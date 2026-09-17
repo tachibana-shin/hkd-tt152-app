@@ -79,11 +79,13 @@ Biến môi trường hữu ích:
 | `E2E_IMPORT_FILE` | `e2e/fixtures/nhap-lieu-e2e.xlsx` | File Excel cho bước `import` |
 | `E2E_USE_XVFB` | `1` | `0` để dùng `DISPLAY` hiện tại thay vì Xvfb |
 | `E2E_XVFB_DISPLAY` | `:99` | Display Xvfb dùng cho app |
+| `E2E_KEEP_VITE` | `0` | `1` để giữ Vite dev server lại sau khi chạy (mặc định script tự dọn Vite nó khởi động) |
 
 ### Cơ chế
 
 - `run_e2e.sh`: khởi động Vite (nếu cần) → **Xvfb display riêng** → app với
-  `XDG_DATA_HOME` mới → chờ inspector → chạy `e2e.py` → dọn app + Xvfb.
+  `XDG_DATA_HOME` mới → chờ inspector → chạy `e2e.py` → dọn app + Xvfb + Vite
+  (chỉ dọn Vite nếu chính script khởi động; dùng `E2E_KEEP_VITE=1` để giữ lại).
 - `insp.py` + `cdp.py`: transport tới WebKit inspector qua
   `Target.sendMessageToTarget` (webview không hỗ trợ `awaitPromise` → gọi nhiều
   `Runtime.evaluate` đồng bộ + `time.sleep`).

@@ -18,6 +18,7 @@
 # Env overrides:
 #   E2E_DATA_HOME   XDG_DATA_HOME for the run (default: <tmp>/hkd-tt152-e2e/data)
 #   E2E_LOG_DIR     directory for app/vite/xvfb logs (default: <tmp>/hkd-tt152-e2e/log)
+#   E2E_KEEP_VITE   set to 1 to keep the Vite dev server running after the run
 #   E2E_INSPECT_PORT, E2E_XVFB_DISPLAY, E2E_USE_XVFB
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -29,8 +30,10 @@ PORT="${E2E_INSPECT_PORT:-9223}"
 LOG="${E2E_LOG_DIR:-$TMPBASE/log}"
 XVFB_DISPLAY="${E2E_XVFB_DISPLAY:-:99}"
 USE_XVFB="${E2E_USE_XVFB:-1}"
+KEEP_VITE="${E2E_KEEP_VITE:-0}"
 APP_PID=""
 XVFB_PID=""
+VITE_PID=""
 mkdir -p "$LOG"
 
 cleanup() {
@@ -39,6 +42,12 @@ cleanup() {
   if [ -n "$XVFB_PID" ]; then
     kill "$XVFB_PID" 2>/dev/null
     wait "$XVFB_PID" 2>/dev/null
+  fi
+  # Stop the Vite server we started (never kill one that was already running).
+  if [ "$KEEP_VITE" != "1" ] && [ -n "$VITE_PID" ]; then
+    pkill -P "$VITE_PID" 2>/dev/null
+    kill "$VITE_PID" 2>/dev/null
+    wait "$VITE_PID" 2>/dev/null
   fi
 }
 
@@ -50,7 +59,7 @@ fi
 # 0) Vite dev server (the debug app loads the frontend from http://localhost:1420)
 if ! ss -ltn 2>/dev/null | grep -q ':1420'; then
   echo "[runner] Vite not running — starting..."
-  (cd "$ROOT" && nohup bun run dev > "$LOG/vite.log" 2>&1 &)
+  VITE_PID="$(cd "$ROOT" && nohup bun run dev > "$LOG/vite.log" 2>&1 & echo $!)"
 fi
 # Wait until Vite actually serves (cold start still optimizes deps)
 for _ in $(seq 1 120); do
