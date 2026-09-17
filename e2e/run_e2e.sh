@@ -7,7 +7,8 @@
 #   ./e2e/run_e2e.sh login product      # run only the named steps
 #
 # Requires a debug binary (src-tauri/target/debug/hkd-tt152-app). If no Vite dev
-# server is listening on port 1420 the script starts one.
+# server is listening on port 1420 the script starts one and stops it again when
+# done (set E2E_KEEP_VITE=1 to leave it running).
 #
 # Defaults to running on its own Xvfb display so the webview is ALWAYS
 # "visible": on Wayland/XWayland, when the desktop session is locked or
@@ -59,7 +60,8 @@ fi
 # 0) Vite dev server (the debug app loads the frontend from http://localhost:1420)
 if ! ss -ltn 2>/dev/null | grep -q ':1420'; then
   echo "[runner] Vite not running — starting..."
-  VITE_PID="$(cd "$ROOT" && nohup bun run dev > "$LOG/vite.log" 2>&1 & echo $!)"
+  ( cd "$ROOT" && exec nohup bun run dev > "$LOG/vite.log" 2>&1 ) &
+  VITE_PID=$!
 fi
 # Wait until Vite actually serves (cold start still optimizes deps)
 for _ in $(seq 1 120); do

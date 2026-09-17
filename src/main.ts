@@ -7,6 +7,7 @@ import ConfirmationService from "primevue/confirmationservice";
 import Tooltip from "primevue/tooltip";
 import router from "./router";
 import App from "./App.vue";
+import "primeicons/primeicons.css";
 import "./style.css";
 
 const app = createApp(App);

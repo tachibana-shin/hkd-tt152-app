@@ -11,6 +11,7 @@
         "ag-grid-community": "^36.2.0",
         "ag-grid-vue3": "^36.2.0",
         "pinia": "^4.0.3",
+        "primeicons": "^8.0.1",
         "primevue": "^5.0.1",
         "vue": "^3.5.13",
         "vue-router": "5.3.1",
@@ -331,6 +332,8 @@
     "pkg-types": ["pkg-types@2.3.3", "", { "dependencies": { "confbox": "^0.3.1", "exsolve": "^1.1.1", "pathe": "^2.0.3" } }, "sha512-j/lCFdcppV0JxWpCEITdbDltBxPP6cHT+yNJ6Go2OgoSA9518X847X9z0p6LtA4Nc16+eQzCZjRrWanTGvHJ5w=="],
 
     "postcss": ["postcss@8.5.28", "", { "dependencies": { "nanoid": "^3.3.18", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A=="],
+
+    "primeicons": ["primeicons@8.0.1", "", {}, "sha512-5O1zIpEKUk0pKfEQSdNVJRxPivo0271zAe7vnZGl+fughxixv4PnVou2J6pPy2wy83nrDn58BqeBwWnpCZmjkw=="],
 
     "primevue": ["primevue@5.0.1", "", { "dependencies": { "@primeicons/vue": "^8.0.0", "@primeui/license-manager": "^1.0.0", "@primeuix/motion": "^1.0.0", "@primeuix/styled": "^1.0.0", "@primeuix/styles": "^3.0.0", "@primeuix/utils": "^0.8.0", "@primevue/core": "5.0.1", "@primevue/icons": "5.0.1" } }, "sha512-nnQmoerXzrDDIeVXw8Ve1JnIaDPapwN51tOf5s4saih69ocZNVs2U1nXmEdc0ajJwpTzh/Wr3lLbub5cyItQ2Q=="],
 
