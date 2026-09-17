@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BusinessConfig,
+  AppSettings,
   Account,
   Product,
   IndustryGroup,
@@ -36,6 +37,46 @@ import type {
 // ─── parse helper: backend trả JSON string ───
 const parse = <T>(s: string): T => JSON.parse(s) as T;
 
+// Cấu hình mặc định nếu thiếu key trong app_setting.
+const SETTING_DEFAULTS: AppSettings = {
+  product_code_prefix: "SP",
+  product_code_start: 1,
+  product_code_digits: 4,
+  product_vat_rate_options: [1, 3, 5],
+  product_vat_rate_default: 1,
+  product_import_tax_options: [0, 5, 8, 10, 15, 20, 25, 30],
+  product_import_tax_default: 0,
+  product_unit: "Cái",
+  product_min_stock: 0,
+};
+
+// Backend lưu mọi thứ dưới dạng chuỗi → chuẩn hóa về kiểu AppSettings.
+function normalizeAppSettings(raw: Record<string, string>): AppSettings {
+  const num = (k: keyof AppSettings, d: number): number => {
+    const n = Number(raw[k]);
+    return Number.isFinite(n) ? n : d;
+  };
+  const list = (k: keyof AppSettings, d: number[]): number[] => {
+    try {
+      const a: unknown = JSON.parse(raw[k] ?? "[]");
+      return Array.isArray(a) ? a.filter((x): x is number => typeof x === "number") : d;
+    } catch {
+      return d;
+    }
+  };
+  return {
+    product_code_prefix: raw.product_code_prefix ?? SETTING_DEFAULTS.product_code_prefix,
+    product_code_start: num("product_code_start", SETTING_DEFAULTS.product_code_start),
+    product_code_digits: num("product_code_digits", SETTING_DEFAULTS.product_code_digits),
+    product_vat_rate_options: list("product_vat_rate_options", SETTING_DEFAULTS.product_vat_rate_options),
+    product_vat_rate_default: num("product_vat_rate_default", SETTING_DEFAULTS.product_vat_rate_default),
+    product_import_tax_options: list("product_import_tax_options", SETTING_DEFAULTS.product_import_tax_options),
+    product_import_tax_default: num("product_import_tax_default", SETTING_DEFAULTS.product_import_tax_default),
+    product_unit: raw.product_unit ?? SETTING_DEFAULTS.product_unit,
+    product_min_stock: num("product_min_stock", SETTING_DEFAULTS.product_min_stock),
+  };
+}
+
 // ─── INFO / CONFIG ───
 export const api = {
   getBusinessInfo: () => invoke<string>("get_business_info"),
@@ -56,9 +97,23 @@ export const api = {
       reportTo: cfg.report_to ?? "",
     }),
 
+  // ─── CÀI ĐẶT MẶC ĐỊNH ───
+  getAppSettings: async () =>
+    normalizeAppSettings(parse<Record<string, string>>(await invoke<string>("get_app_settings"))),
+  saveAppSettings: (settings: Record<string, string>) =>
+    invoke<string>("save_app_settings", { settings }),
+  nextProductCode: () => invoke<string>("next_product_code"),
+
   // ─── MASTER DATA ───
   getAccounts: async () => parse<Account[]>(await invoke<string>("get_accounts")),
   getProducts: async () => parse<Product[]>(await invoke<string>("get_products")),
+  /** Lấy 1 trang sản phẩm theo event lazy của PrimeVue DataTable (server-side sort/filter/page). */
+  getProductsPage: async (lazyEvent: unknown) =>
+    parse<{ rows: Product[]; total: number }>(
+      await invoke<string>("get_products_page", {
+        lazyEvent: JSON.stringify(lazyEvent),
+      }),
+    ),
   saveProduct: (p: Partial<Product>) =>
     invoke<string>("save_product", {
       code: p.code ?? "",
@@ -69,6 +124,7 @@ export const api = {
       minStock: p.min_stock ?? 0,
       vatRate: p.vat_rate ?? 0.01,
       vatReduced: p.vat_reduced ?? false,
+      importTaxRate: p.import_tax_rate ?? 0,
     }),
   deleteProduct: (id: number) => invoke<string>("delete_product", { id }),
 

@@ -3,7 +3,12 @@ import { storeToRefs } from "pinia";
 import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import { exportXlsx, type XlsxColumn } from "@/utils/excel";
-import type { TaxSummaryRow, RevenueExpenseRow, VatReductionRow, TaxDeclarationRow } from "@/types";
+import type {
+  TaxSummaryRow,
+  RevenueExpenseRow,
+  VatReductionRow,
+  TaxDeclarationRow,
+} from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct } from "@/utils/format";
 
@@ -23,7 +28,10 @@ const re = ref<RevenueExpenseRow>({
   expense_down: 0,
 });
 
-const unitOptions = [{ label: "Toàn bộ", value: "" }, { label: "Hà Nội (HaNoi-01)", value: "HaNoi-01" }];
+const unitOptions = [
+  { label: "Toàn bộ", value: "" },
+  { label: "Hà Nội (HaNoi-01)", value: "HaNoi-01" },
+];
 const unitCode = ref("HaNoi-01");
 
 const fromDate = ref<Date | null>(null);
@@ -45,8 +53,14 @@ function openBackupDialog() {
 async function loadReports() {
   loading.value = true;
   try {
-    const f = iso(fromDate.value) || config.value?.report_from || `${config.value?.fiscal_year ?? new Date().getFullYear()}-01-01`;
-    const t = iso(toDate.value) || config.value?.report_to || `${config.value?.fiscal_year ?? new Date().getFullYear()}-12-31`;
+    const f =
+      iso(fromDate.value) ||
+      config.value?.report_from ||
+      `${config.value?.fiscal_year ?? new Date().getFullYear()}-01-01`;
+    const t =
+      iso(toDate.value) ||
+      config.value?.report_to ||
+      `${config.value?.fiscal_year ?? new Date().getFullYear()}-12-31`;
     const [tax, rev] = await Promise.all([
       api.getTaxSummary(f, t, unitCode.value),
       api.getRevenueExpense(f, t),
@@ -55,15 +69,25 @@ async function loadReports() {
     taxRows.value = tax;
     re.value = rev;
   } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi tải báo cáo", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Lỗi tải báo cáo",
+      detail: String(e),
+    });
   } finally {
     loading.value = false;
   }
 }
 
 async function loadVatReduction() {
-  const f = iso(fromDate.value) || config.value?.report_from || `${config.value?.fiscal_year ?? new Date().getFullYear()}-01-01`;
-  const t = iso(toDate.value) || config.value?.report_to || `${config.value?.fiscal_year ?? new Date().getFullYear()}-12-31`;
+  const f =
+    iso(fromDate.value) ||
+    config.value?.report_from ||
+    `${config.value?.fiscal_year ?? new Date().getFullYear()}-01-01`;
+  const t =
+    iso(toDate.value) ||
+    config.value?.report_to ||
+    `${config.value?.fiscal_year ?? new Date().getFullYear()}-12-31`;
   vatRows.value = await api.getVatReductionList(f, t);
 }
 
@@ -78,7 +102,10 @@ const declYear = ref(config.value?.fiscal_year ?? new Date().getFullYear());
 const declMonth = ref(new Date().getMonth() + 1);
 const declPeriodOptions: { label: string; value: number }[] = [
   { label: "Cả năm", value: 0 },
-  ...Array.from({ length: 12 }, (_, i) => ({ label: `Tháng ${i + 1}`, value: i + 1 })),
+  ...Array.from({ length: 12 }, (_, i) => ({
+    label: `Tháng ${i + 1}`,
+    value: i + 1,
+  })),
 ];
 const declTotals = computed(() => {
   const t = {
@@ -153,15 +180,26 @@ function exportVatReductionExcel() {
     reduced_rate: r.reduced_rate * 100,
     vat_reduced: r.vat_reduced,
   }));
-  exportXlsx(`bang-ke-giam-thue-gtgt-${config.value?.fiscal_year ?? ""}`, cols, rows);
+  exportXlsx(
+    `bang-ke-giam-thue-gtgt-${config.value?.fiscal_year ?? ""}`,
+    cols,
+    rows,
+  );
 }
 
 async function loadDeclaration() {
   declLoading.value = true;
   try {
-    declRows.value = await api.getTaxDeclaration(declYear.value, declMonth.value);
+    declRows.value = await api.getTaxDeclaration(
+      declYear.value,
+      declMonth.value,
+    );
   } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi tải tờ khai thuế", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Lỗi tải tờ khai thuế",
+      detail: String(e),
+    });
   } finally {
     declLoading.value = false;
   }
@@ -215,8 +253,17 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button label="Cấu hình hộ KD" icon="pi pi-cog" severity="secondary" @click="openConfig" />
-        <Button label="Tải lại báo cáo" icon="pi pi-refresh" @click="loadReports" />
+        <Button
+          label="Cấu hình hộ KD"
+          icon="pi pi-cog"
+          severity="secondary"
+          @click="openConfig"
+        />
+        <Button
+          label="Tải lại báo cáo"
+          icon="pi pi-refresh"
+          @click="loadReports"
+        />
       </template>
     </Toolbar>
 
@@ -233,11 +280,23 @@ onMounted(async () => {
           </div>
           <div>
             <label class="text-xs text-gray-500 block mb-1">Đơn vị</label>
-            <Select v-model="unitCode" :options="unitOptions" optionLabel="label" optionValue="value" class="w-44" />
+            <Select
+              v-model="unitCode"
+              :options="unitOptions"
+              optionLabel="label"
+              optionValue="value"
+              class="w-44"
+            />
           </div>
-          <Button label="Xem báo cáo" icon="pi pi-search" size="small" @click="loadReports" />
+          <Button
+            label="Xem báo cáo"
+            icon="pi pi-search"
+            size="small"
+            @click="loadReports"
+          />
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
-            Năm tài chính <b>{{ config.fiscal_year }}</b> • {{ config.report_from }} → {{ config.report_to }}
+            Năm tài chính <b>{{ config.fiscal_year }}</b> •
+            {{ config.report_from }} → {{ config.report_to }}
           </span>
         </div>
       </template>
@@ -245,40 +304,57 @@ onMounted(async () => {
 
     <!-- Tờ khai thuế theo nhóm ngành -->
     <SectionCard title="Tờ khai thuế (theo nhóm ngành - TT 152/2025)">
-      <template #icon><i-mdi-file-certificate class="text-rose-500" /></template>
-        <DataTable :value="taxRows" :loading="loading" stripedRows>
-          <Column field="industry_code" header="Mã ngành" style="width: 110px" />
-          <Column field="industry_name" header="Nhóm ngành nghề" />
-          <Column field="vat_rate" header="Thuế GTGT" style="width: 100px" align="right">
-            <template #body="{ data }">{{ (data.vat_rate * 100).toFixed(1) }}%</template>
-          </Column>
-          <Column field="pit_rate" header="Thuế TNCN" style="width: 100px" align="right">
-            <template #body="{ data }">{{ (data.pit_rate * 100).toFixed(1) }}%</template>
-          </Column>
-          <Column field="revenue_up" header="Doanh thu tính thuế" style="width: 160px" align="right">
-            <template #body="{ data }">{{ fmt(data.revenue_up) }}</template>
-          </Column>
-          <Column field="revenue_down" header="Giảm trừ DT" style="width: 130px" align="right">
-            <template #body="{ data }">{{ fmt(data.revenue_down) }}</template>
-          </Column>
-          <Column field="vat_tax" header="Thuế GTGT phải nộp" style="width: 160px" align="right">
-            <template #body="{ data }">
-              <b>{{ fmt(data.vat_tax) }}</b>
-            </template>
-          </Column>
-          <Column field="pit_tax" header="Thuế TNCN phải nộp" style="width: 160px" align="right">
-            <template #body="{ data }">
-              <b>{{ fmt(data.pit_tax) }}</b>
-            </template>
-          </Column>
-          <template #empty><EmptyState text="Chưa có dữ liệu doanh thu trong kỳ." icon="pi pi-chart-line" /></template>
-        </DataTable>
-        <div v-if="taxRows.length" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
-          <span class="text-gray-500">Tổng thuế GTGT:</span>
-          <b class="text-rose-600">{{ fmt(taxRows.reduce((s, r) => s + r.vat_tax, 0)) }} đ</b>
-          <span class="text-gray-500 ml-4">Tổng thuế TNCN:</span>
-          <b class="text-rose-600">{{ fmt(taxRows.reduce((s, r) => s + r.pit_tax, 0)) }} đ</b>
-        </div>
+      <template #icon
+        ><i-mdi-file-certificate class="text-rose-500"
+      /></template>
+      <AppDataTable :value="taxRows" :loading="loading" stripedRows>
+        <Column field="industry_code" header="Mã ngành" />
+        <Column field="industry_name" header="Nhóm ngành nghề" />
+        <Column field="vat_rate" header="Thuế GTGT" align="right">
+          <template #body="{ data }"
+            >{{ (data.vat_rate * 100).toFixed(1) }}%</template
+          >
+        </Column>
+        <Column field="pit_rate" header="Thuế TNCN" align="right">
+          <template #body="{ data }"
+            >{{ (data.pit_rate * 100).toFixed(1) }}%</template
+          >
+        </Column>
+        <Column field="revenue_up" header="Doanh thu tính thuế" align="right">
+          <template #body="{ data }">{{ fmt(data.revenue_up) }}</template>
+        </Column>
+        <Column field="revenue_down" header="Giảm trừ DT" align="right">
+          <template #body="{ data }">{{ fmt(data.revenue_down) }}</template>
+        </Column>
+        <Column field="vat_tax" header="Thuế GTGT phải nộp" align="right">
+          <template #body="{ data }">
+            <b>{{ fmt(data.vat_tax) }}</b>
+          </template>
+        </Column>
+        <Column field="pit_tax" header="Thuế TNCN phải nộp" align="right">
+          <template #body="{ data }">
+            <b>{{ fmt(data.pit_tax) }}</b>
+          </template>
+        </Column>
+        <template #empty
+          ><EmptyState
+            text="Chưa có dữ liệu doanh thu trong kỳ."
+            icon="pi pi-chart-line"
+        /></template>
+      </AppDataTable>
+      <div
+        v-if="taxRows.length"
+        class="mt-4 flex justify-end gap-8 text-sm border-t pt-3"
+      >
+        <span class="text-gray-500">Tổng thuế GTGT:</span>
+        <b class="text-rose-600"
+          >{{ fmt(taxRows.reduce((s, r) => s + r.vat_tax, 0)) }} đ</b
+        >
+        <span class="text-gray-500 ml-4">Tổng thuế TNCN:</span>
+        <b class="text-rose-600"
+          >{{ fmt(taxRows.reduce((s, r) => s + r.pit_tax, 0)) }} đ</b
+        >
+      </div>
     </SectionCard>
 
     <!-- Bảng kê giảm thuế GTGT (Giam Thue GTGT) -->
@@ -294,43 +370,64 @@ onMounted(async () => {
           @click="exportVatReductionExcel"
         />
       </template>
-        <DataTable :value="vatRows" :loading="loading" stripedRows paginator :rows="10">
-          <Column field="posting_date" header="Ngày" style="width: 110px" />
-          <Column field="voucher_no" header="Số phiếu" style="width: 120px" />
-          <Column field="product_code" header="Mã VT" style="width: 110px" />
-          <Column field="product_name" header="Tên hàng hóa DV" />
-          <Column field="quantity" header="SL" style="width: 90px" align="right" />
-          <Column field="unit_price" header="Đơn giá" style="width: 130px" align="right">
-            <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
-          </Column>
-          <Column field="amount" header="Thành tiền" style="width: 150px" align="right">
-            <template #body="{ data }">{{ fmt(data.amount) }}</template>
-          </Column>
-          <Column field="vat_rate" header="Tỷ lệ quy định" style="width: 130px" align="right">
-            <template #body="{ data }">{{ (data.vat_rate * 100).toFixed(1) }}%</template>
-          </Column>
-          <Column field="reduced_rate" header="Tỷ lệ sau giảm" style="width: 130px" align="right">
-            <template #body="{ data }">{{ (data.reduced_rate * 100).toFixed(1) }}%</template>
-          </Column>
-          <Column field="vat_reduced" header="Thuế GTGT được giảm" style="width: 160px" align="right">
-            <template #body="{ data }">
-              <b>{{ fmt(data.vat_reduced) }}</b>
-            </template>
-          </Column>
-          <template #empty><EmptyState text="Không có hàng hóa dịch vụ giảm thuế trong kỳ." icon="pi pi-percentage" /></template>
-        </DataTable>
-        <div v-if="vatRows.length" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
-          <span class="text-gray-500">Tổng thuế được giảm:</span>
-          <b class="text-emerald-600">{{ fmt(vatReducedTotal) }} đ</b>
-        </div>
+      <AppDataTable
+        :value="vatRows"
+        :loading="loading"
+        stripedRows
+        paginator
+        :rows="10"
+      >
+        <Column field="posting_date" header="Ngày" />
+        <Column field="voucher_no" header="Số phiếu" />
+        <Column field="product_code" header="Mã VT" />
+        <Column field="product_name" header="Tên hàng hóa DV" />
+        <Column field="quantity" header="SL" align="right" />
+        <Column field="unit_price" header="Đơn giá" align="right">
+          <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
+        </Column>
+        <Column field="amount" header="Thành tiền" align="right">
+          <template #body="{ data }">{{ fmt(data.amount) }}</template>
+        </Column>
+        <Column field="vat_rate" header="Tỷ lệ quy định" align="right">
+          <template #body="{ data }"
+            >{{ (data.vat_rate * 100).toFixed(1) }}%</template
+          >
+        </Column>
+        <Column field="reduced_rate" header="Tỷ lệ sau giảm" align="right">
+          <template #body="{ data }"
+            >{{ (data.reduced_rate * 100).toFixed(1) }}%</template
+          >
+        </Column>
+        <Column field="vat_reduced" header="Thuế GTGT được giảm" align="right">
+          <template #body="{ data }">
+            <b>{{ fmt(data.vat_reduced) }}</b>
+          </template>
+        </Column>
+        <template #empty
+          ><EmptyState
+            text="Không có hàng hóa dịch vụ giảm thuế trong kỳ."
+            icon="pi pi-percentage"
+        /></template>
+      </AppDataTable>
+      <div
+        v-if="vatRows.length"
+        class="mt-4 flex justify-end gap-8 text-sm border-t pt-3"
+      >
+        <span class="text-gray-500">Tổng thuế được giảm:</span>
+        <b class="text-emerald-600">{{ fmt(vatReducedTotal) }} đ</b>
+      </div>
     </SectionCard>
 
     <!-- Tờ khai thuế theo kỳ (To Khai Thue) -->
     <SectionCard>
-      <template #icon><i-mdi-clipboard-text-outline class="text-violet-500" /></template>
+      <template #icon
+        ><i-mdi-clipboard-text-outline class="text-violet-500"
+      /></template>
       <template #title>
         <span>Tờ khai thuế theo kỳ</span>
-        <span class="text-xs font-normal text-gray-400">Nhóm theo ngành nghề</span>
+        <span class="text-xs font-normal text-gray-400"
+          >Nhóm theo ngành nghề</span
+        >
       </template>
       <template #actions>
         <Button
@@ -342,111 +439,208 @@ onMounted(async () => {
           @click="exportDeclarationExcel"
         />
       </template>
-        <div class="flex flex-wrap items-center gap-3 mb-3">
-          <div>
-            <label class="text-xs text-gray-500 block mb-1">Kỳ khai thuế</label>
-            <Select v-model="declMonth" :options="declPeriodOptions" optionLabel="label" optionValue="value" class="w-44" />
-          </div>
-          <div>
-            <label class="text-xs text-gray-500 block mb-1">Năm</label>
-            <InputNumber v-model="declYear" :min="2000" :max="2100" class="w-36" />
-          </div>
-          <Button label="Tải tờ khai" icon="pi pi-search" size="small" :loading="declLoading" @click="loadDeclaration" />
+      <div class="flex flex-wrap items-center gap-3 mb-3">
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Kỳ khai thuế</label>
+          <Select
+            v-model="declMonth"
+            :options="declPeriodOptions"
+            optionLabel="label"
+            optionValue="value"
+            class="w-44"
+          />
         </div>
-        <DataTable :value="declRows" :loading="declLoading" stripedRows>
-          <Column header="STT" style="width: 70px" align="center">
-            <template #body="{ index }">{{ index + 1 }}</template>
-            <template #footer>{{ declRows.length ? "Tổng cộng" : "" }}</template>
-          </Column>
-          <Column field="industry_name" header="Nhóm ngành nghề" />
-          <Column field="industry_code" header="Mã" style="width: 110px" />
-          <Column header="Tỷ lệ GTGT %" style="width: 120px" align="right">
-            <template #body="{ data }">{{ pct(data.vat_rate) }}</template>
-          </Column>
-          <Column header="Tỷ lệ TNCN %" style="width: 120px" align="right">
-            <template #body="{ data }">{{ pct(data.pit_rate) }}</template>
-          </Column>
-          <Column header="DT tính thuế GTGT – Tăng" style="width: 170px" align="right">
-            <template #body="{ data }">{{ fmt(data.revenue_up) }}</template>
-            <template #footer>{{ declRows.length ? fmt(declTotals.revenue_up) : "" }}</template>
-          </Column>
-          <Column header="DT tính thuế GTGT – Giảm" style="width: 170px" align="right">
-            <template #body="{ data }">{{ fmt(data.revenue_down) }}</template>
-            <template #footer>{{ declRows.length ? fmt(declTotals.revenue_down) : "" }}</template>
-          </Column>
-          <Column header="Thuế GTGT" style="width: 150px" align="right">
-            <template #body="{ data }">{{ fmt(data.vat_tax) }}</template>
-            <template #footer>{{ declRows.length ? fmt(declTotals.vat_tax) : "" }}</template>
-          </Column>
-          <Column header="Thuế GTGT được giảm" style="width: 170px" align="right">
-            <template #body="{ data }">
-              <span class="text-emerald-600">{{ fmt(data.vat_reduced) }}</span>
-            </template>
-            <template #footer>{{ declRows.length ? fmt(declTotals.vat_reduced) : "" }}</template>
-          </Column>
-          <Column header="Thuế GTGT phải nộp" style="width: 170px" align="right">
-            <template #body="{ data }">
-              <b>{{ fmt(data.vat_payable) }}</b>
-            </template>
-            <template #footer>{{ declRows.length ? fmt(declTotals.vat_payable) : "" }}</template>
-          </Column>
-          <Column header="Thuế TNCN phải nộp" style="width: 170px" align="right">
-            <template #body="{ data }">{{ fmt(data.pit_tax) }}</template>
-            <template #footer>{{ declRows.length ? fmt(declTotals.pit_tax) : "" }}</template>
-          </Column>
-          <template #empty><EmptyState text="Chưa có dữ liệu doanh thu trong kỳ này." icon="pi pi-chart-line" /></template>
-        </DataTable>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Năm</label>
+          <InputNumber
+            v-model="declYear"
+            :min="2000"
+            :max="2100"
+            class="w-36"
+          />
+        </div>
+        <Button
+          label="Tải tờ khai"
+          icon="pi pi-search"
+          size="small"
+          :loading="declLoading"
+          @click="loadDeclaration"
+        />
+      </div>
+      <AppDataTable :value="declRows" :loading="declLoading" stripedRows>
+        <Column header="STT" align="center">
+          <template #body="{ index }">{{ index + 1 }}</template>
+          <template #footer>{{ declRows.length ? "Tổng cộng" : "" }}</template>
+        </Column>
+        <Column field="industry_name" header="Nhóm ngành nghề" />
+        <Column field="industry_code" header="Mã" />
+        <Column header="Tỷ lệ GTGT %" align="right">
+          <template #body="{ data }">{{ pct(data.vat_rate) }}</template>
+        </Column>
+        <Column header="Tỷ lệ TNCN %" align="right">
+          <template #body="{ data }">{{ pct(data.pit_rate) }}</template>
+        </Column>
+        <Column header="DT tính thuế GTGT – Tăng" align="right">
+          <template #body="{ data }">{{ fmt(data.revenue_up) }}</template>
+          <template #footer>{{
+            declRows.length ? fmt(declTotals.revenue_up) : ""
+          }}</template>
+        </Column>
+        <Column header="DT tính thuế GTGT – Giảm" align="right">
+          <template #body="{ data }">{{ fmt(data.revenue_down) }}</template>
+          <template #footer>{{
+            declRows.length ? fmt(declTotals.revenue_down) : ""
+          }}</template>
+        </Column>
+        <Column header="Thuế GTGT" align="right">
+          <template #body="{ data }">{{ fmt(data.vat_tax) }}</template>
+          <template #footer>{{
+            declRows.length ? fmt(declTotals.vat_tax) : ""
+          }}</template>
+        </Column>
+        <Column header="Thuế GTGT được giảm" align="right">
+          <template #body="{ data }">
+            <span class="text-emerald-600">{{ fmt(data.vat_reduced) }}</span>
+          </template>
+          <template #footer>{{
+            declRows.length ? fmt(declTotals.vat_reduced) : ""
+          }}</template>
+        </Column>
+        <Column header="Thuế GTGT phải nộp" align="right">
+          <template #body="{ data }">
+            <b>{{ fmt(data.vat_payable) }}</b>
+          </template>
+          <template #footer>{{
+            declRows.length ? fmt(declTotals.vat_payable) : ""
+          }}</template>
+        </Column>
+        <Column header="Thuế TNCN phải nộp" align="right">
+          <template #body="{ data }">{{ fmt(data.pit_tax) }}</template>
+          <template #footer>{{
+            declRows.length ? fmt(declTotals.pit_tax) : ""
+          }}</template>
+        </Column>
+        <template #empty
+          ><EmptyState
+            text="Chưa có dữ liệu doanh thu trong kỳ này."
+            icon="pi pi-chart-line"
+        /></template>
+      </AppDataTable>
     </SectionCard>
 
     <div class="grid grid-cols-2 gap-4">
       <!-- Tổng hợp doanh thu - chi phí -->
       <SectionCard title="Tổng hợp doanh thu - chi phí">
         <template #icon><i-mdi-chart-box class="text-emerald-500" /></template>
-          <DataTable :value="[]" :loading="loading" class="hidden">
-            <Column field="x" header="x" />
-          </DataTable>
-          <div class="space-y-3">
-            <div class="flex justify-between items-center">
-              <span class="text-sm text-gray-600">Doanh thu bán hàng</span>
-              <b class="text-emerald-600">{{ fmt(re.revenue_up - re.revenue_down) }} đ</b>
-            </div>
-            <div class="flex justify-between items-center text-xs text-gray-400">
-              <span>— trong đó giảm trừ doanh thu: {{ fmt(re.revenue_down) }} đ</span>
-            </div>
-            <Divider />
-            <div class="flex justify-between items-center">
-              <span class="text-sm text-gray-600">Chi phí kinh doanh</span>
-              <b class="text-red-600">{{ fmt(re.expense_up - re.expense_down) }} đ</b>
-            </div>
-            <div class="flex justify-between items-center text-xs text-gray-400">
-              <span>— trong đó giảm trừ chi phí: {{ fmt(re.expense_down) }} đ</span>
-            </div>
-            <Divider />
-            <div class="flex justify-between items-center text-base">
-              <span class="font-semibold">Lợi nhuận trước thuế</span>
-              <b class="text-primary-600">
-                {{ fmt((re.revenue_up - re.revenue_down) - (re.expense_up - re.expense_down)) }} đ
-              </b>
-            </div>
+        <AppDataTable
+          :value="[]"
+          :loading="loading"
+          class="hidden"
+          :resizable-columns="false"
+          :sortable="false"
+        >
+          <Column field="x" header="x" />
+        </AppDataTable>
+        <div class="space-y-3">
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-gray-600">Doanh thu bán hàng</span>
+            <b class="text-emerald-600"
+              >{{ fmt(re.revenue_up - re.revenue_down) }} đ</b
+            >
           </div>
+          <div class="flex justify-between items-center text-xs text-gray-400">
+            <span
+              >— trong đó giảm trừ doanh thu: {{ fmt(re.revenue_down) }} đ</span
+            >
+          </div>
+          <Divider />
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-gray-600">Chi phí kinh doanh</span>
+            <b class="text-red-600"
+              >{{ fmt(re.expense_up - re.expense_down) }} đ</b
+            >
+          </div>
+          <div class="flex justify-between items-center text-xs text-gray-400">
+            <span
+              >— trong đó giảm trừ chi phí: {{ fmt(re.expense_down) }} đ</span
+            >
+          </div>
+          <Divider />
+          <div class="flex justify-between items-center text-base">
+            <span class="font-semibold">Lợi nhuận trước thuế</span>
+            <b class="text-primary-600">
+              {{
+                fmt(
+                  re.revenue_up -
+                    re.revenue_down -
+                    (re.expense_up - re.expense_down),
+                )
+              }}
+              đ
+            </b>
+          </div>
+        </div>
       </SectionCard>
 
       <!-- Sổ sách (mẫu TT 152) -->
       <SectionCard title="Sổ sách theo mẫu TT 152/2025">
-        <template #icon><i-mdi-book-open-page-variant class="text-sky-500" /></template>
-          <div class="grid grid-cols-2 gap-3">
-            <Button label="Sổ S2a-HKD" icon="pi pi-book" outlined class="justify-start" @click="router.push('/ledger')" />
-            <Button label="Sổ S2b-HKD" icon="pi pi-book" outlined class="justify-start" @click="router.push('/ledger')" />
-            <Button label="Sổ S3a-HKD" icon="pi pi-book" outlined class="justify-start" @click="router.push('/cash')" />
-            <Button label="In báo cáo" icon="pi pi-print" outlined class="justify-start" @click="printReport" />
-            <Button label="Xuất Excel" icon="pi pi-file-excel" outlined class="justify-start" @click="exportExcel" />
-            <Button v-if="auth.isAdmin" label="Sao lưu dữ liệu" icon="pi pi-database" outlined class="justify-start" @click="openBackupDialog" />
-          </div>
+        <template #icon
+          ><i-mdi-book-open-page-variant class="text-sky-500"
+        /></template>
+        <div class="grid grid-cols-2 gap-3">
+          <Button
+            label="Sổ S2a-HKD"
+            icon="pi pi-book"
+            outlined
+            class="justify-start"
+            @click="router.push('/ledger')"
+          />
+          <Button
+            label="Sổ S2b-HKD"
+            icon="pi pi-book"
+            outlined
+            class="justify-start"
+            @click="router.push('/ledger')"
+          />
+          <Button
+            label="Sổ S3a-HKD"
+            icon="pi pi-book"
+            outlined
+            class="justify-start"
+            @click="router.push('/cash')"
+          />
+          <Button
+            label="In báo cáo"
+            icon="pi pi-print"
+            outlined
+            class="justify-start"
+            @click="printReport"
+          />
+          <Button
+            label="Xuất Excel"
+            icon="pi pi-file-excel"
+            outlined
+            class="justify-start"
+            @click="exportExcel"
+          />
+          <Button
+            v-if="auth.isAdmin"
+            label="Sao lưu dữ liệu"
+            icon="pi pi-database"
+            outlined
+            class="justify-start"
+            @click="openBackupDialog"
+          />
+        </div>
       </SectionCard>
     </div>
 
     <!-- Dialog cấu hình -->
-    <BusinessConfigDialog v-model:visible="configDialog" :config="config" @saved="loadReports" />
+    <BusinessConfigDialog
+      v-model:visible="configDialog"
+      :config="config"
+      @saved="loadReports"
+    />
 
     <!-- Dialog sao lưu & khôi phục -->
     <BackupDialog v-model:visible="backupDialog" />

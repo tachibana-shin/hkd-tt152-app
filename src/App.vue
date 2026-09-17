@@ -30,6 +30,7 @@ const menuItems: MenuItem[] = [
   { label: "Kế toán HKD", icon: "pi pi-calculator", to: "/accounting", roles: ["admin", "ketoan"] },
   { label: "Người dùng", icon: "pi pi-user-edit", to: "/users", roles: ["admin"] },
   { label: "Hồ sơ HKD", icon: "pi pi-database", to: "/profiles", roles: ["admin", "ketoan", "kho", "xem"] },
+  { label: "Cài đặt", icon: "pi pi-cog", to: "/settings", roles: ["admin", "ketoan"] },
 ];
 
 const visibleMenu = computed(() =>

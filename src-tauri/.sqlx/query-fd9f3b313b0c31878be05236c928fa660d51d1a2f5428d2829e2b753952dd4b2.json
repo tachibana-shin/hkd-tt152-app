@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT code FROM product WHERE code LIKE ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "code",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fd9f3b313b0c31878be05236c928fa660d51d1a2f5428d2829e2b753952dd4b2"
+}

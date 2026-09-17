@@ -8,7 +8,10 @@ const loading = ref(false);
 const entries = ref<AuditEntry[]>([]);
 
 const limit = ref(200);
-const limitOptions = [100, 200, 500, 1000].map((n) => ({ label: String(n), value: n }));
+const limitOptions = [100, 200, 500, 1000].map((n) => ({
+  label: String(n),
+  value: n,
+}));
 const filterText = ref("");
 
 async function load() {
@@ -16,7 +19,11 @@ async function load() {
   try {
     entries.value = await api.getAuditLog(limit.value);
   } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi tải nhật ký hoạt động", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Lỗi tải nhật ký hoạt động",
+      detail: String(e),
+    });
   } finally {
     loading.value = false;
   }
@@ -103,7 +110,13 @@ function fmtTs(ts: string): string {
         </div>
       </template>
       <template #end>
-        <Button label="Tải lại" icon="pi pi-refresh" outlined :loading="loading" @click="load" />
+        <Button
+          label="Tải lại"
+          icon="pi pi-refresh"
+          outlined
+          :loading="loading"
+          @click="load"
+        />
       </template>
     </Toolbar>
 
@@ -115,7 +128,9 @@ function fmtTs(ts: string): string {
             <Select v-model="limit" :options="limitOptions" class="w-36" />
           </div>
           <div class="flex-1 min-w-52">
-            <label class="text-xs text-gray-500 block mb-1">Tìm theo thao tác / đối tượng / chi tiết</label>
+            <label class="text-xs text-gray-500 block mb-1"
+              >Tìm theo thao tác / đối tượng / chi tiết</label
+            >
             <InputText
               v-model="filterText"
               placeholder="Nhập chuỗi cần tìm..."
@@ -129,36 +144,45 @@ function fmtTs(ts: string): string {
 
     <Card>
       <template #content>
-        <DataTable
+        <AppDataTable
           :value="filteredEntries"
           :loading="loading"
           stripedRows
           paginator
           :rows="20"
         >
-          <Column field="ts" header="Thời gian" style="width: 150px">
+          <Column field="ts" header="Thời gian">
             <template #body="{ data }">{{ fmtTs(data.ts) }}</template>
           </Column>
-          <Column field="action" header="Thao tác" style="width: 160px">
+          <Column field="action" header="Thao tác">
             <template #body="{ data }">
-              <Tag :value="actionLabel(data.action)" :severity="actionSeverity(data.action)" />
+              <Tag
+                :value="actionLabel(data.action)"
+                :severity="actionSeverity(data.action)"
+              />
             </template>
           </Column>
-          <Column field="entity" header="Đối tượng" style="width: 140px" />
-          <Column field="username" header="Người dùng" style="width: 140px">
+          <Column field="entity" header="Đối tượng" />
+          <Column field="username" header="Người dùng">
             <template #body="{ data }">
-              <span v-if="data.username" class="text-sm">{{ data.username }}</span>
+              <span v-if="data.username" class="text-sm">{{
+                data.username
+              }}</span>
               <span v-else class="text-xs text-gray-400">—</span>
             </template>
           </Column>
           <Column field="detail" header="Chi tiết" />
           <template #empty>
             <EmptyState
-              :text="entries.length ? 'Không có dòng nào khớp bộ lọc.' : 'Chưa có hoạt động nào.'"
+              :text="
+                entries.length
+                  ? 'Không có dòng nào khớp bộ lọc.'
+                  : 'Chưa có hoạt động nào.'
+              "
               icon="pi pi-history"
             />
           </template>
-        </DataTable>
+        </AppDataTable>
       </template>
     </Card>
   </div>

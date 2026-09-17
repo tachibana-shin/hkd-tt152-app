@@ -18,7 +18,11 @@ async function load() {
   try {
     backups.value = await api.listBackups();
   } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi tải danh sách sao lưu", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Lỗi tải danh sách sao lưu",
+      detail: String(e),
+    });
   } finally {
     loading.value = false;
   }
@@ -43,16 +47,24 @@ async function create() {
 
 function restore(filename: string) {
   confirm.require({
-    message: "Sẽ ghi đè toàn bộ dữ liệu hiện tại. Cần khởi động lại ứng dụng sau khi khôi phục.",
+    message:
+      "Sẽ ghi đè toàn bộ dữ liệu hiện tại. Cần khởi động lại ứng dụng sau khi khôi phục.",
     header: "Khôi phục sao lưu",
     icon: "pi pi-exclamation-triangle",
     acceptClass: "p-button-danger",
     accept: async () => {
       try {
         await api.restoreBackup(filename);
-        toast.add({ severity: "success", summary: "Đã khôi phục, vui lòng khởi động lại ứng dụng" });
+        toast.add({
+          severity: "success",
+          summary: "Đã khôi phục, vui lòng khởi động lại ứng dụng",
+        });
       } catch (e) {
-        toast.add({ severity: "error", summary: "Lỗi khôi phục", detail: String(e) });
+        toast.add({
+          severity: "error",
+          summary: "Lỗi khôi phục",
+          detail: String(e),
+        });
       }
     },
   });
@@ -70,19 +82,38 @@ function restore(filename: string) {
   >
     <div class="flex flex-col gap-4 py-2">
       <div>
-        <Button v-if="auth.isAdmin" label="Tạo sao lưu" icon="pi pi-database" @click="create" />
+        <Button
+          v-if="auth.isAdmin"
+          label="Tạo sao lưu"
+          icon="pi pi-database"
+          @click="create"
+        />
       </div>
-      <DataTable :value="backups" :loading="loading" stripedRows size="small">
+      <AppDataTable
+        :value="backups"
+        :loading="loading"
+        stripedRows
+        size="small"
+      >
         <Column header="Tên file">
           <template #body="{ data }">{{ data }}</template>
         </Column>
-        <Column header="Hành động" style="width: 140px">
+        <Column header="Hành động">
           <template #body="{ data }">
-            <Button v-if="auth.isAdmin" label="Khôi phục" icon="pi pi-undo" severity="danger" size="small" @click="restore(data)" />
+            <Button
+              v-if="auth.isAdmin"
+              label="Khôi phục"
+              icon="pi pi-undo"
+              severity="danger"
+              size="small"
+              @click="restore(data)"
+            />
           </template>
         </Column>
-        <template #empty><EmptyState text="Chưa có bản sao lưu nào." icon="pi pi-database" /></template>
-      </DataTable>
+        <template #empty
+          ><EmptyState text="Chưa có bản sao lưu nào." icon="pi pi-database"
+        /></template>
+      </AppDataTable>
     </div>
   </AppDialog>
 </template>

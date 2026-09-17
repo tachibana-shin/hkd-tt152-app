@@ -43,10 +43,13 @@ const catalog = useCatalogStore();
 function onProductPick(index: number) {
   const p = catalog.productByCode(props.items[index].product_code);
   if (!p) return;
-  props.items[index].unit_price = props.priceField === "sale_price" ? p.sale_price : p.cost_price;
+  props.items[index].unit_price =
+    props.priceField === "sale_price" ? p.sale_price : p.cost_price;
 }
 
-const total = computed(() => props.items.reduce((s, it) => s + it.quantity * it.unit_price, 0));
+const total = computed(() =>
+  props.items.reduce((s, it) => s + it.quantity * it.unit_price, 0),
+);
 </script>
 
 <template>
@@ -60,11 +63,18 @@ const total = computed(() => props.items.reduce((s, it) => s + it.quantity * it.
         aria-hidden="true"
       />
     </h4>
-    <Button v-if="canEdit" label="Thêm dòng" icon="pi pi-plus" size="small" text @click="emit('add')" />
+    <Button
+      v-if="canEdit"
+      label="Thêm dòng"
+      icon="pi pi-plus"
+      size="small"
+      text
+      @click="emit('add')"
+    />
   </div>
 
-  <DataTable :value="items" class="mt-2">
-    <Column header="Sản phẩm" style="min-width: 200px">
+  <AppDataTable :value="items" class="mt-2" :resizable-columns="false" :sortable="false">
+    <Column header="Sản phẩm">
       <template #body="{ index }">
         <Select
           v-model="items[index].product_code"
@@ -83,7 +93,10 @@ const total = computed(() => props.items.reduce((s, it) => s + it.quantity * it.
         <InputNumber v-model="items[index].quantity" :min="0" class="w-full" />
       </template>
     </Column>
-    <Column header="Đơn giá" :style="showIndustry ? 'width: 140px' : 'width: 150px'">
+    <Column
+      header="Đơn giá"
+      :style="showIndustry ? 'width: 140px' : 'width: 150px'"
+    >
       <template #body="{ index }">
         <InputNumber
           v-model="items[index].unit_price"
@@ -95,7 +108,7 @@ const total = computed(() => props.items.reduce((s, it) => s + it.quantity * it.
         />
       </template>
     </Column>
-    <Column v-if="showIndustry" header="Nhóm ngành" style="width: 170px">
+    <Column v-if="showIndustry" header="Nhóm ngành">
       <template #body="{ index }">
         <Select
           v-model="items[index].industry_code"
@@ -107,12 +120,14 @@ const total = computed(() => props.items.reduce((s, it) => s + it.quantity * it.
         />
       </template>
     </Column>
-    <Column v-if="showAmount" header="Thành tiền" style="width: 140px" align="right">
+    <Column v-if="showAmount" header="Thành tiền" align="right">
       <template #body="{ index }">
-        <span class="font-medium">{{ fmt(items[index].quantity * items[index].unit_price) }}</span>
+        <span class="font-medium">{{
+          fmt(items[index].quantity * items[index].unit_price)
+        }}</span>
       </template>
     </Column>
-    <Column header="" style="width: 60px">
+    <Column header="">
       <template #body="{ index }">
         <Button
           v-if="canEdit"
@@ -125,8 +140,10 @@ const total = computed(() => props.items.reduce((s, it) => s + it.quantity * it.
         />
       </template>
     </Column>
-    <template #empty><EmptyState text="Chưa có dòng nào" icon="pi pi-list" /></template>
-  </DataTable>
+    <template #empty
+      ><EmptyState text="Chưa có dòng nào" icon="pi pi-list"
+    /></template>
+  </AppDataTable>
 
   <div class="mt-4 flex items-center justify-end gap-3">
     <span class="text-sm text-gray-500">{{ totalLabel }}</span>

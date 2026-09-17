@@ -1,13 +1,24 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
+import { FilterMatchMode } from "@primevue/core/api";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import type { Warehouse, Customer, Supplier } from "@/types";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
-const { warehouses, suppliers, customers, industryGroups, loading } = storeToRefs(catalog);
+const { warehouses, suppliers, customers, industryGroups, loading } =
+  storeToRefs(catalog);
 const toast = useToast();
+
+// Hàng filter theo cột — mặc định ẩn, bật bằng nút "Bộ lọc" của AppDataTable.
+const filters = ref<Record<string, { value: any; matchMode: string }>>({
+  code: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  name: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  tax_code: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  address: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  phone: { value: null, matchMode: FilterMatchMode.CONTAINS },
+});
 
 type Kind = "warehouse" | "customer" | "supplier";
 
@@ -62,14 +73,26 @@ const codePlaceholder = computed(() => {
 function openCreate(kind: Kind) {
   dialogKind.value = kind;
   editing.value = false;
-  Object.assign(form, { code: "", name: "", tax_code: "", address: "", phone: "" });
+  Object.assign(form, {
+    code: "",
+    name: "",
+    tax_code: "",
+    address: "",
+    phone: "",
+  });
   dialog.value = true;
 }
 
 function openEdit(kind: Kind, row: Warehouse | Customer | Supplier) {
   dialogKind.value = kind;
   editing.value = true;
-  Object.assign(form, { code: row.code, name: row.name, tax_code: "", address: "", phone: "" });
+  Object.assign(form, {
+    code: row.code,
+    name: row.name,
+    tax_code: "",
+    address: "",
+    phone: "",
+  });
   if (kind !== "warehouse") {
     const c = row as Customer;
     form.tax_code = c.tax_code ?? "";
@@ -81,7 +104,11 @@ function openEdit(kind: Kind, row: Warehouse | Customer | Supplier) {
 
 async function save() {
   if (!form.code || !form.name) {
-    toast.add({ severity: "warn", summary: "Thiếu thông tin", detail: "Mã và tên là bắt buộc" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin",
+      detail: "Mã và tên là bắt buộc",
+    });
     return;
   }
   saving.value = true;
@@ -105,7 +132,11 @@ async function save() {
         phone: form.phone,
       });
     }
-    toast.add({ severity: "success", summary: "Đã lưu", detail: `Đã lưu ${kindLabel.value} ${form.code}` });
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu",
+      detail: `Đã lưu ${kindLabel.value} ${form.code}`,
+    });
     dialog.value = false;
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi lưu", detail: String(e) });
@@ -122,6 +153,59 @@ async function reload() {
   }
 }
 
+// Sửa ô trực tiếp (double-tap) — AppDataTable phát cell-save khi commit;
+// lưu DB bằng đúng action đang dùng trong dialog, rồi tải lại bảng.
+function onCellSave(
+  kind: Kind,
+  { field, data }: { field: string; data: any },
+) {
+  const str = (s: unknown) => String(s ?? "").trim();
+  if (field === "name" && !str(data.name)) {
+    toast.add({
+      severity: "warn",
+      summary: "Không hợp lệ",
+      detail: "Tên không được để trống",
+    });
+    return;
+  }
+  const label =
+    kind === "warehouse"
+      ? "kho"
+      : kind === "customer"
+        ? "khách hàng"
+        : "nhà cung cấp";
+  const saving =
+    kind === "warehouse"
+      ? catalog.saveWarehouse(data.code, data.name)
+      : kind === "customer"
+        ? catalog.saveCustomer({
+            code: data.code,
+            name: data.name,
+            tax_code: str(data.tax_code),
+            address: str(data.address),
+            phone: str(data.phone),
+          })
+        : catalog.saveSupplier({
+            code: data.code,
+            name: data.name,
+            tax_code: str(data.tax_code),
+            address: str(data.address),
+            phone: str(data.phone),
+          });
+  saving
+    .then(() => {
+      toast.add({
+        severity: "success",
+        summary: "Đã lưu",
+        detail: `Đã lưu ${label} ${data.code}`,
+      });
+    })
+    .catch((e: unknown) => {
+      toast.add({ severity: "error", summary: "Lỗi lưu", detail: String(e) });
+    })
+    .finally(() => reload());
+}
+
 onMounted(() => catalog.loadAll());
 </script>
 
@@ -135,7 +219,12 @@ onMounted(() => catalog.loadAll());
         </div>
       </template>
       <template #end>
-        <Button label="Tải lại" icon="pi pi-refresh" severity="secondary" @click="reload" />
+        <Button
+          label="Tải lại"
+          icon="pi pi-refresh"
+          severity="secondary"
+          @click="reload"
+        />
       </template>
     </Toolbar>
 
@@ -143,82 +232,327 @@ onMounted(() => catalog.loadAll());
       <template #content>
         <Tabs v-model:value="tab">
           <TabList>
-            <Tab value="warehouses"><i class="pi pi-warehouse mr-2" />Kho hàng</Tab>
-            <Tab value="customers"><i class="pi pi-users mr-2" />Khách hàng</Tab>
-            <Tab value="suppliers"><i class="pi pi-truck mr-2" />Nhà cung cấp</Tab>
-            <Tab value="industryGroups"><i class="pi pi-sitemap mr-2" />Nhóm ngành <i class="pi pi-info-circle text-xs text-gray-400 cursor-help" v-tooltip="'Tỷ lệ theo TT 152/2025, chỉnh qua dữ liệu mẫu.'" /></Tab>
+            <Tab value="warehouses"
+              ><i class="pi pi-warehouse mr-2" />Kho hàng</Tab
+            >
+            <Tab value="customers"
+              ><i class="pi pi-users mr-2" />Khách hàng</Tab
+            >
+            <Tab value="suppliers"
+              ><i class="pi pi-truck mr-2" />Nhà cung cấp</Tab
+            >
+            <Tab value="industryGroups"
+              ><i class="pi pi-sitemap mr-2" />Nhóm ngành
+              <i
+                class="pi pi-info-circle text-xs text-gray-400 cursor-help"
+                v-tooltip="'Tỷ lệ theo TT 152/2025, chỉnh qua dữ liệu mẫu.'"
+            /></Tab>
           </TabList>
           <TabPanels>
             <!-- Kho hàng -->
             <TabPanel value="warehouses">
               <div class="mb-3 flex items-center justify-end">
-                <Button v-if="auth.canStock" label="Thêm kho" icon="pi pi-plus" @click="openCreate('warehouse')" />
+                <Button
+                  v-if="auth.canStock"
+                  label="Thêm kho"
+                  icon="pi pi-plus"
+                  @click="openCreate('warehouse')"
+                />
               </div>
-              <DataTable :value="warehouses" :loading="loading" stripedRows>
-                <Column field="code" header="Mã kho" style="width: 160px" />
-                <Column field="name" header="Tên kho" />
-                <Column header="" style="width: 90px">
-                  <template #body="{ data }">
-                    <Button v-if="auth.canStock" icon="pi pi-pencil" text rounded size="small" @click="openEdit('warehouse', data)" />
+              <AppDataTable
+                v-model:filters="filters"
+                :value="warehouses"
+                :loading="loading"
+                stripedRows
+                data-key="id"
+                @cell-save="onCellSave('warehouse', $event)"
+              >
+                <Column field="code" header="Mã kho">
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Mã"
+                      @input="filterCallback()"
+                    />
                   </template>
                 </Column>
-                <template #empty><EmptyState text="Chưa có kho hàng." icon="pi pi-warehouse" /></template>
-              </DataTable>
+                <Column field="name" header="Tên kho" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText size="small" class="w-full" v-model="data.name" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Tên"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column header="">
+                  <template #body="{ data }">
+                    <Button
+                      v-if="auth.canStock"
+                      icon="pi pi-pencil"
+                      text
+                      rounded
+                      size="small"
+                      @click="openEdit('warehouse', data)"
+                    />
+                  </template>
+                </Column>
+                <template #empty
+                  ><EmptyState text="Chưa có kho hàng." icon="pi pi-warehouse"
+                /></template>
+              </AppDataTable>
             </TabPanel>
 
             <!-- Khách hàng -->
             <TabPanel value="customers">
               <div class="mb-3 flex items-center justify-end">
-                <Button v-if="auth.canStock" label="Thêm khách hàng" icon="pi pi-plus" @click="openCreate('customer')" />
+                <Button
+                  v-if="auth.canStock"
+                  label="Thêm khách hàng"
+                  icon="pi pi-plus"
+                  @click="openCreate('customer')"
+                />
               </div>
-              <DataTable :value="customers" :loading="loading" stripedRows>
-                <Column field="code" header="Mã" style="width: 110px" />
-                <Column field="name" header="Tên" />
-                <Column field="tax_code" header="MST" style="width: 140px" />
-                <Column field="address" header="Địa chỉ" />
-                <Column field="phone" header="Điện thoại" style="width: 130px" />
-                <Column header="" style="width: 90px">
-                  <template #body="{ data }">
-                    <Button v-if="auth.canStock" icon="pi pi-pencil" text rounded size="small" @click="openEdit('customer', data)" />
+              <AppDataTable
+                v-model:filters="filters"
+                :value="customers"
+                :loading="loading"
+                stripedRows
+                data-key="id"
+                @cell-save="onCellSave('customer', $event)"
+              >
+                <Column field="code" header="Mã">
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Mã"
+                      @input="filterCallback()"
+                    />
                   </template>
                 </Column>
-                <template #empty><EmptyState text="Chưa có khách hàng." icon="pi pi-users" /></template>
-              </DataTable>
+                <Column field="name" header="Tên" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText size="small" class="w-full" v-model="data.name" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Tên"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column
+                  field="tax_code"
+                  header="MST"
+                  :editable="auth.canStock"
+                >
+                  <template #editor="{ data }">
+                    <InputText
+                      size="small"
+                      class="w-full"
+                      v-model="data.tax_code"
+                    />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="MST"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="address" header="Địa chỉ" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText
+                      size="small"
+                      class="w-full"
+                      v-model="data.address"
+                    />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Địa chỉ"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="phone" header="Điện thoại" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText size="small" class="w-full" v-model="data.phone" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="ĐT"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column header="">
+                  <template #body="{ data }">
+                    <Button
+                      v-if="auth.canStock"
+                      icon="pi pi-pencil"
+                      text
+                      rounded
+                      size="small"
+                      @click="openEdit('customer', data)"
+                    />
+                  </template>
+                </Column>
+                <template #empty
+                  ><EmptyState text="Chưa có khách hàng." icon="pi pi-users"
+                /></template>
+              </AppDataTable>
             </TabPanel>
 
             <!-- Nhà cung cấp -->
             <TabPanel value="suppliers">
               <div class="mb-3 flex items-center justify-end">
-                <Button v-if="auth.canStock" label="Thêm nhà cung cấp" icon="pi pi-plus" @click="openCreate('supplier')" />
+                <Button
+                  v-if="auth.canStock"
+                  label="Thêm nhà cung cấp"
+                  icon="pi pi-plus"
+                  @click="openCreate('supplier')"
+                />
               </div>
-              <DataTable :value="suppliers" :loading="loading" stripedRows>
-                <Column field="code" header="Mã" style="width: 110px" />
-                <Column field="name" header="Tên" />
-                <Column field="tax_code" header="MST" style="width: 140px" />
-                <Column field="address" header="Địa chỉ" />
-                <Column field="phone" header="Điện thoại" style="width: 130px" />
-                <Column header="" style="width: 90px">
-                  <template #body="{ data }">
-                    <Button v-if="auth.canStock" icon="pi pi-pencil" text rounded size="small" @click="openEdit('supplier', data)" />
+              <AppDataTable
+                v-model:filters="filters"
+                :value="suppliers"
+                :loading="loading"
+                stripedRows
+                data-key="id"
+                @cell-save="onCellSave('supplier', $event)"
+              >
+                <Column field="code" header="Mã">
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Mã"
+                      @input="filterCallback()"
+                    />
                   </template>
                 </Column>
-                <template #empty><EmptyState text="Chưa có nhà cung cấp." icon="pi pi-truck" /></template>
-              </DataTable>
+                <Column field="name" header="Tên" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText size="small" class="w-full" v-model="data.name" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Tên"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column
+                  field="tax_code"
+                  header="MST"
+                  :editable="auth.canStock"
+                >
+                  <template #editor="{ data }">
+                    <InputText
+                      size="small"
+                      class="w-full"
+                      v-model="data.tax_code"
+                    />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="MST"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="address" header="Địa chỉ" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText
+                      size="small"
+                      class="w-full"
+                      v-model="data.address"
+                    />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Địa chỉ"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="phone" header="Điện thoại" :editable="auth.canStock">
+                  <template #editor="{ data }">
+                    <InputText size="small" class="w-full" v-model="data.phone" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="ĐT"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column header="">
+                  <template #body="{ data }">
+                    <Button
+                      v-if="auth.canStock"
+                      icon="pi pi-pencil"
+                      text
+                      rounded
+                      size="small"
+                      @click="openEdit('supplier', data)"
+                    />
+                  </template>
+                </Column>
+                <template #empty
+                  ><EmptyState text="Chưa có nhà cung cấp." icon="pi pi-truck"
+                /></template>
+              </AppDataTable>
             </TabPanel>
 
             <!-- Nhóm ngành (chỉ xem) -->
             <TabPanel value="industryGroups">
-              <DataTable :value="industryGroups" :loading="loading" stripedRows>
-                <Column field="code" header="Mã" style="width: 120px" />
+              <AppDataTable
+                :value="industryGroups"
+                :loading="loading"
+                stripedRows
+              >
+                <Column field="code" header="Mã" />
                 <Column field="name" header="Tên nhóm" />
-                <Column field="vat_rate" header="Thuế GTGT (%)" style="width: 140px">
-                  <template #body="{ data }">{{ data.vat_rate * 100 + "%" }}</template>
+                <Column field="vat_rate" header="Thuế GTGT (%)">
+                  <template #body="{ data }">{{
+                    data.vat_rate * 100 + "%"
+                  }}</template>
                 </Column>
-                <Column field="pit_rate" header="Thuế TNCN (%)" style="width: 140px">
-                  <template #body="{ data }">{{ data.pit_rate * 100 + "%" }}</template>
+                <Column field="pit_rate" header="Thuế TNCN (%)">
+                  <template #body="{ data }">{{
+                    data.pit_rate * 100 + "%"
+                  }}</template>
                 </Column>
-                <template #empty><EmptyState text="Chưa có nhóm ngành nào." icon="pi pi-sitemap" /></template>
-              </DataTable>
+                <template #empty
+                  ><EmptyState
+                    text="Chưa có nhóm ngành nào."
+                    icon="pi pi-sitemap"
+                /></template>
+              </AppDataTable>
             </TabPanel>
           </TabPanels>
         </Tabs>
@@ -236,10 +570,20 @@ onMounted(() => catalog.loadAll());
       @action="save"
     >
       <div class="grid grid-cols-2 gap-4 py-2">
-        <FormField :label="dialogKind === 'warehouse' ? 'Mã kho' : 'Mã'" required>
-          <InputText v-model="form.code" :placeholder="codePlaceholder" :disabled="editing" />
+        <FormField
+          :label="dialogKind === 'warehouse' ? 'Mã kho' : 'Mã'"
+          required
+        >
+          <InputText
+            v-model="form.code"
+            :placeholder="codePlaceholder"
+            :disabled="editing"
+          />
         </FormField>
-        <FormField :label="dialogKind === 'warehouse' ? 'Tên kho' : 'Tên'" required>
+        <FormField
+          :label="dialogKind === 'warehouse' ? 'Tên kho' : 'Tên'"
+          required
+        >
           <InputText v-model="form.name" placeholder="Tên hiển thị" />
         </FormField>
 

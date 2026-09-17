@@ -10,6 +10,7 @@ export interface Product {
   min_stock: number;
   vat_rate: number;
   vat_reduced: boolean;
+  import_tax_rate: number;
   default_warehouse_id?: number;
 }
 
@@ -330,6 +331,20 @@ export interface BusinessConfig {
   fiscal_year: number;
   report_from: string;
   report_to: string;
+}
+
+// ─── Cài đặt mặc định (bảng app_setting) ───
+
+export interface AppSettings {
+  product_code_prefix: string;
+  product_code_start: number;
+  product_code_digits: number;
+  product_vat_rate_options: number[];
+  product_vat_rate_default: number;
+  product_import_tax_options: number[];
+  product_import_tax_default: number;
+  product_unit: string;
+  product_min_stock: number;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───

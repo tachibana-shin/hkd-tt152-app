@@ -21,8 +21,14 @@ const entryTypeOptions = [
   { label: "Phiếu thu (PT)", value: "PT" },
   { label: "Phiếu chi (PC)", value: "PC" },
 ];
-const filterTypeOptions = [{ label: "Toàn bộ", value: "" }, ...entryTypeOptions];
-const tagSeverity: Record<string, "success" | "warn"> = { PT: "success", PC: "warn" };
+const filterTypeOptions = [
+  { label: "Toàn bộ", value: "" },
+  ...entryTypeOptions,
+];
+const tagSeverity: Record<string, "success" | "warn"> = {
+  PT: "success",
+  PC: "warn",
+};
 
 const form = reactive({
   entry_type: "PT" as "PT" | "PC",
@@ -47,7 +53,8 @@ const filteredEntries = computed(() =>
 );
 
 const objectCode = computed({
-  get: () => (form.entry_type === "PT" ? form.customer_code : form.supplier_code),
+  get: () =>
+    form.entry_type === "PT" ? form.customer_code : form.supplier_code,
   set: (v: string) => {
     const code = v ?? "";
     if (form.entry_type === "PT") form.customer_code = code;
@@ -110,14 +117,17 @@ async function loadEntries() {
       api.getJournalEntries("PT"),
       api.getJournalEntries("PC"),
     ]);
-    entries.value = [...pt, ...pc].sort(
-      (a, b) =>
-        a.posting_date === b.posting_date
-          ? a.voucher_no.localeCompare(b.voucher_no)
-          : b.posting_date.localeCompare(a.posting_date),
+    entries.value = [...pt, ...pc].sort((a, b) =>
+      a.posting_date === b.posting_date
+        ? a.voucher_no.localeCompare(b.voucher_no)
+        : b.posting_date.localeCompare(a.posting_date),
     );
   } catch (e) {
-    toast.add({ severity: "error", summary: "Không tải được phiếu", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Không tải được phiếu",
+      detail: String(e),
+    });
   } finally {
     loading.value = false;
   }
@@ -125,19 +135,35 @@ async function loadEntries() {
 
 async function save() {
   if (!form.posting_date) {
-    toast.add({ severity: "warn", summary: "Thiếu ngày ghi sổ", detail: "Chọn ngày cho phiếu" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu ngày ghi sổ",
+      detail: "Chọn ngày cho phiếu",
+    });
     return;
   }
   if (!form.voucher_no.trim()) {
-    toast.add({ severity: "warn", summary: "Thiếu số phiếu", detail: "Số phiếu là bắt buộc" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu số phiếu",
+      detail: "Số phiếu là bắt buộc",
+    });
     return;
   }
   if (!form.description.trim()) {
-    toast.add({ severity: "warn", summary: "Thiếu diễn giải", detail: "Diễn giải là bắt buộc" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu diễn giải",
+      detail: "Diễn giải là bắt buộc",
+    });
     return;
   }
   if (!form.amount || form.amount <= 0) {
-    toast.add({ severity: "warn", summary: "Số tiền không hợp lệ", detail: "Số tiền phải lớn hơn 0" });
+    toast.add({
+      severity: "warn",
+      summary: "Số tiền không hợp lệ",
+      detail: "Số tiền phải lớn hơn 0",
+    });
     return;
   }
   saving.value = true;
@@ -167,7 +193,11 @@ async function save() {
     resetForm(form.entry_type);
     await loadEntries();
   } catch (e) {
-    toast.add({ severity: "error", summary: "Không lưu được phiếu", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Không lưu được phiếu",
+      detail: String(e),
+    });
   } finally {
     saving.value = false;
   }
@@ -188,14 +218,21 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button v-if="auth.canAccounting" label="Tạo phiếu" icon="pi pi-plus" @click="openCreate" />
+        <Button
+          v-if="auth.canAccounting"
+          label="Tạo phiếu"
+          icon="pi pi-plus"
+          @click="openCreate"
+        />
       </template>
     </Toolbar>
 
     <Card>
       <template #content>
         <div class="mb-3 flex items-center justify-between gap-3">
-          <span class="text-sm text-gray-500">Tổng số phiếu: {{ entries.length }}</span>
+          <span class="text-sm text-gray-500"
+            >Tổng số phiếu: {{ entries.length }}</span
+          >
           <div class="flex items-center gap-2">
             <i class="pi pi-filter text-gray-400" />
             <Select
@@ -207,37 +244,56 @@ onMounted(async () => {
             />
           </div>
         </div>
-        <DataTable :value="filteredEntries" :loading="loading" stripedRows paginator :rows="10">
-          <Column field="posting_date" header="Ngày" style="width: 110px" />
-          <Column field="voucher_no" header="Số phiếu" style="width: 110px" />
-          <Column field="entry_type" header="Loại" style="width: 90px">
+        <AppDataTable
+          :value="filteredEntries"
+          :loading="loading"
+          stripedRows
+          paginator
+          :rows="10"
+        >
+          <Column field="posting_date" header="Ngày" />
+          <Column field="voucher_no" header="Số phiếu" />
+          <Column field="entry_type" header="Loại">
             <template #body="{ data }">
-              <Tag :value="data.entry_type" :severity="tagSeverity[data.entry_type]" />
+              <Tag
+                :value="data.entry_type"
+                :severity="tagSeverity[data.entry_type]"
+              />
             </template>
           </Column>
           <Column field="description" header="Diễn giải" />
-          <Column header="Khách hàng / NCC" style="width: 190px">
-            <template #body="{ data }">{{ data.customer_name || data.supplier_name || "—" }}</template>
+          <Column header="Khách hàng / NCC">
+            <template #body="{ data }">{{
+              data.customer_name || data.supplier_name || "—"
+            }}</template>
           </Column>
-          <Column field="amount" header="Số tiền" style="width: 150px" align="right">
+          <Column field="amount" header="Số tiền" align="right">
             <template #body="{ data }">{{ fmt(data.amount) }}</template>
           </Column>
-          <Column field="industry_code" header="Nhóm ngành" style="width: 120px">
+          <Column field="industry_code" header="Nhóm ngành">
             <template #body="{ data }">
-              <Tag v-if="data.industry_code" :value="data.industry_code" severity="info" />
+              <Tag
+                v-if="data.industry_code"
+                :value="data.industry_code"
+                severity="info"
+              />
               <span v-else>—</span>
             </template>
           </Column>
-          <Column field="note" header="Ghi chú" style="width: 160px">
+          <Column field="note" header="Ghi chú">
             <template #body="{ data }">{{ data.note || "—" }}</template>
           </Column>
           <template #empty>
             <EmptyState
-              :text="entries.length ? 'Không có phiếu khớp bộ lọc.' : 'Chưa có phiếu thu/chi.'"
+              :text="
+                entries.length
+                  ? 'Không có phiếu khớp bộ lọc.'
+                  : 'Chưa có phiếu thu/chi.'
+              "
               icon="pi pi-wallet"
             />
           </template>
-        </DataTable>
+        </AppDataTable>
       </template>
     </Card>
 
@@ -262,7 +318,11 @@ onMounted(async () => {
           />
         </FormField>
         <FormField label="Ngày ghi sổ" required>
-          <DatePicker v-model="form.posting_date" dateFormat="dd/mm/yy" class="w-full" />
+          <DatePicker
+            v-model="form.posting_date"
+            dateFormat="dd/mm/yy"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Số phiếu" required>
           <InputText v-model="form.voucher_no" />
@@ -270,10 +330,16 @@ onMounted(async () => {
         <FormField label="Diễn giải" required class="col-span-2">
           <InputText
             v-model="form.description"
-            :placeholder="form.entry_type === 'PT' ? 'Thu tiền bán hàng...' : 'Chi phí hoạt động...'"
+            :placeholder="
+              form.entry_type === 'PT'
+                ? 'Thu tiền bán hàng...'
+                : 'Chi phí hoạt động...'
+            "
           />
         </FormField>
-        <FormField :label="form.entry_type === 'PT' ? 'Khách hàng' : 'Nhà cung cấp'">
+        <FormField
+          :label="form.entry_type === 'PT' ? 'Khách hàng' : 'Nhà cung cấp'"
+        >
           <Select
             v-model="objectCode"
             :options="form.entry_type === 'PT' ? customers : suppliers"
@@ -315,18 +381,37 @@ onMounted(async () => {
           />
         </FormField>
         <FormField label="Thuế GTGT (%)">
-          <InputNumber v-model="form.vat_rate" :min="0" :max="100" suffix="%" class="w-full" />
+          <InputNumber
+            v-model="form.vat_rate"
+            :min="0"
+            :max="100"
+            suffix="%"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Thuế TNCN (%)">
-          <InputNumber v-model="form.pit_rate" :min="0" :max="100" suffix="%" class="w-full" />
+          <InputNumber
+            v-model="form.pit_rate"
+            :min="0"
+            :max="100"
+            suffix="%"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Ghi chú" class="col-span-3">
           <InputText v-model="form.note" />
         </FormField>
       </div>
       <div class="mt-3 flex items-center gap-1 text-xs text-gray-400">
-        <span>Đơn vị: HaNoi-01 · Nợ {{ form.debit_account }} / Có {{ form.credit_account }}</span>
-        <i class="pi pi-info-circle cursor-help text-xs text-gray-400" v-tooltip="'Tài khoản mặc định theo loại phiếu; sửa được.'" aria-hidden="true" />
+        <span
+          >Đơn vị: HaNoi-01 · Nợ {{ form.debit_account }} / Có
+          {{ form.credit_account }}</span
+        >
+        <i
+          class="pi pi-info-circle cursor-help text-xs text-gray-400"
+          v-tooltip="'Tài khoản mặc định theo loại phiếu; sửa được.'"
+          aria-hidden="true"
+        />
       </div>
     </AppDialog>
   </div>

@@ -81,6 +81,7 @@ pub(crate) struct ProductRow {
     pub(crate) min_stock: f64,
     pub(crate) vat_rate: f64,
     pub(crate) vat_reduced: bool,
+    pub(crate) import_tax_rate: f64,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -89,6 +90,59 @@ pub(crate) struct IndustryGroupRow {
     pub(crate) name: String,
     pub(crate) vat_rate: f64,
     pub(crate) pit_rate: f64,
+}
+
+// ─── SẢN PHẨM — LAZY LOAD (server-side page / sort / filter) ───
+// Event PrimeVue DataTable: { first, rows, sortField, sortOrder, multiSortMeta, filters }
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProductPageEvent {
+    #[serde(default)]
+    pub(crate) first: Option<i64>,
+    #[serde(default)]
+    pub(crate) rows: Option<i64>,
+    #[serde(default)]
+    pub(crate) sort_field: Option<String>,
+    #[serde(default)]
+    pub(crate) sort_order: Option<i32>,
+    #[serde(default)]
+    pub(crate) multi_sort_meta: Option<Vec<ProductSortMeta>>,
+    #[serde(default)]
+    pub(crate) filters: std::collections::HashMap<String, ProductPageFilter>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProductSortMeta {
+    pub(crate) field: Option<String>,
+    pub(crate) order: Option<i32>,
+}
+
+/// Filter của 1 cột — PrimeVue gửi dạng `{ value, matchMode }` cho filterDisplay="row"
+/// hoặc `{ operator, constraints: [{ value, matchMode }] }`.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProductPageFilter {
+    pub(crate) value: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(crate) match_mode: Option<String>,
+    #[serde(default)]
+    pub(crate) constraints: Option<Vec<ProductPageConstraint>>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProductPageConstraint {
+    pub(crate) value: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(crate) match_mode: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct ProductPageResult {
+    pub(crate) rows: Vec<ProductRow>,
+    pub(crate) total: i64,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

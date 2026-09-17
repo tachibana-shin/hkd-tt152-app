@@ -16,3 +16,39 @@
     --p-primary-950: oklch(0.18 0.07 260);
   }
 }
+
+/* Chống bôi đen text khi kéo resize cột: PrimeVue chỉ set `user-select: none`
+   (không prefix) nên WebKit bỏ qua; thêm bản -webkit- cho đúng. */
+.p-datatable[data-p-unselectable-text="true"],
+.p-datatable[data-p-unselectable-text="true"] * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* Cột thao tác cố định bên phải khi trang/bảng cuộn ngang (các cột mang class
+   `p-col-fixed-right`). PrimeVue v5 không tạo `.p-datatable-wrapper` cho bảng
+   không scrollable → sticky neo theo vùng cuộn ngang thật của trang. Nền của td
+   phải đặc để che nội dung trượt phía dưới. */
+.p-datatable th.p-col-fixed-right,
+.p-datatable td.p-col-fixed-right {
+  position: sticky !important;
+  right: 0 !important;
+  z-index: 1;
+}
+.p-datatable thead th.p-col-fixed-right {
+  z-index: 3;
+  background: var(--p-datatable-header-cell-background) !important;
+}
+.p-datatable tbody tr:nth-child(odd) td.p-col-fixed-right {
+  background: var(--p-datatable-row-striped-background) !important;
+}
+.p-datatable tbody tr:nth-child(even) td.p-col-fixed-right {
+  background: var(--p-datatable-row-background) !important;
+}
+.p-datatable tbody tr:hover td.p-col-fixed-right {
+  background: var(--p-datatable-row-hover-background) !important;
+}
+.p-datatable .p-col-fixed-right {
+  box-shadow: -1px 0 0 0 var(--p-content-border-color, rgba(15, 23, 42, 0.08)),
+    -10px 0 16px -12px rgba(15, 23, 42, 0.35);
+}

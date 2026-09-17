@@ -20,6 +20,7 @@ const routes: RouteRecordRaw[] = [
   { path: "/accounting", name: "accounting", component: () => import("@/views/Accounting.vue"), meta: { title: "Kế toán HKD" } },
   { path: "/users", name: "users", component: () => import("@/views/Users.vue"), meta: { title: "Người dùng & phân quyền" } },
   { path: "/profiles", name: "profiles", component: () => import("@/views/Profiles.vue"), meta: { title: "Hồ sơ HKD" } },
+  { path: "/settings", name: "settings", component: () => import("@/views/Settings.vue"), meta: { title: "Cài đặt" } },
   { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 

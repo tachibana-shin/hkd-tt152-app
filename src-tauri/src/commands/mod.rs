@@ -14,3 +14,4 @@ pub(crate) mod hddt;
 pub(crate) mod attendance;
 pub(crate) mod auth;
 pub(crate) mod profile;
+pub(crate) mod settings;

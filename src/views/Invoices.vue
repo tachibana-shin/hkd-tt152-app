@@ -72,7 +72,11 @@ const statusBadge = {
 
 async function save() {
   if (!form.items.length || !form.customer) {
-    toast.add({ severity: "warn", summary: "Thiếu thông tin", detail: "Cần khách hàng và ít nhất 1 mặt hàng" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin",
+      detail: "Cần khách hàng và ít nhất 1 mặt hàng",
+    });
     return;
   }
   saving.value = true;
@@ -93,7 +97,11 @@ async function save() {
     });
     draftDialog.value = false;
   } catch (e) {
-    toast.add({ severity: "error", summary: "Không lập được hóa đơn", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Không lập được hóa đơn",
+      detail: String(e),
+    });
   } finally {
     saving.value = false;
   }
@@ -108,7 +116,9 @@ function openLinkHddt(inv: Invoice) {
   linkTarget.value = inv;
   linkForm.hddtNo = inv.e_invoice_no ?? "";
   linkForm.hddtSymbol = inv.e_invoice_symbol ?? "";
-  linkForm.hddtDate = inv.e_invoice_date ? new Date(inv.e_invoice_date) : new Date();
+  linkForm.hddtDate = inv.e_invoice_date
+    ? new Date(inv.e_invoice_date)
+    : new Date();
   linkDialog.value = true;
 }
 
@@ -139,7 +149,11 @@ async function saveLink() {
     linkDialog.value = false;
     await invoiceStore.loadInvoices();
   } catch (e) {
-    toast.add({ severity: "error", summary: "Liên kết HĐĐT thất bại", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Liên kết HĐĐT thất bại",
+      detail: String(e),
+    });
   } finally {
     linking.value = false;
   }
@@ -160,58 +174,93 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button v-if="auth.canAccounting" label="Lập hóa đơn nháp" icon="pi pi-plus" @click="openCreate" />
+        <Button
+          v-if="auth.canAccounting"
+          label="Lập hóa đơn nháp"
+          icon="pi pi-plus"
+          @click="openCreate"
+        />
       </template>
     </Toolbar>
 
     <Card>
       <template #content>
-        <DataTable :value="invoices" :loading="loading" stripedRows paginator :rows="10">
-          <Column field="number" header="Số HĐ" style="width: 120px">
-            <template #body="{ data }">
-              <Button :label="data.number" icon="pi pi-eye" text size="small" @click="showDetail(data)" />
-            </template>
-          </Column>
-          <Column field="date" header="Ngày" style="width: 120px" />
-          <Column field="customer" header="Khách hàng" />
-          <Column field="customer_tax_code" header="MST" style="width: 140px" />
-          <Column field="total" header="Tổng tiền" style="width: 150px" align="right">
-            <template #body="{ data }">{{ fmt(data.total) }} đ</template>
-          </Column>
-          <Column field="vat_amount" header="Thuế GTGT" style="width: 130px" align="right">
-            <template #body="{ data }">{{ fmt(data.vat_amount) }} đ</template>
-          </Column>
-          <Column header="Trạng thái" style="width: 150px">
-            <template #body="{ data }">
-              <Tag
-                :value="data.status === 'draft' ? 'Nháp' : data.status === 'pasted' ? 'Đã dán' : 'Đã liên kết HĐĐT'"
-                :severity="statusBadge[data.status as keyof typeof statusBadge] ?? 'secondary'"
-              />
-            </template>
-          </Column>
-          <Column header="Số HĐĐT" style="width: 150px">
-            <template #body="{ data }">{{ data.e_invoice_no || "—" }}</template>
-          </Column>
-          <Column header="Ký hiệu" style="width: 120px">
-            <template #body="{ data }">{{ data.e_invoice_symbol || "—" }}</template>
-          </Column>
-          <Column header="Hành động" style="width: 170px">
+        <AppDataTable
+          :value="invoices"
+          :loading="loading"
+          stripedRows
+          paginator
+          :rows="10"
+          actions-header="Hành động"
+          actions-width="170"
+        >
+          <Column field="number" header="Số HĐ">
             <template #body="{ data }">
               <Button
-                v-if="auth.canAccounting && data.status === 'draft'"
-                icon="pi pi-link"
-                label="Liên kết HĐĐT"
+                :label="data.number"
+                icon="pi pi-eye"
                 text
                 size="small"
-                severity="success"
-                @click="openLinkHddt(data)"
+                @click="showDetail(data)"
               />
-              <Tag v-else-if="data.status === 'official'" value="Đã liên kết" severity="success" icon="pi pi-check" />
-              <span v-else class="text-sm text-gray-400">—</span>
             </template>
           </Column>
-          <template #empty><EmptyState text="Chưa có hóa đơn nào." icon="pi pi-receipt" /></template>
-        </DataTable>
+          <Column field="date" header="Ngày" />
+          <Column field="customer" header="Khách hàng" />
+          <Column field="customer_tax_code" header="MST" />
+          <Column field="total" header="Tổng tiền" align="right">
+            <template #body="{ data }">{{ fmt(data.total) }} đ</template>
+          </Column>
+          <Column field="vat_amount" header="Thuế GTGT" align="right">
+            <template #body="{ data }">{{ fmt(data.vat_amount) }} đ</template>
+          </Column>
+          <Column header="Trạng thái">
+            <template #body="{ data }">
+              <Tag
+                :value="
+                  data.status === 'draft'
+                    ? 'Nháp'
+                    : data.status === 'pasted'
+                      ? 'Đã dán'
+                      : 'Đã liên kết HĐĐT'
+                "
+                :severity="
+                  statusBadge[data.status as keyof typeof statusBadge] ??
+                  'secondary'
+                "
+              />
+            </template>
+          </Column>
+          <Column header="Số HĐĐT">
+            <template #body="{ data }">{{ data.e_invoice_no || "—" }}</template>
+          </Column>
+          <Column header="Ký hiệu">
+            <template #body="{ data }">{{
+              data.e_invoice_symbol || "—"
+            }}</template>
+          </Column>
+          <template #actions="{ data }">
+            <Button
+              v-if="auth.canAccounting && data.status === 'draft'"
+              icon="pi pi-link"
+              label="Liên kết HĐĐT"
+              text
+              size="small"
+              severity="success"
+              @click="openLinkHddt(data)"
+            />
+            <Tag
+              v-else-if="data.status === 'official'"
+              value="Đã liên kết"
+              severity="success"
+              icon="pi pi-check"
+            />
+            <span v-else class="text-sm text-gray-400">—</span>
+          </template>
+          <template #empty
+            ><EmptyState text="Chưa có hóa đơn nào." icon="pi pi-receipt"
+          /></template>
+        </AppDataTable>
       </template>
     </Card>
 
@@ -230,10 +279,17 @@ onMounted(async () => {
           <InputText v-model="form.number" disabled />
         </FormField>
         <FormField label="Ngày lập">
-          <DatePicker v-model="form.date" dateFormat="dd/mm/yy" class="w-full" />
+          <DatePicker
+            v-model="form.date"
+            dateFormat="dd/mm/yy"
+            class="w-full"
+          />
         </FormField>
         <FormField label="MST khách hàng">
-          <InputText v-model="form.customer_tax_code" placeholder="Mã số thuế" />
+          <InputText
+            v-model="form.customer_tax_code"
+            placeholder="Mã số thuế"
+          />
         </FormField>
         <FormField label="Khách hàng" required class="col-span-3">
           <Select
@@ -277,32 +333,51 @@ onMounted(async () => {
     >
       <template v-if="detail">
         <div class="grid grid-cols-2 gap-3 text-sm mb-4">
-          <div><span class="text-gray-500">Số HĐ:</span> <b>{{ detail.invoice.number }}</b></div>
-          <div><span class="text-gray-500">Ngày:</span> {{ detail.invoice.date }}</div>
-          <div><span class="text-gray-500">Khách hàng:</span> {{ detail.invoice.customer }}</div>
-          <div><span class="text-gray-500">MST:</span> {{ detail.invoice.customer_tax_code || "—" }}</div>
+          <div>
+            <span class="text-gray-500">Số HĐ:</span>
+            <b>{{ detail.invoice.number }}</b>
+          </div>
+          <div>
+            <span class="text-gray-500">Ngày:</span> {{ detail.invoice.date }}
+          </div>
+          <div>
+            <span class="text-gray-500">Khách hàng:</span>
+            {{ detail.invoice.customer }}
+          </div>
+          <div>
+            <span class="text-gray-500">MST:</span>
+            {{ detail.invoice.customer_tax_code || "—" }}
+          </div>
         </div>
-        <DataTable :value="detail.items as InvoiceItem[]" stripedRows>
-          <Column field="product_code" header="Mã SP" style="width: 110px" />
+        <AppDataTable :value="detail.items as InvoiceItem[]" stripedRows>
+          <Column field="product_code" header="Mã SP" />
           <Column field="product_name" header="Tên sản phẩm" />
-          <Column field="unit" header="ĐVT" style="width: 80px" />
-          <Column field="quantity" header="SL" style="width: 90px" align="right" />
-          <Column field="unit_price" header="Đơn giá" style="width: 130px" align="right">
+          <Column field="unit" header="ĐVT" />
+          <Column field="quantity" header="SL" align="right" />
+          <Column field="unit_price" header="Đơn giá" align="right">
             <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
           </Column>
-          <Column field="subtotal" header="Thành tiền" style="width: 130px" align="right">
+          <Column field="subtotal" header="Thành tiền" align="right">
             <template #body="{ data }">{{ fmt(data.subtotal) }}</template>
           </Column>
-        </DataTable>
+        </AppDataTable>
         <div class="mt-4 flex flex-col items-end gap-1 text-sm">
           <div class="flex gap-6">
-            <span class="text-gray-500">Cộng tiền hàng:</span><b>{{ fmt(detail.invoice.total) }} đ</b>
+            <span class="text-gray-500">Cộng tiền hàng:</span
+            ><b>{{ fmt(detail.invoice.total) }} đ</b>
           </div>
           <div class="flex gap-6">
-            <span class="text-gray-500">Thuế GTGT:</span><b>{{ fmt(detail.invoice.vat_amount) }} đ</b>
+            <span class="text-gray-500">Thuế GTGT:</span
+            ><b>{{ fmt(detail.invoice.vat_amount) }} đ</b>
           </div>
           <div class="flex gap-6 text-base font-bold text-primary-600">
-            <span>Tổng cộng:</span><span>{{ fmt(detail.invoice.total + detail.invoice.vat_amount) }} đ</span>
+            <span>Tổng cộng:</span
+            ><span
+              >{{
+                fmt(detail.invoice.total + detail.invoice.vat_amount)
+              }}
+              đ</span
+            >
           </div>
         </div>
       </template>
@@ -321,16 +396,30 @@ onMounted(async () => {
     >
       <div class="flex flex-col gap-4 py-2">
         <p v-if="linkTarget" class="text-sm text-gray-600">
-          Hóa đơn <b>{{ linkTarget.number }}</b> — {{ linkTarget.customer || "—" }}. Sau khi lưu, chuyển sang trạng thái <b>Đã liên kết HĐĐT</b>.
+          Hóa đơn <b>{{ linkTarget.number }}</b> —
+          {{ linkTarget.customer || "—" }}. Sau khi lưu, chuyển sang trạng thái
+          <b>Đã liên kết HĐĐT</b>.
         </p>
         <FormField label="Số HĐĐT" required>
-          <InputText v-model="linkForm.hddtNo" placeholder="Nhập số hóa đơn điện tử" class="w-full" />
+          <InputText
+            v-model="linkForm.hddtNo"
+            placeholder="Nhập số hóa đơn điện tử"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Ký hiệu HĐĐT">
-          <InputText v-model="linkForm.hddtSymbol" placeholder="Nhập ký hiệu (VD: 1C24TT152)" class="w-full" />
+          <InputText
+            v-model="linkForm.hddtSymbol"
+            placeholder="Nhập ký hiệu (VD: 1C24TT152)"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Ngày HĐĐT">
-          <DatePicker v-model="linkForm.hddtDate" dateFormat="dd/mm/yy" class="w-full" />
+          <DatePicker
+            v-model="linkForm.hddtDate"
+            dateFormat="dd/mm/yy"
+            class="w-full"
+          />
         </FormField>
       </div>
     </AppDialog>

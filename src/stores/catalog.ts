@@ -9,6 +9,11 @@ export const useCatalogStore = defineStore("catalog", () => {
   const industryGroups = ref<IndustryGroup[]>([]);
   const loading = ref(false);
 
+  // Trang sản phẩm cho màn Danh mục sản phẩm (lazy load — không tải toàn bộ).
+  const pageProducts = ref<Product[]>([]);
+  const totalProducts = ref(0);
+  const productsLoading = ref(false);
+
   async function loadAll() {
     loading.value = true;
     try {
@@ -29,14 +34,29 @@ export const useCatalogStore = defineStore("catalog", () => {
     }
   }
 
+  /** Lazy-load 1 trang sản phẩm theo event PrimeVue (first/rows/sort/filters). */
+  async function loadProductsPage(lazyEvent: unknown) {
+    productsLoading.value = true;
+    try {
+      const { rows, total } = await api.getProductsPage(lazyEvent);
+      pageProducts.value = rows;
+      totalProducts.value = total;
+    } finally {
+      productsLoading.value = false;
+    }
+  }
+
   async function saveProduct(p: Partial<Product>) {
     await api.saveProduct(p);
-    await loadAll();
   }
 
   async function deleteProduct(id: number) {
     await api.deleteProduct(id);
-    await loadAll();
+  }
+
+  /** Xóa nhiều sản phẩm (dùng cho xóa hàng loạt theo checkbox). */
+  async function deleteProducts(ids: number[]) {
+    await Promise.all(ids.map((id) => api.deleteProduct(id)));
   }
 
   async function saveWarehouse(code: string, name: string) {
@@ -64,9 +84,14 @@ export const useCatalogStore = defineStore("catalog", () => {
     customers,
     industryGroups,
     loading,
+    pageProducts,
+    totalProducts,
+    productsLoading,
     loadAll,
+    loadProductsPage,
     saveProduct,
     deleteProduct,
+    deleteProducts,
     saveWarehouse,
     saveSupplier,
     saveCustomer,

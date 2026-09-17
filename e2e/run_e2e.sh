@@ -6,9 +6,10 @@
 #   ./e2e/run_e2e.sh                    # run every step
 #   ./e2e/run_e2e.sh login product      # run only the named steps
 #
-# Requires a debug binary (src-tauri/target/debug/hkd-tt152-app). If no Vite dev
-# server is listening on port 1420 the script starts one and stops it again when
-# done (set E2E_KEEP_VITE=1 to leave it running).
+# Requires a debug binary (src-tauri/target/debug/hkd-tt152-app). If a Vite dev
+# server is already listening on port 1420 (e.g. your `bun run tauri dev`) we
+# REUSE it and leave its app untouched; otherwise the script starts its own Vite
+# and stops it again when done (set E2E_KEEP_VITE=1 to leave it running).
 #
 # Defaults to running on its own Xvfb display so the webview is ALWAYS
 # "visible": on Wayland/XWayland, when the desktop session is locked or
@@ -57,9 +58,22 @@ if [ ! -x "$APP" ]; then
   exit 2
 fi
 
-# 0) Vite dev server (the debug app loads the frontend from http://localhost:1420)
-if ! ss -ltn 2>/dev/null | grep -q ':1420'; then
-  echo "[runner] Vite not running — starting..."
+# 0) Vite dev server (the debug app loads the frontend from http://localhost:1420).
+#    If a Vite is ALREADY running and reachable (your `bun run tauri dev`) we REUSE
+#    it — and must NOT kill the app that owns it further down, or Vite dies mid-test.
+REUSED_VITE=0
+if ss -ltn 2>/dev/null | grep -q ':1420'; then
+  for _ in $(seq 1 20); do
+    if curl -sf -o /dev/null "http://localhost:1420/" 2>/dev/null; then
+      REUSED_VITE=1
+      echo "[runner] reusing running Vite on :1420 (tauri dev app stays untouched)"
+      break
+    fi
+    sleep 0.5
+  done
+fi
+if [ "$REUSED_VITE" != "1" ]; then
+  echo "[runner] Vite not running/reachable — starting our own..."
   ( cd "$ROOT" && exec nohup bun run dev > "$LOG/vite.log" 2>&1 ) &
   VITE_PID=$!
 fi
@@ -68,6 +82,11 @@ for _ in $(seq 1 120); do
   curl -sf -o /dev/null "http://localhost:1420/" 2>/dev/null && break
   sleep 0.5
 done
+if ! curl -sf -o /dev/null "http://localhost:1420/" 2>/dev/null; then
+  echo "[runner] ERROR: Vite unreachable on http://localhost:1420 (see $LOG/vite.log)"
+  cleanup
+  exit 2
+fi
 
 # 0b) Dedicated Xvfb display (webview stays visible → rAF runs → transitions finish)
 if [ "$USE_XVFB" = "1" ]; then
@@ -86,9 +105,22 @@ if [ "$USE_XVFB" = "1" ]; then
 fi
 export GDK_BACKEND=x11
 
-# 1) Kill any old app instance and wipe previous data
-pkill -x hkd-tt152-app 2>/dev/null
-sleep 0.5
+# 1) Fresh data dir; free OUR inspector port from any stale runner instance.
+#    NOTE: when reusing the running Vite we must NOT `pkill -x hkd-tt152-app` —
+#    that would kill the user's tauri dev app and take its Vite down with it.
+stale_on_port() { ss -ltnp 2>/dev/null | grep ":$PORT " | grep -oP 'pid=\K[0-9]+' | head -1; }
+if [ "$REUSED_VITE" = "1" ]; then
+  SP=$(stale_on_port)
+  if [ -n "$SP" ]; then
+    echo "[runner] freeing stale runner instance on port $PORT (pid $SP)"
+    kill "$SP" 2>/dev/null
+    sleep 0.5
+  fi
+else
+  # Only when we own the Vite: no tauri dev is running, so any app leftover is stale.
+  pkill -x hkd-tt152-app 2>/dev/null
+  sleep 0.5
+fi
 rm -rf "$DATA"
 
 # 2) Start the app in the background (X11 + inspector)

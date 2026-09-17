@@ -13,20 +13,38 @@ const users = ref<AppUser[]>([]);
 const loading = ref(false);
 
 const ROLES: { value: Role; label: string; desc: string }[] = [
-  { value: "admin", label: "Quản trị (admin)", desc: "Toàn quyền, quản lý người dùng, backup" },
-  { value: "ketoan", label: "Kế toán (ketoan)", desc: "Sổ sách, thuế, lương, thu/chi, chấm công" },
-  { value: "kho", label: "Kho (kho)", desc: "Nhập/xuất/tồn, danh mục sản phẩm" },
+  {
+    value: "admin",
+    label: "Quản trị (admin)",
+    desc: "Toàn quyền, quản lý người dùng, backup",
+  },
+  {
+    value: "ketoan",
+    label: "Kế toán (ketoan)",
+    desc: "Sổ sách, thuế, lương, thu/chi, chấm công",
+  },
+  {
+    value: "kho",
+    label: "Kho (kho)",
+    desc: "Nhập/xuất/tồn, danh mục sản phẩm",
+  },
   { value: "xem", label: "Xem (xem)", desc: "Chỉ đọc, không ghi dữ liệu" },
 ];
 
-const ROLE_HINT = "admin: toàn quyền · ketoan: sổ sách/thuế/lương · kho: nhập/xuất/tồn · xem: chỉ đọc";
+const ROLE_HINT =
+  "admin: toàn quyền · ketoan: sổ sách/thuế/lương · kho: nhập/xuất/tồn · xem: chỉ đọc";
 
 async function load() {
   loading.value = true;
   try {
     users.value = await api.listUsers();
   } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi", detail: String(e), life: 3000 });
+    toast.add({
+      severity: "error",
+      summary: "Lỗi",
+      detail: String(e),
+      life: 3000,
+    });
   } finally {
     loading.value = false;
   }
@@ -35,21 +53,44 @@ async function load() {
 // ── Add / Edit dialog ──
 const dialogVisible = ref(false);
 const editing = ref<AppUser | null>(null);
-const form = ref({ username: "", display_name: "", password: "", role: "ketoan" as Role, active: true });
+const form = ref({
+  username: "",
+  display_name: "",
+  password: "",
+  role: "ketoan" as Role,
+  active: true,
+});
 
 function openCreate() {
   editing.value = null;
-  form.value = { username: "", display_name: "", password: "", role: "ketoan", active: true };
+  form.value = {
+    username: "",
+    display_name: "",
+    password: "",
+    role: "ketoan",
+    active: true,
+  };
   dialogVisible.value = true;
 }
 
 function openEdit(u: AppUser) {
   if (u.role === "admin" && auth.currentUser?.id !== u.id) {
-    toast.add({ severity: "warn", summary: "Không cho phép", detail: "Chỉ quản trị viên sở hữu tài khoản này mới sửa được", life: 3000 });
+    toast.add({
+      severity: "warn",
+      summary: "Không cho phép",
+      detail: "Chỉ quản trị viên sở hữu tài khoản này mới sửa được",
+      life: 3000,
+    });
     return;
   }
   editing.value = u;
-  form.value = { username: u.username, display_name: u.display_name, password: "", role: u.role, active: u.active };
+  form.value = {
+    username: u.username,
+    display_name: u.display_name,
+    password: "",
+    role: u.role,
+    active: u.active,
+  };
   dialogVisible.value = true;
 }
 
@@ -62,7 +103,12 @@ async function save() {
       role: form.value.role,
       active: form.value.active,
     });
-    toast.add({ severity: "success", summary: "Đã lưu", detail: "Thông tin người dùng đã được cập nhật", life: 2500 });
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu",
+      detail: "Thông tin người dùng đã được cập nhật",
+      life: 2500,
+    });
     dialogVisible.value = false;
     await load();
     // Nếu đang sửa chính mình thì làm mới phiên để phản ánh vai trò mới
@@ -70,7 +116,42 @@ async function save() {
       await auth.load();
     }
   } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi lưu", detail: String(e), life: 4000 });
+    toast.add({
+      severity: "error",
+      summary: "Lỗi lưu",
+      detail: String(e),
+      life: 4000,
+    });
+  }
+}
+
+// Sửa ô trực tiếp (double-tap) — chỉ đổi tên hiển thị, các trường khác giữ nguyên.
+async function onUserCellSave({ data }: { data: AppUser }) {
+  try {
+    await api.saveUser({
+      username: data.username,
+      display_name: data.display_name,
+      password: "",
+      role: data.role,
+      active: data.active,
+    });
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu",
+      detail: "Đã cập nhật tên hiển thị",
+      life: 2500,
+    });
+    await load();
+    // Nếu đang sửa chính mình thì làm mới phiên để phản ánh thay đổi.
+    if (data.username === auth.currentUser?.username) await auth.load();
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Lỗi lưu",
+      detail: String(e),
+      life: 4000,
+    });
+    await load();
   }
 }
 
@@ -83,10 +164,20 @@ function remove(u: AppUser) {
     accept: async () => {
       try {
         await api.deleteUser(u.id);
-        toast.add({ severity: "success", summary: "Đã xóa", detail: `Đã xóa ${u.username}`, life: 2500 });
+        toast.add({
+          severity: "success",
+          summary: "Đã xóa",
+          detail: `Đã xóa ${u.username}`,
+          life: 2500,
+        });
         await load();
       } catch (e) {
-        toast.add({ severity: "error", summary: "Không xóa được", detail: String(e), life: 4000 });
+        toast.add({
+          severity: "error",
+          summary: "Không xóa được",
+          detail: String(e),
+          life: 4000,
+        });
       }
     },
   });
@@ -104,7 +195,12 @@ function openPw() {
 
 async function savePw() {
   if (pw.value.next.length < 4) {
-    toast.add({ severity: "warn", summary: "Mật khẩu quá ngắn", detail: "Tối thiểu 4 ký tự", life: 2500 });
+    toast.add({
+      severity: "warn",
+      summary: "Mật khẩu quá ngắn",
+      detail: "Tối thiểu 4 ký tự",
+      life: 2500,
+    });
     return;
   }
   pwSaving.value = true;
@@ -113,13 +209,19 @@ async function savePw() {
     toast.add({ severity: "success", summary: "Đã đổi mật khẩu", life: 2500 });
     pwDialog.value = false;
   } catch (e) {
-    toast.add({ severity: "error", summary: "Đổi mật khẩu thất bại", detail: String(e), life: 3500 });
+    toast.add({
+      severity: "error",
+      summary: "Đổi mật khẩu thất bại",
+      detail: String(e),
+      life: 3500,
+    });
   } finally {
     pwSaving.value = false;
   }
 }
 
-const roleLabel = (r: string) => ROLES.find((x) => x.value === r)?.label.split(" (")[0] ?? r;
+const roleLabel = (r: string) =>
+  ROLES.find((x) => x.value === r)?.label.split(" (")[0] ?? r;
 
 load();
 </script>
@@ -129,23 +231,46 @@ load();
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2">
         <i class="pi pi-user-edit text-lg text-primary-600"></i>
-        <h3 class="text-lg font-semibold text-gray-800">Người dùng &amp; vai trò</h3>
+        <h3 class="text-lg font-semibold text-gray-800">
+          Người dùng &amp; vai trò
+        </h3>
         <i
           class="pi pi-info-circle text-sm text-gray-400 cursor-help"
           v-tooltip.right="ROLE_HINT"
         ></i>
       </div>
       <div class="flex gap-2">
-        <Button label="Đổi mật khẩu" icon="pi pi-key" severity="secondary" outlined @click="openPw" />
+        <Button
+          label="Đổi mật khẩu"
+          icon="pi pi-key"
+          severity="secondary"
+          outlined
+          @click="openPw"
+        />
         <Button label="Thêm người dùng" icon="pi pi-plus" @click="openCreate" />
       </div>
     </div>
 
     <Card>
       <template #content>
-        <DataTable :value="users" :loading="loading" stripedRows size="small">
+        <AppDataTable
+          :value="users"
+          :loading="loading"
+          stripedRows
+          size="small"
+          data-key="id"
+          @cell-save="onUserCellSave"
+        >
           <Column field="username" header="Tên đăng nhập" />
-          <Column field="display_name" header="Họ tên" />
+          <Column field="display_name" header="Họ tên" :editable="true">
+            <template #editor="{ data }">
+              <InputText
+                size="small"
+                class="w-full"
+                v-model="data.display_name"
+              />
+            </template>
+          </Column>
           <Column header="Vai trò">
             <template #body="{ data }">
               <Tag
@@ -164,10 +289,13 @@ load();
           </Column>
           <Column header="Trạng thái">
             <template #body="{ data }">
-              <Tag :value="data.active ? 'Hoạt động' : 'Khóa'" :severity="data.active ? 'success' : 'danger'" />
+              <Tag
+                :value="data.active ? 'Hoạt động' : 'Khóa'"
+                :severity="data.active ? 'success' : 'danger'"
+              />
             </template>
           </Column>
-          <Column header="Thao tác" style="width: 160px">
+          <Column header="Thao tác">
             <template #body="{ data }">
               <div class="flex gap-1">
                 <Button
@@ -191,7 +319,7 @@ load();
               </div>
             </template>
           </Column>
-        </DataTable>
+        </AppDataTable>
       </template>
     </Card>
 
@@ -205,23 +333,52 @@ load();
     >
       <div class="space-y-3">
         <FormField label="Tên đăng nhập" required>
-          <InputText v-model="form.username" class="w-full" :disabled="!!editing" placeholder="vd: ketoan01" />
+          <InputText
+            v-model="form.username"
+            class="w-full"
+            :disabled="!!editing"
+            placeholder="vd: ketoan01"
+          />
         </FormField>
         <FormField label="Họ tên hiển thị">
-          <InputText v-model="form.display_name" class="w-full" placeholder="vd: Nguyễn Thị Kế Toán" />
+          <InputText
+            v-model="form.display_name"
+            class="w-full"
+            placeholder="vd: Nguyễn Thị Kế Toán"
+          />
         </FormField>
-        <FormField :label="editing ? 'Mật khẩu (để trống = giữ nguyên)' : 'Mật khẩu'" :required="!editing">
-          <InputText v-model="form.password" type="password" class="w-full" :placeholder="editing ? '••••••••' : 'Tối thiểu 4 ký tự'" />
+        <FormField
+          :label="editing ? 'Mật khẩu (để trống = giữ nguyên)' : 'Mật khẩu'"
+          :required="!editing"
+        >
+          <InputText
+            v-model="form.password"
+            type="password"
+            class="w-full"
+            :placeholder="editing ? '••••••••' : 'Tối thiểu 4 ký tự'"
+          />
         </FormField>
         <FormField label="Vai trò" required>
-          <Select v-model="form.role" :options="ROLES" option-label="label" option-value="value" class="w-full" />
+          <Select
+            v-model="form.role"
+            :options="ROLES"
+            option-label="label"
+            option-value="value"
+            class="w-full"
+          />
           <p class="mt-1 text-xs text-gray-500">
             {{ ROLES.find((r) => r.value === form.role)?.desc }}
           </p>
         </FormField>
         <div class="flex items-center gap-2">
-          <Checkbox v-model="form.active" :binary="true" input-id="user-active" />
-          <label for="user-active" class="text-sm text-gray-700">Tài khoản hoạt động</label>
+          <Checkbox
+            v-model="form.active"
+            :binary="true"
+            input-id="user-active"
+          />
+          <label for="user-active" class="text-sm text-gray-700"
+            >Tài khoản hoạt động</label
+          >
         </div>
       </div>
     </AppDialog>

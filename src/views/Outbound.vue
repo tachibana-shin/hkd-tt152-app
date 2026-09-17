@@ -72,25 +72,37 @@ function removeRow(i: number) {
 
 async function save() {
   if (!form.posting_date || !form.items.length) {
-    toast.add({ severity: "warn", summary: "Thiếu thông tin", detail: "Cần ngày và ít nhất 1 mặt hàng" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin",
+      detail: "Cần ngày và ít nhất 1 mặt hàng",
+    });
     return;
   }
-  const invalid = form.items.find((it) => !it.product_code || !it.industry_code);
+  const invalid = form.items.find(
+    (it) => !it.product_code || !it.industry_code,
+  );
   if (invalid) {
-    toast.add({ severity: "warn", summary: "Thiếu thông tin", detail: "Chọn sản phẩm và nhóm ngành cho từng dòng" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin",
+      detail: "Chọn sản phẩm và nhóm ngành cho từng dòng",
+    });
     return;
   }
   saving.value = true;
   try {
-    const res = JSON.parse(await stock.outbound({
-      posting_date: iso(form.posting_date),
-      voucher_no: form.voucher_no,
-      description: form.description,
-      customer_code: form.customer_code,
-      unit_code: "HaNoi-01",
-      note: form.note,
-      items: form.items.map((it) => ({ ...it })),
-    }));
+    const res = JSON.parse(
+      await stock.outbound({
+        posting_date: iso(form.posting_date),
+        voucher_no: form.voucher_no,
+        description: form.description,
+        customer_code: form.customer_code,
+        unit_code: "HaNoi-01",
+        note: form.note,
+        items: form.items.map((it) => ({ ...it })),
+      }),
+    );
     toast.add({
       severity: "success",
       summary: `Đã xuất kho ${form.voucher_no}`,
@@ -98,7 +110,11 @@ async function save() {
     });
     dialog.value = false;
   } catch (e) {
-    toast.add({ severity: "error", summary: "Không xuất được", detail: String(e) });
+    toast.add({
+      severity: "error",
+      summary: "Không xuất được",
+      detail: String(e),
+    });
   } finally {
     saving.value = false;
   }
@@ -119,39 +135,60 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button v-if="auth.canStock" label="Tạo phiếu xuất" icon="pi pi-plus" @click="openCreate" />
+        <Button
+          v-if="auth.canStock"
+          label="Tạo phiếu xuất"
+          icon="pi pi-plus"
+          @click="openCreate"
+        />
       </template>
     </Toolbar>
 
     <Card>
       <template #content>
-        <DataTable :value="entries" :loading="loading" stripedRows paginator :rows="10">
-          <Column field="voucher_no" header="Số phiếu" style="width: 110px" />
-          <Column field="posting_date" header="Ngày" style="width: 120px" />
-          <Column field="product_code" header="Mã SP" style="width: 100px" />
+        <AppDataTable
+          :value="entries"
+          :loading="loading"
+          stripedRows
+          paginator
+          :rows="10"
+          actions-header="In"
+          actions-width="64"
+        >
+          <Column field="voucher_no" header="Số phiếu" />
+          <Column field="posting_date" header="Ngày" />
+          <Column field="product_code" header="Mã SP" />
           <Column field="description" header="Diễn giải" />
-          <Column field="customer_name" header="Khách hàng" style="width: 180px">
-            <template #body="{ data }">{{ data.customer_name || "—" }}</template>
+          <Column field="customer_name" header="Khách hàng">
+            <template #body="{ data }">{{
+              data.customer_name || "—"
+            }}</template>
           </Column>
-          <Column field="industry_code" header="Nhóm ngành" style="width: 120px">
+          <Column field="industry_code" header="Nhóm ngành">
             <template #body="{ data }">
               <Tag :value="data.industry_code" severity="info" />
             </template>
           </Column>
-          <Column field="quantity" header="SL" style="width: 80px" align="right" />
-          <Column field="unit_price" header="Đơn giá" style="width: 120px" align="right">
+          <Column field="quantity" header="SL" align="right" />
+          <Column field="unit_price" header="Đơn giá" align="right">
             <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
           </Column>
-          <Column field="amount" header="Thành tiền" style="width: 140px" align="right">
+          <Column field="amount" header="Thành tiền" align="right">
             <template #body="{ data }">{{ fmt(data.amount) }}</template>
           </Column>
-          <Column header="In" style="width: 64px">
-            <template #body="{ data }">
-              <Button icon="pi pi-print" text rounded size="small" @click="printVoucher(data)" />
-            </template>
-          </Column>
-          <template #empty><EmptyState text="Chưa có phiếu xuất kho." icon="pi pi-upload" /></template>
-        </DataTable>
+          <template #actions="{ data }">
+            <Button
+              icon="pi pi-print"
+              text
+              rounded
+              size="small"
+              @click="printVoucher(data)"
+            />
+          </template>
+          <template #empty
+            ><EmptyState text="Chưa có phiếu xuất kho." icon="pi pi-upload"
+          /></template>
+        </AppDataTable>
       </template>
     </Card>
 
@@ -166,7 +203,11 @@ onMounted(async () => {
     >
       <div class="grid grid-cols-3 gap-4 py-2">
         <FormField label="Ngày xuất">
-          <DatePicker v-model="form.posting_date" dateFormat="dd/mm/yy" class="w-full" />
+          <DatePicker
+            v-model="form.posting_date"
+            dateFormat="dd/mm/yy"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Số phiếu">
           <InputText v-model="form.voucher_no" disabled />
@@ -175,7 +216,16 @@ onMounted(async () => {
           <InputText v-model="form.description" />
         </FormField>
         <FormField label="Khách hàng" class="col-span-2">
-          <Select v-model="form.customer_code" :options="customers" optionLabel="name" optionValue="code" :editable="true" filter class="w-full" placeholder="Chọn hoặc nhập tên khách hàng" />
+          <Select
+            v-model="form.customer_code"
+            :options="customers"
+            optionLabel="name"
+            optionValue="code"
+            :editable="true"
+            filter
+            class="w-full"
+            placeholder="Chọn hoặc nhập tên khách hàng"
+          />
         </FormField>
         <FormField label="Ghi chú">
           <InputText v-model="form.note" />

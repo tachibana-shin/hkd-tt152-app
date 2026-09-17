@@ -1,16 +1,181 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
+import { FilterMatchMode } from "@primevue/core/api";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
+import { useSettingsStore } from "@/stores/settings";
 import type { Product } from "@/types";
 import { fmtInt as fmt } from "@/utils/format";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
-const { products, loading } = storeToRefs(catalog);
+const settings = useSettingsStore();
+const {
+  pageProducts: products,
+  totalProducts,
+  productsLoading: loading,
+} = storeToRefs(catalog);
 const toast = useToast();
 const confirm = useConfirm();
 
+// ─── LAZY LOAD (server-side page + sort + filter — sản phẩm có thể lên tới vài nghìn) ───
+const first = ref(0);
+const rowsPerPage = ref(50);
+const multiSortMeta = ref<{ field: string; order: 1 | -1 }[]>([]);
+const lazyParams = ref<Record<string, unknown>>({});
+
+interface GridFilter {
+  value: any;
+  matchMode: string;
+}
+
+const filters = ref<Record<string, GridFilter>>({
+  global: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  code: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  name: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  unit: { value: null, matchMode: FilterMatchMode.CONTAINS },
+  sale_price: { value: null, matchMode: FilterMatchMode.EQUALS },
+  cost_price: { value: null, matchMode: FilterMatchMode.EQUALS },
+  min_stock: { value: null, matchMode: FilterMatchMode.EQUALS },
+  vat_rate: { value: null, matchMode: FilterMatchMode.EQUALS },
+  import_tax_rate: { value: null, matchMode: FilterMatchMode.EQUALS },
+});
+
+const hasActiveFilter = computed(() =>
+  Object.values(filters.value).some((f) => f.value != null && f.value !== ""),
+);
+
+function loadLazyData() {
+  lazyParams.value = {
+    ...lazyParams.value,
+    first: first.value,
+    rows: rowsPerPage.value,
+    filters: filters.value,
+  };
+  catalog.loadProductsPage(lazyParams.value);
+}
+
+function onPage(event: { first: number; rows: number }) {
+  first.value = event.first;
+  rowsPerPage.value = event.rows;
+  loadLazyData();
+}
+
+function onSort(event: {
+  sortField?: string | null;
+  sortOrder?: 1 | -1 | null;
+  multiSortMeta?: Array<{ field: string; order: 1 | -1 }> | null;
+}) {
+  multiSortMeta.value = event.multiSortMeta ?? [];
+  lazyParams.value = {
+    ...lazyParams.value,
+    sortField: event.sortField ?? null,
+    sortOrder: event.sortOrder ?? null,
+    multiSortMeta: multiSortMeta.value,
+  };
+  loadLazyData();
+}
+
+function onFilter() {
+  first.value = 0;
+  loadLazyData();
+}
+
+function resetFilters() {
+  Object.values(filters.value).forEach((f) => (f.value = null));
+}
+
+onMounted(loadLazyData);
+
+// ─── SELECTION (checkbox, giữ lựa chọn qua các trang bằng id) ───
+const selectedIds = ref<Set<number>>(new Set());
+const selection = computed<Product[]>({
+  get: () => products.value.filter((p) => selectedIds.value.has(p.id)),
+  set: (val: Product[]) => {
+    selectedIds.value = new Set(val.map((p) => p.id));
+  },
+});
+const selectedCount = computed(() => selectedIds.value.size);
+
+// ─── SỬA TRỰC TIẾP TRÊN BẢNG — double-tap (AppDataTable tự quản lý) ───
+// AppDataTable bọc các cột khai `:editable` + #editor; click đơn = chọn dòng,
+// double-tap = mở editor (Enter lưu, Esc hủy, click ra ngoài lưu). Khi commit
+// nó phát `cell-save` với field + bản sao dữ liệu đã sửa — màn này chỉ cần
+// kiểm tra tính hợp lệ, lưu DB và reload trang.
+async function onCellSave({ field, data }: { field: string; data: Product }) {
+  if (field === "name" && !String(data.name ?? "").trim()) {
+    toast.add({
+      severity: "warn",
+      summary: "Không hợp lệ",
+      detail: "Tên sản phẩm không được để trống",
+    });
+    return;
+  }
+  try {
+    await catalog.saveProduct({
+      id: data.id,
+      code: data.code,
+      name: data.name,
+      unit: data.unit,
+      sale_price: data.sale_price,
+      cost_price: data.cost_price,
+      min_stock: data.min_stock,
+      vat_rate: data.vat_rate,
+      vat_reduced: data.vat_reduced,
+      import_tax_rate: data.import_tax_rate,
+    });
+    toast.add({ severity: "success", summary: "Đã lưu", detail: data.code });
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không lưu được",
+      detail: String(e),
+    });
+  }
+  // Tổng / trang có thể đổi sau khi sửa → load lại trang hiện tại.
+  loadLazyData();
+}
+
+// ─── XÓA HÀNG LOẠT (thay cho nút xóa từng dòng) ───
+function removeSelected() {
+  const ids = [...selectedIds.value];
+  const n = ids.length;
+  if (!n) return;
+  confirm.require({
+    message: `Xóa ${n} sản phẩm đã chọn?`,
+    header: "Xác nhận xóa",
+    icon: "pi pi-exclamation-triangle",
+    acceptLabel: "Xóa",
+    rejectLabel: "Hủy",
+    accept: async () => {
+      try {
+        await catalog.deleteProducts(ids);
+        selectedIds.value = new Set();
+        toast.add({
+          severity: "success",
+          summary: "Đã xóa",
+          detail: `${n} sản phẩm`,
+        });
+        // Đã chọn hết trang hiện tại → lùi về trang trước nếu còn.
+        const allOnPageSelected =
+          products.value.length > 0 &&
+          products.value.every((p) => ids.includes(p.id));
+        if (allOnPageSelected && first.value > 0) {
+          first.value = Math.max(0, first.value - rowsPerPage.value);
+        }
+        loadLazyData();
+      } catch (e) {
+        toast.add({
+          severity: "error",
+          summary: "Không xóa được",
+          detail: String(e),
+        });
+      }
+    },
+  });
+}
+
+// ─── DIALOG TẠO MỚI (chỉ tạo mới — sửa thì edit trực tiếp trên bảng) ───
 const dialog = ref(false);
 const saving = ref(false);
 const form = reactive({
@@ -23,35 +188,76 @@ const form = reactive({
   min_stock: 0,
   vat_rate: 1,
   vat_reduced: false,
+  import_tax_rate: 0,
 });
 
-function openCreate() {
-  Object.assign(form, {
-    id: null, code: "", name: "", unit: "Cái",
-    sale_price: 0, cost_price: 0, min_stock: 0,
-    vat_rate: 1, vat_reduced: false,
-  });
-  dialog.value = true;
+// Thuế nhập khẩu dùng AutoComplete: chọn nhanh từ danh sách cấu hình hoặc gõ tùy ý.
+const importTaxText = ref("0");
+const importTaxSuggestions = ref<string[]>([]);
+
+function onImportTaxComplete() {
+  importTaxSuggestions.value = settings.importTaxOptions
+    .map((n) => String(n))
+    .filter((o) => o.includes(importTaxText.value.trim()));
 }
 
-function openEdit(row: Product) {
-  Object.assign(form, {
-    id: row.id, code: row.code, name: row.name, unit: row.unit,
-    sale_price: row.sale_price, cost_price: row.cost_price,
-    min_stock: row.min_stock,
-    vat_rate: Math.round(row.vat_rate * 100),
-    vat_reduced: row.vat_reduced,
-  });
+function syncImportTaxText() {
+  importTaxText.value = String(form.import_tax_rate);
+}
+
+function readImportTax() {
+  const n = parseFloat(importTaxText.value.replace(",", "."));
+  form.import_tax_rate = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+async function openCreate() {
+  try {
+    const [code] = await Promise.all([
+      settings.nextProductCode(),
+      settings.load(),
+    ]);
+    Object.assign(form, {
+      id: null,
+      code,
+      name: "",
+      unit: settings.defaultUnit,
+      sale_price: 0,
+      cost_price: 0,
+      min_stock: settings.defaultMinStock,
+      vat_rate: settings.vatRateDefault,
+      vat_reduced: false,
+      import_tax_rate: settings.importTaxDefault,
+    });
+  } catch {
+    Object.assign(form, {
+      id: null,
+      code: "",
+      name: "",
+      unit: "Cái",
+      sale_price: 0,
+      cost_price: 0,
+      min_stock: 0,
+      vat_rate: 1,
+      vat_reduced: false,
+      import_tax_rate: 0,
+    });
+  }
+  syncImportTaxText();
   dialog.value = true;
 }
 
 async function save() {
   if (!form.code || !form.name) {
-    toast.add({ severity: "warn", summary: "Thiếu thông tin", detail: "Mã và tên sản phẩm là bắt buộc" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin",
+      detail: "Mã và tên sản phẩm là bắt buộc",
+    });
     return;
   }
   saving.value = true;
   try {
+    readImportTax();
     await catalog.saveProduct({
       id: form.id ?? undefined,
       code: form.code,
@@ -62,36 +268,24 @@ async function save() {
       min_stock: form.min_stock,
       vat_rate: form.vat_rate / 100,
       vat_reduced: form.vat_reduced,
+      import_tax_rate: form.import_tax_rate / 100,
     });
-    toast.add({ severity: "success", summary: "Đã lưu", detail: `Sản phẩm ${form.code}` });
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu",
+      detail: `Sản phẩm ${form.code}`,
+    });
     dialog.value = false;
+    // Làm mới bảng: bỏ filter để sản phẩm mới nằm trong kết quả hiển thị.
+    resetFilters();
+    first.value = 0;
+    loadLazyData();
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
   } finally {
     saving.value = false;
   }
 }
-
-function remove(row: Product) {
-  confirm.require({
-    message: `Xóa sản phẩm "${row.name}"?`,
-    header: "Xác nhận xóa",
-    icon: "pi pi-exclamation-triangle",
-    acceptLabel: "Xóa",
-    rejectLabel: "Hủy",
-    accept: async () => {
-      try {
-        await catalog.deleteProduct(row.id);
-        toast.add({ severity: "success", summary: "Đã xóa", detail: row.code });
-      } catch (e) {
-        toast.add({ severity: "error", summary: "Không xóa được", detail: String(e) });
-      }
-    },
-  });
-}
-
-onMounted(() => catalog.loadAll());
-
 </script>
 
 <template>
@@ -104,44 +298,262 @@ onMounted(() => catalog.loadAll());
         </div>
       </template>
       <template #end>
-        <Button v-if="auth.canStock" label="Thêm sản phẩm" icon="pi pi-plus" @click="openCreate" />
+        <div class="flex items-center gap-2">
+          <Button
+            v-if="auth.canStock && selectedCount > 0"
+            severity="danger"
+            outlined
+            icon="pi pi-trash"
+            :label="`Xóa đã chọn (${selectedCount})`"
+            @click="removeSelected"
+          />
+          <Button
+            v-if="auth.canStock"
+            label="Thêm sản phẩm"
+            icon="pi pi-plus"
+            @click="openCreate"
+          />
+        </div>
       </template>
     </Toolbar>
 
     <Card>
       <template #content>
-        <DataTable :value="products" :loading="loading" stripedRows paginator :rows="10">
-          <Column field="code" header="Mã SP" style="width: 110px" />
-          <Column field="name" header="Tên sản phẩm" />
-          <Column field="unit" header="ĐVT" style="width: 80px" />
-          <Column field="sale_price" header="Giá bán" style="width: 130px">
+        <AppDataTable
+          v-model:selection="selection"
+          v-model:filters="filters"
+          v-model:multiSortMeta="multiSortMeta"
+          :meta-key-selection="false"
+          :value="products"
+          :loading="loading"
+          :totalRecords="totalProducts"
+          :first="first"
+          :rows="rowsPerPage"
+          :rows-per-page-options="[20, 50, 100, 200]"
+          data-key="id"
+          sort-mode="multiple"
+          removable-sort
+          :global-filter-fields="['code', 'name', 'unit']"
+          editable
+          filter-toggle
+          @cell-save="onCellSave"
+          @page="onPage"
+          @sort="onSort"
+          @filter="onFilter"
+        >
+          <template #header>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-sm text-gray-500">
+                <template v-if="selectedCount > 0">
+                  Đã chọn {{ selectedCount }} sản phẩm
+                </template>
+                <template v-else>Tổng {{ totalProducts }} sản phẩm</template>
+              </span>
+              <div class="flex gap-2">
+                <IconField>
+                  <InputIcon>
+                    <i class="pi pi-search" />
+                  </InputIcon>
+                  <InputText
+                    size="small"
+                    v-model="filters['global'].value"
+                    placeholder="Tìm mã, tên, đơn vị…"
+                    @input="onFilter"
+                  />
+                </IconField>
+              </div>
+            </div>
+          </template>
+
+          <Column field="code" header="Mã SP" sortable />
+          <Column
+            field="name"
+            header="Tên sản phẩm"
+            sortable
+            :editable="auth.canStock"
+          >
+            <template #editor="{ data }">
+              <InputText size="small" class="w-full" v-model="data.name" />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <InputText
+                size="small"
+                v-model="filterModel.value"
+                placeholder="Tên"
+                @input="filterCallback()"
+              />
+            </template>
+          </Column>
+          <Column field="unit" header="ĐVT" sortable :editable="auth.canStock">
+            <template #editor="{ data }">
+              <InputText size="small" class="w-full" v-model="data.unit" />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <InputText
+                size="small"
+                v-model="filterModel.value"
+                placeholder="ĐVT"
+                @input="filterCallback()"
+              />
+            </template>
+          </Column>
+          <Column
+            field="sale_price"
+            header="Giá bán"
+            sortable
+            :editable="auth.canStock"
+          >
             <template #body="{ data }">{{ fmt(data.sale_price) }}</template>
+            <template #editor="{ data }">
+              <InputNumber class="w-full" v-model="data.sale_price" :min="0" />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <InputNumber
+                v-model="filterModel.value"
+                :min="0"
+                placeholder="Bằng"
+                @input="filterCallback()"
+              />
+            </template>
           </Column>
-          <Column field="cost_price" header="Giá vốn" style="width: 130px">
+          <Column
+            field="cost_price"
+            header="Giá vốn"
+            sortable
+            :editable="auth.canStock"
+          >
             <template #body="{ data }">{{ fmt(data.cost_price) }}</template>
+            <template #editor="{ data }">
+              <InputNumber class="w-full" v-model="data.cost_price" :min="0" />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <InputNumber
+                v-model="filterModel.value"
+                :min="0"
+                placeholder="Bằng"
+                @input="filterCallback()"
+              />
+            </template>
           </Column>
-          <Column field="min_stock" header="Tồn tối thiểu" style="width: 110px">
+          <Column
+            field="min_stock"
+            header="Tồn tối thiểu"
+            sortable
+            :editable="auth.canStock"
+          >
             <template #body="{ data }">{{ fmt(data.min_stock) }}</template>
-          </Column>
-          <Column field="vat_rate" header="Thuế GTGT" style="width: 100px">
-            <template #body="{ data }">
-              <Tag :value="data.vat_rate * 100 + '%'" :severity="data.vat_reduced ? 'secondary' : 'info'" />
+            <template #editor="{ data }">
+              <InputNumber class="w-full" v-model="data.min_stock" :min="0" />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <InputNumber
+                v-model="filterModel.value"
+                :min="0"
+                placeholder="Bằng"
+                @input="filterCallback()"
+              />
             </template>
           </Column>
-          <Column header="" style="width: 140px" alignFrozen="right">
+          <Column
+            field="vat_rate"
+            header="Thuế GTGT"
+            sortable
+            :editable="auth.canStock"
+          >
             <template #body="{ data }">
-              <Button v-if="auth.canStock" icon="pi pi-pencil" text rounded size="small" @click="openEdit(data)" />
-              <Button v-if="auth.canStock" icon="pi pi-trash" text rounded size="small" severity="danger" @click="remove(data)" />
+              <Tag
+                :value="data.vat_rate * 100 + '%'"
+                :severity="data.vat_reduced ? 'secondary' : 'info'"
+              />
+            </template>
+            <template #editor="{ data }">
+              <InputNumber
+                :model-value="data.vat_rate * 100"
+                :min="0"
+                :max="100"
+                suffix="%"
+                class="w-full"
+                @update:model-value="(v) => (data.vat_rate = (v ?? 0) / 100)"
+              />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <Select
+                v-model="filterModel.value"
+                :options="settings.vatRateOptions"
+                placeholder="Tất cả"
+                show-clear
+                @change="filterCallback()"
+              />
             </template>
           </Column>
-          <template #empty><EmptyState text="Chưa có sản phẩm." icon="pi pi-box" /></template>
-        </DataTable>
+          <Column
+            field="vat_reduced"
+            header="Giảm thuế"
+            sortable
+            :editable="auth.canStock"
+          >
+            <template #body="{ data }">
+              <Tag
+                :value="data.vat_reduced ? 'Giảm' : 'Không'"
+                :severity="data.vat_reduced ? 'warn' : 'secondary'"
+              />
+            </template>
+            <template #editor="{ data }">
+              <Checkbox v-model="data.vat_reduced" :binary="true" />
+            </template>
+          </Column>
+          <Column
+            field="import_tax_rate"
+            header="Thuế nhập"
+            sortable
+            :editable="auth.canStock"
+          >
+            <template #body="{ data }">
+              <Tag
+                :value="data.import_tax_rate * 100 + '%'"
+                severity="secondary"
+              />
+            </template>
+            <template #editor="{ data }">
+              <InputNumber
+                :model-value="data.import_tax_rate * 100"
+                :min="0"
+                :max="100"
+                suffix="%"
+                class="w-full"
+                @update:model-value="
+                  (v) => (data.import_tax_rate = (v ?? 0) / 100)
+                "
+              />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <Select
+                v-model="filterModel.value"
+                :options="settings.importTaxOptions"
+                placeholder="Tất cả"
+                show-clear
+                @change="filterCallback()"
+              />
+            </template>
+          </Column>
+
+          <template #empty>
+            <EmptyState
+              :text="
+                hasActiveFilter
+                  ? 'Không tìm thấy sản phẩm phù hợp.'
+                  : 'Chưa có sản phẩm.'
+              "
+              icon="pi pi-box"
+            />
+          </template>
+        </AppDataTable>
       </template>
     </Card>
 
     <AppDialog
       v-model:visible="dialog"
-      :header="form.id ? 'Sửa sản phẩm' : 'Thêm sản phẩm'"
+      header="Thêm sản phẩm"
       width="max-w-xl"
       action-label="Lưu"
       :saving="saving"
@@ -150,30 +562,69 @@ onMounted(() => catalog.loadAll());
     >
       <div class="grid grid-cols-2 gap-4 py-2">
         <FormField label="Mã sản phẩm" required>
-          <InputText v-model="form.code" placeholder="SP001" :disabled="form.id !== null" />
+          <InputText size="small" v-model="form.code" placeholder="SP001" />
         </FormField>
         <FormField label="Đơn vị tính">
-          <InputText v-model="form.unit" placeholder="Cái" />
+          <InputText size="small" v-model="form.unit" placeholder="Cái" />
         </FormField>
         <FormField label="Tên sản phẩm" required class="col-span-2">
-          <InputText v-model="form.name" placeholder="Tên hàng hóa / dịch vụ" />
+          <InputText
+            size="small"
+            v-model="form.name"
+            placeholder="Tên hàng hóa / dịch vụ"
+          />
         </FormField>
         <FormField label="Giá bán">
-          <InputNumber v-model="form.sale_price" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+          <InputNumber
+            v-model="form.sale_price"
+            :min="0"
+            mode="currency"
+            currency="VND"
+            locale="vi-VN"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Giá vốn">
-          <InputNumber v-model="form.cost_price" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+          <InputNumber
+            v-model="form.cost_price"
+            :min="0"
+            mode="currency"
+            currency="VND"
+            locale="vi-VN"
+            class="w-full"
+          />
         </FormField>
         <FormField label="Tồn tối thiểu">
           <InputNumber v-model="form.min_stock" :min="0" class="w-full" />
         </FormField>
         <FormField label="Thuế suất GTGT (%)">
-          <Select v-model="form.vat_rate" :options="[1, 3, 5]" class="w-full" />
+          <Select
+            v-model="form.vat_rate"
+            :options="settings.vatRateOptions"
+            class="w-full"
+          />
+        </FormField>
+        <FormField label="Thuế nhập khẩu (%)">
+          <AutoComplete
+            v-model="importTaxText"
+            :suggestions="importTaxSuggestions"
+            @complete="onImportTaxComplete"
+            placeholder="Gõ hoặc chọn tỷ lệ"
+            class="w-full"
+          />
         </FormField>
         <div class="col-span-2 flex items-center gap-2 pt-2">
-          <Checkbox v-model="form.vat_reduced" :binary="true" inputId="vat_reduced" />
+          <Checkbox
+            v-model="form.vat_reduced"
+            :binary="true"
+            inputId="vat_reduced"
+          />
           <label for="vat_reduced" class="text-sm">Giảm thuế GTGT</label>
-          <i class="pi pi-info-circle cursor-help text-xs text-gray-400" v-tooltip="'Theo Nghị quyết 174/2025'" aria-hidden="true" />
+          <i
+            class="pi pi-info-circle cursor-help text-xs text-gray-400"
+            v-tooltip="'Theo Nghị quyết 174/2025'"
+            aria-hidden="true"
+          />
         </div>
       </div>
     </AppDialog>

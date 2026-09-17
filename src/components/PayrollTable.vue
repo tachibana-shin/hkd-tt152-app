@@ -15,7 +15,8 @@ const props = withDefaults(
 );
 
 const empMap = computed(() => new Map(props.employees.map((e) => [e.code, e])));
-const preview = (row: PayrollRow): PayrollPreview => previewPayroll(row, empMap.value.get(row.employee_code));
+const preview = (row: PayrollRow): PayrollPreview =>
+  previewPayroll(row, empMap.value.get(row.employee_code));
 
 const totals = computed(() => {
   let gross = 0;
@@ -32,7 +33,7 @@ const totals = computed(() => {
 </script>
 
 <template>
-  <DataTable
+  <AppDataTable
     :value="rows"
     :loading="loading"
     stripedRows
@@ -40,10 +41,12 @@ const totals = computed(() => {
     scrollHeight="460px"
     size="small"
     class="mt-3"
+    :resizable-columns="false"
+    :sortable="false"
   >
-    <Column field="employee_code" header="Mã NV" style="width: 90px" />
-    <Column field="employee_name" header="Họ tên" style="min-width: 170px" />
-    <Column header="Số công" style="width: 95px">
+    <Column field="employee_code" header="Mã NV" />
+    <Column field="employee_name" header="Họ tên" />
+    <Column header="Số công">
       <template #body="{ index }">
         <InputNumber
           v-model="rows[index].work_days"
@@ -56,13 +59,13 @@ const totals = computed(() => {
         />
       </template>
     </Column>
-    <Column header="Lương thời gian" style="width: 130px" align="right">
+    <Column header="Lương thời gian" align="right">
       <template #body="{ data }">{{ fmt(preview(data).timeSalary) }}</template>
     </Column>
-    <Column header="Phụ cấp" style="width: 110px" align="right">
+    <Column header="Phụ cấp" align="right">
       <template #body="{ data }">{{ fmt(preview(data).allowance) }}</template>
     </Column>
-    <Column header="Thưởng" style="width: 150px">
+    <Column header="Thưởng">
       <template #body="{ index }">
         <InputNumber
           v-model="rows[index].bonus"
@@ -75,16 +78,16 @@ const totals = computed(() => {
         />
       </template>
     </Column>
-    <Column header="Lương đóng BH" style="width: 130px" align="right">
+    <Column header="Lương đóng BH" align="right">
       <template #body="{ data }">{{ fmt(preview(data).bhBase) }}</template>
     </Column>
-    <Column header="BH SD (21,5%)" style="width: 120px" align="right">
+    <Column header="BH SD (21,5%)" align="right">
       <template #body="{ data }">{{ fmt(preview(data).bhEmployer) }}</template>
     </Column>
-    <Column header="BH NLĐ (10,5%)" style="width: 120px" align="right">
+    <Column header="BH NLĐ (10,5%)" align="right">
       <template #body="{ data }">{{ fmt(preview(data).bhEmployee) }}</template>
     </Column>
-    <Column header="TNCN" style="width: 150px">
+    <Column header="TNCN">
       <template #body="{ index }">
         <InputNumber
           v-model="rows[index].pit_amount"
@@ -97,7 +100,7 @@ const totals = computed(() => {
         />
       </template>
     </Column>
-    <Column header="Tạm ứng" style="width: 150px">
+    <Column header="Tạm ứng">
       <template #body="{ index }">
         <InputNumber
           v-model="rows[index].advance"
@@ -110,23 +113,30 @@ const totals = computed(() => {
         />
       </template>
     </Column>
-    <Column header="Thực lĩnh" style="width: 140px" align="right">
+    <Column header="Thực lĩnh" align="right">
       <template #body="{ data }">
         <span class="font-bold">{{ fmt(preview(data).net) }}</span>
       </template>
     </Column>
-    <Column header="Ghi chú" style="min-width: 180px">
+    <Column header="Ghi chú">
       <template #body="{ index }">
-        <InputText v-model="rows[index].note" class="w-full" placeholder="Ghi chú..." :disabled="!canEdit" />
+        <InputText
+          v-model="rows[index].note"
+          class="w-full"
+          placeholder="Ghi chú..."
+          :disabled="!canEdit"
+        />
       </template>
     </Column>
     <template #empty>
       <EmptyState
-        :text="hasPeriods ? 'Chưa có bảng lương cho kỳ này.' : 'Chưa có bảng lương.'"
+        :text="
+          hasPeriods ? 'Chưa có bảng lương cho kỳ này.' : 'Chưa có bảng lương.'
+        "
         icon="pi pi-money-bill"
       />
     </template>
-  </DataTable>
+  </AppDataTable>
 
   <div
     v-if="rows.length"
@@ -138,7 +148,9 @@ const totals = computed(() => {
     </div>
     <div class="flex items-center gap-2">
       <span class="text-gray-500">Tổng BH SDLĐĐ (21,5%):</span>
-      <span class="font-semibold text-amber-600">{{ fmt(totals.bhEmployer) }} đ</span>
+      <span class="font-semibold text-amber-600"
+        >{{ fmt(totals.bhEmployer) }} đ</span
+      >
     </div>
     <div class="flex items-center gap-2">
       <span class="text-gray-500">Tổng Thực lĩnh:</span>

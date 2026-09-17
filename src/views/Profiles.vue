@@ -22,16 +22,31 @@ function openCreate() {
 async function doCreate() {
   const name = newName.value.trim();
   if (!name) {
-    toast.add({ severity: "warn", summary: "Thiếu tên", detail: "Nhập tên hồ sơ HKD", life: 2500 });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu tên",
+      detail: "Nhập tên hồ sơ HKD",
+      life: 2500,
+    });
     return;
   }
   creating.value = true;
   try {
     await profile.create(name);
-    toast.add({ severity: "success", summary: "Đã tạo hồ sơ", detail: `"${name}" — nhấn Mở để đăng nhập`, life: 3000 });
+    toast.add({
+      severity: "success",
+      summary: "Đã tạo hồ sơ",
+      detail: `"${name}" — nhấn Mở để đăng nhập`,
+      life: 3000,
+    });
     createVisible.value = false;
   } catch (e) {
-    toast.add({ severity: "error", summary: "Không tạo được", detail: String(e), life: 4000 });
+    toast.add({
+      severity: "error",
+      summary: "Không tạo được",
+      detail: String(e),
+      life: 4000,
+    });
   } finally {
     creating.value = false;
   }
@@ -52,7 +67,12 @@ function openRename(p: { key: string; name: string }) {
 async function doRename() {
   const name = renameName.value.trim();
   if (!name) {
-    toast.add({ severity: "warn", summary: "Thiếu tên", detail: "Nhập tên hồ sơ HKD", life: 2500 });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu tên",
+      detail: "Nhập tên hồ sơ HKD",
+      life: 2500,
+    });
     return;
   }
   renaming.value = true;
@@ -61,7 +81,12 @@ async function doRename() {
     toast.add({ severity: "success", summary: "Đã đổi tên", life: 2500 });
     renameVisible.value = false;
   } catch (e) {
-    toast.add({ severity: "error", summary: "Không đổi được", detail: String(e), life: 4000 });
+    toast.add({
+      severity: "error",
+      summary: "Không đổi được",
+      detail: String(e),
+      life: 4000,
+    });
   } finally {
     renaming.value = false;
   }
@@ -77,9 +102,19 @@ function doDelete(p: { key: string; name: string }) {
     accept: async () => {
       try {
         await profile.remove(p.key);
-        toast.add({ severity: "success", summary: "Đã xóa hồ sơ", detail: p.name, life: 2500 });
+        toast.add({
+          severity: "success",
+          summary: "Đã xóa hồ sơ",
+          detail: p.name,
+          life: 2500,
+        });
       } catch (e) {
-        toast.add({ severity: "error", summary: "Không xóa được", detail: String(e), life: 4000 });
+        toast.add({
+          severity: "error",
+          summary: "Không xóa được",
+          detail: String(e),
+          life: 4000,
+        });
       }
     },
   });
@@ -103,7 +138,12 @@ function switchTo(p: { key: string; name: string }) {
         });
         setTimeout(() => window.location.reload(), 900);
       } catch (e) {
-        toast.add({ severity: "error", summary: "Không mở được", detail: String(e), life: 4000 });
+        toast.add({
+          severity: "error",
+          summary: "Không mở được",
+          detail: String(e),
+          life: 4000,
+        });
       }
     },
   });
@@ -120,7 +160,9 @@ profile.load();
         <h3 class="text-lg font-semibold text-gray-800">Hồ sơ hộ kinh doanh</h3>
         <i
           class="pi pi-info-circle text-sm text-gray-400 cursor-help"
-          v-tooltip.right="'Mỗi hồ sơ có file dữ liệu riêng (hóa đơn, kho, lương, thuế, người dùng). Chuyển hồ sơ phải đăng nhập lại bằng tài khoản của hồ sơ đó.'"
+          v-tooltip.right="
+            'Mỗi hồ sơ có file dữ liệu riêng (hóa đơn, kho, lương, thuế, người dùng). Chuyển hồ sơ phải đăng nhập lại bằng tài khoản của hồ sơ đó.'
+          "
         ></i>
       </div>
       <Button
@@ -133,27 +175,35 @@ profile.load();
 
     <Card>
       <template #content>
-        <DataTable
+        <AppDataTable
           :value="profile.profiles"
           :loading="profile.loading"
           stripedRows
           size="small"
-          :row-class="(row: { active: boolean }) => (row.active ? 'highlight-row' : '')"
+          :row-class="
+            (row: { active: boolean }) => (row.active ? 'highlight-row' : '')
+          "
         >
           <Column field="name" header="Tên hồ sơ">
             <template #body="{ data }">
               <span class="font-medium">{{ data.name }}</span>
-              <i v-if="data.active" class="pi pi-check-circle text-primary-600 ml-1"></i>
+              <i
+                v-if="data.active"
+                class="pi pi-check-circle text-primary-600 ml-1"
+              ></i>
             </template>
           </Column>
           <Column field="key" header="Thư mục dữ liệu" />
           <Column field="created_at" header="Ngày tạo" />
           <Column header="Trạng thái">
             <template #body="{ data }">
-              <Tag :value="data.active ? 'Đang mở' : 'Đóng'" :severity="data.active ? 'success' : 'secondary'" />
+              <Tag
+                :value="data.active ? 'Đang mở' : 'Đóng'"
+                :severity="data.active ? 'success' : 'secondary'"
+              />
             </template>
           </Column>
-          <Column header="Thao tác" style="width: 220px">
+          <Column header="Thao tác">
             <template #body="{ data }">
               <div class="flex gap-1">
                 <Button
@@ -189,7 +239,7 @@ profile.load();
               </div>
             </template>
           </Column>
-        </DataTable>
+        </AppDataTable>
       </template>
     </Card>
 
@@ -205,7 +255,10 @@ profile.load();
       <div class="space-y-3">
         <div class="flex items-center gap-2 text-sm text-gray-500">
           <i class="pi pi-info-circle shrink-0 text-sky-500" />
-          <span>Dữ liệu riêng biệt; tài khoản quản trị mặc định <b>admin/admin123</b>.</span>
+          <span
+            >Dữ liệu riêng biệt; tài khoản quản trị mặc định
+            <b>admin/admin123</b>.</span
+          >
         </div>
         <FormField label="Tên hồ sơ" required>
           <InputText
@@ -228,7 +281,11 @@ profile.load();
       @action="doRename"
     >
       <FormField label="Tên hồ sơ" required>
-        <InputText v-model="renameName" class="w-full" @keyup.enter="doRename" />
+        <InputText
+          v-model="renameName"
+          class="w-full"
+          @keyup.enter="doRename"
+        />
       </FormField>
     </AppDialog>
   </div>

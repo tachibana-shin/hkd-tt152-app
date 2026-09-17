@@ -14,7 +14,7 @@ const host = process.env.TAURI_DEV_HOST;
 // cho PrimeVue v5 (thiếu DatePicker/Select/Toast/ConfirmDialog/Tabs…), nên khai báo tường minh
 // để auto-import theo nhu cầu thay vì đăng ký toàn cục trong main.ts.
 const PRIMEVUE_COMPONENTS = [
-  "Avatar", "Button", "Card", "Checkbox", "Column", "ConfirmDialog",
+  "AutoComplete", "Avatar", "Button", "Card", "Checkbox", "Column", "ConfirmDialog",
   "DataTable", "DatePicker", "Dialog", "Divider", "FileUpload", "IconField",
   "InputIcon", "InputNumber", "InputText", "ProgressSpinner", "Select",
   "Tab", "TabList", "TabPanel", "TabPanels", "Tabs", "Tag", "Toast",
