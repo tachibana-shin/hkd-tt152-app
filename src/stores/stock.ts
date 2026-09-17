@@ -1,0 +1,82 @@
+import { api } from "@/db";
+import type { JournalEntryRow, StockLot, InventoryRow } from "@/types";
+
+export const useStockStore = defineStore("stock", () => {
+  const entries = ref<JournalEntryRow[]>([]);
+  const summary = ref<InventoryRow[]>([]);
+  const lots = ref<StockLot[]>([]);
+  const loading = ref(false);
+
+  async function loadEntries(entryType = "", fromDate = "", toDate = "") {
+    loading.value = true;
+    try {
+      entries.value = await api.getJournalEntries(entryType, fromDate, toDate);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function loadSummary() {
+    loading.value = true;
+    try {
+      summary.value = await api.getInventorySummary();
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function loadLots(productCode = "") {
+    loading.value = true;
+    try {
+      lots.value = await api.getStockLots(productCode);
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function inbound(args: {
+    posting_date: string;
+    voucher_no: string;
+    description: string;
+    supplier_code: string;
+    warehouse_code: string;
+    unit_code: string;
+    note: string;
+    items: { product_code: string; quantity: number; unit_price: number }[];
+  }) {
+    const res = await api.saveInbound(args);
+    await Promise.all([loadEntries("PN"), loadSummary(), loadLots()]);
+    return res;
+  }
+
+  async function outbound(args: {
+    posting_date: string;
+    voucher_no: string;
+    description: string;
+    customer_code: string;
+    unit_code: string;
+    note: string;
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      industry_code: string;
+    }[];
+  }) {
+    const res = await api.saveOutbound(args);
+    await Promise.all([loadEntries("PX"), loadSummary(), loadLots()]);
+    return res;
+  }
+
+  return {
+    entries,
+    summary,
+    lots,
+    loading,
+    loadEntries,
+    loadSummary,
+    loadLots,
+    inbound,
+    outbound,
+  };
+});

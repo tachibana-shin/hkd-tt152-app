@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT cik.id, cik.count_id, p.code AS product_code, p.name AS product_name,\n                w.code AS warehouse_code,\n                COALESCE((SELECT SUM(quantity) FROM stock_lot sl\n                          WHERE sl.product_id = cik.product_id\n                            AND sl.warehouse_id = cik.warehouse_id\n                            AND sl.depleted = 0), 0.0) AS book_qty,\n                cik.counted_qty, cik.variance\n         FROM inventory_count_item cik\n         JOIN product p ON p.id = cik.product_id\n         JOIN warehouse w ON w.id = cik.warehouse_id\n         WHERE cik.count_id = ?\n         ORDER BY p.code",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "count_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "product_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "warehouse_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "book_qty",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "counted_qty",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "variance",
+        "ordinal": 7,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fd93d075b7dfbf92ec1f6bd48f36695997e91372cc99613055c36197faf24ae3"
+}

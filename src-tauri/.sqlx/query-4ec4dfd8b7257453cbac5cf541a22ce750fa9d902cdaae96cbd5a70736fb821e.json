@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT posting_date, voucher_no, entry_type, description, product_code,\n                debit_account, credit_account, quantity, unit_price, amount\n         FROM journal_entry\n         WHERE posting_date >= ? AND posting_date <= ?\n         ORDER BY posting_date ASC, id ASC\n         LIMIT 5000",
+  "describe": {
+    "columns": [
+      {
+        "name": "posting_date",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "entry_type",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "debit_account",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "credit_account",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "amount",
+        "ordinal": 9,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4ec4dfd8b7257453cbac5cf541a22ce750fa9d902cdaae96cbd5a70736fb821e"
+}

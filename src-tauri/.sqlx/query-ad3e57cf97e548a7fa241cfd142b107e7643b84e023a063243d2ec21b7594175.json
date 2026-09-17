@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "vat_rate",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "pit_rate",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ad3e57cf97e548a7fa241cfd142b107e7643b84e023a063243d2ec21b7594175"
+}

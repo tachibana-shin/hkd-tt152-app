@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n            ig.code AS industry_code,\n            ig.name AS industry_name,\n            ig.vat_rate,\n            ig.pit_rate,\n            COALESCE(SUM(CASE WHEN je.adjust_code != 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) AS revenue_up,\n            COALESCE(SUM(CASE WHEN je.adjust_code = 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) AS revenue_down,\n            COALESCE(SUM(CASE WHEN je.adjust_code != 'GiamDT' THEN je.amount ELSE 0.0 END) - SUM(CASE WHEN je.adjust_code = 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) * ig.vat_rate AS vat_tax,\n            COALESCE(SUM(CASE WHEN je.adjust_code != 'GiamDT' THEN je.amount ELSE 0.0 END) - SUM(CASE WHEN je.adjust_code = 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) * ig.pit_rate AS pit_tax\n         FROM industry_group ig\n         LEFT JOIN journal_entry je ON je.industry_code = ig.code\n            AND je.entry_type = 'PX'\n            AND je.posting_date >= ?\n            AND je.posting_date <= ?\n            AND je.unit_code = ?\n         GROUP BY ig.code\n         ORDER BY ig.code",
+  "describe": {
+    "columns": [
+      {
+        "name": "industry_code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "industry_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "vat_rate",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "pit_rate",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "revenue_up",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "revenue_down",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_tax",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "pit_tax",
+        "ordinal": 7,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6eb18ad458433d931b717279d4a8974191117af59ca78cee5984eec87814b60c"
+}

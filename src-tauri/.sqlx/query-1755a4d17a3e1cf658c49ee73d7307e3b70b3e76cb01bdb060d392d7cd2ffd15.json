@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT b.name, b.tax_code, b.address, b.short_name, b.ownership,\n                b.province, b.tax_code_issued_on, b.phone, b.email, b.fiscal_year,\n                rp.from_date AS report_from, rp.to_date AS report_to\n         FROM business b CROSS JOIN report_period rp\n         WHERE b.id = 1 AND rp.id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "tax_code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "address",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "short_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "ownership",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "province",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "tax_code_issued_on",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "phone",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "email",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "fiscal_year",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "report_from",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "report_to",
+        "ordinal": 11,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1755a4d17a3e1cf658c49ee73d7307e3b70b3e76cb01bdb060d392d7cd2ffd15"
+}

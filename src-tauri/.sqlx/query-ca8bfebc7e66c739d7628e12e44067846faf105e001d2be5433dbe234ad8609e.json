@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, vat_reduced\n         FROM product ORDER BY code",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "sale_price",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "cost_price",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "min_stock",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_rate",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_reduced",
+        "ordinal": 8,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ca8bfebc7e66c739d7628e12e44067846faf105e001d2be5433dbe234ad8609e"
+}

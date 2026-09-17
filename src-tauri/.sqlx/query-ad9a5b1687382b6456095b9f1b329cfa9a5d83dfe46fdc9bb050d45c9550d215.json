@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sl.id, p.code AS product_code, p.name AS product_name,\n                w.code AS warehouse_code, sl.quantity, sl.unit_cost,\n                sl.received_at, sl.depleted\n         FROM stock_lot sl\n         JOIN product p ON p.id = sl.product_id\n         JOIN warehouse w ON w.id = sl.warehouse_id\n         WHERE (? = '' OR p.code = ?) AND sl.depleted = 0\n         ORDER BY p.code, sl.received_at ASC, sl.id ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "product_code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "warehouse_code",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_cost",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "received_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "depleted",
+        "ordinal": 7,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ad9a5b1687382b6456095b9f1b329cfa9a5d83dfe46fdc9bb050d45c9550d215"
+}

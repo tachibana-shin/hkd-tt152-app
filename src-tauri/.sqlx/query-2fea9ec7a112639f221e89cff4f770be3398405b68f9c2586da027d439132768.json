@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO warehouse (code, name) VALUES (?, ?)\n         ON CONFLICT(code) DO UPDATE SET name = excluded.name",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "2fea9ec7a112639f221e89cff4f770be3398405b68f9c2586da027d439132768"
+}

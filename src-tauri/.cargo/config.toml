@@ -1,0 +1,4 @@
+[env]
+# Compile-time checked queries use .sqlx/ metadata (offline mode).
+# To regenerate: run `cargo sqlx prepare` with DATABASE_URL=sqlite:./dev.db
+SQLX_OFFLINE = "true"

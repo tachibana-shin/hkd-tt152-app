@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO supplier (code, name, address, tax_code, phone) VALUES (?, ?, ?, ?, ?)\n         ON CONFLICT(code) DO UPDATE SET\n            name = excluded.name, address = excluded.address,\n            tax_code = excluded.tax_code, phone = excluded.phone",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "e2c9ed8ae59ad13dfd59ea2fb0edb4fa95cf8fbcba6891ac87050374fe0b19f9"
+}

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, date, note FROM inventory_count ORDER BY date DESC, id DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "note",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a879658f454e83bcc4aaead51c3af7de6b491784a2f7496ee8a9178d79b6a0ca"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, vat_reduced)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n         ON CONFLICT(code) DO UPDATE SET\n            name = excluded.name, unit = excluded.unit,\n            sale_price = excluded.sale_price, cost_price = excluded.cost_price,\n            min_stock = excluded.min_stock, vat_rate = excluded.vat_rate,\n            vat_reduced = excluded.vat_reduced",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "e821d4f795464a48c90a5f4e933a3d1bd89cb6c2093af8ea6c021febe672866c"
+}

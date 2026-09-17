@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.id, je.posting_date, je.voucher_no, je.entry_type, je.description,\n                je.product_code, je.quantity, je.unit_price, je.amount,\n                s.name AS supplier_name, c.name AS customer_name,\n                je.industry_code, je.adjust_code, je.note\n         FROM journal_entry je\n         LEFT JOIN supplier s ON s.code = je.supplier_code\n         LEFT JOIN customer c ON c.code = je.customer_code\n         WHERE (? = '' OR je.entry_type = ?)\n           AND (? = '' OR je.posting_date >= ?)\n           AND (? = '' OR je.posting_date <= ?)\n         ORDER BY je.posting_date DESC, je.id DESC\n         LIMIT 500",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "entry_type",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_code",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "amount",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "supplier_name",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_name",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "industry_code",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "adjust_code",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "note",
+        "ordinal": 13,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c908e4d7a2fbeb92fd8752a6f98bf4d56fcd1c559f67db6ccfee0f8296e221a8"
+}

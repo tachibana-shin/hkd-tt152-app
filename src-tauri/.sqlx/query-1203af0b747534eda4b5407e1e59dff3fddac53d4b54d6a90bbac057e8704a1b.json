@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, code, name, address, tax_code, phone FROM customer ORDER BY code",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "address",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "tax_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "phone",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1203af0b747534eda4b5407e1e59dff3fddac53d4b54d6a90bbac057e8704a1b"
+}

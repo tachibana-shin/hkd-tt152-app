@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n            COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code != 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_up,\n            COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code = 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_down,\n            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS expense_up,\n            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code = 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS expense_down\n         FROM journal_entry\n         WHERE posting_date >= ?\n           AND posting_date <= ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "revenue_up",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "revenue_down",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "expense_up",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "expense_down",
+        "ordinal": 3,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ec14291cffde6eb5efbf50e2ebde86c4bc6883642b8712482613404b36c088bb"
+}
