@@ -2,13 +2,14 @@
 // Bảng nhập dòng mặt hàng dùng chung cho phiếu nhập / phiếu xuất.
 import { useCatalogStore } from "@/stores/catalog";
 import { fmtInt as fmt } from "@/utils/format";
-import type { IndustryGroup, Product } from "@/types";
+import type { IndustryGroup, Product, Warehouse } from "@/types";
 
 interface LineItem {
   product_code: string;
   quantity: number;
   unit_price: number;
   industry_code?: string;
+  warehouse_code?: string;
 }
 
 const props = withDefaults(
@@ -16,8 +17,10 @@ const props = withDefaults(
     items: LineItem[];
     products: Product[];
     industryGroups?: IndustryGroup[];
+    warehouses?: Warehouse[];
     canEdit?: boolean;
     showIndustry?: boolean;
+    showWarehouse?: boolean;
     showAmount?: boolean;
     priceField?: "cost_price" | "sale_price";
     info?: string;
@@ -26,9 +29,11 @@ const props = withDefaults(
   {
     canEdit: true,
     showIndustry: false,
+    showWarehouse: false,
     showAmount: false,
     priceField: "cost_price",
     industryGroups: () => [],
+    warehouses: () => [],
     totalLabel: "Tổng tiền:",
   },
 );
@@ -47,6 +52,11 @@ function onProductPick(index: number) {
     props.priceField === "sale_price" ? p.sale_price : p.cost_price;
   // Tự điền nhóm ngành theo sản phẩm (cơ sở tỷ lệ thuế bán ra) — vẫn sửa tay được.
   if (p.industry_code) props.items[index].industry_code = p.industry_code;
+  // Tự điền kho xuất theo kho mặc định của sản phẩm — nếu dòng chưa chọn kho.
+  if (!props.items[index].warehouse_code && p.default_warehouse_id) {
+    const w = props.warehouses.find((x) => x.id === p.default_warehouse_id);
+    if (w) props.items[index].warehouse_code = w.code;
+  }
 }
 
 const total = computed(() =>
@@ -119,6 +129,20 @@ const total = computed(() =>
           optionValue="code"
           filter
           class="w-full"
+        />
+      </template>
+    </Column>
+    <Column v-if="showWarehouse" header="Kho xuất">
+      <template #body="{ index }">
+        <Select
+          v-model="items[index].warehouse_code"
+          :options="warehouses"
+          optionLabel="name"
+          optionValue="code"
+          filter
+          showClear
+          class="w-full"
+          placeholder="Kho mặc định"
         />
       </template>
     </Column>

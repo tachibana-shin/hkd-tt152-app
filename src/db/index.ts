@@ -147,6 +147,7 @@ export const api = {
   getWarehouses: async () => parse<Warehouse[]>(await invoke<string>("get_warehouses")),
   saveWarehouse: (code: string, name: string) =>
     invoke<string>("save_warehouse", { code, name }),
+  nextWarehouseCode: () => invoke<string>("next_warehouse_code"),
   getSuppliers: async () => parse<Supplier[]>(await invoke<string>("get_suppliers")),
   saveSupplier: (s: Partial<Supplier>) =>
     invoke<string>("save_supplier", {

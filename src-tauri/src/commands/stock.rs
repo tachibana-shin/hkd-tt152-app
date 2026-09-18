@@ -206,21 +206,30 @@ pub(crate) async fn save_outbound_core(
             continue;
         }
 
-        // Hàng hóa: FIFO lấy các lô chưa xuất hết theo ngày nhập
+        // Kho xuất trên dòng: rỗng → kho mặc định của sản phẩm / kho đầu tiên.
+        let wh_id = resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
+
+        // Hàng hóa: FIFO lấy các lô chưa xuất hết theo ngày nhập, trong đúng kho đã chọn
         let lots: Vec<(i64, f64, f64)> = sqlx::query_as(
             "SELECT id, quantity, unit_cost FROM stock_lot
-             WHERE product_id = ? AND depleted = 0
+             WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
              ORDER BY received_at ASC, id ASC",
         )
         .bind(product.id)
+        .bind(wh_id)
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
 
+        let wh_name = if item.warehouse_code.trim().is_empty() {
+            "kho mặc định".to_string()
+        } else {
+            item.warehouse_code.clone()
+        };
         let (cogs, takes) = allocate_fifo(&lots, item.quantity).map_err(|short| {
             format!(
-                "Không đủ tồn kho cho '{}': thiếu {:.2} (còn thiếu sau khi xuất hết các lô)",
-                item.product_code, short
+                "Không đủ tồn kho cho '{}' tại {}: thiếu {:.2} (còn thiếu sau khi xuất hết các lô)",
+                item.product_code, wh_name, short
             )
         })?;
         for t in takes {
@@ -288,7 +297,7 @@ pub(crate) async fn save_inbound(
         return Err("Chưa có mặt hàng nào trong phiếu nhập".into());
     }
     let unit_code = if unit_code.is_empty() {
-        "HaNoi-01".to_string()
+        "HKD".to_string()
     } else {
         unit_code
     };
@@ -329,7 +338,7 @@ pub(crate) async fn save_outbound(
         return Err("Chưa có mặt hàng nào trong phiếu xuất".into());
     }
     let unit_code = if unit_code.is_empty() {
-        "HaNoi-01".to_string()
+        "HKD".to_string()
     } else {
         unit_code
     };
@@ -460,6 +469,22 @@ mod tests {
             quantity,
             unit_price,
             industry_code: "PPHH".into(),
+            warehouse_code: "".into(), // rỗng → kho mặc định / kho đầu tiên
+        }
+    }
+
+    fn out_wh(
+        product_code: &str,
+        quantity: f64,
+        unit_price: f64,
+        warehouse_code: &str,
+    ) -> OutboundItemInput {
+        OutboundItemInput {
+            product_code: product_code.into(),
+            quantity,
+            unit_price,
+            industry_code: "PPHH".into(),
+            warehouse_code: warehouse_code.into(),
         }
     }
 
@@ -533,7 +558,12 @@ mod tests {
     async fn xuat_kho_fifo_va_ghi_so_ban_hang() {
         let pool = test_pool().await;
         let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
-        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        // Kho mặc định được migration seed sẵn (KHO-CHINH) — khi dòng bỏ trống kho,
+        // xuất rơi vào kho đầu tiên này (fallback của resolve_warehouse).
+        let (w,): (i64,) = sqlx::query_as("SELECT id FROM warehouse WHERE code = 'KHO-CHINH'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
         add_stock_lot(&pool, p, w, 10.0, 1200.0, "2026-02-01").await;
 
@@ -543,7 +573,7 @@ mod tests {
             "PXK-01",
             "Bán hàng",
             "",
-            "HaNoi-01",
+            "HKD",
             &[out("P1", 15.0, 2000.0)],
             "",
         )
@@ -598,7 +628,7 @@ mod tests {
             "PXK-02",
             "Bán hàng",
             "",
-            "HaNoi-01",
+            "HKD",
             &[out("P1", 8.0, 2000.0)],
             "",
         )
@@ -612,6 +642,56 @@ mod tests {
             scalar_f64(&pool, "SELECT quantity FROM stock_lot").await,
             5.0
         );
+    }
+
+    #[tokio::test]
+    async fn xuat_kho_theo_dung_kho_da_chon_tren_dong() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w1 = seed_warehouse(&pool, "W1", "Kho 1").await;
+        let w2 = seed_warehouse(&pool, "W2", "Kho 2").await;
+        add_stock_lot(&pool, p, w1, 10.0, 1000.0, "2026-01-01").await;
+        add_stock_lot(&pool, p, w2, 3.0, 1000.0, "2026-01-01").await;
+
+        // Xuất 3 từ W2 → vừa đủ tồn W2, W1 giữ nguyên 10.
+        let r = save_outbound_core(
+            &pool,
+            "2026-03-10",
+            "PXK-W2",
+            "Bán hàng kho 2",
+            "",
+            "HKD",
+            &[out_wh("P1", 3.0, 2000.0, "W2")],
+            "",
+        )
+        .await
+        .expect("xuất đúng kho W2");
+        assert_eq!(r.cogs, 3_000.0); // 3 x 1000 (lô W2)
+        let (q1, q_w1): (f64, i64) = sqlx::query_as(
+            "SELECT quantity, warehouse_id FROM stock_lot WHERE warehouse_id = ?",
+        )
+        .bind(w1)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(q1, 10.0);
+        assert_eq!(q_w1, w1);
+
+        // Xuất tiếp 1 từ W2 → thiếu (W2 đã hết, W1 còn nhưng không bị đụng tới).
+        let err = save_outbound_core(
+            &pool,
+            "2026-03-11",
+            "PXK-W2B",
+            "Bán hàng kho 2",
+            "",
+            "HKD",
+            &[out_wh("P1", 1.0, 2000.0, "W2")],
+            "",
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Không đủ tồn kho"));
+        assert!(err.contains("W2"));
     }
 
     #[tokio::test]
@@ -633,12 +713,13 @@ mod tests {
             "PXK-SV",
             "Bán dịch vụ",
             "",
-            "HaNoi-01",
+            "HKD",
             &[OutboundItemInput {
                 product_code: "S1".into(),
                 quantity: 5.0,
                 unit_price: 300_000.0,
                 industry_code: "".into(), // rỗng → lấy nhóm ngành của sản phẩm
+                warehouse_code: "".into(),
             }],
             "",
         )
@@ -693,7 +774,7 @@ mod tests {
             "Nhập hàng",
             "",
             "W1",
-            "HaNoi-01",
+            "HKD",
             &[inp("P1", 5.0, 1000.0), inp("P1", 3.0, 1200.0)],
             "",
         )

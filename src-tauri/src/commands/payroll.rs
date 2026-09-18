@@ -157,7 +157,7 @@ pub(crate) async fn save_payroll_core(
             "",
             0.0,
             0.0,
-            "HaNoi-01",
+            "HKD",
             "",
             "Tự sinh từ bảng lương",
         )

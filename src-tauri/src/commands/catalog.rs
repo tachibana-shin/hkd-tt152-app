@@ -309,6 +309,29 @@ pub(crate) async fn next_product_code(state: State<'_, AppState>) -> Result<Stri
     Ok(format!("{}{:0>width$}", prefix, next, width = digits))
 }
 
+/// Tự sinh mã kho tiếp theo giống cách tự sinh mã sản phẩm:
+/// prefix "KHO" + số tự tăng + đệm 0 (3 chữ số) — ví dụ KHO001, KHO002...
+/// Dò theo mã đang có trong bảng warehouse nên không bao giờ trùng.
+#[tauri::command]
+pub(crate) async fn next_warehouse_code(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let pool = state.pool.read().await;
+    let prefix = "KHO";
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT code FROM warehouse")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut max_num: i64 = 0;
+    for (code,) in rows {
+        if let Some(num) = code.strip_prefix(prefix) {
+            if let Ok(n) = num.trim_start_matches('0').trim().parse::<i64>() {
+                max_num = max_num.max(n);
+            }
+        }
+    }
+    Ok(format!("{}{:0>3}", prefix, max_num + 1))
+}
+
 // ─── LAZY LOAD SẢN PHẨM ───
 // Nhận event lazy của PrimeVue DataTable (first/rows/sortField/sortOrder/multiSortMeta/filters)
 // rồi trả về đúng 1 trang + tổng số dòng — tránh tải toàn bộ vài nghìn sản phẩm về frontend.

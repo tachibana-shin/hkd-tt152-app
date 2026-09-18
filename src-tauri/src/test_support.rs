@@ -133,7 +133,7 @@ pub(crate) async fn add_journal_px(
          (posting_date, voucher_no, doc_date, entry_type, description, product_code,
           quantity, unit_price, amount, debit_account, credit_account,
           industry_code, vat_rate, pit_rate, unit_code, adjust_code, note)
-         VALUES (?, ?, ?, 'PX', 'test', ?, ?, ?, ?, '131', '511', ?, ?, ?, 'HaNoi-01', '', '')",
+         VALUES (?, ?, ?, 'PX', 'test', ?, ?, ?, ?, '131', '511', ?, ?, ?, 'HKD', '', '')",
     )
     .bind(posting_date)
     .bind(voucher_no)

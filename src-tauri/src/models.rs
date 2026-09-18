@@ -323,6 +323,9 @@ pub(crate) struct OutboundItemInput {
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
     pub(crate) industry_code: String,
+    /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
+    #[serde(default)]
+    pub(crate) warehouse_code: String,
 }
 
 #[derive(serde::Deserialize)]

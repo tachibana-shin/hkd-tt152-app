@@ -24,7 +24,7 @@ pub(crate) async fn save_cash_entry(
     if input.posting_date.is_empty() || input.voucher_no.is_empty() {
         return Err("Thiếu ngày ghi sổ hoặc số phiếu".into());
     }
-    let unit_code = if input.unit_code.is_empty() { "HaNoi-01" } else { &input.unit_code };
+    let unit_code = if input.unit_code.is_empty() { "HKD" } else { &input.unit_code };
 
     let pool = state.pool.read().await;
 

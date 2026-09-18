@@ -76,7 +76,7 @@ const codePlaceholder = computed(() => {
   }
 });
 
-function openCreate(kind: Kind) {
+async function openCreate(kind: Kind) {
   dialogKind.value = kind;
   editing.value = false;
   Object.assign(form, {
@@ -87,6 +87,14 @@ function openCreate(kind: Kind) {
     phone: "",
   });
   resetLookup();
+  // Kho: tự sinh mã như sản phẩm (KHO001, KHO002...) — vẫn sửa tay được.
+  if (kind === "warehouse") {
+    try {
+      form.code = await api.nextWarehouseCode();
+    } catch {
+      /* giữ trống — người dùng tự nhập */
+    }
+  }
   dialog.value = true;
 }
 

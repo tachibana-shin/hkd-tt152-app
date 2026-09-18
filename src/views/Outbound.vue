@@ -8,7 +8,7 @@ import { fmtInt as fmt } from "@/utils/format";
 const catalog = useCatalogStore();
 const stock = useStockStore();
 const auth = useAuthStore();
-const { products, customers, industryGroups } = storeToRefs(catalog);
+const { products, customers, industryGroups, warehouses } = storeToRefs(catalog);
 const { entries, loading } = storeToRefs(stock);
 const toast = useToast();
 const router = useRouter();
@@ -31,6 +31,7 @@ const form = reactive({
     quantity: number;
     unit_price: number;
     industry_code: string;
+    warehouse_code: string;
   }[],
 });
 
@@ -63,6 +64,7 @@ function addRow() {
     quantity: 1,
     unit_price: 0,
     industry_code: industryGroups.value[0]?.code ?? "PPHH",
+    warehouse_code: "", // rỗng → kho mặc định của sản phẩm / kho đầu tiên
   });
 }
 
@@ -98,9 +100,12 @@ async function save() {
         voucher_no: form.voucher_no,
         description: form.description,
         customer_code: form.customer_code,
-        unit_code: "HaNoi-01",
+        unit_code: "HKD",
         note: form.note,
-        items: form.items.map((it) => ({ ...it })),
+        items: form.items.map((it) => ({
+          ...it,
+          warehouse_code: it.warehouse_code ?? "", // showClear có thể trả null
+        })),
       }),
     );
     toast.add({
@@ -236,10 +241,12 @@ onMounted(async () => {
         :items="form.items"
         :products="products"
         :industry-groups="industryGroups"
+        :warehouses="warehouses"
         :can-edit="auth.canStock"
         price-field="sale_price"
         show-industry
-        info="Xuất theo FIFO, có kiểm tra tồn."
+        show-warehouse
+        info="Xuất FIFO theo kho đã chọn ở từng dòng; dòng bỏ trống kho sẽ lấy kho mặc định của sản phẩm."
         @add="addRow"
         @remove="removeRow"
       />

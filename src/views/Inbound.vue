@@ -89,7 +89,7 @@ async function save() {
         description: form.description,
         supplier_code: form.supplier_code,
         warehouse_code: form.warehouse_code,
-        unit_code: "HaNoi-01",
+        unit_code: "HKD",
         note: form.note,
         items: form.items.map((it) => ({ ...it })),
       }),

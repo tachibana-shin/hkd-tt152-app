@@ -55,7 +55,7 @@ pub(crate) async fn import_nhap_lieu(
         .bind(it.vat_rate)
         .bind(it.pit_rate)
         .bind(it.tax_period)
-        .bind(if it.unit_code.is_empty() { "HaNoi-01" } else { &it.unit_code })
+        .bind(if it.unit_code.is_empty() { "HKD" } else { &it.unit_code })
         .bind(&it.adjust_code)
         .bind(&it.note)
         .execute(&mut *tx)

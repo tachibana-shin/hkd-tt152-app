@@ -251,4 +251,4 @@ INSERT OR IGNORE INTO tax_type (code, name) VALUES
     ('TaiNguyen', 'Thuế tài nguyên');
 
 INSERT OR IGNORE INTO business_unit (code, name) VALUES
-    ('HaNoi-01', 'Cơ sở 1 - Hà Nội');
+    ('HKD', 'Cơ sở chính');

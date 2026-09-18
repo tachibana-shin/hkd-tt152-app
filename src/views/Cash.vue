@@ -190,7 +190,7 @@ async function save() {
       industry_code: form.industry_code,
       vat_rate: form.vat_rate / 100,
       pit_rate: form.pit_rate / 100,
-      unit_code: "HaNoi-01",
+      unit_code: "HKD",
       note: form.note.trim(),
     });
     toast.add({
@@ -431,7 +431,7 @@ onMounted(async () => {
       </div>
       <div class="mt-3 flex items-center gap-1 text-xs text-gray-400">
         <span
-          >Đơn vị: HaNoi-01 · Nợ {{ form.debit_account }} / Có
+          >Đơn vị: HKD · Nợ {{ form.debit_account }} / Có
           {{ form.credit_account }}</span
         >
         <i

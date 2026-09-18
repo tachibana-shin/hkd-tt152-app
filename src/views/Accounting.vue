@@ -31,9 +31,9 @@ const re = ref<RevenueExpenseRow>({
 
 const unitOptions = [
   { label: "Toàn bộ", value: "" },
-  { label: "Hà Nội (HaNoi-01)", value: "HaNoi-01" },
+  { label: "Đơn vị chính (HKD)", value: "HKD" },
 ];
-const unitCode = ref("HaNoi-01");
+const unitCode = ref("HKD");
 
 const fromDate = ref<Date | null>(null);
 const toDate = ref<Date | null>(null);
