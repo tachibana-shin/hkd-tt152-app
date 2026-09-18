@@ -6,6 +6,7 @@ import { exportXlsx, type XlsxColumn } from "@/utils/excel";
 import type {
   TaxSummaryRow,
   RevenueExpenseRow,
+  TrialBalanceRow,
   TaxDeclarationRow,
   TaxOverview,
 } from "@/types";
@@ -20,6 +21,7 @@ const router = useRouter();
 
 const loading = ref(false);
 const taxRows = ref<TaxSummaryRow[]>([]);
+const tb = ref<TrialBalanceRow[]>([]);
 const re = ref<RevenueExpenseRow>({
   revenue_up: 0,
   revenue_down: 0,
@@ -55,12 +57,14 @@ async function loadReports() {
     const year = new Date().getFullYear();
     const f = iso(fromDate.value) || `${year}-01-01`;
     const t = iso(toDate.value) || `${year}-12-31`;
-    const [tax, rev] = await Promise.all([
+    const [tax, rev, balance] = await Promise.all([
       api.getTaxSummary(f, t, unitCode.value),
       api.getRevenueExpense(f, t),
+      api.getTrialBalance(f, t),
     ]);
     taxRows.value = tax;
     re.value = rev;
+    tb.value = balance;
   } catch (e) {
     toast.add({
       severity: "error",
@@ -583,6 +587,66 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
             icon="pi pi-chart-line"
         /></template>
       </AppDataTable>
+    </SectionCard>
+
+    <!-- Bảng cân đối số phát sinh — dư đầu kỳ (DMTK) + phát sinh trong kỳ -->
+    <SectionCard title="Bảng cân đối số phát sinh">
+      <template #icon><i-mdi-scale-balance class="text-amber-600" /></template>
+      <AppDataTable :value="tb" :loading="loading" stripedRows>
+        <Column field="code" header="Mã TK" style="width: 90px" />
+        <Column field="name" header="Tên tài khoản" />
+        <Column field="opening_debit" header="Dư Nợ đầu kỳ" align="right">
+          <template #body="{ data }">{{ fmt(data.opening_debit) }}</template>
+        </Column>
+        <Column field="opening_credit" header="Dư Có đầu kỳ" align="right">
+          <template #body="{ data }">{{ fmt(data.opening_credit) }}</template>
+        </Column>
+        <Column field="debit_mvmt" header="Phát sinh Nợ" align="right">
+          <template #body="{ data }">{{ fmt(data.debit_mvmt) }}</template>
+        </Column>
+        <Column field="credit_mvmt" header="Phát sinh Có" align="right">
+          <template #body="{ data }">{{ fmt(data.credit_mvmt) }}</template>
+        </Column>
+        <Column field="closing_debit" header="Dư Nợ cuối kỳ" align="right">
+          <template #body="{ data }">
+            <b>{{ fmt(data.closing_debit) }}</b>
+          </template>
+        </Column>
+        <Column field="closing_credit" header="Dư Có cuối kỳ" align="right">
+          <template #body="{ data }">
+            <b>{{ fmt(data.closing_credit) }}</b>
+          </template>
+        </Column>
+        <template #empty
+          ><EmptyState
+            text="Chưa có tài khoản nào trong danh mục (DMTK)."
+            icon="pi pi-book"
+        /></template>
+      </AppDataTable>
+      <div
+        v-if="tb.length"
+        class="mt-4 flex flex-wrap items-center justify-end gap-6 text-sm border-t pt-3"
+      >
+        <span class="text-gray-500"
+          >Tổng Dư đầu: <b class="text-amber-700">{{ fmt(tb.reduce((s, r) => s + r.opening_debit, 0)) }}</b>
+          <span class="text-gray-400">/</span>
+          <b class="text-amber-700">{{ fmt(tb.reduce((s, r) => s + r.opening_credit, 0)) }}</b> đ</span
+        >
+        <span class="text-gray-500"
+          >Phát sinh: <b class="text-primary-600">{{ fmt(tb.reduce((s, r) => s + r.debit_mvmt, 0)) }}</b>
+          <span class="text-gray-400">/</span>
+          <b class="text-primary-600">{{ fmt(tb.reduce((s, r) => s + r.credit_mvmt, 0)) }}</b> đ</span
+        >
+        <span class="text-gray-500"
+          >Dư cuối: <b class="text-emerald-700">{{ fmt(tb.reduce((s, r) => s + r.closing_debit, 0)) }}</b>
+          <span class="text-gray-400">/</span>
+          <b class="text-emerald-700">{{ fmt(tb.reduce((s, r) => s + r.closing_credit, 0)) }}</b> đ</span
+        >
+      </div>
+      <p class="mt-2 text-xs text-gray-400">
+        Số dư đầu kỳ nhập tại màn Tài khoản; phát sinh lấy từ sổ nhật ký
+        (journal_entry) trong khoảng ngày đã chọn.
+      </p>
     </SectionCard>
 
     <div class="grid grid-cols-2 gap-4">

@@ -27,6 +27,33 @@ pub(crate) async fn save_cash_entry(
     let unit_code = if input.unit_code.is_empty() { "HaNoi-01" } else { &input.unit_code };
 
     let pool = state.pool.read().await;
+
+    // Tài khoản Nợ/Có (kể cả mặc định theo loại phiếu) phải có trong danh mục
+    // tài khoản (màn Tài khoản) — đảm bảo hạch toán dùng đúng DMTK của hộ.
+    let debit: &str = if input.debit_account.trim().is_empty() {
+        if input.entry_type == "PT" { "111" } else { "642" }
+    } else {
+        &input.debit_account
+    };
+    let credit: &str = if input.credit_account.trim().is_empty() {
+        if input.entry_type == "PT" { "511" } else { "111" }
+    } else {
+        &input.credit_account
+    };
+    for code in [debit, credit] {
+        let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM account WHERE code = ?")
+            .bind(code)
+            .fetch_one(&*pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        if exists.0 == 0 {
+            return Err(format!(
+                "Tài khoản '{}' chưa có trong danh mục tài khoản — hãy thêm ở màn Tài khoản trước khi lập phiếu",
+                code
+            ));
+        }
+    }
+
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     insert_journal_entry(
         &mut tx,
@@ -40,16 +67,8 @@ pub(crate) async fn save_cash_entry(
         1.0,
         input.amount,
         input.amount,
-        if input.debit_account.is_empty() {
-            if input.entry_type == "PT" { "111" } else { "642" }
-        } else {
-            &input.debit_account
-        },
-        if input.credit_account.is_empty() {
-            if input.entry_type == "PT" { "511" } else { "111" }
-        } else {
-            &input.credit_account
-        },
+        debit,
+        credit,
         &input.industry_code,
         input.vat_rate,
         input.pit_rate,

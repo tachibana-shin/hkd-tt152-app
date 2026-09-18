@@ -216,6 +216,20 @@ pub(crate) struct LedgerRow {
     pub(crate) amount: f64,
 }
 
+/// Bảng cân đối số phát sinh — Số dư đầu kỳ (DMTK) + Phát sinh Nợ/Có trong kỳ
+/// + Số dư cuối kỳ, theo từng tài khoản kế toán của hộ.
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct TrialBalanceRow {
+    pub(crate) code: String,
+    pub(crate) name: String,
+    pub(crate) opening_debit: f64,
+    pub(crate) opening_credit: f64,
+    pub(crate) debit_mvmt: f64,
+    pub(crate) credit_mvmt: f64,
+    pub(crate) closing_debit: f64,
+    pub(crate) closing_credit: f64,
+}
+
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub(crate) struct StockLotRow {
     pub(crate) id: Option<i64>,

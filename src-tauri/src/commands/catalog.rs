@@ -18,6 +18,59 @@ pub(crate) async fn get_accounts(state: State<'_, AppState>) -> Result<String, S
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Lưu tài khoản DMTK (thêm mới hoặc sửa theo mã — upsert).
+#[tauri::command]
+pub(crate) async fn save_account(
+    state: State<'_, AppState>,
+    code: String,
+    name: String,
+    opening_debit: f64,
+    opening_credit: f64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    sqlx::query(
+        "INSERT INTO account (code, name, opening_debit, opening_credit) VALUES (?, ?, ?, ?)
+         ON CONFLICT(code) DO UPDATE SET
+            name = excluded.name,
+            opening_debit = excluded.opening_debit,
+            opening_credit = excluded.opening_credit",
+    )
+    .bind(&code)
+    .bind(&name)
+    .bind(opening_debit)
+    .bind(opening_credit)
+    .execute(&*state.pool.read().await)
+    .await
+    .map_err(|e| e.to_string())?;
+    audit(&state, "save", "account", &code).await;
+    Ok("ok".into())
+}
+
+/// Xóa tài khoản khỏi DMTK. journal_entry lưu mã tài khoản dạng text (không
+/// khóa ngoại) nên việc xóa dòng DMTK không làm hỏng bút toán đã ghi.
+#[tauri::command]
+pub(crate) async fn delete_account(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let row: Option<(String,)> = sqlx::query_as("SELECT code FROM account WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&*state.pool.read().await)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some((code,)) = row else {
+        return Err("Không tìm thấy tài khoản".into());
+    };
+    sqlx::query("DELETE FROM account WHERE id = ?")
+        .bind(id)
+        .execute(&*state.pool.read().await)
+        .await
+        .map_err(|e| e.to_string())?;
+    audit(&state, "delete", "account", &code).await;
+    Ok("ok".into())
+}
+
 #[tauri::command]
 pub(crate) async fn get_products(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<ProductRow> = sqlx::query_as::<_, ProductRow>(

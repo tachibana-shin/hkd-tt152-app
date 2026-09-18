@@ -333,6 +333,18 @@ export interface RevenueExpenseRow {
   expense_down: number;
 }
 
+/** Bảng cân đối số phát sinh — dư đầu kỳ + phát sinh + dư cuối kỳ theo tài khoản. */
+export interface TrialBalanceRow {
+  code: string;
+  name: string;
+  opening_debit: number;
+  opening_credit: number;
+  debit_mvmt: number;
+  credit_mvmt: number;
+  closing_debit: number;
+  closing_credit: number;
+}
+
 export interface InventoryRow {
   product_code: string;
   product_name: string;

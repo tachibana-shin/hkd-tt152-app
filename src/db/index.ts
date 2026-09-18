@@ -11,6 +11,7 @@ import type {
   Customer,
   TaxSummaryRow,
   RevenueExpenseRow,
+  TrialBalanceRow,
   InventoryRow,
   StockLot,
   JournalEntryRow,
@@ -110,6 +111,14 @@ export const api = {
 
   // ─── MASTER DATA ───
   getAccounts: async () => parse<Account[]>(await invoke<string>("get_accounts")),
+  saveAccount: (p: Partial<Account>) =>
+    invoke<string>("save_account", {
+      code: p.code ?? "",
+      name: p.name ?? "",
+      openingDebit: p.opening_debit ?? 0,
+      openingCredit: p.opening_credit ?? 0,
+    }),
+  deleteAccount: (id: number) => invoke<string>("delete_account", { id }),
   getProducts: async () => parse<Product[]>(await invoke<string>("get_products")),
   /** Lấy 1 trang sản phẩm theo event lazy của PrimeVue DataTable (server-side sort/filter/page). */
   getProductsPage: async (lazyEvent: unknown) =>
@@ -349,6 +358,10 @@ export const api = {
     ),
   getRevenueExpense: async (fromDate: string, toDate: string) =>
     parse<RevenueExpenseRow>(await invoke<string>("get_revenue_expense", { fromDate, toDate })),
+  getTrialBalance: async (fromDate: string, toDate: string) =>
+    parse<TrialBalanceRow[]>(
+      await invoke<string>("get_trial_balance", { fromDate, toDate }),
+    ),
 
   // ─── SỔ SÁCH ───
   getLedger: async (fromDate: string, toDate: string) =>

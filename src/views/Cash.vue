@@ -3,13 +3,22 @@ import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { api } from "@/db";
-import type { JournalEntryRow } from "@/types";
+import type { JournalEntryRow, Account } from "@/types";
 import { fmtInt as fmt } from "@/utils/format";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
 const { customers, suppliers, industryGroups } = storeToRefs(catalog);
 const toast = useToast();
+
+// Danh mục tài khoản (DMTK) — nguồn chọn TK Nợ / TK Có khi lập phiếu.
+const accounts = ref<Account[]>([]);
+const accountOptions = computed(() =>
+  accounts.value.map((a) => ({
+    code: a.code,
+    label: `${a.code} — ${a.name}`,
+  })),
+);
 
 const dialog = ref(false);
 const saving = ref(false);
@@ -204,7 +213,11 @@ async function save() {
 }
 
 onMounted(async () => {
-  await Promise.all([catalog.loadAll(), loadEntries()]);
+  await Promise.all([
+    catalog.loadAll(),
+    loadEntries(),
+    api.getAccounts().then((a) => (accounts.value = a)),
+  ]);
 });
 </script>
 
@@ -363,10 +376,24 @@ onMounted(async () => {
           />
         </FormField>
         <FormField label="TK Nợ">
-          <InputText v-model="form.debit_account" class="w-28" />
+          <Select
+            v-model="form.debit_account"
+            :options="accountOptions"
+            option-label="label"
+            option-value="code"
+            filter
+            class="w-full"
+          />
         </FormField>
         <FormField label="TK Có">
-          <InputText v-model="form.credit_account" class="w-28" />
+          <Select
+            v-model="form.credit_account"
+            :options="accountOptions"
+            option-label="label"
+            option-value="code"
+            filter
+            class="w-full"
+          />
         </FormField>
         <FormField label="Nhóm ngành">
           <Select
@@ -409,7 +436,7 @@ onMounted(async () => {
         >
         <i
           class="pi pi-info-circle cursor-help text-xs text-gray-400"
-          v-tooltip="'Tài khoản mặc định theo loại phiếu; sửa được.'"
+          v-tooltip="'Chọn từ danh mục tài khoản (màn Tài khoản); mặc định theo loại phiếu.'"
           aria-hidden="true"
         />
       </div>

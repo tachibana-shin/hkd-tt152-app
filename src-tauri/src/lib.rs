@@ -70,6 +70,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::accounting::get_ledger,
+            commands::accounting::get_trial_balance,
             commands::accounting::get_tax_summary,
             commands::accounting::get_tax_declaration,
             commands::accounting::get_tax_overview,
@@ -95,6 +96,8 @@ pub fn run() {
             commands::business::save_business_config,
             commands::cash::save_cash_entry,
             commands::catalog::get_accounts,
+            commands::catalog::save_account,
+            commands::catalog::delete_account,
             commands::catalog::get_products,
             commands::catalog::get_products_page,
             commands::catalog::get_industry_groups,

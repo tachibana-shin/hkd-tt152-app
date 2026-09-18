@@ -31,6 +31,65 @@ pub(crate) async fn get_ledger(
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Bảng cân đối số phát sinh: số dư đầu kỳ (từ DMTK) + phát sinh trong kỳ
+/// (từ journal_entry) + số dư cuối kỳ, nhóm theo từng tài khoản.
+#[tauri::command]
+pub(crate) async fn get_trial_balance(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let pool = state.pool.read().await;
+    let accounts: Vec<(String, String, f64, f64)> = sqlx::query_as(
+        "SELECT code, name, opening_debit, opening_credit FROM account ORDER BY code",
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Tổng phát sinh Nợ / Có theo từng tài khoản trong kỳ.
+    let mvmt: Vec<(String, f64, f64)> = sqlx::query_as(
+        "SELECT code, SUM(d) AS debit_mvmt, SUM(c) AS credit_mvmt FROM (
+            SELECT debit_account AS code, amount AS d, 0.0 AS c FROM journal_entry
+            WHERE posting_date >= ? AND posting_date <= ?
+            UNION ALL
+            SELECT credit_account, 0.0, amount FROM journal_entry
+            WHERE posting_date >= ? AND posting_date <= ?
+         ) GROUP BY code",
+    )
+    .bind(&from_date)
+    .bind(&to_date)
+    .bind(&from_date)
+    .bind(&to_date)
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mv: std::collections::HashMap<String, (f64, f64)> = mvmt
+        .into_iter()
+        .map(|(code, d, c)| (code, (d, c)))
+        .collect();
+    let rows: Vec<TrialBalanceRow> = accounts
+        .into_iter()
+        .map(|(code, name, od, oc)| {
+            let (d, c) = mv.get(&code).copied().unwrap_or((0.0, 0.0));
+            let net = od + d - oc - c;
+            let (cd, cc) = if net > 0.0 { (net, 0.0) } else { (0.0, -net) };
+            TrialBalanceRow {
+                code,
+                name,
+                opening_debit: od,
+                opening_credit: oc,
+                debit_mvmt: round2(d),
+                credit_mvmt: round2(c),
+                closing_debit: round2(cd),
+                closing_credit: round2(cc),
+            }
+        })
+        .collect();
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
 /// Doanh thu + thuế theo nhóm ngành nghề (≡ To Khai Thue sheet)
 #[tauri::command]
 pub(crate) async fn get_tax_summary(
