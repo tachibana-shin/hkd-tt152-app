@@ -15,6 +15,10 @@ withDefaults(
     actionDisabled?: boolean;
     showAction?: boolean;
     showFooter?: boolean;
+    /** Ẩn nút X ở góc (dùng cho dialog bắt buộc phải hoàn tất). */
+    closable?: boolean;
+    /** Cho phép bấm Esc đóng dialog hay không. */
+    closeOnEscape?: boolean;
   }>(),
   {
     width: "max-w-2xl",
@@ -23,6 +27,8 @@ withDefaults(
     actionIcon: "pi pi-check",
     showAction: true,
     showFooter: true,
+    closable: true,
+    closeOnEscape: true,
   },
 );
 
@@ -37,6 +43,8 @@ const emit = defineEmits<{
     :visible="visible"
     :header="header"
     :modal="true"
+    :closable="closable"
+    :close-on-escape="closeOnEscape"
     :class="`w-full ${width}`"
     @update:visible="emit('update:visible', $event)"
   >

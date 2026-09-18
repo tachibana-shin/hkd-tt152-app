@@ -9,7 +9,6 @@ export interface Product {
   cost_price: number;
   min_stock: number;
   vat_rate: number;
-  vat_reduced: boolean;
   import_tax_rate: number;
   default_warehouse_id?: number;
 }
@@ -164,21 +163,6 @@ export interface PayrollRow {
   bh_employee: number;
   net_pay: number;
   note: string;
-}
-
-// ─── Bảng kê giảm thuế GTGT (Giam Thue GTGT) ───
-
-export interface VatReductionRow {
-  posting_date: string;
-  voucher_no: string;
-  product_code: string;
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-  amount: number;
-  vat_rate: number;
-  reduced_rate: number;
-  vat_reduced: number;
 }
 
 // ─── Audit log ───
@@ -336,9 +320,6 @@ export interface BusinessConfig {
   tax_code_issued_on: string;
   phone: string;
   email: string;
-  fiscal_year: number;
-  report_from: string;
-  report_to: string;
 }
 
 // ─── Cài đặt mặc định (bảng app_setting) ───
@@ -353,6 +334,10 @@ export interface AppSettings {
   product_import_tax_default: number;
   product_unit: string;
   product_min_stock: number;
+  /** Kỳ khai thuế của hộ: "year" | "quarter" | "month" | "per_occurrence" */
+  tax_period: string;
+  /** Phương pháp tính thuế TNCN: "revenue" (theo doanh thu) | "profit" (theo lợi nhuận) */
+  tax_method: string;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───
@@ -391,10 +376,27 @@ export interface TaxDeclarationRow {
   pit_rate: number;
   revenue_up: number; // DT tính thuế GTGT — tăng trong kỳ
   revenue_down: number; // DT tính thuế GTGT — giảm trong kỳ
-  vat_reduced: number; // Thuế GTGT được giảm (sản phẩm giảm thuế)
-  vat_tax: number; // Số thuế GTGT (trước giảm)
+  vat_tax: number; // Số thuế GTGT = doanh thu × tỷ lệ ngành
   vat_payable: number; // Thuế GTGT phải nộp
-  pit_tax: number; // Số thuế TNCN phải nộp
+  pit_tax: number; // Số thuế TNCN phải nộp (theo tỷ lệ doanh thu — nhóm 2 p.pháp doanh thu)
+}
+
+/** Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (Kế toán hộ KD). */
+export interface TaxOverview {
+  year: number;
+  /** Tổng doanh thu cả năm — cơ sở xếp nhóm hộ */
+  year_revenue: number;
+  /** Nhóm hộ: 1 = ≤ 1 tỷ (miễn thuế), 2 = > 1–3 tỷ, 3 = > 3–50 tỷ, 4 = > 50 tỷ */
+  group: number;
+  /** Phương pháp TNCN đang áp dụng: "revenue" | "profit" */
+  method: string;
+  period_revenue: number; // doanh thu kỳ khai
+  expense: number; // chi phí kỳ khai
+  profit: number; // lợi nhuận kỳ = DT − CP
+  profit_rate: number; // thuế suất TNCN theo lợi nhuận (15/17/20%) hoặc 0
+  vat_payable: number;
+  pit_tax: number;
+  total_tax: number;
 }
 
 // ─── Chi tiết chứng từ (in PNK 01-VT / PXK 02-VT) ───

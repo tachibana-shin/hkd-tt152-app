@@ -19,8 +19,11 @@ export const useBusinessStore = defineStore("business", () => {
     await load();
   }
 
-  const reportFrom = computed(() => config.value?.report_from || "");
-  const reportTo = computed(() => config.value?.report_to || "");
+  /** Thông tin hộ kinh doanh đã đủ chưa (tên + mã số thuế — 2 trường bắt buộc). */
+  const complete = computed(() => {
+    const c = config.value;
+    return !!c && !!c.name?.trim() && !!c.tax_code?.trim();
+  });
 
-  return { config, loading, load, save, reportFrom, reportTo };
+  return { config, loading, load, save, complete };
 });

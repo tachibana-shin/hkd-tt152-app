@@ -4,7 +4,13 @@ import { useBusinessStore } from "@/stores/business";
 import { useAuthStore } from "@/stores/auth";
 import type { BusinessConfig } from "@/types";
 
-const props = defineProps<{ visible: boolean; config: BusinessConfig | null }>();
+const props = defineProps<{
+  visible: boolean;
+  config: BusinessConfig | null;
+  /** Chế độ bắt buộc (cập nhật thông tin HKD ngay khi đăng nhập): không đóng
+   *  được cho tới khi lưu thành công — ẩn nút Hủy, không có nút X, không Esc. */
+  required?: boolean;
+}>();
 const emit = defineEmits<{
   (e: "update:visible", value: boolean): void;
   (e: "saved"): void;
@@ -25,12 +31,7 @@ const form = reactive({
   tax_code_issued_on: "",
   phone: "",
   email: "",
-  fiscal_year: 2026,
-  report_from: null as Date | null,
-  report_to: null as Date | null,
 });
-
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
 watch(
   () => props.visible,
@@ -47,21 +48,24 @@ watch(
       tax_code_issued_on: c.tax_code_issued_on,
       phone: c.phone,
       email: c.email,
-      fiscal_year: c.fiscal_year,
-      report_from: c.report_from ? new Date(c.report_from) : null,
-      report_to: c.report_to ? new Date(c.report_to) : null,
     });
   },
 );
 
 async function save() {
+  // Tên và MST là bắt buộc (nhất là chế độ bắt buộc sau đăng nhập).
+  if (!form.name.trim() || !form.tax_code.trim()) {
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin bắt buộc",
+      detail: "Tên hộ kinh doanh và mã số thuế không được để trống",
+      life: 3000,
+    });
+    return;
+  }
   saving.value = true;
   try {
-    await business.save({
-      ...form,
-      report_from: iso(form.report_from),
-      report_to: iso(form.report_to),
-    });
+    await business.save({ ...form });
     toast.add({ severity: "success", summary: "Đã lưu thông tin hộ kinh doanh" });
     emit("update:visible", false);
     emit("saved");
@@ -81,6 +85,9 @@ async function save() {
     action-label="Lưu cấu hình"
     :saving="saving"
     :show-action="auth.isAdmin"
+    :cancel-label="required ? null : undefined"
+    :closable="!required"
+    :close-on-escape="!required"
     @update:visible="emit('update:visible', $event)"
     @action="save"
   >
@@ -111,16 +118,6 @@ async function save() {
       </FormField>
       <FormField label="Email" class="col-span-2">
         <InputText v-model="form.email" />
-      </FormField>
-      <FormField label="Năm tài chính">
-        <InputNumber v-model="form.fiscal_year" :min="2000" :max="2100" class="w-full" />
-      </FormField>
-      <FormField label="Kỳ báo cáo">
-        <div class="flex items-center gap-2">
-          <DatePicker v-model="form.report_from" dateFormat="dd/mm/yy" class="w-full" />
-          <span>→</span>
-          <DatePicker v-model="form.report_to" dateFormat="dd/mm/yy" class="w-full" />
-        </div>
       </FormField>
     </div>
   </AppDialog>

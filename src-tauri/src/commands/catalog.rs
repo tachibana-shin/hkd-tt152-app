@@ -20,10 +20,9 @@ pub(crate) async fn get_accounts(state: State<'_, AppState>) -> Result<String, S
 
 #[tauri::command]
 pub(crate) async fn get_products(state: State<'_, AppState>) -> Result<String, String> {
-    let rows: Vec<ProductRow> = sqlx::query_as!(
-        ProductRow,
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, vat_reduced, import_tax_rate
-         FROM product ORDER BY code"
+    let rows: Vec<ProductRow> = sqlx::query_as::<_, ProductRow>(
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate
+         FROM product ORDER BY code",
     )
     .fetch_all(&*state.pool.read().await)
     .await
@@ -166,28 +165,26 @@ pub(crate) async fn save_product(
     cost_price: f64,
     min_stock: f64,
     vat_rate: f64,
-    vat_reduced: bool,
     import_tax_rate: f64,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
-    sqlx::query!(
-        "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, vat_reduced, import_tax_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sqlx::query(
+        "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(code) DO UPDATE SET
             name = excluded.name, unit = excluded.unit,
             sale_price = excluded.sale_price, cost_price = excluded.cost_price,
             min_stock = excluded.min_stock, vat_rate = excluded.vat_rate,
-            vat_reduced = excluded.vat_reduced, import_tax_rate = excluded.import_tax_rate",
-        code,
-        name,
-        unit,
-        sale_price,
-        cost_price,
-        min_stock,
-        vat_rate,
-        vat_reduced,
-        import_tax_rate
+            import_tax_rate = excluded.import_tax_rate",
     )
+    .bind(&code)
+    .bind(&name)
+    .bind(&unit)
+    .bind(sale_price)
+    .bind(cost_price)
+    .bind(min_stock)
+    .bind(vat_rate)
+    .bind(import_tax_rate)
     .execute(&*state.pool.read().await)
     .await
     .map_err(|e| e.to_string())?;
@@ -284,7 +281,7 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
     const NUM_FIELDS: &[&str] = &["sale_price", "cost_price", "min_stock", "vat_rate", "import_tax_rate"];
     const SORTABLE: &[&str] = &[
         "id", "code", "name", "unit", "sale_price", "cost_price",
-        "min_stock", "vat_rate", "vat_reduced", "import_tax_rate",
+        "min_stock", "vat_rate", "import_tax_rate",
     ];
 
     let mut clauses: Vec<String> = Vec::new();
@@ -406,7 +403,7 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
     }
 
     let sql = format!(
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, vat_reduced, import_tax_rate
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate
          FROM product{} ORDER BY {} LIMIT ? OFFSET ?",
         where_sql,
         sorts.join(", ")
@@ -494,9 +491,9 @@ mod tests {
     #[tokio::test]
     async fn products_page_lazy_filters_sorts_paginates() {
         let pool = test_pool().await;
-        seed_product(&pool, "SP001", "Táo đỏ", 0.05, false).await;
-        seed_product(&pool, "SP002", "Chuối", 0.10, true).await;
-        seed_product(&pool, "SP003", "Táo xanh", 0.05, false).await;
+        seed_product(&pool, "SP001", "Táo đỏ", 0.05).await;
+        seed_product(&pool, "SP002", "Chuối", 0.10).await;
+        seed_product(&pool, "SP003", "Táo xanh", 0.05).await;
 
         // (1) Filter toàn cục + sort giảm dần theo tên, trang đầu 2 dòng.
         let ev: ProductPageEvent = serde_json::from_str(

@@ -21,12 +21,12 @@ import type {
   CountItemRow,
   Employee,
   PayrollRow,
-  VatReductionRow,
   AuditEntry,
   ImportResult,
   AttendanceRow,
   AttendanceWorkDay,
   TaxDeclarationRow,
+  TaxOverview,
   VoucherRow,
   CurrentUser,
   AppUser,
@@ -49,6 +49,8 @@ const SETTING_DEFAULTS: AppSettings = {
   product_import_tax_default: 0,
   product_unit: "Cái",
   product_min_stock: 0,
+  tax_period: "quarter", // Kỳ khai thuế: year | quarter | month | per_occurrence
+  tax_method: "revenue", // Phương pháp TNCN: revenue (theo doanh thu) | profit (theo lợi nhuận)
 };
 
 // Backend lưu mọi thứ dưới dạng chuỗi → chuẩn hóa về kiểu AppSettings.
@@ -75,6 +77,8 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     product_import_tax_default: num("product_import_tax_default", SETTING_DEFAULTS.product_import_tax_default),
     product_unit: raw.product_unit ?? SETTING_DEFAULTS.product_unit,
     product_min_stock: num("product_min_stock", SETTING_DEFAULTS.product_min_stock),
+    tax_period: raw.tax_period || SETTING_DEFAULTS.tax_period,
+    tax_method: raw.tax_method || SETTING_DEFAULTS.tax_method,
   };
 }
 
@@ -93,9 +97,6 @@ export const api = {
       taxCodeIssuedOn: cfg.tax_code_issued_on ?? "",
       phone: cfg.phone ?? "",
       email: cfg.email ?? "",
-      fiscalYear: cfg.fiscal_year ?? new Date().getFullYear(),
-      reportFrom: cfg.report_from ?? "",
-      reportTo: cfg.report_to ?? "",
     }),
 
   // ─── CÀI ĐẶT MẶC ĐỊNH ───
@@ -124,7 +125,6 @@ export const api = {
       costPrice: p.cost_price ?? 0,
       minStock: p.min_stock ?? 0,
       vatRate: p.vat_rate ?? 0.01,
-      vatReduced: p.vat_reduced ?? false,
       importTaxRate: p.import_tax_rate ?? 0,
     }),
   deleteProduct: (id: number) => invoke<string>("delete_product", { id }),
@@ -366,12 +366,6 @@ export const api = {
   hddtSendSimulated: (invoiceNo: string, symbol: string, total: number) =>
     invoke<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
 
-  // ─── BẢNG KÊ GIẢM THUẾ GTGT ───
-  getVatReductionList: async (fromDate: string, toDate: string) =>
-    parse<VatReductionRow[]>(
-      await invoke<string>("get_vat_reduction_list", { fromDate, toDate }),
-    ),
-
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>
     parse<AuditEntry[]>(await invoke<string>("get_audit_log", { limit })),
@@ -447,9 +441,16 @@ export const api = {
     ),
 
   // ─── TỜ KHAI THUẾ THEO KỲ ───
-  getTaxDeclaration: async (year: number, month: number) =>
+  // period: "year" | "quarter" | "month" | "occurrence"; periodNo: 1..12 (tháng) / 1..4 (quý) / 0 (năm)
+  getTaxDeclaration: async (year: number, period: string, periodNo: number) =>
     parse<TaxDeclarationRow[]>(
-      await invoke<string>("get_tax_declaration", { year, month }),
+      await invoke<string>("get_tax_declaration", { year, period, periodNo }),
+    ),
+
+  // Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)
+  getTaxOverview: async (year: number, period: string, periodNo: number) =>
+    parse<TaxOverview>(
+      await invoke<string>("get_tax_overview", { year, period, periodNo }),
     ),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───

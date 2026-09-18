@@ -89,16 +89,14 @@ pub(crate) async fn save_invoice(
         return Err(format!("Không đủ tồn kho: {}", shortage.join("; ")));
     }
 
-    // tổng tiền + thuế GTGT (sản phẩm không giảm thuế)
+    // tổng tiền + thuế GTGT (theo mức thuế suất của từng sản phẩm)
     let mut total = 0.0;
     let mut vat_amount = 0.0;
     for item in &items {
         let product = resolve_product(&mut tx, &item.product_code).await?;
         let subtotal = item.quantity * item.unit_price;
         total += subtotal;
-        if !product.vat_reduced {
-            vat_amount += subtotal * product.vat_rate;
-        }
+        vat_amount += subtotal * product.vat_rate;
     }
 
     let res = sqlx::query!(

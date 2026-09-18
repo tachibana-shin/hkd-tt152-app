@@ -6,8 +6,8 @@ import { exportXlsx, type XlsxColumn } from "@/utils/excel";
 import type {
   TaxSummaryRow,
   RevenueExpenseRow,
-  VatReductionRow,
   TaxDeclarationRow,
+  TaxOverview,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct } from "@/utils/format";
@@ -20,7 +20,6 @@ const router = useRouter();
 
 const loading = ref(false);
 const taxRows = ref<TaxSummaryRow[]>([]);
-const vatRows = ref<VatReductionRow[]>([]);
 const re = ref<RevenueExpenseRow>({
   revenue_up: 0,
   revenue_down: 0,
@@ -53,18 +52,12 @@ function openBackupDialog() {
 async function loadReports() {
   loading.value = true;
   try {
-    const f =
-      iso(fromDate.value) ||
-      config.value?.report_from ||
-      `${config.value?.fiscal_year ?? new Date().getFullYear()}-01-01`;
-    const t =
-      iso(toDate.value) ||
-      config.value?.report_to ||
-      `${config.value?.fiscal_year ?? new Date().getFullYear()}-12-31`;
+    const year = new Date().getFullYear();
+    const f = iso(fromDate.value) || `${year}-01-01`;
+    const t = iso(toDate.value) || `${year}-12-31`;
     const [tax, rev] = await Promise.all([
       api.getTaxSummary(f, t, unitCode.value),
       api.getRevenueExpense(f, t),
-      loadVatReduction(),
     ]);
     taxRows.value = tax;
     re.value = rev;
@@ -79,40 +72,66 @@ async function loadReports() {
   }
 }
 
-async function loadVatReduction() {
-  const f =
-    iso(fromDate.value) ||
-    config.value?.report_from ||
-    `${config.value?.fiscal_year ?? new Date().getFullYear()}-01-01`;
-  const t =
-    iso(toDate.value) ||
-    config.value?.report_to ||
-    `${config.value?.fiscal_year ?? new Date().getFullYear()}-12-31`;
-  vatRows.value = await api.getVatReductionList(f, t);
-}
-
-const vatReducedTotal = computed(() =>
-  vatRows.value.reduce((s, r) => s + r.vat_reduced, 0),
-);
-
-// ——— Tờ khai thuế theo kỳ (To Khai Thue) ———
+// ——— Tờ khai thuế theo kỳ (To Khai Thue) + tổng hợp thuế theo quy định 2026 ———
 const declRows = ref<TaxDeclarationRow[]>([]);
 const declLoading = ref(false);
-const declYear = ref(config.value?.fiscal_year ?? new Date().getFullYear());
-const declMonth = ref(new Date().getMonth() + 1);
-const declPeriodOptions: { label: string; value: number }[] = [
-  { label: "Cả năm", value: 0 },
-  ...Array.from({ length: 12 }, (_, i) => ({
-    label: `Tháng ${i + 1}`,
-    value: i + 1,
-  })),
+const overview = ref<TaxOverview | null>(null);
+const declYear = ref(new Date().getFullYear());
+// Bộ chọn kỳ để XEM tờ khai: quý / tháng / năm (mặc định theo kỳ khai đã cấu hình)
+const declPeriod = ref<"year" | "quarter" | "month">("quarter");
+const declPeriodNo = ref(1);
+const declPeriodTypeOptions: { label: string; value: "year" | "quarter" | "month" }[] = [
+  { label: "Theo quý", value: "quarter" },
+  { label: "Theo tháng", value: "month" },
+  { label: "Theo năm", value: "year" },
 ];
+const declPeriodNoOptions = computed(() => {
+  if (declPeriod.value === "quarter")
+    return [1, 2, 3, 4].map((q) => ({ label: `Quý ${q}`, value: q }));
+  if (declPeriod.value === "month")
+    return Array.from({ length: 12 }, (_, i) => ({
+      label: `Tháng ${i + 1}`,
+      value: i + 1,
+    }));
+  return [];
+});
+
+// Cấu hình kê khai thuế của hộ (app_setting): kỳ khai + phương pháp TNCN
+const taxDialog = ref(false);
+const taxPeriod = ref<string>("quarter"); // year | quarter | month | per_occurrence
+const taxMethod = ref<string>("revenue"); // revenue | profit
+const taxPeriodLabel = computed(() => {
+  switch (taxPeriod.value) {
+    case "month":
+      return "Theo tháng";
+    case "year":
+      return "Theo năm";
+    case "per_occurrence":
+      return "Theo từng lần phát sinh";
+    default:
+      return "Theo quý";
+  }
+});
+const taxMethodLabel = computed(() =>
+  taxMethod.value === "profit" ? "Theo lợi nhuận" : "Theo doanh thu",
+);
+const groupLabel = computed(() => {
+  switch (overview.value?.group) {
+    case 1:
+      return "Nhóm 1 — doanh thu ≤ 1 tỷ: miễn thuế";
+    case 2:
+      return "Nhóm 2 — doanh thu > 1 tỷ đến 3 tỷ";
+    case 3:
+      return "Nhóm 3 — doanh thu > 3 tỷ đến 50 tỷ";
+    default:
+      return "Nhóm 4 — doanh thu > 50 tỷ";
+  }
+});
 const declTotals = computed(() => {
   const t = {
     revenue_up: 0,
     revenue_down: 0,
     vat_tax: 0,
-    vat_reduced: 0,
     vat_payable: 0,
     pit_tax: 0,
   };
@@ -120,7 +139,6 @@ const declTotals = computed(() => {
     t.revenue_up += r.revenue_up;
     t.revenue_down += r.revenue_down;
     t.vat_tax += r.vat_tax;
-    t.vat_reduced += r.vat_reduced;
     t.vat_payable += r.vat_payable;
     t.pit_tax += r.pit_tax;
   }
@@ -152,48 +170,19 @@ function exportExcel() {
     vat_tax: r.vat_tax,
     pit_tax: r.pit_tax,
   }));
-  exportXlsx(`to-khai-thue-${config.value?.fiscal_year ?? ""}`, cols, rows);
-}
-
-function exportVatReductionExcel() {
-  const cols: XlsxColumn[] = [
-    { header: "Ngày", key: "posting_date" },
-    { header: "Số phiếu", key: "voucher_no" },
-    { header: "Mã VT", key: "product_code" },
-    { header: "Tên hàng hóa DV", key: "product_name" },
-    { header: "SL", key: "quantity" },
-    { header: "Đơn giá", key: "unit_price" },
-    { header: "Thành tiền", key: "amount" },
-    { header: "Tỷ lệ quy định (%)", key: "vat_rate" },
-    { header: "Tỷ lệ sau giảm (%)", key: "reduced_rate" },
-    { header: "Thuế GTGT được giảm", key: "vat_reduced" },
-  ];
-  const rows = vatRows.value.map((r) => ({
-    posting_date: r.posting_date,
-    voucher_no: r.voucher_no,
-    product_code: r.product_code,
-    product_name: r.product_name,
-    quantity: r.quantity,
-    unit_price: r.unit_price,
-    amount: r.amount,
-    vat_rate: r.vat_rate * 100,
-    reduced_rate: r.reduced_rate * 100,
-    vat_reduced: r.vat_reduced,
-  }));
-  exportXlsx(
-    `bang-ke-giam-thue-gtgt-${config.value?.fiscal_year ?? ""}`,
-    cols,
-    rows,
-  );
+  exportXlsx(`to-khai-thue-${new Date().getFullYear()}`, cols, rows);
 }
 
 async function loadDeclaration() {
   declLoading.value = true;
   try {
-    declRows.value = await api.getTaxDeclaration(
-      declYear.value,
-      declMonth.value,
-    );
+    const no = declPeriod.value === "year" ? 0 : declPeriodNo.value;
+    const [rows, ov] = await Promise.all([
+      api.getTaxDeclaration(declYear.value, declPeriod.value, no),
+      api.getTaxOverview(declYear.value, declPeriod.value, no),
+    ]);
+    declRows.value = rows;
+    overview.value = ov;
   } catch (e) {
     toast.add({
       severity: "error",
@@ -214,7 +203,6 @@ function exportDeclarationExcel() {
     { header: "DT tính thuế GTGT – Tăng", key: "revenue_up" },
     { header: "DT tính thuế GTGT – Giảm", key: "revenue_down" },
     { header: "Thuế GTGT", key: "vat_tax" },
-    { header: "Thuế GTGT được giảm", key: "vat_reduced" },
     { header: "Thuế GTGT phải nộp", key: "vat_payable" },
     { header: "Thuế TNCN phải nộp", key: "pit_tax" },
   ];
@@ -226,21 +214,67 @@ function exportDeclarationExcel() {
     revenue_up: r.revenue_up,
     revenue_down: r.revenue_down,
     vat_tax: r.vat_tax,
-    vat_reduced: r.vat_reduced,
     vat_payable: r.vat_payable,
     pit_tax: r.pit_tax,
   }));
-  const month = declMonth.value === 0 ? "ca-nam" : String(declMonth.value);
-  exportXlsx(`to-khai-thue-ky-${declYear.value}-${month}`, cols, rows);
+  const periodLabel =
+    declPeriod.value === "year"
+      ? "ca-nam"
+      : `${declPeriod.value}-${declPeriodNo.value}`;
+  exportXlsx(`to-khai-thue-ky-${declYear.value}-${periodLabel}`, cols, rows);
 }
 
 onMounted(async () => {
   await business.load();
-  if (business.reportFrom) fromDate.value = new Date(business.reportFrom);
-  if (business.reportTo) toDate.value = new Date(business.reportTo);
-  if (config.value?.fiscal_year) declYear.value = config.value.fiscal_year;
+  // Kỳ báo cáo không còn lưu — mặc định theo năm hiện tại của hệ thống.
+  const settings = await api.getAppSettings().catch(() => null);
+  if (settings) {
+    taxPeriod.value = settings.tax_period;
+    taxMethod.value = settings.tax_method;
+    // Mặc định xem theo đúng kỳ khai của hộ (per_occurrence xem theo năm).
+    if (taxPeriod.value === "month") declPeriod.value = "month";
+    else if (taxPeriod.value === "year" || taxPeriod.value === "per_occurrence")
+      declPeriod.value = "year";
+    else declPeriod.value = "quarter";
+    const now = new Date();
+    if (declPeriod.value === "quarter") declPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
+    else if (declPeriod.value === "month") declPeriodNo.value = now.getMonth() + 1;
+  }
   await Promise.all([loadReports(), loadDeclaration()]);
 });
+
+function openTaxConfig() {
+  taxDialog.value = true;
+}
+
+async function onTaxConfigSaved(payload: { period: string; method: string }) {
+  taxPeriod.value = payload.period;
+  taxMethod.value = payload.method;
+  toast.add({
+    severity: "success",
+    summary: "Đã lưu cấu hình thuế",
+    detail: `Kỳ khai: ${taxPeriodLabel.value} • TNCN: ${taxMethodLabel.value}`,
+    life: 3000,
+  });
+  if (
+    (payload.period === "month" && declPeriod.value !== "month") ||
+    (payload.period === "quarter" && declPeriod.value !== "quarter")
+  ) {
+    declPeriod.value = payload.period === "month" ? "month" : "quarter";
+    const now = new Date();
+    declPeriodNo.value =
+      declPeriod.value === "quarter"
+        ? Math.floor(now.getMonth() / 3) + 1
+        : now.getMonth() + 1;
+  } else if (
+    (payload.period === "year" || payload.period === "per_occurrence") &&
+    declPeriod.value !== "year"
+  ) {
+    declPeriod.value = "year";
+    declPeriodNo.value = 0;
+  }
+  await loadDeclaration();
+}
 </script>
 
 <template>
@@ -258,6 +292,13 @@ onMounted(async () => {
           icon="pi pi-cog"
           severity="secondary"
           @click="openConfig"
+        />
+        <Button
+          label="Cấu hình thuế"
+          icon="pi pi-percentage"
+          severity="secondary"
+          v-tooltip.top="'Kỳ khai thuế + phương pháp tính TNCN (NĐ 68/2026, NĐ 141/2026)'"
+          @click="openTaxConfig"
         />
         <Button
           label="Tải lại báo cáo"
@@ -295,8 +336,12 @@ onMounted(async () => {
             @click="loadReports"
           />
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
-            Năm tài chính <b>{{ config.fiscal_year }}</b> •
-            {{ config.report_from }} → {{ config.report_to }}
+            <i class="pi pi-calendar mr-1" />Kỳ khai thuế:
+            <b>{{ taxPeriodLabel }}</b> • TNCN:
+            <b>{{ taxMethodLabel }}</b>
+            <span class="mx-1 text-gray-300">|</span>
+            Năm hiện tại:
+            <b>{{ new Date().getFullYear() }}</b>
           </span>
         </div>
       </template>
@@ -357,65 +402,66 @@ onMounted(async () => {
       </div>
     </SectionCard>
 
-    <!-- Bảng kê giảm thuế GTGT (Giam Thue GTGT) -->
-    <SectionCard title="Bảng kê giảm thuế GTGT (Giam Thue GTGT)">
-      <template #icon><i-mdi-percent class="text-emerald-500" /></template>
-      <template #actions>
-        <Button
-          label="Xuất Excel"
-          icon="pi pi-file-excel"
-          size="small"
-          outlined
-          :disabled="!vatRows.length"
-          @click="exportVatReductionExcel"
-        />
-      </template>
-      <AppDataTable
-        :value="vatRows"
-        :loading="loading"
-        stripedRows
-        paginator
-        :rows="10"
-      >
-        <Column field="posting_date" header="Ngày" />
-        <Column field="voucher_no" header="Số phiếu" />
-        <Column field="product_code" header="Mã VT" />
-        <Column field="product_name" header="Tên hàng hóa DV" />
-        <Column field="quantity" header="SL" align="right" />
-        <Column field="unit_price" header="Đơn giá" align="right">
-          <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
-        </Column>
-        <Column field="amount" header="Thành tiền" align="right">
-          <template #body="{ data }">{{ fmt(data.amount) }}</template>
-        </Column>
-        <Column field="vat_rate" header="Tỷ lệ quy định" align="right">
-          <template #body="{ data }"
-            >{{ (data.vat_rate * 100).toFixed(1) }}%</template
+    <!-- Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 -->
+    <SectionCard title="Tổng hợp thuế phải nộp (NĐ 68/2026, NĐ 141/2026)">
+      <template #icon
+        ><i-mdi-calculator-variant class="text-indigo-500"
+      /></template>
+      <div v-if="overview" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Nhóm hộ kinh doanh</span>
+          <b>{{ groupLabel }}</b>
+          <div class="text-xs text-gray-400">
+            DT cả năm: {{ fmt(overview.year_revenue) }} đ
+          </div>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Doanh thu kỳ khai</span>
+          <b>{{ fmt(overview.period_revenue) }} đ</b>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Chi phí kỳ</span>
+          <b>{{ fmt(overview.expense) }} đ</b>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Lợi nhuận kỳ</span>
+          <b>{{ fmt(overview.profit) }} đ</b>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Thuế GTGT phải nộp</span>
+          <b class="text-rose-600">{{ fmt(overview.vat_payable) }} đ</b>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">
+            Thuế TNCN phải nộp
+            <span v-if="overview.profit_rate" class="text-gray-400"
+              >(lợi nhuận × {{ (overview.profit_rate * 100).toFixed(0) }}%)</span
+            >
+            <span v-else-if="overview.method === 'revenue'" class="text-gray-400"
+              >(theo doanh thu)</span
+            >
+          </span>
+          <b class="text-rose-600">{{ fmt(overview.pit_tax) }} đ</b>
+        </div>
+        <div class="col-span-2 md:col-span-2">
+          <span class="text-gray-500 block text-xs mb-1">Tổng thuế phải nộp kỳ</span>
+          <b class="text-primary-600 text-lg"
+            >{{ fmt(overview.total_tax) }} đ</b
           >
-        </Column>
-        <Column field="reduced_rate" header="Tỷ lệ sau giảm" align="right">
-          <template #body="{ data }"
-            >{{ (data.reduced_rate * 100).toFixed(1) }}%</template
-          >
-        </Column>
-        <Column field="vat_reduced" header="Thuế GTGT được giảm" align="right">
-          <template #body="{ data }">
-            <b>{{ fmt(data.vat_reduced) }}</b>
-          </template>
-        </Column>
-        <template #empty
-          ><EmptyState
-            text="Không có hàng hóa dịch vụ giảm thuế trong kỳ."
-            icon="pi pi-percentage"
-        /></template>
-      </AppDataTable>
-      <div
-        v-if="vatRows.length"
-        class="mt-4 flex justify-end gap-8 text-sm border-t pt-3"
-      >
-        <span class="text-gray-500">Tổng thuế được giảm:</span>
-        <b class="text-emerald-600">{{ fmt(vatReducedTotal) }} đ</b>
+        </div>
       </div>
+      <p v-if="overview?.group === 1" class="mt-3 text-xs text-emerald-600">
+        Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ
+        cần thông báo doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm
+        sau).
+      </p>
+      <p v-else class="mt-3 text-xs text-gray-400">
+        Căn cứ: Nghị định 68/2026/NĐ-CP (bãi bỏ thuế khoán, chuyển sang kê khai),
+        Nghị định 141/2026/NĐ-CP (ngưỡng miễn thuế 1 tỷ đồng/năm), Luật Thuế GTGT
+        2024, Luật Thuế TNCN 2025. Nhóm hộ xếp theo tổng doanh thu cả năm; TNCN
+        nhóm 2 theo doanh thu × tỷ lệ ngành hoặc lợi nhuận × 15%; nhóm 3/4 theo
+        lợi nhuận × 17%/20%.
+      </p>
     </SectionCard>
 
     <!-- Tờ khai thuế theo kỳ (To Khai Thue) -->
@@ -441,13 +487,25 @@ onMounted(async () => {
       </template>
       <div class="flex flex-wrap items-center gap-3 mb-3">
         <div>
-          <label class="text-xs text-gray-500 block mb-1">Kỳ khai thuế</label>
+          <label class="text-xs text-gray-500 block mb-1">Loại kỳ</label>
           <Select
-            v-model="declMonth"
-            :options="declPeriodOptions"
+            v-model="declPeriod"
+            :options="declPeriodTypeOptions"
             optionLabel="label"
             optionValue="value"
-            class="w-44"
+            class="w-36"
+            @change="loadDeclaration"
+          />
+        </div>
+        <div v-if="declPeriod !== 'year'">
+          <label class="text-xs text-gray-500 block mb-1">Kỳ</label>
+          <Select
+            v-model="declPeriodNo"
+            :options="declPeriodNoOptions"
+            optionLabel="label"
+            optionValue="value"
+            class="w-32"
+            @change="loadDeclaration"
           />
         </div>
         <div>
@@ -456,7 +514,8 @@ onMounted(async () => {
             v-model="declYear"
             :min="2000"
             :max="2100"
-            class="w-36"
+            class="w-32"
+            @input="loadDeclaration"
           />
         </div>
         <Button
@@ -465,6 +524,12 @@ onMounted(async () => {
           size="small"
           :loading="declLoading"
           @click="loadDeclaration"
+        />
+        <Tag
+          v-if="overview"
+          :value="groupLabel"
+          :severity="overview.group === 1 ? 'success' : 'warning'"
+          class="ml-auto"
         />
       </div>
       <AppDataTable :value="declRows" :loading="declLoading" stripedRows>
@@ -496,14 +561,6 @@ onMounted(async () => {
           <template #body="{ data }">{{ fmt(data.vat_tax) }}</template>
           <template #footer>{{
             declRows.length ? fmt(declTotals.vat_tax) : ""
-          }}</template>
-        </Column>
-        <Column header="Thuế GTGT được giảm" align="right">
-          <template #body="{ data }">
-            <span class="text-emerald-600">{{ fmt(data.vat_reduced) }}</span>
-          </template>
-          <template #footer>{{
-            declRows.length ? fmt(declTotals.vat_reduced) : ""
           }}</template>
         </Column>
         <Column header="Thuế GTGT phải nộp" align="right">
@@ -640,6 +697,14 @@ onMounted(async () => {
       v-model:visible="configDialog"
       :config="config"
       @saved="loadReports"
+    />
+
+    <!-- Dialog cấu hình kê khai thuế -->
+    <TaxConfigDialog
+      v-model:visible="taxDialog"
+      :period="taxPeriod"
+      :method="taxMethod"
+      @saved="onTaxConfigSaved"
     />
 
     <!-- Dialog sao lưu & khôi phục -->

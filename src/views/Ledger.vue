@@ -6,7 +6,7 @@ import type { LedgerRow } from "@/types";
 import { fmtInt as fmt } from "@/utils/format";
 
 const business = useBusinessStore();
-const { config, reportFrom, reportTo } = storeToRefs(business);
+const { config } = storeToRefs(business);
 const toast = useToast();
 
 const loading = ref(false);
@@ -19,11 +19,12 @@ const entryType = ref("");
 const entryOptions = [{ label: "Toàn bộ", value: "" }, "PN", "PX", "PT", "PC"];
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
+const currentYear = () => new Date().getFullYear();
 async function loadLedger() {
   loading.value = true;
   try {
-    const f = iso(fromDate.value) || reportFrom.value;
-    const t = iso(toDate.value) || reportTo.value;
+    const f = iso(fromDate.value) || `${currentYear()}-01-01`;
+    const t = iso(toDate.value) || `${currentYear()}-12-31`;
     rows.value = await api.getLedger(f, t);
   } catch (e) {
     toast.add({
@@ -62,8 +63,6 @@ function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
 
 onMounted(async () => {
   if (!config.value) await business.load();
-  if (reportFrom.value) fromDate.value = new Date(reportFrom.value);
-  if (reportTo.value) toDate.value = new Date(reportTo.value);
   await loadLedger();
 });
 </script>
@@ -111,7 +110,7 @@ onMounted(async () => {
             @click="loadLedger"
           />
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
-            {{ config.report_from }} → {{ config.report_to }}
+            <i class="pi pi-calendar mr-1" />Kỳ mặc định: {{ currentYear() }} (theo năm hiện tại)
           </span>
         </div>
       </template>

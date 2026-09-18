@@ -56,9 +56,6 @@ pub(crate) struct BusinessConfigRow {
     pub(crate) tax_code_issued_on: String,
     pub(crate) phone: String,
     pub(crate) email: String,
-    pub(crate) fiscal_year: i64,
-    pub(crate) report_from: String,
-    pub(crate) report_to: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -80,7 +77,6 @@ pub(crate) struct ProductRow {
     pub(crate) cost_price: f64,
     pub(crate) min_stock: f64,
     pub(crate) vat_rate: f64,
-    pub(crate) vat_reduced: bool,
     pub(crate) import_tax_rate: f64,
 }
 
@@ -435,22 +431,6 @@ pub(crate) struct ImportEntryInput {
     pub(crate) note: String,
 }
 
-// ─── BẢNG KÊ GIẢM THUẾ GTGT (sheet Giam Thue GTGT) ───
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-pub(crate) struct VatReductionRow {
-    pub(crate) posting_date: String,
-    pub(crate) voucher_no: String,
-    pub(crate) product_code: String,
-    pub(crate) product_name: String,
-    pub(crate) quantity: f64,
-    pub(crate) unit_price: f64,
-    pub(crate) amount: f64,
-    pub(crate) vat_rate: f64,
-    pub(crate) reduced_rate: f64,  // tỷ lệ sau giảm = vat_rate x 80%
-    pub(crate) vat_reduced: f64,   // thuế GTGT được giảm = amount x (rate - reduced_rate)
-}
-
 // ─── AUDIT LOG ───
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -499,7 +479,6 @@ pub(crate) struct TaxAgg {
     pub(crate) pit_rate: f64,
     pub(crate) revenue_up: f64,   // DT tính thuế GTGT — Tăng trong kỳ
     pub(crate) revenue_down: f64, // DT tính thuế GTGT — Giảm trong kỳ (điều chỉnh giảm)
-    pub(crate) vat_reduced: f64,  // Thuế GTGT được giảm (sản phẩm giảm thuế, 20% thuế suất)
 }
 
 #[derive(serde::Serialize)]
@@ -510,10 +489,33 @@ pub(crate) struct TaxDeclarationRow {
     pub(crate) pit_rate: f64,
     pub(crate) revenue_up: f64,
     pub(crate) revenue_down: f64,
-    pub(crate) vat_reduced: f64,
-    pub(crate) vat_tax: f64,    // Số thuế GTGT trước giảm = (UP-DOWN) x tỷ lệ
-    pub(crate) vat_payable: f64, // Thuế GTGT phải nộp = vat_tax - vat_reduced
-    pub(crate) pit_tax: f64,    // Số thuế TNCN = (UP-DOWN) x tỷ lệ
+    pub(crate) vat_tax: f64,    // Số thuế GTGT = (UP-DOWN) x tỷ lệ ngành
+    pub(crate) vat_payable: f64, // Thuế GTGT phải nộp = vat_tax
+    pub(crate) pit_tax: f64,    // Số thuế TNCN theo tỷ lệ doanh thu (chỉ nhóm 2, phương pháp doanh thu)
+}
+
+/// Tổng hợp thuế phải nộp theo NĐ 68/2026/NĐ-CP + NĐ 141/2026/NĐ-CP:
+/// nhóm hộ xác định theo tổng doanh thu CẢ NĂM; thuế GTGT/TNCN tính theo kỳ khai.
+#[derive(serde::Serialize)]
+pub(crate) struct TaxOverview {
+    pub(crate) year: i64,
+    /// Tổng doanh thu cả năm — cơ sở xếp nhóm hộ (1..4)
+    pub(crate) year_revenue: f64,
+    /// Nhóm hộ kinh doanh: 1 = ≤ 1 tỷ (miễn thuế), 2 = > 1–3 tỷ, 3 = > 3–50 tỷ, 4 = > 50 tỷ
+    pub(crate) group: i64,
+    /// Phương pháp tính TNCN đang áp dụng: "revenue" | "profit"
+    pub(crate) method: String,
+    /// Doanh thu trong kỳ khai
+    pub(crate) period_revenue: f64,
+    /// Chi phí trong kỳ khai (phiếu PC)
+    pub(crate) expense: f64,
+    /// Lợi nhuận kỳ = doanh thu kỳ − chi phí kỳ
+    pub(crate) profit: f64,
+    /// Thuế suất TNCN theo lợi nhuận (15%/17%/20%) hoặc 0 nếu không áp dụng
+    pub(crate) profit_rate: f64,
+    pub(crate) vat_payable: f64,
+    pub(crate) pit_tax: f64,
+    pub(crate) total_tax: f64,
 }
 
 // ─── CHI TIẾT CHỨNG TỪ (in PNK 01-VT / PXK 02-VT) ───
@@ -543,5 +545,4 @@ pub(crate) struct VoucherRow {
 pub(crate) struct ProductInfo {
     pub(crate) id: i64,
     pub(crate) vat_rate: f64,
-    pub(crate) vat_reduced: bool,
 }

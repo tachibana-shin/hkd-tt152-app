@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
+import { useBusinessStore } from "@/stores/business";
 import LoginView from "@/views/LoginView.vue";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const profile = useProfileStore();
+const business = useBusinessStore();
 const toast = useToast();
 const pageTitle = computed(() => route.meta?.title || "HKD Kế Toán");
 
@@ -60,6 +62,52 @@ async function onPickProfile(key: string) {
       life: 4000,
     });
   }
+}
+
+// ─── Cổng thông tin hộ kinh doanh ───
+// Ngay sau khi đăng nhập, nếu thông tin hộ kinh doanh (tên + MST) chưa được cập nhật:
+// - Tài khoản có quyền (admin): bắt buộc cập nhật ngay — dialog không đóng được cho tới khi lưu.
+// - Tài khoản khác: KHÔNG cho vào app — tự đăng xuất + yêu cầu đăng nhập bằng tài khoản có quyền.
+const forceBusinessConfig = ref(false);
+const gateBusy = ref(false);
+
+watch(
+  () => [auth.isLoggedIn, bootstrapped.value, profile.active?.key],
+  async ([loggedIn, booted]) => {
+    if (!booted || !loggedIn || gateBusy.value) return;
+    gateBusy.value = true;
+    try {
+      await business.load();
+      if (business.complete) return;
+      if (auth.isAdmin) {
+        forceBusinessConfig.value = true; // bắt cập nhật ngay
+        return;
+      }
+      // Không có quyền → không cho vào app.
+      if (profile.active) {
+        try {
+          await profile.setAutoLogin(profile.active.key, false); // tránh kẹt auto-login
+        } catch {
+          /* bỏ qua */
+        }
+      }
+      await auth.logout();
+      toast.add({
+        severity: "error",
+        summary: "Chưa thể sử dụng app",
+        detail:
+          "Thông tin hộ kinh doanh chưa được cập nhật. Vui lòng đăng nhập bằng tài khoản quản trị (admin) để cập nhật trước khi sử dụng.",
+        life: 6000,
+      });
+    } finally {
+      gateBusy.value = false;
+    }
+  },
+);
+
+function onForceConfigSaved() {
+  // Đã lưu xong → thông tin đủ → đóng dialog bắt buộc.
+  forceBusinessConfig.value = false;
 }
 
 type MenuItem = { label: string; icon: string; to: string; roles: string[] };
@@ -213,4 +261,12 @@ onMounted(bootstrap);
 
   <Toast position="top-right" />
   <ConfirmDialog />
+
+  <!-- Bắt buộc cập nhật thông tin hộ kinh doanh ngay sau khi đăng nhập (chỉ admin) -->
+  <BusinessConfigDialog
+    :visible="forceBusinessConfig"
+    :config="business.config"
+    required
+    @saved="onForceConfigSaved"
+  />
 </template>

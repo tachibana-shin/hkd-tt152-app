@@ -129,7 +129,6 @@ async function onCellSave({ field, data }: { field: string; data: Product }) {
       cost_price: data.cost_price,
       min_stock: data.min_stock,
       vat_rate: data.vat_rate,
-      vat_reduced: data.vat_reduced,
       import_tax_rate: data.import_tax_rate,
     });
     toast.add({ severity: "success", summary: "Đã lưu", detail: data.code });
@@ -195,7 +194,6 @@ const form = reactive({
   cost_price: 0,
   min_stock: 0,
   vat_rate: 1,
-  vat_reduced: false,
   import_tax_rate: 0,
 });
 
@@ -233,7 +231,6 @@ async function openCreate() {
       cost_price: 0,
       min_stock: settings.defaultMinStock,
       vat_rate: settings.vatRateDefault,
-      vat_reduced: false,
       import_tax_rate: settings.importTaxDefault,
     });
   } catch {
@@ -246,7 +243,6 @@ async function openCreate() {
       cost_price: 0,
       min_stock: 0,
       vat_rate: 1,
-      vat_reduced: false,
       import_tax_rate: 0,
     });
   }
@@ -275,7 +271,6 @@ async function save() {
       cost_price: form.cost_price,
       min_stock: form.min_stock,
       vat_rate: form.vat_rate / 100,
-      vat_reduced: form.vat_reduced,
       import_tax_rate: form.import_tax_rate / 100,
     });
     toast.add({
@@ -455,10 +450,7 @@ async function save() {
             :editable="auth.canStock"
           >
             <template #body="{ data }">
-              <Tag
-                :value="data.vat_rate * 100 + '%'"
-                :severity="data.vat_reduced ? 'secondary' : 'info'"
-              />
+              <Tag :value="data.vat_rate * 100 + '%'" severity="info" />
             </template>
             <template #editor="{ data }">
               <InputNumber
@@ -478,22 +470,6 @@ async function save() {
                 show-clear
                 @change="filterCallback()"
               />
-            </template>
-          </Column>
-          <Column
-            field="vat_reduced"
-            header="Giảm thuế"
-            sortable
-            :editable="auth.canStock"
-          >
-            <template #body="{ data }">
-              <Tag
-                :value="data.vat_reduced ? 'Giảm' : 'Không'"
-                :severity="data.vat_reduced ? 'warn' : 'secondary'"
-              />
-            </template>
-            <template #editor="{ data }">
-              <Checkbox v-model="data.vat_reduced" :binary="true" />
             </template>
           </Column>
           <Column
@@ -607,20 +583,7 @@ async function save() {
             class="w-full"
           />
         </FormField>
-        <div class="col-span-2 flex items-center gap-2 pt-2">
-          <Checkbox
-            v-model="form.vat_reduced"
-            :binary="true"
-            inputId="vat_reduced"
-          />
-          <label for="vat_reduced" class="text-sm">Giảm thuế GTGT</label>
-          <i
-            class="pi pi-info-circle cursor-help text-xs text-gray-400"
-            v-tooltip="'Theo Nghị quyết 174/2025'"
-            aria-hidden="true"
-          />
         </div>
-      </div>
     </AppDialog>
   </div>
 </template>

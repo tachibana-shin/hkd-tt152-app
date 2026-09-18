@@ -27,16 +27,14 @@ pub(crate) async fn seed_product(
     code: &str,
     name: &str,
     vat_rate: f64,
-    vat_reduced: bool,
 ) -> i64 {
     sqlx::query(
-        "INSERT INTO product (code, name, unit, vat_rate, vat_reduced)
-         VALUES (?, ?, 'Cái', ?, ?)",
+        "INSERT INTO product (code, name, unit, vat_rate)
+         VALUES (?, ?, 'Cái', ?)",
     )
     .bind(code)
     .bind(name)
     .bind(vat_rate)
-    .bind(vat_reduced)
     .execute(pool)
     .await
     .expect("seed product");

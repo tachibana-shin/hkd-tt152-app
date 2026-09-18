@@ -488,7 +488,7 @@ mod tests {
     #[tokio::test]
     async fn xuat_kho_fifo_va_ghi_so_ban_hang() {
         let pool = test_pool().await;
-        let p = seed_product(&pool, "P1", "Hàng A", 0.01, false).await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
         let w = seed_warehouse(&pool, "W1", "Kho 1").await;
         add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
         add_stock_lot(&pool, p, w, 10.0, 1200.0, "2026-02-01").await;
@@ -544,7 +544,7 @@ mod tests {
     #[tokio::test]
     async fn xuat_kho_thieu_ton_bao_loi_va_khong_doi_du_lieu() {
         let pool = test_pool().await;
-        let p = seed_product(&pool, "P1", "Hàng A", 0.01, false).await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
         let w = seed_warehouse(&pool, "W1", "Kho 1").await;
         add_stock_lot(&pool, p, w, 5.0, 1000.0, "2026-01-01").await;
 
@@ -575,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn nhap_kho_tao_lo_va_ghi_so_nhap() {
         let pool = test_pool().await;
-        seed_product(&pool, "P1", "Hàng A", 0.01, false).await;
+        seed_product(&pool, "P1", "Hàng A", 0.01).await;
         seed_warehouse(&pool, "W1", "Kho 1").await;
 
         let r = save_inbound_core(
