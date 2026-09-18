@@ -3,7 +3,7 @@ import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -153,10 +153,10 @@ onMounted(async () => {
           </Column>
           <Column field="quantity" header="SL" align="right" />
           <Column field="unit_price" header="Đơn giá" align="right">
-            <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.unit_price) }}</template>
           </Column>
           <Column field="amount" header="Thành tiền" align="right">
-            <template #body="{ data }">{{ fmt(data.amount) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
           </Column>
           <template #actions="{ data }">
             <Button

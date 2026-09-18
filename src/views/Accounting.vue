@@ -11,7 +11,7 @@ import type {
   TaxOverview,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
-import { fmtInt as fmt, fmtPct as pct } from "@/utils/format";
+import { fmtInt as fmt, fmtPct as pct, fmtVnd } from "@/utils/format";
 
 const business = useBusinessStore();
 const auth = useAuthStore();
@@ -370,19 +370,19 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
           >
         </Column>
         <Column field="revenue_up" header="Doanh thu tính thuế" align="right">
-          <template #body="{ data }">{{ fmt(data.revenue_up) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.revenue_up) }}</template>
         </Column>
         <Column field="revenue_down" header="Giảm trừ DT" align="right">
-          <template #body="{ data }">{{ fmt(data.revenue_down) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
         </Column>
         <Column field="vat_tax" header="Thuế GTGT phải nộp" align="right">
           <template #body="{ data }">
-            <b>{{ fmt(data.vat_tax) }}</b>
+            <b>{{ fmtVnd(data.vat_tax) }}</b>
           </template>
         </Column>
         <Column field="pit_tax" header="Thuế TNCN phải nộp" align="right">
           <template #body="{ data }">
-            <b>{{ fmt(data.pit_tax) }}</b>
+            <b>{{ fmtVnd(data.pit_tax) }}</b>
           </template>
         </Column>
         <template #empty
@@ -550,35 +550,35 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
           <template #body="{ data }">{{ pct(data.pit_rate) }}</template>
         </Column>
         <Column header="DT tính thuế GTGT – Tăng" align="right">
-          <template #body="{ data }">{{ fmt(data.revenue_up) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.revenue_up) }}</template>
           <template #footer>{{
-            declRows.length ? fmt(declTotals.revenue_up) : ""
+            declRows.length ? fmtVnd(declTotals.revenue_up) : ""
           }}</template>
         </Column>
         <Column header="DT tính thuế GTGT – Giảm" align="right">
-          <template #body="{ data }">{{ fmt(data.revenue_down) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
           <template #footer>{{
-            declRows.length ? fmt(declTotals.revenue_down) : ""
+            declRows.length ? fmtVnd(declTotals.revenue_down) : ""
           }}</template>
         </Column>
         <Column header="Thuế GTGT" align="right">
-          <template #body="{ data }">{{ fmt(data.vat_tax) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.vat_tax) }}</template>
           <template #footer>{{
-            declRows.length ? fmt(declTotals.vat_tax) : ""
+            declRows.length ? fmtVnd(declTotals.vat_tax) : ""
           }}</template>
         </Column>
         <Column header="Thuế GTGT phải nộp" align="right">
           <template #body="{ data }">
-            <b>{{ fmt(data.vat_payable) }}</b>
+            <b>{{ fmtVnd(data.vat_payable) }}</b>
           </template>
           <template #footer>{{
-            declRows.length ? fmt(declTotals.vat_payable) : ""
+            declRows.length ? fmtVnd(declTotals.vat_payable) : ""
           }}</template>
         </Column>
         <Column header="Thuế TNCN phải nộp" align="right">
-          <template #body="{ data }">{{ fmt(data.pit_tax) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.pit_tax) }}</template>
           <template #footer>{{
-            declRows.length ? fmt(declTotals.pit_tax) : ""
+            declRows.length ? fmtVnd(declTotals.pit_tax) : ""
           }}</template>
         </Column>
         <template #empty
@@ -596,25 +596,25 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
         <Column field="code" header="Mã TK" style="width: 90px" />
         <Column field="name" header="Tên tài khoản" />
         <Column field="opening_debit" header="Dư Nợ đầu kỳ" align="right">
-          <template #body="{ data }">{{ fmt(data.opening_debit) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.opening_debit) }}</template>
         </Column>
         <Column field="opening_credit" header="Dư Có đầu kỳ" align="right">
-          <template #body="{ data }">{{ fmt(data.opening_credit) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.opening_credit) }}</template>
         </Column>
         <Column field="debit_mvmt" header="Phát sinh Nợ" align="right">
-          <template #body="{ data }">{{ fmt(data.debit_mvmt) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.debit_mvmt) }}</template>
         </Column>
         <Column field="credit_mvmt" header="Phát sinh Có" align="right">
-          <template #body="{ data }">{{ fmt(data.credit_mvmt) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.credit_mvmt) }}</template>
         </Column>
         <Column field="closing_debit" header="Dư Nợ cuối kỳ" align="right">
           <template #body="{ data }">
-            <b>{{ fmt(data.closing_debit) }}</b>
+            <b>{{ fmtVnd(data.closing_debit) }}</b>
           </template>
         </Column>
         <Column field="closing_credit" header="Dư Có cuối kỳ" align="right">
           <template #body="{ data }">
-            <b>{{ fmt(data.closing_credit) }}</b>
+            <b>{{ fmtVnd(data.closing_credit) }}</b>
           </template>
         </Column>
         <template #empty

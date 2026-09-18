@@ -2,7 +2,7 @@
 // Màn in phiếu nhập kho (01-VT) / phiếu xuất kho (02-VT) theo bộ mẫu TT152.
 import { api } from "@/db";
 import type { BusinessConfig, VoucherRow } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const route = useRoute();
 const router = useRouter();
@@ -236,8 +236,8 @@ onBeforeUnmount(() => {
             <td class="border border-black px-1 py-1 text-center">{{ r.product_code }}</td>
             <td class="border border-black px-1 py-1 text-center">{{ r.unit }}</td>
             <td class="border border-black px-1 py-1 text-right">{{ fmt(r.quantity) }}</td>
-            <td class="border border-black px-1 py-1 text-right">{{ fmt(r.unit_price) }}</td>
-            <td class="border border-black px-1 py-1 text-right">{{ fmt(r.amount > 0 ? r.amount : r.quantity * r.unit_price) }}</td>
+            <td class="border border-black px-1 py-1 text-right">{{ fmtVnd(r.unit_price) }}</td>
+            <td class="border border-black px-1 py-1 text-right">{{ fmtVnd(r.amount > 0 ? r.amount : r.quantity * r.unit_price) }}</td>
           </tr>
         </tbody>
       </table>

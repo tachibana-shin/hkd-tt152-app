@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ImportItem } from "@/utils/importExcel";
 import { typeSeverity } from "@/utils/importExcel";
-import { fmtInt as fmt, fmtDec as fmt2 } from "@/utils/format";
+import { fmtDec as fmt2, fmtVnd } from "@/utils/format";
 
 defineProps<{
   rows: ImportItem[];
@@ -36,7 +36,7 @@ defineProps<{
       <template #body="{ data }">{{ fmt2(data.unit_price) }}</template>
     </Column>
     <Column field="amount" header="Số tiền" align="right">
-      <template #body="{ data }">{{ fmt(data.amount) }}</template>
+      <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
     </Column>
     <Column field="industry_code" header="Nhóm ngành" />
     <Column field="tax_period" header="Kỳ thuế" />

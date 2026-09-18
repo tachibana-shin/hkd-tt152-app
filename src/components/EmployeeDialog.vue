@@ -61,8 +61,17 @@ function fill() {
 
 watch(
   () => props.visible,
-  (open) => {
-    if (open) fill();
+  async (open) => {
+    if (!open) return;
+    fill();
+    // Thêm mới: tự sinh mã NV tiếp theo (NV001, NV002...) — sửa thì giữ nguyên mã.
+    if (props.employee == null) {
+      try {
+        form.code = await api.nextEmployeeCode();
+      } catch {
+        // Lỗi thì để trống nhập tay
+      }
+    }
   },
 );
 

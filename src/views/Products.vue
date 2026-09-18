@@ -5,7 +5,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useSettingsStore } from "@/stores/settings";
 import type { Product } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
@@ -397,22 +397,28 @@ async function save() {
             </template>
           </Column>
           <Column field="sale_price" header="Giá bán" sortable>
-            <template #body="{ data }">{{ fmt(data.sale_price) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.sale_price) }}</template>
             <template #filter="{ filterModel, filterCallback }">
               <InputNumber
                 v-model="filterModel.value"
                 :min="0"
+                mode="currency"
+                currency="VND"
+                locale="vi-VN"
                 placeholder="Bằng"
                 @input="filterCallback()"
               />
             </template>
           </Column>
           <Column field="cost_price" header="Giá vốn" sortable>
-            <template #body="{ data }">{{ fmt(data.cost_price) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.cost_price) }}</template>
             <template #filter="{ filterModel, filterCallback }">
               <InputNumber
                 v-model="filterModel.value"
                 :min="0"
+                mode="currency"
+                currency="VND"
+                locale="vi-VN"
                 placeholder="Bằng"
                 @input="filterCallback()"
               />

@@ -141,7 +141,7 @@ onMounted(load);
                 <InputText v-model="st.vat_options_text" class="w-full" />
               </FormField>
               <FormField label="Mặc định khi thêm sản phẩm">
-                <InputNumber v-model="st.vat_default" :min="0" class="w-full" />
+                <InputNumber v-model="st.vat_default" :min="0" suffix="%" class="w-full" />
               </FormField>
             </div>
           </section>
@@ -158,7 +158,7 @@ onMounted(load);
                 <InputText v-model="st.import_options_text" class="w-full" />
               </FormField>
               <FormField label="Mặc định khi thêm sản phẩm">
-                <InputNumber v-model="st.import_default" :min="0" class="w-full" />
+                <InputNumber v-model="st.import_default" :min="0" suffix="%" class="w-full" />
               </FormField>
             </div>
           </section>

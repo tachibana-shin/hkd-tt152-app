@@ -786,6 +786,7 @@ onMounted(() => catalog.loadAll());
             :min="0"
             :max="100"
             mode="decimal"
+            suffix="%"
           />
         </FormField>
         <FormField label="Thuế TNCN (%)">
@@ -794,6 +795,7 @@ onMounted(() => catalog.loadAll());
             :min="0"
             :max="100"
             mode="decimal"
+            suffix="%"
           />
         </FormField>
         <p class="col-span-2 text-xs text-gray-400">

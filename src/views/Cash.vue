@@ -4,7 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { api } from "@/db";
 import type { JournalEntryRow, Account } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -281,7 +281,7 @@ onMounted(async () => {
             }}</template>
           </Column>
           <Column field="amount" header="Số tiền" align="right">
-            <template #body="{ data }">{{ fmt(data.amount) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
           </Column>
           <Column field="industry_code" header="Nhóm ngành">
             <template #body="{ data }">

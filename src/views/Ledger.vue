@@ -3,7 +3,7 @@ import { storeToRefs } from "pinia";
 import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import type { LedgerRow } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const business = useBusinessStore();
 const { config } = storeToRefs(business);
@@ -145,11 +145,11 @@ onMounted(async () => {
             <template #body="{ data }">{{ fmt(data.quantity) }}</template>
           </Column>
           <Column field="unit_price" header="Đơn giá" align="right">
-            <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.unit_price) }}</template>
           </Column>
           <Column field="amount" header="Số tiền" align="right">
             <template #body="{ data }">
-              <b>{{ fmt(data.amount) }}</b>
+              <b>{{ fmtVnd(data.amount) }}</b>
             </template>
           </Column>
           <template #empty

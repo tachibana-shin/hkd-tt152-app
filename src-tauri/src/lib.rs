@@ -115,6 +115,7 @@ pub fn run() {
             commands::catalog::next_warehouse_code,
             commands::catalog::next_customer_code,
             commands::catalog::next_supplier_code,
+            commands::catalog::next_employee_code,
             commands::hddt::hddt_status,
             commands::hddt::hddt_send_simulated,
             commands::import::import_nhap_lieu,

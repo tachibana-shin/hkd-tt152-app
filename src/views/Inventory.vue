@@ -4,7 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import { useInvoiceStore } from "@/stores/invoice";
-import { fmtDec as fmt } from "@/utils/format";
+import { fmtDec as fmt, fmtVnd } from "@/utils/format";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -238,7 +238,7 @@ onMounted(async () => {
                 </Column>
                 <Column field="unit_cost" header="Đơn giá nhập" align="right">
                   <template #body="{ data }">{{
-                    fmt(data.unit_cost)
+                    fmtVnd(data.unit_cost)
                   }}</template>
                 </Column>
                 <template #empty

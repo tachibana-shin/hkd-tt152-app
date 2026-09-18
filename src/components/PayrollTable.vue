@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Employee, PayrollRow } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 import { type PayrollPreview, previewPayroll } from "@/utils/payroll";
 
 const props = withDefaults(
@@ -60,10 +60,10 @@ const totals = computed(() => {
       </template>
     </Column>
     <Column header="Lương thời gian" align="right">
-      <template #body="{ data }">{{ fmt(preview(data).timeSalary) }}</template>
+      <template #body="{ data }">{{ fmtVnd(preview(data).timeSalary) }}</template>
     </Column>
     <Column header="Phụ cấp" align="right">
-      <template #body="{ data }">{{ fmt(preview(data).allowance) }}</template>
+      <template #body="{ data }">{{ fmtVnd(preview(data).allowance) }}</template>
     </Column>
     <Column header="Thưởng">
       <template #body="{ index }">
@@ -79,13 +79,13 @@ const totals = computed(() => {
       </template>
     </Column>
     <Column header="Lương đóng BH" align="right">
-      <template #body="{ data }">{{ fmt(preview(data).bhBase) }}</template>
+      <template #body="{ data }">{{ fmtVnd(preview(data).bhBase) }}</template>
     </Column>
     <Column header="BH SD (21,5%)" align="right">
-      <template #body="{ data }">{{ fmt(preview(data).bhEmployer) }}</template>
+      <template #body="{ data }">{{ fmtVnd(preview(data).bhEmployer) }}</template>
     </Column>
     <Column header="BH NLĐ (10,5%)" align="right">
-      <template #body="{ data }">{{ fmt(preview(data).bhEmployee) }}</template>
+      <template #body="{ data }">{{ fmtVnd(preview(data).bhEmployee) }}</template>
     </Column>
     <Column header="TNCN">
       <template #body="{ index }">
@@ -115,7 +115,7 @@ const totals = computed(() => {
     </Column>
     <Column header="Thực lĩnh" align="right">
       <template #body="{ data }">
-        <span class="font-bold">{{ fmt(preview(data).net) }}</span>
+        <span class="font-bold">{{ fmtVnd(preview(data).net) }}</span>
       </template>
     </Column>
     <Column header="Ghi chú">

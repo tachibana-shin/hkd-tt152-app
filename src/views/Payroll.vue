@@ -2,7 +2,7 @@
 import { api } from "@/db";
 import type { AttendanceWorkDay, Employee, PayrollRow } from "@/types";
 import { useAuthStore } from "@/stores/auth";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -271,19 +271,19 @@ onMounted(() => {
           <template #body="{ data }">{{ data.department || "—" }}</template>
         </Column>
         <Column field="basic_salary" header="Lương HĐ" align="right">
-          <template #body="{ data }">{{ fmt(data.basic_salary) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.basic_salary) }}</template>
         </Column>
         <Column field="allowance_cv" header="PC CV" align="right">
-          <template #body="{ data }">{{ fmt(data.allowance_cv) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.allowance_cv) }}</template>
         </Column>
         <Column field="allowance_xx" header="PC XX" align="right">
-          <template #body="{ data }">{{ fmt(data.allowance_xx) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.allowance_xx) }}</template>
         </Column>
         <Column field="allowance_phone" header="PC ĐT" align="right">
-          <template #body="{ data }">{{ fmt(data.allowance_phone) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.allowance_phone) }}</template>
         </Column>
         <Column field="bh_salary" header="Lương đóng BH" align="right">
-          <template #body="{ data }">{{ fmt(data.bh_salary) }}</template>
+          <template #body="{ data }">{{ fmtVnd(data.bh_salary) }}</template>
         </Column>
         <template #actions="{ data }">
           <Button

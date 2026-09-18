@@ -164,6 +164,7 @@ export const api = {
   nextWarehouseCode: () => invoke<string>("next_warehouse_code"),
   nextCustomerCode: () => invoke<string>("next_customer_code"),
   nextSupplierCode: () => invoke<string>("next_supplier_code"),
+  nextEmployeeCode: () => invoke<string>("next_employee_code"),
   getSuppliers: async () => parse<Supplier[]>(await invoke<string>("get_suppliers")),
   saveSupplier: (s: Partial<Supplier>) =>
     invoke<string>("save_supplier", {

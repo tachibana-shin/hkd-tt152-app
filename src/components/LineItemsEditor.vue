@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Bảng nhập dòng mặt hàng dùng chung cho phiếu nhập / phiếu xuất.
 import { useCatalogStore } from "@/stores/catalog";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 import type { IndustryGroup, Product, Warehouse } from "@/types";
 
 interface LineItem {
@@ -149,7 +149,7 @@ const total = computed(() =>
     <Column v-if="showAmount" header="Thành tiền" align="right">
       <template #body="{ index }">
         <span class="font-medium">{{
-          fmt(items[index].quantity * items[index].unit_price)
+          fmtVnd(items[index].quantity * items[index].unit_price)
         }}</span>
       </template>
     </Column>

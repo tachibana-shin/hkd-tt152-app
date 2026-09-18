@@ -5,7 +5,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
 import type { Invoice, InvoiceItem } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -219,7 +219,7 @@ onMounted(async () => {
           <Column field="customer" header="Khách hàng" />
           <Column field="customer_tax_code" header="MST" />
           <Column field="total" header="Tổng tiền" align="right">
-            <template #body="{ data }">{{ fmt(data.total) }} đ</template>
+            <template #body="{ data }">{{ fmtVnd(data.total) }}</template>
           </Column>
           <Column header="Trạng thái">
             <template #body="{ data }">
@@ -370,10 +370,10 @@ onMounted(async () => {
           <Column field="unit" header="ĐVT" />
           <Column field="quantity" header="SL" align="right" />
           <Column field="unit_price" header="Đơn giá" align="right">
-            <template #body="{ data }">{{ fmt(data.unit_price) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.unit_price) }}</template>
           </Column>
           <Column field="subtotal" header="Thành tiền" align="right">
-            <template #body="{ data }">{{ fmt(data.subtotal) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.subtotal) }}</template>
           </Column>
         </AppDataTable>
         <div class="mt-4 flex flex-col items-end gap-1 text-sm">

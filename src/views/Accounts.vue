@@ -2,7 +2,7 @@
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import type { Account } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -175,10 +175,10 @@ onMounted(load);
           <Column field="code" header="Mã TK" style="width: 120px" />
           <Column field="name" header="Tên tài khoản" />
           <Column field="opening_debit" header="Dư Nợ đầu kỳ" align="right">
-            <template #body="{ data }">{{ fmt(data.opening_debit) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.opening_debit) }}</template>
           </Column>
           <Column field="opening_credit" header="Dư Có đầu kỳ" align="right">
-            <template #body="{ data }">{{ fmt(data.opening_credit) }}</template>
+            <template #body="{ data }">{{ fmtVnd(data.opening_credit) }}</template>
           </Column>
           <Column
             v-if="auth.canAccounting"
@@ -218,12 +218,12 @@ onMounted(load);
         >
           <span>
             <span class="text-gray-500">Tổng Dư Nợ:</span>
-            <b class="text-primary-600 ml-1">{{ fmt(totalDebit) }}</b>
+            <b class="text-primary-600 ml-1">{{ fmtVnd(totalDebit) }}</b>
           </span>
           <span class="text-gray-400">•</span>
           <span>
             <span class="text-gray-500">Tổng Dư Có:</span>
-            <b class="text-primary-600 ml-1">{{ fmt(totalCredit) }}</b>
+            <b class="text-primary-600 ml-1">{{ fmtVnd(totalCredit) }}</b>
           </span>
         </div>
       </template>

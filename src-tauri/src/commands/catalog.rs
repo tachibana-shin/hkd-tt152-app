@@ -425,6 +425,13 @@ pub(crate) async fn next_supplier_code(state: State<'_, AppState>) -> Result<Str
     next_entity_code(&pool, "supplier", "NCC", 3).await
 }
 
+#[tauri::command]
+pub(crate) async fn next_employee_code(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    next_entity_code(&pool, "employee", "NV", 3).await
+}
+
 // ─── LAZY LOAD SẢN PHẨM ───
 // Nhận event lazy của PrimeVue DataTable (first/rows/sortField/sortOrder/multiSortMeta/filters)
 // rồi trả về đúng 1 trang + tổng số dòng — tránh tải toàn bộ vài nghìn sản phẩm về frontend.
