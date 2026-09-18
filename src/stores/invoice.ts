@@ -26,7 +26,12 @@ export const useInvoiceStore = defineStore("invoice", () => {
     date: string;
     customer: string;
     customer_tax_code: string;
-    items: { product_code: string; quantity: number; unit_price: number }[];
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      industry_code?: string;
+    }[];
   }) {
     const res = await api.saveInvoice(args);
     await loadInvoices();

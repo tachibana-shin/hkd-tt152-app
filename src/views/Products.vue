@@ -14,6 +14,7 @@ const {
   pageProducts: products,
   totalProducts,
   productsLoading: loading,
+  industryGroups,
 } = storeToRefs(catalog);
 const toast = useToast();
 const confirm = useConfirm();
@@ -39,6 +40,7 @@ const filters = ref<Record<string, GridFilter>>({
   min_stock: { value: null, matchMode: FilterMatchMode.EQUALS },
   vat_rate: { value: null, matchMode: FilterMatchMode.EQUALS },
   import_tax_rate: { value: null, matchMode: FilterMatchMode.EQUALS },
+  industry_code: { value: null, matchMode: FilterMatchMode.CONTAINS },
 });
 
 const hasActiveFilter = computed(() =>
@@ -93,7 +95,10 @@ function resetFilters() {
   Object.values(filters.value).forEach((f) => (f.value = null));
 }
 
-onMounted(loadLazyData);
+onMounted(() => {
+  loadLazyData();
+  catalog.loadIndustryGroups(); // nhóm ngành cho cột + dialog (màn này không loadAll)
+});
 
 // ─── SELECTION (checkbox, giữ lựa chọn qua các trang bằng id) ───
 const selectedIds = ref<Set<number>>(new Set());
@@ -130,6 +135,8 @@ async function onCellSave({ field, data }: { field: string; data: Product }) {
       min_stock: data.min_stock,
       vat_rate: data.vat_rate,
       import_tax_rate: data.import_tax_rate,
+      is_service: data.is_service ?? false,
+      industry_code: data.industry_code ?? "",
     });
     toast.add({ severity: "success", summary: "Đã lưu", detail: data.code });
   } catch (e) {
@@ -193,8 +200,10 @@ const form = reactive({
   sale_price: 0,
   cost_price: 0,
   min_stock: 0,
-  vat_rate: 1,
+  vat_rate: 10,
   import_tax_rate: 0,
+  is_service: false,
+  industry_code: "PPHH",
 });
 
 // Thuế nhập khẩu dùng AutoComplete: chọn nhanh từ danh sách cấu hình hoặc gõ tùy ý.
@@ -232,6 +241,8 @@ async function openCreate() {
       min_stock: settings.defaultMinStock,
       vat_rate: settings.vatRateDefault,
       import_tax_rate: settings.importTaxDefault,
+      is_service: false,
+      industry_code: "PPHH",
     });
   } catch {
     Object.assign(form, {
@@ -242,8 +253,10 @@ async function openCreate() {
       sale_price: 0,
       cost_price: 0,
       min_stock: 0,
-      vat_rate: 1,
+      vat_rate: 10,
       import_tax_rate: 0,
+      is_service: false,
+      industry_code: "PPHH",
     });
   }
   syncImportTaxText();
@@ -272,6 +285,8 @@ async function save() {
       min_stock: form.min_stock,
       vat_rate: form.vat_rate / 100,
       import_tax_rate: form.import_tax_rate / 100,
+      is_service: form.is_service,
+      industry_code: form.industry_code,
     });
     toast.add({
       severity: "success",
@@ -444,8 +459,81 @@ async function save() {
             </template>
           </Column>
           <Column
+            field="is_service"
+            header="Loại"
+            sortable
+            :editable="auth.canStock"
+          >
+            <template #body="{ data }">
+              <Tag
+                :value="data.is_service ? 'Dịch vụ' : 'Hàng hóa'"
+                :severity="data.is_service ? 'warning' : 'info'"
+              />
+            </template>
+            <template #editor="{ data }">
+              <Select
+                :model-value="data.is_service ? 'service' : 'goods'"
+                :options="[
+                  {
+                    label: 'Hàng hóa (theo dõi tồn kho)',
+                    value: 'goods',
+                  },
+                  {
+                    label: 'Dịch vụ (không theo dõi tồn kho)',
+                    value: 'service',
+                  },
+                ]"
+                option-label="label"
+                option-value="value"
+                class="w-full"
+                @update:model-value="
+                  (v: string) => (data.is_service = v === 'service')
+                "
+              />
+            </template>
+          </Column>
+          <Column
+            field="industry_code"
+            header="Nhóm ngành"
+            sortable
+            :editable="auth.canStock"
+          >
+            <template #body="{ data }">
+              <Tag
+                v-if="data.industry_code"
+                :value="
+                  industryGroups.find((g) => g.code === data.industry_code)
+                    ?.name ?? data.industry_code
+                "
+                severity="secondary"
+              />
+              <span v-else class="text-gray-400">—</span>
+            </template>
+            <template #editor="{ data }">
+              <Select
+                v-model="data.industry_code"
+                :options="industryGroups"
+                option-label="name"
+                option-value="code"
+                show-clear
+                class="w-full"
+              />
+            </template>
+            <template #filter="{ filterModel, filterCallback }">
+              <Select
+                v-model="filterModel.value"
+                :options="industryGroups"
+                option-label="name"
+                option-value="code"
+                placeholder="Tất cả"
+                show-clear
+                @change="filterCallback()"
+              />
+            </template>
+          </Column>
+          <Column
             field="vat_rate"
-            header="Thuế GTGT"
+            header="Thuế GTGT đầu vào"
             sortable
             :editable="auth.canStock"
           >
@@ -544,6 +632,41 @@ async function save() {
             placeholder="Tên hàng hóa / dịch vụ"
           />
         </FormField>
+        <FormField label="Loại">
+          <Select
+            v-model="form.is_service"
+            :options="[
+              { label: 'Hàng hóa (theo dõi tồn kho)', value: false },
+              {
+                label: 'Dịch vụ (không nhập/xuất kho — vd nhân công)',
+                value: true,
+              },
+            ]"
+            option-label="label"
+            option-value="value"
+            size="small"
+            class="w-full"
+          />
+          <p class="text-xs text-gray-400 mt-1">
+            Thuế suất GTGT là thuế trên hóa đơn <b>mua vào</b> (đầu vào). HKD
+            không xuất VAT khi bán ra — thuế bán ra tính theo nhóm ngành khi ghi
+            phiếu xuất / hóa đơn.
+          </p>
+        </FormField>
+        <FormField label="Nhóm ngành (cơ sở tính thuế bán ra)">
+          <Select
+            v-model="form.industry_code"
+            :options="industryGroups"
+            option-label="name"
+            option-value="code"
+            show-clear
+            size="small"
+            class="w-full"
+          />
+          <p class="text-xs text-gray-400 mt-1">
+            Tự điền vào dòng phiếu xuất / hóa đơn.
+          </p>
+        </FormField>
         <FormField label="Giá bán">
           <InputNumber
             v-model="form.sale_price"
@@ -551,6 +674,7 @@ async function save() {
             mode="currency"
             currency="VND"
             locale="vi-VN"
+            size="small"
             class="w-full"
           />
         </FormField>
@@ -561,16 +685,18 @@ async function save() {
             mode="currency"
             currency="VND"
             locale="vi-VN"
+            size="small"
             class="w-full"
           />
         </FormField>
         <FormField label="Tồn tối thiểu">
-          <InputNumber v-model="form.min_stock" :min="0" class="w-full" />
+          <InputNumber v-model="form.min_stock" :min="0" size="small" class="w-full" />
         </FormField>
-        <FormField label="Thuế suất GTGT (%)">
+        <FormField label="Thuế suất GTGT đầu vào (%)">
           <Select
             v-model="form.vat_rate"
             :options="settings.vatRateOptions"
+            size="small"
             class="w-full"
           />
         </FormField>
@@ -580,6 +706,7 @@ async function save() {
             :suggestions="importTaxSuggestions"
             @complete="onImportTaxComplete"
             placeholder="Gõ hoặc chọn tỷ lệ"
+            size="small"
             class="w-full"
           />
         </FormField>

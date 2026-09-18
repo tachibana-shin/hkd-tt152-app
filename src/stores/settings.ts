@@ -10,8 +10,8 @@ export const useSettingsStore = defineStore("settings", () => {
     settings.value = await api.getAppSettings();
   }
 
-  const vatRateOptions = computed(() => settings.value?.product_vat_rate_options ?? [1, 3, 5]);
-  const vatRateDefault = computed(() => settings.value?.product_vat_rate_default ?? 1);
+  const vatRateOptions = computed(() => settings.value?.product_vat_rate_options ?? [5, 8, 10]);
+  const vatRateDefault = computed(() => settings.value?.product_vat_rate_default ?? 10);
   const importTaxOptions = computed(
     () => settings.value?.product_import_tax_options ?? [0, 5, 8, 10],
   );

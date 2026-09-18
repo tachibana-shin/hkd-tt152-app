@@ -129,8 +129,13 @@ onMounted(load);
           <!-- Thuế suất GTGT -->
           <section>
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-              <i class="pi pi-percentage text-primary-500" /> Thuế suất GTGT (%) — hàng bán ra
+              <i class="pi pi-percentage text-primary-500" /> Thuế suất GTGT đầu vào (%) — trên hóa đơn mua hàng
             </h4>
+            <p class="text-xs text-gray-500 mb-3">
+              Ghi nhận thuế suất trên hóa đơn <b>mua vào</b> (nhà cung cấp cộng %
+              này khi xuất hàng cho hộ). HKD không xuất VAT khi bán ra — thuế
+              bán ra theo tỷ lệ nhóm ngành trên doanh thu.
+            </p>
             <div class="grid grid-cols-2 gap-4">
               <FormField label="Danh sách lựa chọn (cách nhau bởi dấu phẩy)">
                 <InputText v-model="st.vat_options_text" class="w-full" />

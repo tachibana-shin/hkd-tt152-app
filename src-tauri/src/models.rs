@@ -78,6 +78,10 @@ pub(crate) struct ProductRow {
     pub(crate) min_stock: f64,
     pub(crate) vat_rate: f64,
     pub(crate) import_tax_rate: f64,
+    /// Sản phẩm dịch vụ (nhân công...) — không theo dõi tồn kho.
+    pub(crate) is_service: bool,
+    /// Nhóm ngành mặc định của sản phẩm (cơ sở tính thuế bán ra).
+    pub(crate) industry_code: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -267,6 +271,10 @@ pub(crate) struct InvoiceItemRow {
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
     pub(crate) subtotal: f64,
+    /// Nhóm ngành của dòng (cơ sở tỷ lệ thuế bán ra).
+    pub(crate) industry_code: String,
+    pub(crate) vat_rate: f64,
+    pub(crate) pit_rate: f64,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -308,6 +316,9 @@ pub(crate) struct InvoiceItemInput {
     pub(crate) product_code: String,
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
+    /// Nhóm ngành dòng (rỗng → lấy theo sản phẩm).
+    #[serde(default)]
+    pub(crate) industry_code: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -544,5 +555,8 @@ pub(crate) struct VoucherRow {
 
 pub(crate) struct ProductInfo {
     pub(crate) id: i64,
-    pub(crate) vat_rate: f64,
+    /// Sản phẩm dịch vụ — không theo dõi tồn kho (không kiểm tra FIFO khi xuất).
+    pub(crate) is_service: bool,
+    /// Nhóm ngành mặc định — dùng khi dòng xuất/hóa đơn không chỉ định nhóm.
+    pub(crate) industry_code: String,
 }

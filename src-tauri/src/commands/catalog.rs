@@ -21,7 +21,7 @@ pub(crate) async fn get_accounts(state: State<'_, AppState>) -> Result<String, S
 #[tauri::command]
 pub(crate) async fn get_products(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<ProductRow> = sqlx::query_as::<_, ProductRow>(
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code
          FROM product ORDER BY code",
     )
     .fetch_all(&*state.pool.read().await)
@@ -166,16 +166,19 @@ pub(crate) async fn save_product(
     min_stock: f64,
     vat_rate: f64,
     import_tax_rate: f64,
+    is_service: bool,
+    industry_code: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     sqlx::query(
-        "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(code) DO UPDATE SET
             name = excluded.name, unit = excluded.unit,
             sale_price = excluded.sale_price, cost_price = excluded.cost_price,
             min_stock = excluded.min_stock, vat_rate = excluded.vat_rate,
-            import_tax_rate = excluded.import_tax_rate",
+            import_tax_rate = excluded.import_tax_rate, is_service = excluded.is_service,
+            industry_code = excluded.industry_code",
     )
     .bind(&code)
     .bind(&name)
@@ -185,6 +188,8 @@ pub(crate) async fn save_product(
     .bind(min_stock)
     .bind(vat_rate)
     .bind(import_tax_rate)
+    .bind(is_service)
+    .bind(&industry_code)
     .execute(&*state.pool.read().await)
     .await
     .map_err(|e| e.to_string())?;
@@ -277,11 +282,11 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
     let offset = ev.first.unwrap_or(0).max(0);
 
     // Cột được phép lọc / sắp xếp (whitelist — tránh SQL injection từ client).
-    const TEXT_FIELDS: &[&str] = &["code", "name", "unit"];
+    const TEXT_FIELDS: &[&str] = &["code", "name", "unit", "industry_code"];
     const NUM_FIELDS: &[&str] = &["sale_price", "cost_price", "min_stock", "vat_rate", "import_tax_rate"];
     const SORTABLE: &[&str] = &[
         "id", "code", "name", "unit", "sale_price", "cost_price",
-        "min_stock", "vat_rate", "import_tax_rate",
+        "min_stock", "vat_rate", "import_tax_rate", "is_service", "industry_code",
     ];
 
     let mut clauses: Vec<String> = Vec::new();
@@ -403,7 +408,7 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
     }
 
     let sql = format!(
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code
          FROM product{} ORDER BY {} LIMIT ? OFFSET ?",
         where_sql,
         sorts.join(", ")

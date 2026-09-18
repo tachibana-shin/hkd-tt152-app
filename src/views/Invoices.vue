@@ -10,7 +10,7 @@ import { fmtInt as fmt } from "@/utils/format";
 const auth = useAuthStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
-const { products, customers } = storeToRefs(catalog);
+const { products, customers, industryGroups } = storeToRefs(catalog);
 const { invoices, detail, loading } = storeToRefs(invoiceStore);
 const toast = useToast();
 
@@ -32,7 +32,12 @@ const form = reactive({
   date: new Date(),
   customer: "",
   customer_tax_code: "",
-  items: [] as { product_code: string; quantity: number; unit_price: number }[],
+  items: [] as {
+    product_code: string;
+    quantity: number;
+    unit_price: number;
+    industry_code?: string;
+  }[],
 });
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
@@ -57,7 +62,12 @@ function openCreate() {
 }
 
 function addRow() {
-  form.items.push({ product_code: "", quantity: 1, unit_price: 0 });
+  form.items.push({
+    product_code: "",
+    quantity: 1,
+    unit_price: 0,
+    industry_code: "",
+  });
 }
 
 function removeRow(i: number) {
@@ -93,7 +103,7 @@ async function save() {
     toast.add({
       severity: "success",
       summary: `Đã lập hóa đơn ${form.number}`,
-      detail: `Tổng: ${fmt(res.total)} đ • Thuế GTGT: ${fmt(res.vat_amount)} đ`,
+      detail: `Tổng tiền: ${fmt(res.total)} đ • Thuế phải nộp (tỷ lệ nhóm ngành): ${fmt(res.tax_payable ?? 0)} đ`,
     });
     draftDialog.value = false;
   } catch (e) {
@@ -211,9 +221,6 @@ onMounted(async () => {
           <Column field="total" header="Tổng tiền" align="right">
             <template #body="{ data }">{{ fmt(data.total) }} đ</template>
           </Column>
-          <Column field="vat_amount" header="Thuế GTGT" align="right">
-            <template #body="{ data }">{{ fmt(data.vat_amount) }} đ</template>
-          </Column>
           <Column header="Trạng thái">
             <template #body="{ data }">
               <Tag
@@ -314,10 +321,12 @@ onMounted(async () => {
       <LineItemsEditor
         :items="form.items"
         :products="products"
+        :industry-groups="industryGroups"
         :can-edit="auth.canAccounting"
         price-field="sale_price"
-        info="Kiểm tra tồn kho trước khi lưu."
-        total-label="Tổng tiền (chưa thuế):"
+        show-industry
+        info="Nhóm ngành tự lấy theo sản phẩm (đổi được trên dòng). Hàng hóa phải có đủ tồn kho; sản phẩm dịch vụ (nhân công...) không cần tồn kho."
+        total-label="Tổng tiền:"
         @add="addRow"
         @remove="removeRow"
       />
@@ -352,6 +361,12 @@ onMounted(async () => {
         <AppDataTable :value="detail.items as InvoiceItem[]" stripedRows>
           <Column field="product_code" header="Mã SP" />
           <Column field="product_name" header="Tên sản phẩm" />
+          <Column field="industry_code" header="Nhóm ngành">
+            <template #body="{ data }">{{
+              industryGroups.find((g) => g.code === data.industry_code)?.name ??
+              (data.industry_code || "—")
+            }}</template>
+          </Column>
           <Column field="unit" header="ĐVT" />
           <Column field="quantity" header="SL" align="right" />
           <Column field="unit_price" header="Đơn giá" align="right">
@@ -367,18 +382,27 @@ onMounted(async () => {
             ><b>{{ fmt(detail.invoice.total) }} đ</b>
           </div>
           <div class="flex gap-6">
-            <span class="text-gray-500">Thuế GTGT:</span
-            ><b>{{ fmt(detail.invoice.vat_amount) }} đ</b>
-          </div>
-          <div class="flex gap-6 text-base font-bold text-primary-600">
-            <span>Tổng cộng:</span
-            ><span
-              >{{
-                fmt(detail.invoice.total + detail.invoice.vat_amount)
-              }}
-              đ</span
+            <span class="text-gray-500"
+              >Thuế GTGT phải nộp (theo tỷ lệ nhóm ngành):</span
+            ><b>{{
+              fmt(
+                (detail.items as InvoiceItem[]).reduce(
+                  (s, it) => s + it.subtotal * (it.vat_rate ?? 0),
+                  0,
+                ),
+              )
+            }}
+              đ</b
             >
           </div>
+          <div class="flex gap-6 text-base font-bold text-primary-600">
+            <span>Tổng tiền thanh toán:</span
+            ><span>{{ fmt(detail.invoice.total) }} đ</span>
+          </div>
+          <p class="text-xs text-gray-400">
+            Hóa đơn bán hàng của HKD không tách thuế GTGT — thuế nộp theo tỷ lệ
+            nhóm ngành trên doanh thu (báo cáo thuế).
+          </p>
         </div>
       </template>
     </AppDialog>

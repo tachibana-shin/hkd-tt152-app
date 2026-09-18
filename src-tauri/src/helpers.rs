@@ -10,14 +10,16 @@ pub(crate) async fn resolve_product(
     tx: &mut SqliteTransaction<'_>,
     code: &str,
 ) -> Result<ProductInfo, String> {
-    let row: (i64, f64) = sqlx::query_as("SELECT id, vat_rate FROM product WHERE code = ?")
-        .bind(code)
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(|_| format!("Không tìm thấy sản phẩm có mã '{}'", code))?;
+    let row: (i64, bool, String) =
+        sqlx::query_as("SELECT id, is_service, industry_code FROM product WHERE code = ?")
+            .bind(code)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|_| format!("Không tìm thấy sản phẩm có mã '{}'", code))?;
     Ok(ProductInfo {
         id: row.0,
-        vat_rate: row.1,
+        is_service: row.1,
+        industry_code: row.2,
     })
 }
 

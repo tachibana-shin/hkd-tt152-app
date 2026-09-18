@@ -148,7 +148,65 @@ pub(crate) async fn save_outbound_core(
     for item in items {
         let product = resolve_product(&mut tx, &item.product_code).await?;
 
-        // FIFO: lấy các lô chưa xuất hết theo ngày nhập
+        // Nhóm ngành trên dòng: ưu tiên khai trên dòng, rỗng → nhóm ngành mặc định
+        // của sản phẩm (cơ sở tỷ lệ thuế bán ra).
+        let industry = if item.industry_code.trim().is_empty() {
+            product.industry_code.clone()
+        } else {
+            item.industry_code.trim().to_string()
+        };
+        if industry.is_empty() {
+            return Err(format!(
+                "Sản phẩm '{}' chưa có nhóm ngành — hãy gán nhóm ngành cho sản phẩm (màn Sản phẩm) hoặc chọn nhóm ngành trên dòng",
+                item.product_code
+            ));
+        }
+
+        // tỷ lệ thuế theo nhóm ngành
+        let (vat_rate, pit_rate) = {
+            let r = sqlx::query!(
+                "SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?",
+                industry
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", industry))?;
+            (r.vat_rate, r.pit_rate)
+        };
+
+        // ghi sổ bán hàng (doanh thu = giá bán * SL)
+        let amount = item.quantity * item.unit_price;
+
+        // Sản phẩm dịch vụ (nhân công...): không theo dõi tồn kho → chỉ ghi doanh thu,
+        // không xuất FIFO, không giá vốn.
+        if product.is_service {
+            insert_journal_entry(
+                &mut tx,
+                posting_date,
+                voucher_no,
+                "PX",
+                description,
+                &item.product_code,
+                "",
+                customer_code,
+                item.quantity,
+                item.unit_price,
+                amount,
+                "131",
+                "511",
+                &industry,
+                vat_rate,
+                pit_rate,
+                unit_code,
+                "",
+                note,
+            )
+            .await?;
+            revenue_total += amount;
+            continue;
+        }
+
+        // Hàng hóa: FIFO lấy các lô chưa xuất hết theo ngày nhập
         let lots: Vec<(i64, f64, f64)> = sqlx::query_as(
             "SELECT id, quantity, unit_cost FROM stock_lot
              WHERE product_id = ? AND depleted = 0
@@ -177,20 +235,6 @@ pub(crate) async fn save_outbound_core(
             .map_err(|e| e.to_string())?;
         }
 
-        // tỷ lệ thuế theo nhóm ngành
-        let (vat_rate, pit_rate) = {
-            let r = sqlx::query!(
-                "SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?",
-                item.industry_code
-            )
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", item.industry_code))?;
-            (r.vat_rate, r.pit_rate)
-        };
-
-        // ghi sổ bán hàng (doanh thu = giá bán * SL)
-        let amount = item.quantity * item.unit_price;
         insert_journal_entry(
             &mut tx,
             posting_date,
@@ -205,7 +249,7 @@ pub(crate) async fn save_outbound_core(
             amount,
             "131",
             "511",
-            &item.industry_code,
+            &industry,
             vat_rate,
             pit_rate,
             unit_code,
@@ -568,6 +612,70 @@ mod tests {
             scalar_f64(&pool, "SELECT quantity FROM stock_lot").await,
             5.0
         );
+    }
+
+    #[tokio::test]
+    async fn xuat_kho_dich_vu_khong_can_ton_kho() {
+        let pool = test_pool().await;
+        // Dịch vụ (nhân công): không có lô tồn kho nào; nhóm ngành gán trên sản phẩm
+        // (DVXD-KNL → GTGT 5%, TNCN 2%) để kiểm tra fallback khi dòng bỏ trống nhóm.
+        seed_product(&pool, "S1", "Nhân công", 0.0).await;
+        sqlx::query(
+            "UPDATE product SET is_service = 1, industry_code = 'DVXD-KNL' WHERE code = 'S1'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let r = save_outbound_core(
+            &pool,
+            "2026-03-10",
+            "PXK-SV",
+            "Bán dịch vụ",
+            "",
+            "HaNoi-01",
+            &[OutboundItemInput {
+                product_code: "S1".into(),
+                quantity: 5.0,
+                unit_price: 300_000.0,
+                industry_code: "".into(), // rỗng → lấy nhóm ngành của sản phẩm
+            }],
+            "",
+        )
+        .await
+        .expect("xuất dịch vụ không cần tồn kho");
+
+        // Chỉ ghi doanh thu, không giá vốn, không đụng stock_lot.
+        assert_eq!(r.entries, 1);
+        assert_eq!(r.revenue, 1_500_000.0);
+        assert_eq!(r.cogs, 0.0);
+        assert_eq!(
+            scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await,
+            0
+        );
+
+        let (etype, debit, credit, amount, industry, vat, pit): (
+            String,
+            String,
+            String,
+            f64,
+            String,
+            f64,
+            f64,
+        ) = sqlx::query_as(
+            "SELECT entry_type, debit_account, credit_account, amount, industry_code, vat_rate, pit_rate
+             FROM journal_entry WHERE voucher_no = 'PXK-SV'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(etype, "PX");
+        assert_eq!(debit, "131");
+        assert_eq!(credit, "511");
+        assert_eq!(amount, 1_500_000.0);
+        assert_eq!(industry, "DVXD-KNL");
+        assert_eq!(vat, 0.05);
+        assert_eq!(pit, 0.02);
     }
 
     // ─── save_inbound_core (DB) ───

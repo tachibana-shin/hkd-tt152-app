@@ -34,6 +34,11 @@ export const useCatalogStore = defineStore("catalog", () => {
     }
   }
 
+  /** Chỉ nạp danh mục nhóm ngành (màn Sản phẩm lazy-load không gọi loadAll). */
+  async function loadIndustryGroups() {
+    industryGroups.value = await api.getIndustryGroups();
+  }
+
   /** Lazy-load 1 trang sản phẩm theo event PrimeVue (first/rows/sort/filters). */
   async function loadProductsPage(lazyEvent: unknown) {
     productsLoading.value = true;
@@ -88,6 +93,7 @@ export const useCatalogStore = defineStore("catalog", () => {
     totalProducts,
     productsLoading,
     loadAll,
+    loadIndustryGroups,
     loadProductsPage,
     saveProduct,
     deleteProduct,

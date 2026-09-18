@@ -11,6 +11,10 @@ export interface Product {
   vat_rate: number;
   import_tax_rate: number;
   default_warehouse_id?: number;
+  /** Sản phẩm dịch vụ (nhân công...) — không theo dõi tồn kho. */
+  is_service?: boolean;
+  /** Nhóm ngành mặc định (cơ sở tỷ lệ thuế bán ra). */
+  industry_code?: string;
 }
 
 export interface Warehouse {
@@ -274,6 +278,10 @@ export interface InvoiceItem {
   quantity: number;
   unit_price: number;
   subtotal: number;
+  /** Nhóm ngành của dòng (cơ sở tỷ lệ thuế bán ra). */
+  industry_code?: string;
+  vat_rate?: number;
+  pit_rate?: number;
 }
 
 // ─── Kiểm kê ───

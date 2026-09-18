@@ -45,6 +45,8 @@ function onProductPick(index: number) {
   if (!p) return;
   props.items[index].unit_price =
     props.priceField === "sale_price" ? p.sale_price : p.cost_price;
+  // Tự điền nhóm ngành theo sản phẩm (cơ sở tỷ lệ thuế bán ra) — vẫn sửa tay được.
+  if (p.industry_code) props.items[index].industry_code = p.industry_code;
 }
 
 const total = computed(() =>
