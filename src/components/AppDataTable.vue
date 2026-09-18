@@ -13,6 +13,9 @@
  *    bản sao đã sửa; màn hình tự lưu DB + reload trang.
  *  - nút bật/tắt hàng filter theo cột (prop `filterToggle`, mặc định hàng filter
  *    ẩn). Khi bật, đừng truyền `:filter-display` từ màn hình — AppDataTable tự quản.
+ *  - ô tìm kiếm toàn cục trong header (mọi bảng đều có, kiểu Products): bảng
+ *    client-side tự lọc mọi cột qua khóa `global` (không cần khai gì thêm);
+ *    bảng server-side lắng nghe sự kiện `search` để reload.
  *
  * Chế độ dữ liệu tự phát hiện: màn truyền @page/@sort/@filter (như Products) là
  * server-side → lazy + paginator; bảng client-side (`:value=`) tự lọc/phân trang
@@ -21,6 +24,7 @@
  */
 import {
   cloneVNode,
+  computed,
   defineComponent,
   h,
   nextTick,
@@ -31,6 +35,9 @@ import {
 import Button from "primevue/button";
 import Column from "primevue/column";
 import DataTable from "primevue/datatable";
+import IconField from "primevue/iconfield";
+import InputIcon from "primevue/inputicon";
+import InputText from "primevue/inputtext";
 
 // ---------------------------------------------------------------------------
 // Engine resize: làm cho kéo cột hoạt động đúng trong WebKitGTK
@@ -119,7 +126,7 @@ export default defineComponent({
     /** Model của selection (v-model:selection). */
     selection: { type: null, default: undefined },
   },
-  emits: ["update:selection", "cell-save"],
+  emits: ["update:selection", "cell-save", "search"],
   setup(props, { slots, attrs, emit }) {
     const hasActionsSlot = !!slots.actions;
     const forwardedSlots = Object.keys(slots).filter(
@@ -129,6 +136,20 @@ export default defineComponent({
     // ─── Hàng filter theo cột (prop filterToggle; mặc định ẩn) ───
     const filterRowVisible = ref(false);
     const toggleFilterRow = () => (filterRowVisible.value = !filterRowVisible.value);
+
+    // ─── Ô tìm kiếm toàn cục (header, mọi bảng đều có như Products) ───
+    const search = ref("");
+    function onSearchInput(v: string) {
+      search.value = v;
+      emit("search", v);
+    }
+    // Gộp giá trị tìm kiếm vào model filters dưới khóa `global` — với bảng
+    // client-side DataTable tự lọc mọi cột (không cần global-filter-fields);
+    // với bảng server-side thì `search` event để màn hình reload.
+    const tableFilters = computed(() => ({
+      ...((attrs.filters as Record<string, unknown> | null) ?? {}),
+      global: { value: search.value, matchMode: "contains" },
+    }));
 
     // ─── CELL EDITING ENGINE (double-tap; draft; Enter/Esc/click-away) ───
     interface EditingCell {
@@ -323,7 +344,7 @@ export default defineComponent({
       });
     }
 
-    // ─── Header: nút bộ lọc + header của màn hình (khi filterToggle) ───
+    // ─── Header: nút bộ lọc + ô tìm kiếm + header của màn hình ───
     function headerContent() {
       const screenHeader = slots.header ? slots.header() : [];
       if (!props.filterToggle) return screenHeader;
@@ -337,6 +358,20 @@ export default defineComponent({
           severity: filterRowVisible.value ? "primary" : "secondary",
           onClick: toggleFilterRow,
         }),
+        h(
+          IconField,
+          { style: { flex: "1 1 220px", maxWidth: "360px" } },
+          [
+            h(InputIcon, {}, [h("i", { class: "pi pi-search" })]),
+            h(InputText, {
+              size: "small",
+              type: "search",
+              modelValue: search.value,
+              "onUpdate:modelValue": onSearchInput,
+              placeholder: "Tìm kiếm…",
+            }),
+          ],
+        ),
       ];
       if (screenHeader.length) {
         children.push(h("div", { class: "flex-1 min-w-[240px]" }, screenHeader));
@@ -351,6 +386,7 @@ export default defineComponent({
           ...attrs,
           selection: props.selection,
           "onUpdate:selection": (v: unknown) => emit("update:selection", v),
+          filters: tableFilters.value,
           resizableColumns: props.resizableColumns,
           size: "large",
           showGridlines: true,

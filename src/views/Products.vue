@@ -81,6 +81,14 @@ function onFilter() {
   loadLazyData();
 }
 
+// Ô tìm kiếm chung do AppDataTable dựng sẵn trong header → đồng bộ vào bộ lọc
+// server-side (Products là lazy: DataTable không tự lọc client-side).
+function onSearch(v: string) {
+  filters.value.global.value = v || null;
+  first.value = 0;
+  onFilter();
+}
+
 function resetFilters() {
   Object.values(filters.value).forEach((f) => (f.value = null));
 }
@@ -340,29 +348,15 @@ async function save() {
           @page="onPage"
           @sort="onSort"
           @filter="onFilter"
+          @search="onSearch"
         >
           <template #header>
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="text-sm text-gray-500">
-                <template v-if="selectedCount > 0">
-                  Đã chọn {{ selectedCount }} sản phẩm
-                </template>
-                <template v-else>Tổng {{ totalProducts }} sản phẩm</template>
-              </span>
-              <div class="flex gap-2">
-                <IconField>
-                  <InputIcon>
-                    <i class="pi pi-search" />
-                  </InputIcon>
-                  <InputText
-                    size="small"
-                    v-model="filters['global'].value"
-                    placeholder="Tìm mã, tên, đơn vị…"
-                    @input="onFilter"
-                  />
-                </IconField>
-              </div>
-            </div>
+            <span class="text-sm text-gray-500">
+              <template v-if="selectedCount > 0">
+                Đã chọn {{ selectedCount }} sản phẩm
+              </template>
+              <template v-else>Tổng {{ totalProducts }} sản phẩm</template>
+            </span>
           </template>
 
           <Column field="code" header="Mã SP" sortable />
