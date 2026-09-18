@@ -8,7 +8,7 @@ import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
-const { customers, suppliers, industryGroups } = storeToRefs(catalog);
+const { customers, suppliers } = storeToRefs(catalog);
 const toast = useToast();
 
 // Danh mục tài khoản (DMTK) — nguồn chọn TK Nợ / TK Có khi lập phiếu.
@@ -49,9 +49,6 @@ const form = reactive({
   amount: 0,
   debit_account: "111",
   credit_account: "511",
-  industry_code: "",
-  vat_rate: 0,
-  pit_rate: 0,
   note: "",
 });
 
@@ -92,9 +89,6 @@ function resetForm(type: "PT" | "PC") {
     amount: 0,
     debit_account: type === "PT" ? "111" : "642",
     credit_account: type === "PT" ? "511" : "111",
-    industry_code: "",
-    vat_rate: 0,
-    pit_rate: 0,
     note: "",
   });
 }
@@ -111,12 +105,6 @@ function onTypeChange() {
   form.debit_account = t === "PT" ? "111" : "642";
   form.credit_account = t === "PT" ? "511" : "111";
   form.voucher_no = suggestVoucherNo(t);
-}
-
-function onIndustryPick() {
-  const g = industryGroups.value.find((x) => x.code === form.industry_code);
-  form.vat_rate = g ? Math.round(g.vat_rate * 100) : 0;
-  form.pit_rate = g ? Math.round(g.pit_rate * 100) : 0;
 }
 
 async function loadEntries() {
@@ -187,9 +175,11 @@ async function save() {
       amount: form.amount,
       debit_account: form.debit_account.trim(),
       credit_account: form.credit_account.trim(),
-      industry_code: form.industry_code,
-      vat_rate: form.vat_rate / 100,
-      pit_rate: form.pit_rate / 100,
+      // Phiếu thu/chi chỉ theo dõi tiền mặt — không khai nhóm ngành/thuế
+      // (tờ khai thuế chỉ tính từ phiếu bán hàng PX).
+      industry_code: "",
+      vat_rate: 0,
+      pit_rate: 0,
       unit_code: "HKD",
       note: form.note.trim(),
     });
@@ -282,16 +272,6 @@ onMounted(async () => {
           </Column>
           <Column field="amount" header="Số tiền" align="right">
             <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
-          </Column>
-          <Column field="industry_code" header="Nhóm ngành">
-            <template #body="{ data }">
-              <Tag
-                v-if="data.industry_code"
-                :value="data.industry_code"
-                severity="info"
-              />
-              <span v-else>—</span>
-            </template>
           </Column>
           <Column field="note" header="Ghi chú">
             <template #body="{ data }">{{ data.note || "—" }}</template>
@@ -392,36 +372,6 @@ onMounted(async () => {
             option-label="label"
             option-value="code"
             filter
-            class="w-full"
-          />
-        </FormField>
-        <FormField label="Nhóm ngành">
-          <Select
-            v-model="form.industry_code"
-            :options="industryGroups"
-            optionLabel="name"
-            optionValue="code"
-            filter
-            showClear
-            class="w-full"
-            @change="onIndustryPick"
-          />
-        </FormField>
-        <FormField label="Thuế GTGT (%)">
-          <InputNumber
-            v-model="form.vat_rate"
-            :min="0"
-            :max="100"
-            suffix="%"
-            class="w-full"
-          />
-        </FormField>
-        <FormField label="Thuế TNCN (%)">
-          <InputNumber
-            v-model="form.pit_rate"
-            :min="0"
-            :max="100"
-            suffix="%"
             class="w-full"
           />
         </FormField>
