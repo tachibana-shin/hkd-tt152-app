@@ -110,46 +110,6 @@ const selection = computed<Product[]>({
 });
 const selectedCount = computed(() => selectedIds.value.size);
 
-// ─── SỬA TRỰC TIẾP TRÊN BẢNG — double-tap (AppDataTable tự quản lý) ───
-// AppDataTable bọc các cột khai `:editable` + #editor; click đơn = chọn dòng,
-// double-tap = mở editor (Enter lưu, Esc hủy, click ra ngoài lưu). Khi commit
-// nó phát `cell-save` với field + bản sao dữ liệu đã sửa — màn này chỉ cần
-// kiểm tra tính hợp lệ, lưu DB và reload trang.
-async function onCellSave({ field, data }: { field: string; data: Product }) {
-  if (field === "name" && !String(data.name ?? "").trim()) {
-    toast.add({
-      severity: "warn",
-      summary: "Không hợp lệ",
-      detail: "Tên sản phẩm không được để trống",
-    });
-    return;
-  }
-  try {
-    await catalog.saveProduct({
-      id: data.id,
-      code: data.code,
-      name: data.name,
-      unit: data.unit,
-      sale_price: data.sale_price,
-      cost_price: data.cost_price,
-      min_stock: data.min_stock,
-      vat_rate: data.vat_rate,
-      import_tax_rate: data.import_tax_rate,
-      is_service: data.is_service ?? false,
-      industry_code: data.industry_code ?? "",
-    });
-    toast.add({ severity: "success", summary: "Đã lưu", detail: data.code });
-  } catch (e) {
-    toast.add({
-      severity: "error",
-      summary: "Không lưu được",
-      detail: String(e),
-    });
-  }
-  // Tổng / trang có thể đổi sau khi sửa → load lại trang hiện tại.
-  loadLazyData();
-}
-
 // ─── XÓA HÀNG LOẠT (thay cho nút xóa từng dòng) ───
 function removeSelected() {
   const ids = [...selectedIds.value];
@@ -189,9 +149,13 @@ function removeSelected() {
   });
 }
 
-// ─── DIALOG TẠO MỚI (chỉ tạo mới — sửa thì edit trực tiếp trên bảng) ───
+// ─── DIALOG THÊM / SỬA SẢN PHẨM ───
 const dialog = ref(false);
 const saving = ref(false);
+const editing = ref(false);
+const dialogTitle = computed(() =>
+  editing.value ? "Sửa sản phẩm" : "Thêm sản phẩm",
+);
 const form = reactive({
   id: null as number | null,
   code: "",
@@ -226,6 +190,7 @@ function readImportTax() {
 }
 
 async function openCreate() {
+  editing.value = false;
   try {
     const [code] = await Promise.all([
       settings.nextProductCode(),
@@ -263,6 +228,35 @@ async function openCreate() {
   dialog.value = true;
 }
 
+// Sửa sản phẩm từ dòng đang chọn — chọn đúng 1 dòng rồi bấm Sửa trên header.
+function openEdit() {
+  if (selectedCount.value !== 1) {
+    toast.add({
+      severity: "warn",
+      summary: "Chọn 1 dòng",
+      detail: "Nhấn chọn đúng 1 sản phẩm muốn sửa",
+    });
+    return;
+  }
+  const row = selection.value[0];
+  editing.value = true;
+  Object.assign(form, {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    unit: row.unit,
+    sale_price: row.sale_price,
+    cost_price: row.cost_price,
+    min_stock: row.min_stock,
+    vat_rate: row.vat_rate * 100,
+    import_tax_rate: row.import_tax_rate * 100,
+    is_service: row.is_service ?? false,
+    industry_code: row.industry_code ?? "PPHH",
+  });
+  syncImportTaxText();
+  dialog.value = true;
+}
+
 async function save() {
   if (!form.code || !form.name) {
     toast.add({
@@ -294,10 +288,15 @@ async function save() {
       detail: `Sản phẩm ${form.code}`,
     });
     dialog.value = false;
-    // Làm mới bảng: bỏ filter để sản phẩm mới nằm trong kết quả hiển thị.
-    resetFilters();
-    first.value = 0;
-    loadLazyData();
+    if (form.id != null) {
+      // Sửa sản phẩm: giữ nguyên filter/trang đang xem.
+      loadLazyData();
+    } else {
+      // Sản phẩm mới: bỏ filter để sản phẩm mới nằm trong kết quả hiển thị.
+      resetFilters();
+      first.value = 0;
+      loadLazyData();
+    }
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
   } finally {
@@ -317,6 +316,15 @@ async function save() {
       </template>
       <template #end>
         <div class="flex items-center gap-2">
+          <Button
+            v-if="auth.canStock"
+            label="Sửa"
+            icon="pi pi-pencil"
+            severity="secondary"
+            outlined
+            :disabled="selectedCount !== 1"
+            @click="openEdit"
+          />
           <Button
             v-if="auth.canStock && selectedCount > 0"
             severity="danger"
@@ -352,9 +360,7 @@ async function save() {
           sort-mode="multiple"
           removable-sort
           :global-filter-fields="['code', 'name', 'unit']"
-          editable
           filter-toggle
-          @cell-save="onCellSave"
           @page="onPage"
           @sort="onSort"
           @filter="onFilter"
@@ -370,15 +376,7 @@ async function save() {
           </template>
 
           <Column field="code" header="Mã SP" sortable />
-          <Column
-            field="name"
-            header="Tên sản phẩm"
-            sortable
-            :editable="auth.canStock"
-          >
-            <template #editor="{ data }">
-              <InputText size="small" class="w-full" v-model="data.name" />
-            </template>
+          <Column field="name" header="Tên sản phẩm" sortable>
             <template #filter="{ filterModel, filterCallback }">
               <InputText
                 size="small"
@@ -388,10 +386,7 @@ async function save() {
               />
             </template>
           </Column>
-          <Column field="unit" header="ĐVT" sortable :editable="auth.canStock">
-            <template #editor="{ data }">
-              <InputText size="small" class="w-full" v-model="data.unit" />
-            </template>
+          <Column field="unit" header="ĐVT" sortable>
             <template #filter="{ filterModel, filterCallback }">
               <InputText
                 size="small"
@@ -401,16 +396,8 @@ async function save() {
               />
             </template>
           </Column>
-          <Column
-            field="sale_price"
-            header="Giá bán"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="sale_price" header="Giá bán" sortable>
             <template #body="{ data }">{{ fmt(data.sale_price) }}</template>
-            <template #editor="{ data }">
-              <InputNumber class="w-full" v-model="data.sale_price" :min="0" />
-            </template>
             <template #filter="{ filterModel, filterCallback }">
               <InputNumber
                 v-model="filterModel.value"
@@ -420,16 +407,8 @@ async function save() {
               />
             </template>
           </Column>
-          <Column
-            field="cost_price"
-            header="Giá vốn"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="cost_price" header="Giá vốn" sortable>
             <template #body="{ data }">{{ fmt(data.cost_price) }}</template>
-            <template #editor="{ data }">
-              <InputNumber class="w-full" v-model="data.cost_price" :min="0" />
-            </template>
             <template #filter="{ filterModel, filterCallback }">
               <InputNumber
                 v-model="filterModel.value"
@@ -439,16 +418,8 @@ async function save() {
               />
             </template>
           </Column>
-          <Column
-            field="min_stock"
-            header="Tồn tối thiểu"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="min_stock" header="Tồn tối thiểu" sortable>
             <template #body="{ data }">{{ fmt(data.min_stock) }}</template>
-            <template #editor="{ data }">
-              <InputNumber class="w-full" v-model="data.min_stock" :min="0" />
-            </template>
             <template #filter="{ filterModel, filterCallback }">
               <InputNumber
                 v-model="filterModel.value"
@@ -458,46 +429,15 @@ async function save() {
               />
             </template>
           </Column>
-          <Column
-            field="is_service"
-            header="Loại"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="is_service" header="Loại" sortable>
             <template #body="{ data }">
               <Tag
                 :value="data.is_service ? 'Dịch vụ' : 'Hàng hóa'"
                 :severity="data.is_service ? 'warning' : 'info'"
               />
             </template>
-            <template #editor="{ data }">
-              <Select
-                :model-value="data.is_service ? 'service' : 'goods'"
-                :options="[
-                  {
-                    label: 'Hàng hóa (theo dõi tồn kho)',
-                    value: 'goods',
-                  },
-                  {
-                    label: 'Dịch vụ (không theo dõi tồn kho)',
-                    value: 'service',
-                  },
-                ]"
-                option-label="label"
-                option-value="value"
-                class="w-full"
-                @update:model-value="
-                  (v: string) => (data.is_service = v === 'service')
-                "
-              />
-            </template>
           </Column>
-          <Column
-            field="industry_code"
-            header="Nhóm ngành"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="industry_code" header="Nhóm ngành" sortable>
             <template #body="{ data }">
               <Tag
                 v-if="data.industry_code"
@@ -509,16 +449,6 @@ async function save() {
               />
               <span v-else class="text-gray-400">—</span>
             </template>
-            <template #editor="{ data }">
-              <Select
-                v-model="data.industry_code"
-                :options="industryGroups"
-                option-label="name"
-                option-value="code"
-                show-clear
-                class="w-full"
-              />
-            </template>
             <template #filter="{ filterModel, filterCallback }">
               <Select
                 v-model="filterModel.value"
@@ -531,24 +461,9 @@ async function save() {
               />
             </template>
           </Column>
-          <Column
-            field="vat_rate"
-            header="Thuế GTGT đầu vào"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="vat_rate" header="Thuế GTGT đầu vào" sortable>
             <template #body="{ data }">
               <Tag :value="data.vat_rate * 100 + '%'" severity="info" />
-            </template>
-            <template #editor="{ data }">
-              <InputNumber
-                :model-value="data.vat_rate * 100"
-                :min="0"
-                :max="100"
-                suffix="%"
-                class="w-full"
-                @update:model-value="(v) => (data.vat_rate = (v ?? 0) / 100)"
-              />
             </template>
             <template #filter="{ filterModel, filterCallback }">
               <Select
@@ -560,28 +475,11 @@ async function save() {
               />
             </template>
           </Column>
-          <Column
-            field="import_tax_rate"
-            header="Thuế nhập"
-            sortable
-            :editable="auth.canStock"
-          >
+          <Column field="import_tax_rate" header="Thuế nhập" sortable>
             <template #body="{ data }">
               <Tag
                 :value="data.import_tax_rate * 100 + '%'"
                 severity="secondary"
-              />
-            </template>
-            <template #editor="{ data }">
-              <InputNumber
-                :model-value="data.import_tax_rate * 100"
-                :min="0"
-                :max="100"
-                suffix="%"
-                class="w-full"
-                @update:model-value="
-                  (v) => (data.import_tax_rate = (v ?? 0) / 100)
-                "
               />
             </template>
             <template #filter="{ filterModel, filterCallback }">
@@ -611,7 +509,7 @@ async function save() {
 
     <AppDialog
       v-model:visible="dialog"
-      header="Thêm sản phẩm"
+      :header="dialogTitle"
       width="max-w-xl"
       action-label="Lưu"
       :saving="saving"
@@ -620,7 +518,12 @@ async function save() {
     >
       <div class="grid grid-cols-2 gap-4 py-2">
         <FormField label="Mã sản phẩm" required>
-          <InputText size="small" v-model="form.code" placeholder="SP001" />
+          <InputText
+            size="small"
+            v-model="form.code"
+            placeholder="SP001"
+            :disabled="editing"
+          />
         </FormField>
         <FormField label="Đơn vị tính">
           <InputText size="small" v-model="form.unit" placeholder="Cái" />

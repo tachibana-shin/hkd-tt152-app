@@ -79,6 +79,21 @@ export const useCatalogStore = defineStore("catalog", () => {
     await loadAll();
   }
 
+  async function saveIndustryGroup(g: {
+    code: string;
+    name: string;
+    vat_rate: number;
+    pit_rate: number;
+  }) {
+    await api.saveIndustryGroup(g);
+    await loadIndustryGroups();
+  }
+
+  async function deleteIndustryGroup(code: string) {
+    await api.deleteIndustryGroup(code);
+    await loadIndustryGroups();
+  }
+
   const productByCode = (code: string) =>
     products.value.find((p) => p.code === code);
 
@@ -101,6 +116,8 @@ export const useCatalogStore = defineStore("catalog", () => {
     saveWarehouse,
     saveSupplier,
     saveCustomer,
+    saveIndustryGroup,
+    deleteIndustryGroup,
     productByCode,
   };
 });

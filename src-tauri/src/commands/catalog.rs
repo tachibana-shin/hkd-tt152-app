@@ -95,6 +95,77 @@ pub(crate) async fn get_industry_groups(state: State<'_, AppState>) -> Result<St
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Lưu nhóm ngành (thêm mới hoặc sửa theo mã). Tỷ lệ GTGT / TNCN là phần thập
+/// phân (5% = 0.05) — đúng định dạng dùng khi tính thuế bán ra theo nhóm ngành.
+#[tauri::command]
+pub(crate) async fn save_industry_group(
+    state: State<'_, AppState>,
+    code: String,
+    name: String,
+    vat_rate: f64,
+    pit_rate: f64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let code = code.trim().to_string();
+    let name = name.trim().to_string();
+    if code.is_empty() || name.is_empty() {
+        return Err("Mã và tên nhóm ngành là bắt buộc".into());
+    }
+    if !(0.0..=1.0).contains(&vat_rate) || !(0.0..=1.0).contains(&pit_rate) {
+        return Err("Tỷ lệ thuế phải nằm trong khoảng 0 – 100%".into());
+    }
+    let pool = state.pool.read().await;
+    sqlx::query(
+        "INSERT INTO industry_group (code, name, vat_rate, pit_rate) VALUES (?, ?, ?, ?)
+         ON CONFLICT(code) DO UPDATE SET
+            name = excluded.name, vat_rate = excluded.vat_rate, pit_rate = excluded.pit_rate",
+    )
+    .bind(&code)
+    .bind(&name)
+    .bind(vat_rate)
+    .bind(pit_rate)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(json!({ "ok": true, "code": code }).to_string())
+}
+
+/// Xóa nhóm ngành — chỉ xóa khi chưa được tham chiếu (sản phẩm / bút toán /
+/// hóa đơn), tránh làm hỏng báo cáo thuế và tờ khai.
+#[tauri::command]
+pub(crate) async fn delete_industry_group(
+    state: State<'_, AppState>,
+    code: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let code = code.trim().to_string();
+    let pool = state.pool.read().await;
+    let used: (i64,) = sqlx::query_as(
+        "SELECT
+            (SELECT COUNT(*) FROM product WHERE industry_code = ?) +
+            (SELECT COUNT(*) FROM journal_entry WHERE industry_code = ?) +
+            (SELECT COUNT(*) FROM invoice_item WHERE industry_code = ?)",
+    )
+    .bind(&code)
+    .bind(&code)
+    .bind(&code)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if used.0 > 0 {
+        return Err(format!(
+            "Không xóa được nhóm ngành '{}' — đang được dùng cho sản phẩm / bút toán / hóa đơn",
+            code
+        ));
+    }
+    sqlx::query("DELETE FROM industry_group WHERE code = ?")
+        .bind(&code)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "ok": true, "code": code }).to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn get_warehouses(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<WarehouseRow> = sqlx::query_as!(
@@ -309,16 +380,17 @@ pub(crate) async fn next_product_code(state: State<'_, AppState>) -> Result<Stri
     Ok(format!("{}{:0>width$}", prefix, next, width = digits))
 }
 
-/// Tự sinh mã kho tiếp theo giống cách tự sinh mã sản phẩm:
-/// prefix "KHO" + số tự tăng + đệm 0 (3 chữ số) — ví dụ KHO001, KHO002...
-/// Dò theo mã đang có trong bảng warehouse nên không bao giờ trùng.
-#[tauri::command]
-pub(crate) async fn next_warehouse_code(state: State<'_, AppState>) -> Result<String, String> {
-    require_role(&state, &["admin", "ketoan", "kho"]).await?;
-    let pool = state.pool.read().await;
-    let prefix = "KHO";
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT code FROM warehouse")
-        .fetch_all(&*pool)
+/// Tự sinh mã tiếp theo: prefix + số tự tăng + đệm 0 — ví dụ KHO001, KH001,
+/// NCC001... Dò theo mã đang có trong bảng nên không bao giờ trùng.
+async fn next_entity_code(
+    pool: &SqlitePool,
+    table: &str,
+    prefix: &str,
+    digits: usize,
+) -> Result<String, String> {
+    let sql = format!("SELECT code FROM {}", table);
+    let rows: Vec<(String,)> = sqlx::query_as(&sql)
+        .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
     let mut max_num: i64 = 0;
@@ -329,7 +401,28 @@ pub(crate) async fn next_warehouse_code(state: State<'_, AppState>) -> Result<St
             }
         }
     }
-    Ok(format!("{}{:0>3}", prefix, max_num + 1))
+    Ok(format!("{}{:0>width$}", prefix, max_num + 1, width = digits))
+}
+
+#[tauri::command]
+pub(crate) async fn next_warehouse_code(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let pool = state.pool.read().await;
+    next_entity_code(&pool, "warehouse", "KHO", 3).await
+}
+
+#[tauri::command]
+pub(crate) async fn next_customer_code(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    next_entity_code(&pool, "customer", "KH", 3).await
+}
+
+#[tauri::command]
+pub(crate) async fn next_supplier_code(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    next_entity_code(&pool, "supplier", "NCC", 3).await
 }
 
 // ─── LAZY LOAD SẢN PHẨM ───

@@ -144,10 +144,26 @@ export const api = {
 
   getIndustryGroups: async () =>
     parse<IndustryGroup[]>(await invoke<string>("get_industry_groups")),
+  saveIndustryGroup: (g: {
+    code: string;
+    name: string;
+    vat_rate: number;
+    pit_rate: number;
+  }) =>
+    invoke<string>("save_industry_group", {
+      code: g.code,
+      name: g.name,
+      vatRate: g.vat_rate,
+      pitRate: g.pit_rate,
+    }),
+  deleteIndustryGroup: (code: string) =>
+    invoke<string>("delete_industry_group", { code }),
   getWarehouses: async () => parse<Warehouse[]>(await invoke<string>("get_warehouses")),
   saveWarehouse: (code: string, name: string) =>
     invoke<string>("save_warehouse", { code, name }),
   nextWarehouseCode: () => invoke<string>("next_warehouse_code"),
+  nextCustomerCode: () => invoke<string>("next_customer_code"),
+  nextSupplierCode: () => invoke<string>("next_supplier_code"),
   getSuppliers: async () => parse<Supplier[]>(await invoke<string>("get_suppliers")),
   saveSupplier: (s: Partial<Supplier>) =>
     invoke<string>("save_supplier", {

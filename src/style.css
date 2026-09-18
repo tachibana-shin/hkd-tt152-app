@@ -52,3 +52,7 @@
   box-shadow: -1px 0 0 0 var(--p-content-border-color, rgba(15, 23, 42, 0.08)),
     -10px 0 16px -12px rgba(15, 23, 42, 0.35);
 }
+
+input {
+  max-width: 100%;
+}

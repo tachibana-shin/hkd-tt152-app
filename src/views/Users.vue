@@ -125,36 +125,6 @@ async function save() {
   }
 }
 
-// Sửa ô trực tiếp (double-tap) — chỉ đổi tên hiển thị, các trường khác giữ nguyên.
-async function onUserCellSave({ data }: { data: AppUser }) {
-  try {
-    await api.saveUser({
-      username: data.username,
-      display_name: data.display_name,
-      password: "",
-      role: data.role,
-      active: data.active,
-    });
-    toast.add({
-      severity: "success",
-      summary: "Đã lưu",
-      detail: "Đã cập nhật tên hiển thị",
-      life: 2500,
-    });
-    await load();
-    // Nếu đang sửa chính mình thì làm mới phiên để phản ánh thay đổi.
-    if (data.username === auth.currentUser?.username) await auth.load();
-  } catch (e) {
-    toast.add({
-      severity: "error",
-      summary: "Lỗi lưu",
-      detail: String(e),
-      life: 4000,
-    });
-    await load();
-  }
-}
-
 function remove(u: AppUser) {
   confirm.require({
     message: `Xóa người dùng "${u.username}"?`,
@@ -259,18 +229,9 @@ load();
           stripedRows
           size="small"
           data-key="id"
-          @cell-save="onUserCellSave"
         >
           <Column field="username" header="Tên đăng nhập" />
-          <Column field="display_name" header="Họ tên" :editable="true">
-            <template #editor="{ data }">
-              <InputText
-                size="small"
-                class="w-full"
-                v-model="data.display_name"
-              />
-            </template>
-          </Column>
+          <Column field="display_name" header="Họ tên" />
           <Column header="Vai trò">
             <template #body="{ data }">
               <Tag
