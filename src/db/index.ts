@@ -33,6 +33,8 @@ import type {
   Role,
   Profile,
   ProfilePrefs,
+  TaxInfo,
+  LookupOutcome,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -152,6 +154,14 @@ export const api = {
       taxCode: c.tax_code ?? "",
       phone: c.phone ?? "",
     }),
+
+  // ─── TRA CỨU MST (masothue.com qua backend) ───
+  /** Tra cứu MST → 1 kết quả (single), danh sách (multiple) hoặc không thấy. */
+  lookupTaxCode: async (mst: string): Promise<LookupOutcome> =>
+    parse<LookupOutcome>(await invoke<string>("lookup_tax_code", { mst })),
+  /** Lấy chi tiết từ URL masothue (dùng khi chọn trong danh sách). */
+  lookupTaxDetail: async (url: string): Promise<TaxInfo> =>
+    parse<TaxInfo>(await invoke<string>("lookup_tax_detail", { url })),
 
   // ─── NHÂN SỰ & BẢNG LƯƠNG ───
   getEmployees: async () => parse<Employee[]>(await invoke<string>("get_employees")),

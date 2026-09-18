@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { useProfileStore } from "@/stores/profile";
 import { useAuthStore } from "@/stores/auth";
+import { useBusinessStore } from "@/stores/business";
 import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 
 const profile = useProfileStore();
 const auth = useAuthStore();
+const business = useBusinessStore();
 const toast = useToast();
 const confirm = useConfirm();
 
@@ -221,6 +223,10 @@ async function toggleAutoLogin(p: { key: string }) {
 
 profile.load();
 profile.loadPrefs();
+business.load();
+
+// ── Cài đặt thông tin hộ kinh doanh (tên, MST, địa chỉ…) ──
+const bizConfigVisible = ref(false);
 </script>
 
 <template>
@@ -236,6 +242,13 @@ profile.loadPrefs();
           "
         ></i>
       </div>
+      <Button
+        v-if="auth.isAdmin"
+        label="Cài đặt thông tin HKD"
+        icon="pi pi-building"
+        severity="secondary"
+        @click="bizConfigVisible = true"
+      />
       <Button
         v-if="auth.isAdmin"
         label="Tạo hồ sơ mới"
@@ -419,6 +432,13 @@ profile.loadPrefs();
         </FormField>
       </div>
     </AppDialog>
+
+    <!-- Cài đặt thông tin hộ kinh doanh -->
+    <BusinessConfigDialog
+      v-model:visible="bizConfigVisible"
+      :config="business.config"
+      @saved="business.load"
+    />
   </div>
 </template>
 

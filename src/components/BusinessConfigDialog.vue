@@ -2,7 +2,8 @@
 // Dialog cấu hình hộ kinh doanh.
 import { useBusinessStore } from "@/stores/business";
 import { useAuthStore } from "@/stores/auth";
-import type { BusinessConfig } from "@/types";
+import { api } from "@/db";
+import type { BusinessConfig, TaxInfo, TaxResult } from "@/types";
 
 const props = defineProps<{
   visible: boolean;
@@ -33,6 +34,11 @@ const form = reactive({
   email: "",
 });
 
+// ─── Tra cứu MST hộ kinh doanh ───
+const lookupLoading = ref(false);
+const lookupResults = ref<TaxResult[]>([]);
+const lookupSelectedUrl = ref("");
+
 watch(
   () => props.visible,
   (open) => {
@@ -49,8 +55,85 @@ watch(
       phone: c.phone,
       email: c.email,
     });
+    lookupLoading.value = false;
+    lookupResults.value = [];
+    lookupSelectedUrl.value = "";
   },
 );
+
+/** Điền thông tin tra cứu được vào form. */
+function applyTaxInfo(info: TaxInfo) {
+  const t = (v?: string) => (v ?? "").trim();
+  const name = t(info.name);
+  const addr = t(info.address);
+  const phone = t(info.phone);
+  const ownership = t(info.company_type);
+  const issued = t(info.managed_by) || t(info.issued_on);
+  if (name) form.name = name;
+  if (addr) form.address = addr;
+  if (phone) form.phone = phone;
+  if (ownership) form.ownership = ownership;
+  if (issued) form.tax_code_issued_on = issued;
+}
+
+async function runLookup() {
+  const mst = form.tax_code.trim();
+  if (!mst) {
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu MST",
+      detail: "Nhập mã số thuế trước khi tra cứu",
+    });
+    return;
+  }
+  lookupLoading.value = true;
+  lookupResults.value = [];
+  lookupSelectedUrl.value = "";
+  try {
+    const outcome = await api.lookupTaxCode(mst);
+    if (outcome.kind === "single") {
+      applyTaxInfo(outcome.info);
+      toast.add({
+        severity: "success",
+        summary: "Đã tra cứu",
+        detail: `Tìm thấy: ${outcome.info.name ?? outcome.info.tax_code ?? mst}`,
+      });
+    } else if (outcome.kind === "multiple") {
+      lookupResults.value = outcome.results;
+      toast.add({
+        severity: "info",
+        summary: "Nhiều kết quả",
+        detail: `Có ${outcome.results.length} kết quả — chọn đúng bên dưới`,
+      });
+    } else {
+      toast.add({
+        severity: "warn",
+        summary: "Không tìm thấy",
+        detail: outcome.message,
+      });
+    }
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi tra cứu", detail: String(e) });
+  } finally {
+    lookupLoading.value = false;
+  }
+}
+
+async function applyLookupResult(url: string) {
+  if (!url) return;
+  try {
+    const info = await api.lookupTaxDetail(url);
+    applyTaxInfo(info);
+    lookupSelectedUrl.value = url;
+    toast.add({
+      severity: "success",
+      summary: "Đã điền thông tin",
+      detail: info.name ?? "Xong",
+    });
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi lấy chi tiết", detail: String(e) });
+  }
+}
 
 async function save() {
   // Tên và MST là bắt buộc (nhất là chế độ bắt buộc sau đăng nhập).
@@ -99,7 +182,33 @@ async function save() {
         <InputText v-model="form.short_name" />
       </FormField>
       <FormField label="Mã số thuế" required>
-        <InputText v-model="form.tax_code" placeholder="VD: 0123456789" />
+        <div class="flex gap-2">
+          <InputText
+            v-model="form.tax_code"
+            placeholder="VD: 0123456789"
+            class="min-w-0 flex-1"
+          />
+          <Button
+            label="Tra cứu"
+            icon="pi pi-search"
+            severity="secondary"
+            class="shrink-0 whitespace-nowrap"
+            :loading="lookupLoading"
+            :disabled="!form.tax_code.trim()"
+            @click="runLookup"
+          />
+        </div>
+      </FormField>
+      <FormField v-if="lookupResults.length" label="Kết quả tra cứu" class="col-span-2">
+        <Select
+          v-model="lookupSelectedUrl"
+          :options="lookupResults"
+          option-label="name"
+          option-value="url"
+          placeholder="Có nhiều kết quả — chọn đúng hộ kinh doanh…"
+          class="w-full"
+          @change="applyLookupResult($event.value)"
+        />
       </FormField>
       <FormField label="Địa chỉ" class="col-span-2">
         <InputText v-model="form.address" />

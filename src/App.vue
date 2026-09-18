@@ -222,14 +222,25 @@ onMounted(bootstrap);
       <header class="bg-white border-b border-gray-200 px-6 py-3 shadow-sm flex items-center justify-between">
         <h2 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h2>
         <div class="flex items-center gap-3">
-          <!-- Hồ sơ HKD đang mở → nhấn để quản lý/chuyển hồ sơ -->
+          <!-- HKD đang đăng nhập → tên + MST; nhấn để quản lý/chuyển hồ sơ -->
           <button
             @click="router.push('/profiles')"
-            class="flex items-center gap-1.5 text-xs text-primary-600 hover:underline"
-            v-tooltip.bottom="'Chuyển hồ sơ hộ kinh doanh'"
+            class="flex flex-col items-end leading-tight hover:opacity-80 transition-opacity"
+            v-tooltip.bottom="'Quản lý / chuyển hồ sơ hộ kinh doanh'"
           >
-            <i class="pi pi-database"></i>
-            <span class="font-medium">{{ profile.activeName || "Chọn hồ sơ" }}</span>
+            <span
+              class="flex items-center gap-1.5 text-sm font-semibold text-gray-800"
+            >
+              <i class="pi pi-building text-primary-600"></i>
+              <span>{{
+                business.config?.name?.trim() ||
+                profile.activeName ||
+                "Chưa có thông tin HKD"
+              }}</span>
+            </span>
+            <span v-if="business.config?.tax_code" class="text-[11px] text-gray-400">
+              MST: {{ business.config.tax_code }}
+            </span>
           </button>
           <Divider layout="vertical" />
           <span class="text-sm text-gray-500">

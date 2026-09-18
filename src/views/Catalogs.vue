@@ -3,7 +3,8 @@ import { storeToRefs } from "pinia";
 import { FilterMatchMode } from "@primevue/core/api";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
-import type { Warehouse, Customer, Supplier } from "@/types";
+import { api } from "@/db";
+import type { Warehouse, Customer, Supplier, TaxInfo, TaxResult } from "@/types";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
@@ -35,6 +36,11 @@ const form = reactive({
   address: "",
   phone: "",
 });
+
+// ─── Tra cứu MST ───
+const lookupLoading = ref(false);
+const lookupResults = ref<TaxResult[]>([]);
+const lookupSelectedUrl = ref("");
 
 const dialogTitle = computed(() => {
   const base = editing.value ? "Sửa" : "Thêm";
@@ -80,6 +86,7 @@ function openCreate(kind: Kind) {
     address: "",
     phone: "",
   });
+  resetLookup();
   dialog.value = true;
 }
 
@@ -99,7 +106,84 @@ function openEdit(kind: Kind, row: Warehouse | Customer | Supplier) {
     form.address = c.address ?? "";
     form.phone = c.phone ?? "";
   }
+  resetLookup();
   dialog.value = true;
+}
+
+function resetLookup() {
+  lookupLoading.value = false;
+  lookupResults.value = [];
+  lookupSelectedUrl.value = "";
+}
+
+/** Điền thông tin tra cứu được vào form (chỉ ghi đè khi có giá trị). */
+function applyTaxInfo(info: TaxInfo) {
+  const t = (v?: string) => (v ?? "").trim();
+  const name = t(info.name);
+  const addr = t(info.address);
+  const phone = t(info.phone);
+  if (name) form.name = name;
+  if (addr) form.address = addr;
+  if (phone) form.phone = phone;
+}
+
+async function runLookup() {
+  const mst = form.tax_code.trim();
+  if (!mst) {
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu MST",
+      detail: "Nhập mã số thuế trước khi tra cứu",
+    });
+    return;
+  }
+  lookupLoading.value = true;
+  lookupResults.value = [];
+  lookupSelectedUrl.value = "";
+  try {
+    const outcome = await api.lookupTaxCode(mst);
+    if (outcome.kind === "single") {
+      applyTaxInfo(outcome.info);
+      toast.add({
+        severity: "success",
+        summary: "Đã tra cứu",
+        detail: `Tìm thấy: ${outcome.info.name ?? outcome.info.tax_code ?? mst}`,
+      });
+    } else if (outcome.kind === "multiple") {
+      lookupResults.value = outcome.results;
+      toast.add({
+        severity: "info",
+        summary: "Nhiều kết quả",
+        detail: `Có ${outcome.results.length} kết quả — chọn đúng bên dưới`,
+      });
+    } else {
+      toast.add({
+        severity: "warn",
+        summary: "Không tìm thấy",
+        detail: outcome.message,
+      });
+    }
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi tra cứu", detail: String(e) });
+  } finally {
+    lookupLoading.value = false;
+  }
+}
+
+async function applyLookupResult(url: string) {
+  if (!url) return;
+  try {
+    const info = await api.lookupTaxDetail(url);
+    applyTaxInfo(info);
+    lookupSelectedUrl.value = url;
+    toast.add({
+      severity: "success",
+      summary: "Đã điền thông tin",
+      detail: info.name ?? "Xong",
+    });
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi lấy chi tiết", detail: String(e) });
+  }
 }
 
 async function save() {
@@ -589,7 +673,37 @@ onMounted(() => catalog.loadAll());
 
         <template v-if="dialogKind !== 'warehouse'">
           <FormField label="MST">
-            <InputText v-model="form.tax_code" placeholder="Mã số thuế" />
+            <div class="flex gap-2">
+              <InputText
+                v-model="form.tax_code"
+                placeholder="Mã số thuế"
+                class="min-w-0 flex-1"
+              />
+              <Button
+                label="Tra cứu"
+                icon="pi pi-search"
+                severity="secondary"
+                class="shrink-0 whitespace-nowrap"
+                :loading="lookupLoading"
+                :disabled="!form.tax_code.trim()"
+                @click="runLookup"
+              />
+            </div>
+          </FormField>
+          <FormField
+            v-if="lookupResults.length"
+            label="Kết quả tra cứu"
+            class="col-span-2"
+          >
+            <Select
+              v-model="lookupSelectedUrl"
+              :options="lookupResults"
+              option-label="name"
+              option-value="url"
+              placeholder="Có nhiều kết quả — chọn đúng hộ / doanh nghiệp…"
+              class="w-full"
+              @change="applyLookupResult($event.value)"
+            />
           </FormField>
           <FormField label="Điện thoại">
             <InputText v-model="form.phone" placeholder="Số điện thoại" />

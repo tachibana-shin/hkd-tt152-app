@@ -132,6 +132,8 @@ pub fn run() {
             commands::profile::select_profile,
             commands::settings::get_app_settings,
             commands::settings::save_app_settings,
+            commands::tax_lookup::lookup_tax_code,
+            commands::tax_lookup::lookup_tax_detail,
             commands::stock::save_inbound,
             commands::stock::save_outbound,
             commands::stock::get_journal_entries,

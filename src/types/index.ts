@@ -37,6 +37,33 @@ export interface Supplier {
   phone?: string;
 }
 
+// ─── Tra cứu MST (masothue) ───
+
+export interface TaxInfo {
+  name?: string;
+  tax_code?: string;
+  address?: string;
+  representative?: string;
+  status?: string;
+  phone?: string;
+  company_type?: string;
+  managed_by?: string;
+  issued_on?: string;
+  international_name?: string;
+  short_name?: string;
+}
+
+export interface TaxResult {
+  mst: string;
+  name: string;
+  url: string;
+}
+
+export type LookupOutcome =
+  | { kind: "single"; info: TaxInfo }
+  | { kind: "multiple"; results: TaxResult[] }
+  | { kind: "notFound"; message: string };
+
 export interface BusinessUnit {
   id: number;
   code: string;

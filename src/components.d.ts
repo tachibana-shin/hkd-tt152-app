@@ -34,6 +34,7 @@ declare module 'vue' {
     IMdiBank: typeof import('~icons/mdi/bank')['default']
     IMdiBookOpenPageVariant: typeof import('~icons/mdi/book-open-page-variant')['default']
     IMdiCalculator: typeof import('~icons/mdi/calculator')['default']
+    IMdiCalculatorVariant: typeof import('~icons/mdi/calculator-variant')['default']
     IMdiCalendarCheck: typeof import('~icons/mdi/calendar-check')['default']
     IMdiCashMultiple: typeof import('~icons/mdi/cash-multiple')['default']
     IMdiChartBox: typeof import('~icons/mdi/chart-box')['default']

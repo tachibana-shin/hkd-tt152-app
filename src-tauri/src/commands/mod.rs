@@ -15,3 +15,4 @@ pub(crate) mod attendance;
 pub(crate) mod auth;
 pub(crate) mod profile;
 pub(crate) mod settings;
+pub(crate) mod tax_lookup;
