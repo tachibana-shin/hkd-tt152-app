@@ -58,6 +58,7 @@ declare module 'vue' {
     InputText: typeof import('primevue/inputtext')['default']
     LineItemsEditor: typeof import('./components/LineItemsEditor.vue')['default']
     PayrollTable: typeof import('./components/PayrollTable.vue')['default']
+    ProfilePicker: typeof import('./components/ProfilePicker.vue')['default']
     ProgressSpinner: typeof import('primevue/progressspinner')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
@@ -70,6 +71,7 @@ declare module 'vue' {
     Tabs: typeof import('primevue/tabs')['default']
     Tag: typeof import('primevue/tag')['default']
     Toast: typeof import('primevue/toast')['default']
+    ToggleSwitch: typeof import('primevue/toggleswitch')['default']
     Toolbar: typeof import('primevue/toolbar')['default']
   }
 }

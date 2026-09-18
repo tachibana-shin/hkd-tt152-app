@@ -18,7 +18,7 @@ const PRIMEVUE_COMPONENTS = [
   "DataTable", "DatePicker", "Dialog", "Divider", "FileUpload", "IconField",
   "InputIcon", "InputNumber", "InputText", "ProgressSpinner", "Select",
   "Tab", "TabList", "TabPanel", "TabPanels", "Tabs", "Tag", "Toast",
-  "Toolbar",
+  "ToggleSwitch", "Toolbar",
 ];
 
 const PrimeVueLocalResolver = () => ({

@@ -10,6 +10,58 @@ const profile = useProfileStore();
 const toast = useToast();
 const pageTitle = computed(() => route.meta?.title || "HKD Kế Toán");
 
+// Luồng khởi động: nạp hồ sơ + prefs → thử auto-login → chọn hồ sơ (nhiều hồ sơ)
+// → màn hình đăng nhập. `bootstrapped` giữ màn chờ cho tới khi hoàn tất.
+const bootstrapped = ref(false);
+const showPicker = ref(false);
+
+async function bootstrap() {
+  // Đổi hồ sơ từ màn Hồ sơ HKD reload cả app → vào thẳng màn hình đăng nhập
+  // (bỏ qua picker và auto-login để đăng nhập lại đúng hồ sơ đã chọn).
+  const enterLoginDirectly = sessionStorage.getItem("hkd.enterLogin") === "1";
+  sessionStorage.removeItem("hkd.enterLogin");
+
+  await Promise.all([auth.load(), profile.load(), profile.loadPrefs()]);
+
+  if (!enterLoginDirectly) {
+    const target = profile.autoLoginTarget;
+    if (target) {
+      try {
+        if (profile.active?.key !== target.key) {
+          await profile.select(target.key);
+        }
+        await auth.login(target.username, target.password);
+      } catch {
+        // Sai mật khẩu / tài khoản bị khóa → bỏ cấu hình auto-login.
+        try {
+          await profile.setAutoLogin(target.key, false);
+        } catch {
+          /* bỏ qua */
+        }
+      }
+    }
+    // Chưa đăng nhập & máy có nhiều hồ sơ → màn chọn hồ sơ (kiểu Chrome).
+    if (!auth.isLoggedIn && profile.profiles.length > 1) {
+      showPicker.value = true;
+    }
+  }
+  bootstrapped.value = true;
+}
+
+async function onPickProfile(key: string) {
+  try {
+    await profile.select(key);
+    showPicker.value = false; // LoginView sẽ hiển thị với hồ sơ vừa chọn
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không mở được hồ sơ",
+      detail: String(e),
+      life: 4000,
+    });
+  }
+}
+
 type MenuItem = { label: string; icon: string; to: string; roles: string[] };
 
 const menuItems: MenuItem[] = [
@@ -47,22 +99,35 @@ const ROLE_LABEL: Record<string, string> = {
 const isActive = (to: string) => route.path === to;
 
 async function doLogout() {
+  // Đăng xuất thủ công → tắt tự động đăng nhập (tránh khởi động app vào lại ngay).
+  if (profile.active) {
+    try {
+      await profile.setAutoLogin(profile.active.key, false);
+    } catch {
+      /* bỏ qua */
+    }
+  }
   await auth.logout();
   toast.add({ severity: "info", summary: "Đã đăng xuất", life: 2000 });
   router.push("/");
 }
 
-onMounted(() => {
-  auth.load();
-  profile.load();
-});
+onMounted(bootstrap);
 </script>
 
 <template>
   <!-- Đang khôi phục phiên đăng nhập → màn chờ -->
-  <div v-if="auth.loading" class="flex h-screen items-center justify-center bg-gray-50">
+  <div v-if="auth.loading || !bootstrapped" class="flex h-screen items-center justify-center bg-gray-50">
     <ProgressSpinner />
   </div>
+
+  <!-- Nhiều hồ sơ & chưa đăng nhập → màn chọn hồ sơ (kiểu Chrome) -->
+  <ProfilePicker
+    v-else-if="showPicker"
+    :profiles="profile.profiles"
+    :active-key="profile.active?.key"
+    @select="onPickProfile"
+  />
 
   <!-- Chưa đăng nhập → màn hình đăng nhập (che toàn bộ app) -->
   <LoginView v-else-if="!auth.isLoggedIn" />

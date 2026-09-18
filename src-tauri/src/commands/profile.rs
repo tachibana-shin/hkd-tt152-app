@@ -5,6 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tauri::{AppHandle, Manager, State};
@@ -278,6 +279,98 @@ pub(crate) async fn switch_profile(
 
     // Ghi audit với người dùng CŨ, rồi xóa phiên → buộc đăng nhập lại ở hồ sở mới
     audit(&state, "switch_profile", "profile", &key).await;
+    *state.current_user.lock().await = None;
+
+    // Ghi hồ sơ đang mở, rồi swap pool
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    set_active(&app_dir, &key, &name);
+    *state.pool.write().await = new_pool;
+
+    Ok(json!({ "ok": true, "key": key, "name": name, "active": true }).to_string())
+}
+
+// ─── TÙY CHỌN ĐĂNG NHẬP THEO HỒ SƠ ───
+// Lưu trong `app_data_dir/profile_prefs.json`: { "<key>": { last_username, auto_login, username, password } }.
+// `password` là mật khẩu đã lưu để tự động đăng nhập — app local máy đơn, chấp nhận
+// lưu trong file dữ liệu của app (tương tự profile.json).
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+pub(crate) struct ProfilePrefs {
+    /// Tên đăng nhập nhập lần trước ở màn hình đăng nhập của hồ sơ này.
+    #[serde(default)]
+    pub(crate) last_username: Option<String>,
+    /// Có tự động đăng nhập hồ sơ này khi khởi động app không.
+    #[serde(default)]
+    pub(crate) auto_login: bool,
+    /// Tài khoản dùng để tự động đăng nhập (lưu khi bật auto_login).
+    #[serde(default)]
+    pub(crate) username: Option<String>,
+    #[serde(default)]
+    pub(crate) password: Option<String>,
+}
+
+fn prefs_file(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("profile_prefs.json"))
+        .unwrap_or_else(|_| PathBuf::from("profile_prefs.json"))
+}
+
+fn read_prefs(app: &AppHandle) -> HashMap<String, ProfilePrefs> {
+    let raw = std::fs::read_to_string(prefs_file(app)).unwrap_or_default();
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn write_prefs(app: &AppHandle, map: &HashMap<String, ProfilePrefs>) -> Result<(), String> {
+    std::fs::write(
+        prefs_file(app),
+        serde_json::to_string_pretty(map).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Toàn bộ tùy chọn đăng nhập của mọi hồ sơ. Đọc được khi CHƯA đăng nhập —
+/// cần cho màn hình chọn hồ sơ / màn hình đăng nhập lúc khởi động.
+#[tauri::command]
+pub(crate) async fn get_profile_prefs(app: AppHandle) -> Result<String, String> {
+    Ok(serde_json::to_string(&read_prefs(&app)).map_err(|e| e.to_string())?)
+}
+
+/// Ghi (ghi đè) tùy chọn đăng nhập cho 1 hồ sơ. Không cần đăng nhập.
+#[tauri::command]
+pub(crate) async fn save_profile_pref(
+    app: AppHandle,
+    key: String,
+    prefs: ProfilePrefs,
+) -> Result<String, String> {
+    validate_key(&key)?;
+    let mut map = read_prefs(&app);
+    map.insert(key, prefs);
+    write_prefs(&app, &map)?;
+    Ok("ok".into())
+}
+
+/// Mở hồ sơ từ màn hình chọn hồ sơ lúc KHỞI ĐỘNG (chưa cần đăng nhập): đổi hồ sơ
+/// đang mở + swap pool SQLite; frontend sẽ đưa người dùng tới màn hình đăng nhập
+/// của hồ sơ mới. Khác `switch_profile` (yêu cầu đăng nhập + ghi audit).
+#[tauri::command]
+pub(crate) async fn select_profile(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    key: String,
+) -> Result<String, String> {
+    validate_key(&key)?;
+    let dir = profile_dir(&app, &key);
+    if !dir.join("hkd.db").is_file() {
+        return Err("Hồ sơ không tồn tại".into());
+    }
+    let name = profile_name(&dir, &key);
+
+    // Mở pool mới + đảm bảo migration/seed (an toàn nếu tạo thủ công)
+    let new_pool = open_pool(&dir.join("hkd.db")).await?;
+    init_database(&new_pool).await;
+
+    // Chưa đăng nhập ở thời điểm này (khởi động) nhưng xóa phiên cho chắc chắn
     *state.current_user.lock().await = None;
 
     // Ghi hồ sơ đang mở, rồi swap pool

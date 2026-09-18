@@ -220,6 +220,14 @@ export interface Profile {
   active: boolean;
 }
 
+/** Tùy chọn đăng nhập theo hồ sơ (tên đăng nhập ghi nhớ + tự động đăng nhập). */
+export interface ProfilePrefs {
+  last_username?: string | null;
+  auto_login: boolean;
+  username?: string | null;
+  password?: string | null;
+}
+
 // ─── Kết quả nhập khối NHAP LIEU ───
 
 export interface ImportResult {

@@ -9,10 +9,23 @@ const toast = useToast();
 
 const username = ref("");
 const password = ref("");
+const autoLogin = ref(false);
 const submitting = ref(false);
 
+// Tên đăng nhập nhập lần trước của hồ sơ này được ghi nhớ (lưu ở profile_prefs.json);
+// nếu đã bật tự động đăng nhập thì tích sẵn ô "Tự động đăng nhập".
+onMounted(async () => {
+  await profile.loadPrefs(); // đảm bảo đã nạp (App cũng nạp khi khởi động)
+  const key = profile.active?.key;
+  if (!key) return;
+  const pref = profile.prefsOf(key);
+  username.value = pref.last_username ?? "";
+  autoLogin.value = !!pref.auto_login && !!pref.username && !!pref.password;
+});
+
 async function doLogin() {
-  if (!username.value.trim() || !password.value) {
+  const user = username.value.trim();
+  if (!user || !password.value) {
     toast.add({
       severity: "warn",
       summary: "Thiếu thông tin",
@@ -23,7 +36,18 @@ async function doLogin() {
   }
   submitting.value = true;
   try {
-    await auth.login(username.value.trim(), password.value);
+    await auth.login(user, password.value);
+    // Đăng nhập thành công → ghi nhớ tên đăng nhập cho hồ sơ này; lưu thêm
+    // mật khẩu nếu người dùng bật tự động đăng nhập (tắt thì xóa mật khẩu cũ).
+    const key = profile.active?.key;
+    if (key) {
+      await profile.setAutoLogin(
+        key,
+        autoLogin.value,
+        user,
+        autoLogin.value ? password.value : undefined,
+      );
+    }
   } catch (e) {
     toast.add({
       severity: "error",
@@ -74,6 +98,7 @@ const roleHint = computed(() => {
                 placeholder="admin"
                 autocomplete="username"
                 :disabled="submitting"
+                data-testid="login-username"
               />
             </IconField>
           </div>
@@ -88,9 +113,17 @@ const roleHint = computed(() => {
                 placeholder="••••••••"
                 autocomplete="current-password"
                 :disabled="submitting"
+                data-testid="login-password"
               />
             </IconField>
           </div>
+          <label
+            class="flex items-center gap-3 text-sm text-gray-600 cursor-pointer select-none"
+            v-tooltip.top="'Khởi động app lần sau sẽ tự đăng nhập hồ sơ này bằng tài khoản vừa nhập'"
+          >
+            <ToggleSwitch v-model="autoLogin" :disabled="submitting" inputId="autoLogin" />
+            <span>Tự động đăng nhập khi khởi động app</span>
+          </label>
           <Button
             type="submit"
             label="Đăng nhập"

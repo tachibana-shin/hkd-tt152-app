@@ -32,6 +32,7 @@ import type {
   AppUser,
   Role,
   Profile,
+  ProfilePrefs,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -496,5 +497,15 @@ export const api = {
   switchProfile: async (key: string) =>
     parse<{ ok: boolean; key: string; name: string; active: boolean }>(
       await invoke<string>("switch_profile", { key }),
+    ),
+  /** Tùy chọn đăng nhập của mọi hồ sơ (đọc được trước khi đăng nhập). */
+  getProfilePrefs: async (): Promise<Record<string, ProfilePrefs>> =>
+    parse<Record<string, ProfilePrefs>>(await invoke<string>("get_profile_prefs")),
+  saveProfilePref: (key: string, prefs: ProfilePrefs) =>
+    invoke<string>("save_profile_pref", { key, prefs }),
+  /** Mở hồ sơ từ màn hình chọn hồ sơ lúc khởi động (không cần đăng nhập). */
+  selectProfile: async (key: string) =>
+    parse<{ ok: boolean; key: string; name: string; active: boolean }>(
+      await invoke<string>("select_profile", { key }),
     ),
 };
