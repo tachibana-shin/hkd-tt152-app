@@ -1,0 +1,1 @@
+INSERT OR IGNORE INTO warehouse (code, name) VALUES ('HaNoi-01', 'Kho chính');
