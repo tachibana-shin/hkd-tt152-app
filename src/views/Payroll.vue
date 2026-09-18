@@ -187,7 +187,11 @@ async function useAttendanceWorkDays() {
     const workDays: AttendanceWorkDay[] = await api.getAttendanceWorkDays(
       selectedPeriod.value,
     );
-    if (!workDays.length) {
+    // Kỳ chưa có Ô nào được chấm (bảng chấm công còn trống) → báo để sang
+    // màn Chấm công nhập. Lưu ý: backend giờ trả cả người 0 công, nên không
+    // dùng workDays.length để nhận biết "chưa có dữ liệu".
+    const att = await api.getAttendance(selectedPeriod.value);
+    if (!att.length) {
       toast.add({
         severity: "info",
         summary: "Chưa có dữ liệu chấm công",

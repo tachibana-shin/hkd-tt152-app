@@ -51,7 +51,7 @@ const totals = computed(() => {
         <InputNumber
           v-model="rows[index].work_days"
           :min="0"
-          :max="26"
+          :max="31"
           :step="0.5"
           :maxFractionDigits="1"
           :disabled="!canEdit"

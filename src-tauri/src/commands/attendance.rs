@@ -88,6 +88,8 @@ pub(crate) async fn save_attendance(
 /// Số công mỗi nhân viên trong kỳ — nạp sẵn Số công khi lập bảng lương.
 /// Quy ước công (khớp cột tổng của sheet Cham Cong):
 /// X/P/H/CT/TS/O/CO = 1 ngày công; NC = 0,5 ngày; KL và ô trống = 0.
+/// Trả về CẢ nhân viên không có công (work_days = 0) để nạp đúng 0 công
+/// (nghỉ cả tháng / toàn KL) thay vì bỏ sót.
 #[tauri::command]
 pub(crate) async fn get_attendance_work_days(
     state: State<'_, AppState>,
@@ -103,7 +105,6 @@ pub(crate) async fn get_attendance_work_days(
          FROM employee e
          LEFT JOIN attendance a ON a.employee_id = e.id AND a.work_date LIKE ? || '-%'
          GROUP BY e.id
-         HAVING work_days > 0
          ORDER BY e.code",
     )
     .bind(&period)

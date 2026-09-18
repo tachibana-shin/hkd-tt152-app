@@ -285,35 +285,35 @@ onMounted(() => {
         </div>
 
         <!-- Lưới chấm công -->
-        <div class="mt-3 max-h-[540px] overflow-auto rounded-lg border">
+        <div class="mt-3 max-h-[620px] overflow-auto rounded-lg border">
           <table class="w-full border-collapse text-sm">
             <thead class="sticky top-0 z-10">
               <tr>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-xs font-semibold text-gray-600">
+                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600">
                   Mã NV
                 </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-xs font-semibold text-gray-600">
+                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600">
                   Họ tên
                 </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-xs font-semibold text-gray-600">
+                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600">
                   Bộ phận
                 </th>
                 <th
                   v-for="d in days"
                   :key="d.day"
-                  class="border-b px-0.5 py-1 text-center text-xs font-semibold"
+                  class="border-b min-w-9 px-1 py-1.5 text-center text-sm font-semibold"
                   :class="d.isSunday ? 'bg-rose-50 text-rose-600' : 'bg-gray-50 text-gray-600'"
                 >
-                  <div>{{ d.day }}</div>
-                  <div class="text-[10px] font-normal">{{ DOW[d.dow] }}</div>
+                  <div class="leading-4">{{ d.day }}</div>
+                  <div class="text-[11px] font-normal leading-3">{{ DOW[d.dow] }}</div>
                 </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-xs font-semibold text-emerald-700">
+                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-emerald-700">
                   Công
                 </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-xs font-semibold text-gray-600">
+                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-gray-600">
                   Nghỉ
                 </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-xs font-semibold text-gray-600">
+                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-gray-600">
                   Tiện ích
                 </th>
               </tr>
@@ -331,7 +331,7 @@ onMounted(() => {
                 >
                   <button
                     type="button"
-                    class="block h-7 w-full text-xs leading-7 transition-colors hover:bg-black/5"
+                    class="block h-9 w-full text-sm leading-9 transition-colors hover:bg-black/5"
                     :class="cellText(r, idx)"
                     :title="cellTitle(r, idx, d)"
                     @click="cycle(r, idx)"
