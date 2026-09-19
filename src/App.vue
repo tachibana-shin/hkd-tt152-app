@@ -2,6 +2,7 @@
 import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
 import { useBusinessStore } from "@/stores/business";
+import { useThemeStore } from "@/stores/theme";
 import LoginView from "@/views/LoginView.vue";
 
 const route = useRoute();
@@ -9,6 +10,7 @@ const router = useRouter();
 const auth = useAuthStore();
 const profile = useProfileStore();
 const business = useBusinessStore();
+const theme = useThemeStore();
 const toast = useToast();
 const pageTitle = computed(() => route.meta?.title || "HKD Kế Toán");
 
@@ -160,7 +162,10 @@ async function doLogout() {
   router.push("/");
 }
 
-onMounted(bootstrap);
+onMounted(() => {
+  theme.init(); // áp theme đã lưu + theo dõi đổi giao diện hệ thống
+  bootstrap();
+});
 </script>
 
 <template>
@@ -222,6 +227,14 @@ onMounted(bootstrap);
       <header class="bg-white border-b border-gray-200 px-6 py-3 shadow-sm flex items-center justify-between">
         <h2 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h2>
         <div class="flex items-center gap-3">
+          <!-- Bật/tắt giao diện sáng-tối -->
+          <Button
+            :icon="theme.dark ? 'pi pi-sun' : 'pi pi-moon'"
+            text
+            rounded
+            :aria-label="theme.dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'"
+            @click="theme.toggle"
+          />
           <!-- HKD đang đăng nhập → tên + MST; nhấn để quản lý/chuyển hồ sơ -->
           <button
             @click="router.push('/profiles')"

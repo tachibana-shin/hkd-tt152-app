@@ -8,6 +8,7 @@ import ConfirmationService from "primevue/confirmationservice";
 import Tooltip from "primevue/tooltip";
 import router from "./router";
 import App from "./App.vue";
+import { applyInitialTheme } from "./stores/theme";
 import "primeicons/primeicons.css";
 import "./style.css";
 
@@ -44,4 +45,5 @@ app.use(ToastService);
 app.use(ConfirmationService);
 app.directive("tooltip", Tooltip);
 
+applyInitialTheme(); // áp theme (sáng/tối) trước khi mount — tránh chớp trắng
 app.mount("#app");

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
+import { useThemeStore } from "@/stores/theme";
 import { useToast } from "primevue/usetoast";
 
 const auth = useAuthStore();
 const profile = useProfileStore();
+const theme = useThemeStore();
 const toast = useToast();
 
 const username = ref("");
@@ -76,8 +78,16 @@ const roleHint = computed(() => {
 
 <template>
   <div
-    class="flex h-screen items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-primary-900"
+    class="relative flex h-screen items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-primary-900"
   >
+    <!-- Bật/tắt giao diện sáng-tối -->
+    <button
+      @click="theme.toggle"
+      class="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+      :aria-label="theme.dark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'"
+    >
+      <i :class="theme.dark ? 'pi pi-sun' : 'pi pi-moon'" class="text-lg"></i>
+    </button>
     <div class="w-full max-w-md px-6">
       <div class="bg-white rounded-2xl shadow-2xl overflow-hidden">
         <div class="bg-gray-900 px-8 py-6 text-white">

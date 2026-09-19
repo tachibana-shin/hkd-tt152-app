@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Dark mode theo class `.dark` trên <html> (khớp darkModeSelector của PrimeVue). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* PrimeVue Tailwind theme */
 @layer base {
   :root {
@@ -56,3 +59,35 @@
 input {
   max-width: 100%;
 }
+
+/* ─── Dark mode ─── */
+/* Nền chung trang (view nào không tự set nền cũng không bị lóa trắng). */
+body {
+  background-color: #f9fafb; /* gray-50 */
+}
+.dark body {
+  background-color: #030712; /* gray-950 */
+  color: #e5e7eb; /* gray-200 */
+}
+
+/* Compat layer: dưới `.dark`, dịch toàn bộ màu xám hard-code (bg-white,
+   bg-gray-*, text-gray-*, border-gray-*) sang tone tối. Các component PrimeVue
+   (DataTable, Dialog, Input…) tự đổi theo Aura dark nên không phải sửa từng
+   view; lớp này chỉ lo phần Tailwind viết tay. */
+.dark .bg-white { background-color: #111827; }   /* gray-900 */
+.dark .bg-gray-50 { background-color: #030712; } /* gray-950 */
+.dark .bg-gray-100 { background-color: #1f2937; } /* gray-800 */
+.dark .bg-gray-200 { background-color: #374151; } /* gray-700 */
+.dark .bg-gray-300 { background-color: #4b5563; } /* gray-600 */
+
+.dark .text-gray-900 { color: #f9fafb; } /* gray-50 */
+.dark .text-gray-800 { color: #f3f4f6; } /* gray-100 */
+.dark .text-gray-700 { color: #e5e7eb; } /* gray-200 */
+.dark .text-gray-600 { color: #d1d5db; } /* gray-300 */
+.dark .text-gray-500 { color: #9ca3af; } /* gray-400 */
+.dark .text-gray-400 { color: #6b7280; } /* gray-500 */
+
+.dark .border-gray-200 { border-color: #374151; } /* gray-700 */
+.dark .border-gray-300 { border-color: #4b5563; } /* gray-600 */
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #374151; }
+.dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]) { border-color: #4b5563; }
