@@ -5,7 +5,7 @@
     "": {
       "name": "hkd-tt152-app",
       "dependencies": {
-        "@primeuix/themes": "^2.0.3",
+        "@primeuix/themes": "^3.0.1",
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-opener": "^2",
         "ag-grid-community": "^36.2.0",
@@ -25,6 +25,7 @@
         "@tauri-apps/cli": "^2",
         "@types/node": "^22.20.3",
         "@vitejs/plugin-vue": "^6.0.7",
+        "husky": "^9.1.7",
         "oxfmt": "^0.68.0",
         "oxlint": "^1.83.0",
         "tailwindcss": "^4.3.3",
@@ -154,11 +155,11 @@
 
     "@primeuix/motion": ["@primeuix/motion@1.0.0", "", { "dependencies": { "@primeuix/utils": "^0.8.0" } }, "sha512-rqpFRKmUVp9BI3YQKdok0rLUwzYShXzuuxy72Kq74xYRV14eR+4+XrIXOdyVs7j7CYV0ajYowiRpJCrVgdrq6A=="],
 
-    "@primeuix/styled": ["@primeuix/styled@0.7.4", "", { "dependencies": { "@primeuix/utils": "^0.6.1" } }, "sha512-QSO/NpOQg8e9BONWRBx9y8VGMCMYz0J/uKfNJEya/RGEu7ARx0oYW0ugI1N3/KB1AAvyGxzKBzGImbwg0KUiOQ=="],
+    "@primeuix/styled": ["@primeuix/styled@1.0.0", "", { "dependencies": { "@primeui/license-manager": "^1.0.0", "@primeuix/utils": "^0.8.0" } }, "sha512-6SXoeQWwKswSqTv1ygaXNfY7otHo6Rb9mxbKJK5WF8adWlZ6CtwmlNfIP+p8cH/zGccsei/5Bu7IetXlMoZGjQ=="],
 
     "@primeuix/styles": ["@primeuix/styles@3.0.0", "", { "dependencies": { "@primeuix/styled": "^1.0.0" } }, "sha512-nFsG2V0kbn3Q/fr0EV0Lxy2cKeW1F+WFXyxWI1CxWAAXW34mTCLkDd6OFbN5dP9hrSJOVaeXWzTdoonh1sdklQ=="],
 
-    "@primeuix/themes": ["@primeuix/themes@2.0.3", "", { "dependencies": { "@primeuix/styled": "^0.7.4" } }, "sha512-3fS1883mtCWhgUgNf/feiaaDSOND4EBIOu9tZnzJlJ8QtYyL6eFLcA6V3ymCWqLVXQ1+lTVEZv1gl47FIdXReg=="],
+    "@primeuix/themes": ["@primeuix/themes@3.0.1", "", { "dependencies": { "@primeuix/styled": "^1.0.0" } }, "sha512-UmHzvA16DKb3dcE+2J8NbgK6eI5zFJQbCaNBW1YyY+ADZEVId4H275TPTcwlZ/8ywt0AFpunEPiyLQE1oub9pA=="],
 
     "@primeuix/utils": ["@primeuix/utils@0.8.2", "", {}, "sha512-4Cz5HY1XHqJwhq1ieml6l5IDkWt41Amdw/t2rAQxNXv7WwAhgb8QrnjJM6scW9h1D0PjQgm9Z3RgNlWCU+WZng=="],
 
@@ -350,6 +351,8 @@
 
     "hookable": ["hookable@5.5.3", "", {}, "sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ=="],
 
+    "husky": ["husky@9.1.7", "", { "bin": { "husky": "bin.js" } }, "sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA=="],
+
     "import-meta-resolve": ["import-meta-resolve@4.2.0", "", {}, "sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg=="],
 
     "jiti": ["jiti@2.7.0", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
@@ -488,12 +491,6 @@
 
     "@iconify/utils/@antfu/install-pkg": ["@antfu/install-pkg@2.1.0", "", { "dependencies": { "package-manager-detector": "^1.8.0", "tinyexec": "^1.3.1" } }, "sha512-sdg9NxU3zR4Mnawfbc/x6GB5Wf17WYud5qOuEuxXjaKpYpMkISSJEjItGebXJ2bQ4DIcly4NYH23mtkGJjvKUw=="],
 
-    "@primeuix/styled/@primeuix/utils": ["@primeuix/utils@0.6.4", "", {}, "sha512-pZ5f+vj7wSzRhC7KoEQRU5fvYAe+RP9+m39CTscZ3UywCD1Y2o6Fe1rRgklMPSkzUcty2jzkA0zMYkiJBD1hgg=="],
-
-    "@primeuix/styles/@primeuix/styled": ["@primeuix/styled@1.0.0", "", { "dependencies": { "@primeui/license-manager": "^1.0.0", "@primeuix/utils": "^0.8.0" } }, "sha512-6SXoeQWwKswSqTv1ygaXNfY7otHo6Rb9mxbKJK5WF8adWlZ6CtwmlNfIP+p8cH/zGccsei/5Bu7IetXlMoZGjQ=="],
-
-    "@primevue/core/@primeuix/styled": ["@primeuix/styled@1.0.0", "", { "dependencies": { "@primeui/license-manager": "^1.0.0", "@primeuix/utils": "^0.8.0" } }, "sha512-6SXoeQWwKswSqTv1ygaXNfY7otHo6Rb9mxbKJK5WF8adWlZ6CtwmlNfIP+p8cH/zGccsei/5Bu7IetXlMoZGjQ=="],
-
     "@tailwindcss/node/lightningcss": ["lightningcss@1.32.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.32.0", "lightningcss-darwin-arm64": "1.32.0", "lightningcss-darwin-x64": "1.32.0", "lightningcss-freebsd-x64": "1.32.0", "lightningcss-linux-arm-gnueabihf": "1.32.0", "lightningcss-linux-arm64-gnu": "1.32.0", "lightningcss-linux-arm64-musl": "1.32.0", "lightningcss-linux-x64-gnu": "1.32.0", "lightningcss-linux-x64-musl": "1.32.0", "lightningcss-win32-arm64-msvc": "1.32.0", "lightningcss-win32-x64-msvc": "1.32.0" } }, "sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ=="],
 
     "@tailwindcss/node/magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
@@ -521,8 +518,6 @@
     "mlly/pkg-types": ["pkg-types@1.3.1", "", { "dependencies": { "confbox": "^0.1.8", "mlly": "^1.7.4", "pathe": "^2.0.1" } }, "sha512-/Jm5M4RvtBFVkKWRu2BLUTNP8/M2a+UwuAX+ae4770q1qVGtfjG+WTCupoZixokjmHiry8uI+dlY8KXYV5HVVQ=="],
 
     "pkg-types/confbox": ["confbox@0.3.1", "", {}, "sha512-cKUSoKa8YxFZZSmraVi7onONx3amu77ngK3kGpsYHDH7drPwCRkQE1RYMPlLRrMtnciRj274XNRxcHxnKmDSnA=="],
-
-    "primevue/@primeuix/styled": ["@primeuix/styled@1.0.0", "", { "dependencies": { "@primeui/license-manager": "^1.0.0", "@primeuix/utils": "^0.8.0" } }, "sha512-6SXoeQWwKswSqTv1ygaXNfY7otHo6Rb9mxbKJK5WF8adWlZ6CtwmlNfIP+p8cH/zGccsei/5Bu7IetXlMoZGjQ=="],
 
     "unplugin-vue-components/magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
