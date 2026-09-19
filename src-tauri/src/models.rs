@@ -549,9 +549,9 @@ pub(crate) struct TaxDeclarationRow {
     pub(crate) pit_rate: f64,
     pub(crate) revenue_up: f64,
     pub(crate) revenue_down: f64,
-    pub(crate) vat_tax: f64,    // Số thuế GTGT = (UP-DOWN) x tỷ lệ ngành
+    pub(crate) vat_tax: f64,     // Số thuế GTGT = (UP-DOWN) x tỷ lệ ngành
     pub(crate) vat_payable: f64, // Thuế GTGT phải nộp = vat_tax
-    pub(crate) pit_tax: f64,    // Số thuế TNCN theo tỷ lệ doanh thu (chỉ nhóm 2, phương pháp doanh thu)
+    pub(crate) pit_tax: f64, // Số thuế TNCN theo tỷ lệ doanh thu (chỉ nhóm 2, phương pháp doanh thu)
 }
 
 /// Tổng hợp thuế phải nộp theo NĐ 68/2026/NĐ-CP + NĐ 141/2026/NĐ-CP:

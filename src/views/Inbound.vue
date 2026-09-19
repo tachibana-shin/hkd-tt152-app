@@ -83,9 +83,7 @@ function printVoucher(row: { voucher_no: string }) {
 async function adjustFromVoucher(row: { voucher_no: string }) {
   try {
     const voucher = await api.getVoucher(row.voucher_no);
-    const lines = voucher.filter(
-      (r) => r.entry_type === "PN" && r.product_code && r.quantity > 0,
-    );
+    const lines = voucher.filter((r) => r.entry_type === "PN" && r.product_code && r.quantity > 0);
     if (!lines.length) {
       toast.add({
         severity: "warn",
@@ -260,12 +258,7 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button
-          v-if="auth.canStock"
-          label="Tạo phiếu nhập"
-          icon="pi pi-plus"
-          @click="openCreate"
-        />
+        <Button v-if="auth.canStock" label="Tạo phiếu nhập" icon="pi pi-plus" @click="openCreate" />
       </template>
     </Toolbar>
 
@@ -285,9 +278,7 @@ onMounted(async () => {
           <Column field="product_code" header="Mã SP" />
           <Column field="description" header="Diễn giải" />
           <Column field="supplier_name" header="Nhà cung cấp">
-            <template #body="{ data }">{{
-              data.supplier_name || "—"
-            }}</template>
+            <template #body="{ data }">{{ data.supplier_name || "—" }}</template>
           </Column>
           <Column field="quantity" header="SL" align="right" />
           <Column field="unit_price" header="Đơn giá" align="right">
@@ -329,9 +320,7 @@ onMounted(async () => {
     <AppDialog
       v-model:visible="dialog"
       :header="
-        form.inbound_type === 'adjust'
-          ? 'Tạo phiếu điều chỉnh hóa đơn mua'
-          : 'Tạo phiếu nhập kho'
+        form.inbound_type === 'adjust' ? 'Tạo phiếu điều chỉnh hóa đơn mua' : 'Tạo phiếu nhập kho'
       "
       width="max-w-3xl"
       action-label="Lưu phiếu"
@@ -351,10 +340,7 @@ onMounted(async () => {
             @change="onTypeChange"
           />
         </FormField>
-        <FormField
-          v-if="form.inbound_type === 'adjust'"
-          label="Hướng điều chỉnh"
-        >
+        <FormField v-if="form.inbound_type === 'adjust'" label="Hướng điều chỉnh">
           <Select
             v-model="form.adjust_dir"
             :options="adjustDirOptions"
@@ -386,17 +372,9 @@ onMounted(async () => {
           />
         </FormField>
         <FormField label="Theo chứng từ" class="col-span-2">
-          <InputText
-            v-model="form.reference_no"
-            :placeholder="referencePlaceholder"
-            size="small"
-          />
+          <InputText v-model="form.reference_no" :placeholder="referencePlaceholder" size="small" />
         </FormField>
-        <FormField
-          v-if="form.inbound_type === 'purchase'"
-          label="Nhà cung cấp"
-          class="col-span-2"
-        >
+        <FormField v-if="form.inbound_type === 'purchase'" label="Nhà cung cấp" class="col-span-2">
           <div class="flex gap-2">
             <Select
               v-model="form.supplier_code"
@@ -459,29 +437,26 @@ onMounted(async () => {
         <FormField label="Diễn giải">
           <InputText v-model="form.description" size="small" />
         </FormField>
-        <FormField
-          v-if="form.inbound_type === 'purchase'"
-          label="Trả tiền ngay"
-        >
+        <FormField v-if="form.inbound_type === 'purchase'" label="Trả tiền ngay">
           <div class="flex h-full items-center gap-1.5">
             <ToggleSwitch v-model="form.pay_now" class="shrink-0" />
             <i
               class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
-              v-tooltip="'Bật: khi lưu sẽ tự tạo phiếu chi (PC) thanh toán cho nhà cung cấp — cần chọn Nhà cung cấp.'"
+              v-tooltip="
+                'Bật: khi lưu sẽ tự tạo phiếu chi (PC) thanh toán cho nhà cung cấp — cần chọn Nhà cung cấp.'
+              "
               aria-hidden="true"
             />
           </div>
         </FormField>
       </div>
       <p class="mt-1 text-xs text-gray-400">
-        Mua hàng ngoài: Nợ 152 / Có 331 — nhập số tiền chiết khấu ở cột Tiền CK,
-        giá trị nhập kho = Thành tiền − Tiền CK. Tự sản xuất, gia công: nhập kho
-        thành phẩm theo lệnh sản xuất (Nợ 155 / Có 154). Nhập khác: tùy chọn TK
-        Nợ/Có (thừa kiểm kê, điều chỉnh…). Đơn giá nhập = giá sau chiết khấu,
-        chưa thuế khi bật khấu trừ GTGT, ngược lại là giá đã gồm thuế.
-        Điều chỉnh hóa đơn mua — Giảm: trả lại NCC, trừ lô FIFO theo ngày nhập,
-        ghi Nợ TK đối ứng / Có TK hàng (kèm giảm thuế 133 nếu khấu trừ); Tăng:
-        nhập kho như phiếu thường.
+        Mua hàng ngoài: Nợ 152 / Có 331 — nhập số tiền chiết khấu ở cột Tiền CK, giá trị nhập kho =
+        Thành tiền − Tiền CK. Tự sản xuất, gia công: nhập kho thành phẩm theo lệnh sản xuất (Nợ 155
+        / Có 154). Nhập khác: tùy chọn TK Nợ/Có (thừa kiểm kê, điều chỉnh…). Đơn giá nhập = giá sau
+        chiết khấu, chưa thuế khi bật khấu trừ GTGT, ngược lại là giá đã gồm thuế. Điều chỉnh hóa
+        đơn mua — Giảm: trả lại NCC, trừ lô FIFO theo ngày nhập, ghi Nợ TK đối ứng / Có TK hàng (kèm
+        giảm thuế 133 nếu khấu trừ); Tăng: nhập kho như phiếu thường.
       </p>
 
       <LineItemsEditor
@@ -493,9 +468,7 @@ onMounted(async () => {
         compact
         show-add-product
         :show-discount="form.inbound_type === 'purchase'"
-        :total-label="
-          form.inbound_type === 'purchase' ? 'Giá trị nhập kho:' : 'Tổng tiền:'
-        "
+        :total-label="form.inbound_type === 'purchase' ? 'Giá trị nhập kho:' : 'Tổng tiền:'"
         @add="addRow"
         @remove="removeRow"
       />

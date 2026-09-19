@@ -140,7 +140,9 @@ const roleHint = computed(() => {
           </div>
           <label
             class="flex items-center gap-3 text-sm text-gray-600 cursor-pointer select-none"
-            v-tooltip.top="'Khởi động app lần sau sẽ tự đăng nhập hồ sơ này bằng tài khoản vừa nhập'"
+            v-tooltip.top="
+              'Khởi động app lần sau sẽ tự đăng nhập hồ sơ này bằng tài khoản vừa nhập'
+            "
           >
             <ToggleSwitch v-model="autoLogin" :disabled="submitting" inputId="autoLogin" />
             <span>Tự động đăng nhập khi khởi động app</span>

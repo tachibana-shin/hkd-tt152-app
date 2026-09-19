@@ -25,19 +25,22 @@ async function ensureLoggedIn(page: Page) {
   await expect(page.locator("header h2")).toHaveText("Tổng quan", { timeout: 20_000 });
 }
 
-test("login with a wrong password shows an error toast and stays on the login screen", async ({ page }) => {
+test("login with a wrong password shows an error toast and stays on the login screen", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.getByTestId("login-username").fill(ADMIN.username);
   await page.getByTestId("login-password").fill("wrong-password");
   await page.getByRole("button", { name: "Đăng nhập" }).click();
-  await expect(page.locator(".p-toast-detail")).toContainText(
-    "Sai tên đăng nhập hoặc mật khẩu",
-    { timeout: 10_000 },
-  );
+  await expect(page.locator(".p-toast-detail")).toContainText("Sai tên đăng nhập hoặc mật khẩu", {
+    timeout: 10_000,
+  });
   await expect(page.getByTestId("login-username")).toBeVisible();
 });
 
-test("login with valid credentials opens the Dashboard with the seeded business info", async ({ page }) => {
+test("login with valid credentials opens the Dashboard with the seeded business info", async ({
+  page,
+}) => {
   await ensureLoggedIn(page);
   await expect(page.locator("header h2")).toHaveText("Tổng quan");
   // Header shows the active business (name + tax code) and the revenue card renders.

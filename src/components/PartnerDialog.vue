@@ -249,11 +249,7 @@ async function save() {
   >
     <div class="grid grid-cols-2 gap-4 py-2">
       <FormField :label="kind === 'warehouse' ? 'Mã kho' : 'Mã'" required>
-        <InputText
-          v-model="form.code"
-          :placeholder="codePlaceholder"
-          :disabled="editing"
-        />
+        <InputText v-model="form.code" :placeholder="codePlaceholder" :disabled="editing" />
       </FormField>
       <FormField :label="kind === 'warehouse' ? 'Tên kho' : 'Tên'" required>
         <InputText v-model="form.name" placeholder="Tên hiển thị" />
@@ -262,11 +258,7 @@ async function save() {
       <template v-if="kind !== 'warehouse'">
         <FormField label="MST">
           <div class="flex gap-2">
-            <InputText
-              v-model="form.tax_code"
-              placeholder="Mã số thuế"
-              class="min-w-0 flex-1"
-            />
+            <InputText v-model="form.tax_code" placeholder="Mã số thuế" class="min-w-0 flex-1" />
             <Button
               label="Tra cứu"
               icon="pi pi-search"
@@ -278,11 +270,7 @@ async function save() {
             />
           </div>
         </FormField>
-        <FormField
-          v-if="lookupResults.length"
-          label="Kết quả tra cứu"
-          class="col-span-2"
-        >
+        <FormField v-if="lookupResults.length" label="Kết quả tra cứu" class="col-span-2">
           <Select
             v-model="lookupSelectedUrl"
             :options="lookupResults"

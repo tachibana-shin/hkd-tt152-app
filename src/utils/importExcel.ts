@@ -49,13 +49,19 @@ export function parseExcelDate(v: unknown): string {
   }
   const s = String(v).trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); // đã là ISO
-  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
   if (m) {
     const dd = m[1].padStart(2, "0");
     const mm = m[2].padStart(2, "0");
     let yyyy = m[3];
     if (yyyy.length === 2) yyyy = (Number(yyyy) > 30 ? "19" : "20") + yyyy;
-    if (yyyy.length === 4 && Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) {
+    if (
+      yyyy.length === 4 &&
+      Number(mm) >= 1 &&
+      Number(mm) <= 12 &&
+      Number(dd) >= 1 &&
+      Number(dd) <= 31
+    ) {
       return `${yyyy}-${mm}-${dd}`;
     }
   }
@@ -77,7 +83,11 @@ export function toNumber(v: unknown): number {
     if (hasComma && hasDot) {
       // dấu thập phân là dấu xuất hiện sau cùng
       const dec = s.lastIndexOf(",") > s.lastIndexOf(".") ? "," : ".";
-      s = s.split(dec === "," ? "." : ",").join("").split(dec).join(".");
+      s = s
+        .split(dec === "," ? "." : ",")
+        .join("")
+        .split(dec)
+        .join(".");
     } else if (hasComma) {
       const parts = s.split(",");
       if (parts.length > 2) s = parts.join(""); // "1,200,000" -> nghìn
@@ -115,7 +125,7 @@ export function toTaxPeriod(v: unknown): number {
   if (typeof v === "number") return Math.trunc(v);
   if (!notEmpty(v)) return 0;
   const s = String(v).trim();
-  const m = s.match(/^(\d{1,2})[\/\-.](\d{2,4})$/);
+  const m = s.match(/^(\d{1,2})[/\-.](\d{2,4})$/);
   if (m) {
     const mm = m[1].padStart(2, "0");
     const yyyy = (m[2].length === 2 ? "20" : "") + m[2];

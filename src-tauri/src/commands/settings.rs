@@ -6,7 +6,7 @@ use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub(crate) struct SettingRow {

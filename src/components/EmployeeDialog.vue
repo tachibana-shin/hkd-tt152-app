@@ -77,7 +77,11 @@ watch(
 
 async function save() {
   if (!form.code.trim() || !form.name.trim()) {
-    toast.add({ severity: "warn", summary: "Thiếu thông tin", detail: "Mã và họ tên nhân viên là bắt buộc" });
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu thông tin",
+      detail: "Mã và họ tên nhân viên là bắt buộc",
+    });
     return;
   }
   saving.value = true;
@@ -136,19 +140,54 @@ async function save() {
         <InputText v-model="form.department" placeholder="Bộ phận" />
       </FormField>
       <FormField label="Lương theo HĐ">
-        <InputNumber v-model="form.basic_salary" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+        <InputNumber
+          v-model="form.basic_salary"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          class="w-full"
+        />
       </FormField>
       <FormField label="PC CV">
-        <InputNumber v-model="form.allowance_cv" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+        <InputNumber
+          v-model="form.allowance_cv"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          class="w-full"
+        />
       </FormField>
       <FormField label="PC XX">
-        <InputNumber v-model="form.allowance_xx" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+        <InputNumber
+          v-model="form.allowance_xx"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          class="w-full"
+        />
       </FormField>
       <FormField label="PC ĐT">
-        <InputNumber v-model="form.allowance_phone" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+        <InputNumber
+          v-model="form.allowance_phone"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          class="w-full"
+        />
       </FormField>
       <FormField label="Lương đóng BH">
-        <InputNumber v-model="form.bh_salary" :min="0" mode="currency" currency="VND" locale="vi-VN" class="w-full" />
+        <InputNumber
+          v-model="form.bh_salary"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          class="w-full"
+        />
       </FormField>
       <FormField label="Số người phụ thuộc">
         <InputNumber v-model="form.dependents" :min="0" :maxFractionDigits="0" class="w-full" />

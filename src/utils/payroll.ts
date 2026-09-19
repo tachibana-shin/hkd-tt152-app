@@ -24,5 +24,13 @@ export function previewPayroll(row: PayrollRow, emp?: Employee): PayrollPreview 
   const bhEmployer = Math.round(bhBase * EMPLOYER_BH_RATE);
   const bhEmployee = Math.round(bhBase * EMPLOYEE_BH_RATE);
   const net = gross - bhEmployee - row.pit_amount - row.advance;
-  return { timeSalary: Math.round(timeSalary), allowance, gross, bhBase, bhEmployer, bhEmployee, net };
+  return {
+    timeSalary: Math.round(timeSalary),
+    allowance,
+    gross,
+    bhBase,
+    bhEmployer,
+    bhEmployee,
+    net,
+  };
 }

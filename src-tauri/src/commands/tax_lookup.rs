@@ -6,9 +6,9 @@
 
 use crate::helpers::require_role;
 use crate::models::AppState;
+use regex::Regex;
 use reqwest::cookie::Jar;
 use reqwest::header::{ORIGIN, REFERER};
-use regex::Regex;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -42,6 +42,8 @@ pub(crate) struct TaxResultItem {
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+// Enum chỉ qua biên JSON (kích thước variant không đáng kể ở runtime).
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum LookupOutcome {
     Single { info: TaxInfo },
     Multiple { results: Vec<TaxResultItem> },
@@ -179,13 +181,8 @@ fn parse_detail(html: &str, url: &str) -> TaxInfo {
         .captures(html)
         .map(|c| clean_text(&c[1]))
         .or_else(|| {
-            label_value(html, "Người đại diện").map(|v| {
-                v.split("Ngoài ra")
-                    .next()
-                    .unwrap_or(&v)
-                    .trim()
-                    .to_string()
-            })
+            label_value(html, "Người đại diện")
+                .map(|v| v.split("Ngoài ra").next().unwrap_or(&v).trim().to_string())
         });
     TaxInfo {
         name: Some(parse_name(html, url)),
@@ -209,12 +206,18 @@ fn parse_listing(html: &str) -> Vec<TaxResultItem> {
         let path = cap[1].to_string();
         let name = clean_text(&cap[2]);
         if let Some(mst) = slug_mst(&path) {
-            out.push(TaxResultItem { mst, name, url: path });
+            out.push(TaxResultItem {
+                mst,
+                name,
+                url: path,
+            });
         }
     }
     // Fallback: block `data-prefetch='...'` (tên nằm trong <a> kế bên)
     if out.is_empty() {
         let re2 = Regex::new(r"data-prefetch='([^']+)'").unwrap();
+        // Regex tách tên từ <a> kế bên — tạo 1 lần ngoài vòng lặp.
+        let re_name = Regex::new(r"<a[^>]*>([^<]{2,120})</a>").unwrap();
         let mut seen: HashSet<String> = HashSet::new();
         for cap in re2.captures_iter(html) {
             let path = cap[1].to_string();
@@ -223,14 +226,17 @@ fn parse_listing(html: &str) -> Vec<TaxResultItem> {
             }
             let start = cap.get(1).unwrap().start();
             let window = &html[start..(start + 600).min(html.len())];
-            let name = Regex::new(r"<a[^>]*>([^<]{2,120})</a>")
-                .unwrap()
+            let name = re_name
                 .captures(window)
                 .map(|c| clean_text(&c[1]))
                 .unwrap_or_default();
             let mst = slug_mst(&path).unwrap_or_default();
             if !name.is_empty() {
-                out.push(TaxResultItem { mst, name, url: path });
+                out.push(TaxResultItem {
+                    mst,
+                    name,
+                    url: path,
+                });
             }
         }
     }
@@ -403,10 +409,7 @@ mod tests {
             <tr><td><i class='fa fa-map-marker'></i> Địa chỉ Thuế</td>
             <td itemprop='address'><span class='copy' id='tax-address-html'>Thửa đất số 187, Quốc lộ 10, Phường Nam Định, Tỉnh Ninh Bình, Việt Nam</span></td></tr>
         </table>";
-        assert_eq!(
-            label_value(html, "Mã số thuế").unwrap(),
-            "036186003184"
-        );
+        assert_eq!(label_value(html, "Mã số thuế").unwrap(), "036186003184");
         assert_eq!(
             label_value(html, "Địa chỉ Thuế").unwrap(),
             "Thửa đất số 187, Quốc lộ 10, Phường Nam Định, Tỉnh Ninh Bình, Việt Nam"
@@ -417,7 +420,10 @@ mod tests {
     fn test_parse_name() {
         let html = "<h1>036186003184 - HỘ KINH DOANH HOTEL 19</h1>";
         assert_eq!(
-            parse_name(html, "https://masothue.com/036186003184-ho-kinh-doanh-hotel-19"),
+            parse_name(
+                html,
+                "https://masothue.com/036186003184-ho-kinh-doanh-hotel-19"
+            ),
             "HỘ KINH DOANH HOTEL 19"
         );
     }

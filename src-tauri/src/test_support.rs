@@ -22,12 +22,7 @@ pub(crate) async fn test_pool() -> SqlitePool {
     pool
 }
 
-pub(crate) async fn seed_product(
-    pool: &SqlitePool,
-    code: &str,
-    name: &str,
-    vat_rate: f64,
-) -> i64 {
+pub(crate) async fn seed_product(pool: &SqlitePool, code: &str, name: &str, vat_rate: f64) -> i64 {
     sqlx::query(
         "INSERT INTO product (code, name, unit, vat_rate)
          VALUES (?, ?, 'Cái', ?)",

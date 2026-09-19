@@ -8,9 +8,7 @@ export const useProfileStore = defineStore("profile", () => {
   const loading = ref(true);
   const switching = ref(false);
 
-  const active = computed<Profile | null>(
-    () => profiles.value.find((p) => p.active) ?? null,
-  );
+  const active = computed<Profile | null>(() => profiles.value.find((p) => p.active) ?? null);
   const activeName = computed(() => active.value?.name ?? "");
 
   async function load() {
@@ -57,12 +55,7 @@ export const useProfileStore = defineStore("profile", () => {
    * - Tắt: xóa mật khẩu đã lưu (giữ lại tên đăng nhập cuối).
    * Truyền `username` để cập nhật tên đăng nhập cuối theo lần đăng nhập.
    */
-  async function setAutoLogin(
-    key: string,
-    enabled: boolean,
-    username?: string,
-    password?: string,
-  ) {
+  async function setAutoLogin(key: string, enabled: boolean, username?: string, password?: string) {
     const cur = prefsOf(key);
     await savePref(key, {
       last_username: username || cur.last_username,
@@ -87,11 +80,8 @@ export const useProfileStore = defineStore("profile", () => {
       .filter((x) => x.pref?.auto_login && x.pref.username && x.pref.password);
     if (!candidates.length) return null;
     const t =
-      candidates.find((c) => c.p.active) ??
-      (candidates.length === 1 ? candidates[0] : null);
-    return t
-      ? { key: t.p.key, username: t.pref.username!, password: t.pref.password! }
-      : null;
+      candidates.find((c) => c.p.active) ?? (candidates.length === 1 ? candidates[0] : null);
+    return t ? { key: t.p.key, username: t.pref.username!, password: t.pref.password! } : null;
   });
 
   async function create(name: string): Promise<Profile> {

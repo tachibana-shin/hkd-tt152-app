@@ -5,14 +5,11 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 /// helper cho admin: thư mục backups (tạo nếu chưa có)
 pub(crate) fn backups_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let dir = dir.join("backups");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)

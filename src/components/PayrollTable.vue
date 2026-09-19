@@ -130,9 +130,7 @@ const totals = computed(() => {
     </Column>
     <template #empty>
       <EmptyState
-        :text="
-          hasPeriods ? 'Chưa có bảng lương cho kỳ này.' : 'Chưa có bảng lương.'
-        "
+        :text="hasPeriods ? 'Chưa có bảng lương cho kỳ này.' : 'Chưa có bảng lương.'"
         icon="pi pi-money-bill"
       />
     </template>
@@ -148,9 +146,7 @@ const totals = computed(() => {
     </div>
     <div class="flex items-center gap-2">
       <span class="text-gray-500">Tổng BH SDLĐĐ (21,5%):</span>
-      <span class="font-semibold text-amber-600"
-        >{{ fmt(totals.bhEmployer) }} đ</span
-      >
+      <span class="font-semibold text-amber-600">{{ fmt(totals.bhEmployer) }} đ</span>
     </div>
     <div class="flex items-center gap-2">
       <span class="text-gray-500">Tổng Thực lĩnh:</span>

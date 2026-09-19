@@ -7,15 +7,15 @@
 @layer base {
   :root {
     --p-primary-50: oklch(0.95 0.02 260);
-    --p-primary-100: oklch(0.90 0.04 260);
+    --p-primary-100: oklch(0.9 0.04 260);
     --p-primary-200: oklch(0.82 0.07 260);
     --p-primary-300: oklch(0.72 0.11 260);
     --p-primary-400: oklch(0.62 0.15 260);
     --p-primary-500: oklch(0.55 0.18 260);
     --p-primary-600: oklch(0.47 0.19 260);
-    --p-primary-700: oklch(0.40 0.17 260);
+    --p-primary-700: oklch(0.4 0.17 260);
     --p-primary-800: oklch(0.33 0.14 260);
-    --p-primary-900: oklch(0.26 0.10 260);
+    --p-primary-900: oklch(0.26 0.1 260);
     --p-primary-950: oklch(0.18 0.07 260);
   }
 }
@@ -52,7 +52,8 @@
   background: var(--p-datatable-row-hover-background) !important;
 }
 .p-datatable .p-col-fixed-right {
-  box-shadow: -1px 0 0 0 var(--p-content-border-color, rgba(15, 23, 42, 0.08)),
+  box-shadow:
+    -1px 0 0 0 var(--p-content-border-color, rgba(15, 23, 42, 0.08)),
     -10px 0 16px -12px rgba(15, 23, 42, 0.35);
 }
 
@@ -74,20 +75,50 @@ body {
    bg-gray-*, text-gray-*, border-gray-*) sang tone tối. Các component PrimeVue
    (DataTable, Dialog, Input…) tự đổi theo Aura dark nên không phải sửa từng
    view; lớp này chỉ lo phần Tailwind viết tay. */
-.dark .bg-white { background-color: #111827; }   /* gray-900 */
-.dark .bg-gray-50 { background-color: #030712; } /* gray-950 */
-.dark .bg-gray-100 { background-color: #1f2937; } /* gray-800 */
-.dark .bg-gray-200 { background-color: #374151; } /* gray-700 */
-.dark .bg-gray-300 { background-color: #4b5563; } /* gray-600 */
+.dark .bg-white {
+  background-color: #111827;
+} /* gray-900 */
+.dark .bg-gray-50 {
+  background-color: #030712;
+} /* gray-950 */
+.dark .bg-gray-100 {
+  background-color: #1f2937;
+} /* gray-800 */
+.dark .bg-gray-200 {
+  background-color: #374151;
+} /* gray-700 */
+.dark .bg-gray-300 {
+  background-color: #4b5563;
+} /* gray-600 */
 
-.dark .text-gray-900 { color: #f9fafb; } /* gray-50 */
-.dark .text-gray-800 { color: #f3f4f6; } /* gray-100 */
-.dark .text-gray-700 { color: #e5e7eb; } /* gray-200 */
-.dark .text-gray-600 { color: #d1d5db; } /* gray-300 */
-.dark .text-gray-500 { color: #9ca3af; } /* gray-400 */
-.dark .text-gray-400 { color: #6b7280; } /* gray-500 */
+.dark .text-gray-900 {
+  color: #f9fafb;
+} /* gray-50 */
+.dark .text-gray-800 {
+  color: #f3f4f6;
+} /* gray-100 */
+.dark .text-gray-700 {
+  color: #e5e7eb;
+} /* gray-200 */
+.dark .text-gray-600 {
+  color: #d1d5db;
+} /* gray-300 */
+.dark .text-gray-500 {
+  color: #9ca3af;
+} /* gray-400 */
+.dark .text-gray-400 {
+  color: #6b7280;
+} /* gray-500 */
 
-.dark .border-gray-200 { border-color: #374151; } /* gray-700 */
-.dark .border-gray-300 { border-color: #4b5563; } /* gray-600 */
-.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #374151; }
-.dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]) { border-color: #4b5563; }
+.dark .border-gray-200 {
+  border-color: #374151;
+} /* gray-700 */
+.dark .border-gray-300 {
+  border-color: #4b5563;
+} /* gray-600 */
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #374151;
+}
+.dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #4b5563;
+}

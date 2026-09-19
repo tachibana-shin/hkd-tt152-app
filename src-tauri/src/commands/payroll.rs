@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 /// Tỷ lệ trích bảo hiểm theo bộ mẫu Excel (sheet Bang Luong / So Luong-BH):
 /// - Trích tính vào chi phí HKD (NSDLĐ): BHXH 17,5% + BHYT 3,0% + BHTN 1,0% = 21,5%
@@ -29,6 +29,7 @@ pub(crate) struct PayrollCalc {
 ///   gross = Lương thời gian + phụ cấp (CV, xăng xe, ĐT) + thưởng
 ///   Căn cứ đóng BH = bh_salary nếu > 0, ngược lại lấy gross
 ///   net = gross - BH người LĐ (10,5%) - thuế TNCN - tạm ứng
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_payroll_line(
     basic_salary: f64,
     allowance_cv: f64,
@@ -131,13 +132,12 @@ pub(crate) async fn save_payroll_core(
 
     // Phiếu chi lương tổng (PC: Nợ 642 / Có 111) — tự sinh nếu kỳ chưa có
     let voucher = format!("LUONG-{}", period);
-    let existing: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = ?",
-    )
-    .bind(&voucher)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| e.to_string())?;
+    let existing: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM journal_entry WHERE voucher_no = ?")
+            .bind(&voucher)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
     let desc = format!("Chi lương tháng {}", period);
     if existing == 0 {
         insert_journal_entry(
@@ -333,7 +333,17 @@ mod tests {
     #[test]
     fn payroll_formula_matches_excel() {
         // Lương HĐ 5.000.000, đủ 26 công, phụ cấp 500k+300k+200k, lương đóng BH 5.000.000
-        let c = calc_payroll_line(5_000_000.0, 500_000.0, 300_000.0, 200_000.0, 5_000_000.0, 26.0, 0.0, 0.0, 0.0);
+        let c = calc_payroll_line(
+            5_000_000.0,
+            500_000.0,
+            300_000.0,
+            200_000.0,
+            5_000_000.0,
+            26.0,
+            0.0,
+            0.0,
+            0.0,
+        );
         assert_eq!(c.gross, 6_000_000.0);
         assert_eq!(c.bh_employer, 1_075_000.0); // 5.000.000 x 21,5%
         assert_eq!(c.bh_employee, 525_000.0); // 5.000.000 x 10,5%
@@ -352,7 +362,17 @@ mod tests {
 
     #[test]
     fn payroll_deducts_pit_and_advance() {
-        let c = calc_payroll_line(5_000_000.0, 0.0, 0.0, 0.0, 0.0, 26.0, 1_000_000.0, 200_000.0, 500_000.0);
+        let c = calc_payroll_line(
+            5_000_000.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            26.0,
+            1_000_000.0,
+            200_000.0,
+            500_000.0,
+        );
         assert_eq!(c.gross, 6_000_000.0); // 5.000.000 + thưởng 1.000.000
         assert_eq!(c.bh_employee, 630_000.0); // 6.000.000 x 10,5%
         assert_eq!(c.net, 4_670_000.0); // 6.000.000 - 630.000 - 200.000 - 500.000
@@ -361,7 +381,17 @@ mod tests {
     #[tokio::test]
     async fn save_payroll_persists_row_and_auto_voucher() {
         let pool = test_pool().await;
-        seed_employee(&pool, "E1", "Nguyễn Văn A", 5_000_000.0, 500_000.0, 300_000.0, 200_000.0, 5_000_000.0).await;
+        seed_employee(
+            &pool,
+            "E1",
+            "Nguyễn Văn A",
+            5_000_000.0,
+            500_000.0,
+            300_000.0,
+            200_000.0,
+            5_000_000.0,
+        )
+        .await;
 
         let out = save_payroll_core(&pool, "2026-05", &[line("E1", 26.0)])
             .await
@@ -380,13 +410,14 @@ mod tests {
         assert_eq!((gross, bh_emp, net), (6_000_000.0, 525_000.0, 5_475_000.0));
 
         // Tự sinh 1 phiếu chi lương tổng: PC Nợ 642 / Có 111
-        let (etype, debit, credit, amount, date): (String, String, String, f64, String) = sqlx::query_as(
-            "SELECT entry_type, debit_account, credit_account, amount, posting_date
+        let (etype, debit, credit, amount, date): (String, String, String, f64, String) =
+            sqlx::query_as(
+                "SELECT entry_type, debit_account, credit_account, amount, posting_date
              FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(etype, "PC");
         assert_eq!(debit, "642");
         assert_eq!(credit, "111");
@@ -397,26 +428,52 @@ mod tests {
     #[tokio::test]
     async fn save_payroll_is_idempotent_per_period() {
         let pool = test_pool().await;
-        seed_employee(&pool, "E1", "Nguyễn Văn A", 5_000_000.0, 500_000.0, 300_000.0, 200_000.0, 5_000_000.0).await;
+        seed_employee(
+            &pool,
+            "E1",
+            "Nguyễn Văn A",
+            5_000_000.0,
+            500_000.0,
+            300_000.0,
+            200_000.0,
+            5_000_000.0,
+        )
+        .await;
 
-        save_payroll_core(&pool, "2026-05", &[line("E1", 26.0)]).await.unwrap();
+        save_payroll_core(&pool, "2026-05", &[line("E1", 26.0)])
+            .await
+            .unwrap();
         // Lần 2 với số công khác → cập nhật, KHÔNG thêm dòng/phiếu mới
-        let out = save_payroll_core(&pool, "2026-05", &[line("E1", 13.0)]).await.unwrap();
+        let out = save_payroll_core(&pool, "2026-05", &[line("E1", 13.0)])
+            .await
+            .unwrap();
         assert_eq!(out.rows, 1);
 
         let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM payroll WHERE period = '2026-05'")
-            .fetch_one(&pool).await.unwrap();
-        let vouchers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'")
-            .fetch_one(&pool).await.unwrap();
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let vouchers: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(rows, 1);
         assert_eq!(vouchers, 1);
 
         // Số công 13 → gross 2.500.000 + 1.000.000 phụ cấp = 3.500.000; net = 3.500.000 - 525.000
         let (net, amount): (f64, f64) = (
             sqlx::query_scalar("SELECT net_pay FROM payroll WHERE period = '2026-05'")
-                .fetch_one(&pool).await.unwrap(),
-            sqlx::query_scalar("SELECT amount FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'")
-                .fetch_one(&pool).await.unwrap(),
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            sqlx::query_scalar(
+                "SELECT amount FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
         );
         assert_eq!(net, 2_975_000.0);
         assert_eq!(amount, 2_975_000.0);

@@ -56,9 +56,7 @@ function onhandOf(code: string): number {
   >
     <template #option="slotProps">
       <div class="flex w-full items-center justify-between gap-3">
-        <span class="min-w-0 flex-1 truncate font-medium">{{
-          slotProps.option.name
-        }}</span>
+        <span class="min-w-0 flex-1 truncate font-medium">{{ slotProps.option.name }}</span>
         <span
           v-if="onhandOf(slotProps.option.code) > 0"
           class="whitespace-nowrap text-xs text-gray-500"

@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub(crate) async fn get_inventory_counts(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<InventoryCountRow> = sqlx::query_as!(

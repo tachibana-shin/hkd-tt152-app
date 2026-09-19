@@ -110,13 +110,7 @@ function fmtTs(ts: string): string {
         </div>
       </template>
       <template #end>
-        <Button
-          label="Tải lại"
-          icon="pi pi-refresh"
-          outlined
-          :loading="loading"
-          @click="load"
-        />
+        <Button label="Tải lại" icon="pi pi-refresh" outlined :loading="loading" @click="load" />
       </template>
     </Toolbar>
 
@@ -131,11 +125,7 @@ function fmtTs(ts: string): string {
             <label class="text-xs text-gray-500 block mb-1"
               >Tìm theo thao tác / đối tượng / chi tiết</label
             >
-            <InputText
-              v-model="filterText"
-              placeholder="Nhập chuỗi cần tìm..."
-              class="w-full"
-            />
+            <InputText v-model="filterText" placeholder="Nhập chuỗi cần tìm..." class="w-full" />
           </div>
           <Button label="Xem" icon="pi pi-search" @click="load" />
         </div>
@@ -144,41 +134,26 @@ function fmtTs(ts: string): string {
 
     <Card>
       <template #content>
-        <AppDataTable
-          :value="filteredEntries"
-          :loading="loading"
-          stripedRows
-          paginator
-          :rows="20"
-        >
+        <AppDataTable :value="filteredEntries" :loading="loading" stripedRows paginator :rows="20">
           <Column field="ts" header="Thời gian">
             <template #body="{ data }">{{ fmtTs(data.ts) }}</template>
           </Column>
           <Column field="action" header="Thao tác">
             <template #body="{ data }">
-              <Tag
-                :value="actionLabel(data.action)"
-                :severity="actionSeverity(data.action)"
-              />
+              <Tag :value="actionLabel(data.action)" :severity="actionSeverity(data.action)" />
             </template>
           </Column>
           <Column field="entity" header="Đối tượng" />
           <Column field="username" header="Người dùng">
             <template #body="{ data }">
-              <span v-if="data.username" class="text-sm">{{
-                data.username
-              }}</span>
+              <span v-if="data.username" class="text-sm">{{ data.username }}</span>
               <span v-else class="text-xs text-gray-400">—</span>
             </template>
           </Column>
           <Column field="detail" header="Chi tiết" />
           <template #empty>
             <EmptyState
-              :text="
-                entries.length
-                  ? 'Không có dòng nào khớp bộ lọc.'
-                  : 'Chưa có hoạt động nào.'
-              "
+              :text="entries.length ? 'Không có dòng nào khớp bộ lọc.' : 'Chưa có hoạt động nào.'"
               icon="pi pi-history"
             />
           </template>

@@ -13,11 +13,30 @@ const out = process.argv[2] || "e2e/fixtures/nhap-lieu-e2e.xlsx";
 //      6 Dien giai | 7 SL | 8 So tien | 9 MaKH | 10 MaNCC | 11 MaVatTu
 //      18 NhomNganhNghe | 19 TyLeGTGT | 20 TyLeTNCN
 const header = [
-  "LoaiPhieu", "SoPhieu", "NgayGhiSo", "SoHieu", "NgayChungTu", "KyKhaiThue",
-  "Dien giai", "SoLuong", "So tien", "MaKH", "MaNCC", "MaVatTu",
-  "", "", "", "", "", "", "NhomNganhNghe", "TyLeGTGT", "TyLeTNCN",
+  "LoaiPhieu",
+  "SoPhieu",
+  "NgayGhiSo",
+  "SoHieu",
+  "NgayChungTu",
+  "KyKhaiThue",
+  "Dien giai",
+  "SoLuong",
+  "So tien",
+  "MaKH",
+  "MaNCC",
+  "MaVatTu",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "",
+  "NhomNganhNghe",
+  "TyLeGTGT",
+  "TyLeTNCN",
 ];
 const row = (v) => {
+  // oxlint-disable-next-line unicorn/no-new-array
   const r = new Array(21).fill("");
   return Object.assign(r, v);
 };
@@ -29,12 +48,36 @@ const aoa = [
   ["Dòng 4"],
   ["Dòng 5"],
   header,
-  row({ 1: "PN101", 2: "2026-01-05", 3: "HD-IMP1", 4: "2026-01-05", 5: 202601,
-        6: "Nhập từ Excel E2E", 7: 3, 8: 300000, 10: "NCC001", 11: "SP001",
-        18: "PPHH", 19: 1, 20: 0.5 }),
-  row({ 1: "PX101", 2: "2026-01-06", 3: "HD-IMP2", 4: "2026-01-06", 5: 202601,
-        6: "Xuất từ Excel E2E", 7: 2, 8: 200000, 9: "KH001", 11: "SP001",
-        18: "PPHH", 19: 1, 20: 0.5 }),
+  row({
+    1: "PN101",
+    2: "2026-01-05",
+    3: "HD-IMP1",
+    4: "2026-01-05",
+    5: 202601,
+    6: "Nhập từ Excel E2E",
+    7: 3,
+    8: 300000,
+    10: "NCC001",
+    11: "SP001",
+    18: "PPHH",
+    19: 1,
+    20: 0.5,
+  }),
+  row({
+    1: "PX101",
+    2: "2026-01-06",
+    3: "HD-IMP2",
+    4: "2026-01-06",
+    5: 202601,
+    6: "Xuất từ Excel E2E",
+    7: 2,
+    8: 200000,
+    9: "KH001",
+    11: "SP001",
+    18: "PPHH",
+    19: 1,
+    20: 0.5,
+  }),
 ];
 
 const ws = XLSX.utils.aoa_to_sheet(aoa);

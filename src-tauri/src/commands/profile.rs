@@ -85,7 +85,10 @@ pub(crate) fn write_profile_meta(dir: &Path, name: &str) {
         name: name.to_string(),
         created_at: chrono_now(),
     };
-    let _ = std::fs::write(dir.join("profile.json"), serde_json::to_string_pretty(&meta).unwrap_or_default());
+    let _ = std::fs::write(
+        dir.join("profile.json"),
+        serde_json::to_string_pretty(&meta).unwrap_or_default(),
+    );
 }
 
 pub(crate) fn set_active(app_dir: &Path, key: &str, name: &str) {
@@ -151,10 +154,8 @@ pub(crate) async fn get_profiles(app: AppHandle) -> Result<String, String> {
     if !dir.is_dir() {
         return Ok(json!([]).to_string());
     }
-    let active = read_active_key(
-        &app.path().app_data_dir().map_err(|e| e.to_string())?,
-    )
-    .unwrap_or_default();
+    let active =
+        read_active_key(&app.path().app_data_dir().map_err(|e| e.to_string())?).unwrap_or_default();
     let mut out: Vec<ProfileRow> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
@@ -333,7 +334,7 @@ fn write_prefs(app: &AppHandle, map: &HashMap<String, ProfilePrefs>) -> Result<(
 /// cần cho màn hình chọn hồ sơ / màn hình đăng nhập lúc khởi động.
 #[tauri::command]
 pub(crate) async fn get_profile_prefs(app: AppHandle) -> Result<String, String> {
-    Ok(serde_json::to_string(&read_prefs(&app)).map_err(|e| e.to_string())?)
+    serde_json::to_string(&read_prefs(&app)).map_err(|e| e.to_string())
 }
 
 /// Ghi (ghi đè) tùy chọn đăng nhập cho 1 hồ sơ. Không cần đăng nhập.

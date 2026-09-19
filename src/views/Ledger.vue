@@ -39,14 +39,10 @@ async function loadLedger() {
 
 // backend get_ledger chỉ lọc theo ngày → lọc loại phiếu ở client
 const filteredRows = computed(() =>
-  entryType.value
-    ? rows.value.filter((r) => r.entry_type === entryType.value)
-    : rows.value,
+  entryType.value ? rows.value.filter((r) => r.entry_type === entryType.value) : rows.value,
 );
 
-const totalAmount = computed(() =>
-  filteredRows.value.reduce((s, r) => s + r.amount, 0),
-);
+const totalAmount = computed(() => filteredRows.value.reduce((s, r) => s + r.amount, 0));
 
 function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
   switch (et) {
@@ -96,19 +92,10 @@ onMounted(async () => {
             <label class="text-xs text-gray-500 block mb-1">Loại phiếu</label>
             <div class="flex items-center gap-2">
               <i class="pi pi-filter text-gray-400" />
-              <Select
-                v-model="entryType"
-                :options="entryOptions"
-                class="w-40"
-              />
+              <Select v-model="entryType" :options="entryOptions" class="w-40" />
             </div>
           </div>
-          <Button
-            label="Xem báo cáo"
-            icon="pi pi-search"
-            size="small"
-            @click="loadLedger"
-          />
+          <Button label="Xem báo cáo" icon="pi pi-search" size="small" @click="loadLedger" />
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
             <i class="pi pi-calendar mr-1" />Kỳ mặc định: {{ currentYear() }} (theo năm hiện tại)
           </span>
@@ -118,21 +105,12 @@ onMounted(async () => {
 
     <Card>
       <template #content>
-        <AppDataTable
-          :value="filteredRows"
-          :loading="loading"
-          stripedRows
-          paginator
-          :rows="15"
-        >
+        <AppDataTable :value="filteredRows" :loading="loading" stripedRows paginator :rows="15">
           <Column field="posting_date" header="Ngày" />
           <Column field="voucher_no" header="Số phiếu" />
           <Column field="entry_type" header="Loại">
             <template #body="{ data }">
-              <Tag
-                :value="data.entry_type"
-                :severity="tagSeverity(data.entry_type)"
-              />
+              <Tag :value="data.entry_type" :severity="tagSeverity(data.entry_type)" />
             </template>
           </Column>
           <Column field="description" header="Diễn giải" />
@@ -156,10 +134,7 @@ onMounted(async () => {
             ><EmptyState text="Chưa có phát sinh trong kỳ." icon="pi pi-list"
           /></template>
         </AppDataTable>
-        <div
-          v-if="filteredRows.length"
-          class="mt-4 flex justify-end gap-8 text-sm border-t pt-3"
-        >
+        <div v-if="filteredRows.length" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
           <span class="text-gray-500">Tổng số tiền:</span>
           <b class="text-primary-600">{{ fmt(totalAmount) }} đ</b>
         </div>

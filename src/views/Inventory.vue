@@ -34,13 +34,9 @@ const countForm = reactive({
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
-const totalValue = computed(() =>
-  summary.value.reduce((s, r) => s + r.balance, 0),
-);
+const totalValue = computed(() => summary.value.reduce((s, r) => s + r.balance, 0));
 const lowStock = computed(() =>
-  summary.value.filter(
-    (r) => r.balance <= (catalog.productByCode(r.product_code)?.min_stock ?? 0),
-  ),
+  summary.value.filter((r) => r.balance <= (catalog.productByCode(r.product_code)?.min_stock ?? 0)),
 );
 
 function openCounting() {
@@ -160,26 +156,14 @@ onMounted(async () => {
       <template #content>
         <Tabs v-model:value="tab">
           <TabList>
-            <Tab value="summary"
-              ><i class="pi pi-table mr-2" />Tổng hợp N-X-T</Tab
-            >
-            <Tab value="lots"
-              ><i class="pi pi-list mr-2" />Chi tiết lô (FIFO)</Tab
-            >
-            <Tab value="counts"
-              ><i class="pi pi-clipboard mr-2" />Phiếu kiểm kê</Tab
-            >
+            <Tab value="summary"><i class="pi pi-table mr-2" />Tổng hợp N-X-T</Tab>
+            <Tab value="lots"><i class="pi pi-list mr-2" />Chi tiết lô (FIFO)</Tab>
+            <Tab value="counts"><i class="pi pi-clipboard mr-2" />Phiếu kiểm kê</Tab>
           </TabList>
           <TabPanels>
             <!-- Tổng hợp -->
             <TabPanel value="summary">
-              <AppDataTable
-                :value="summary"
-                :loading="loading"
-                stripedRows
-                paginator
-                :rows="15"
-              >
+              <AppDataTable :value="summary" :loading="loading" stripedRows paginator :rows="15">
                 <Column field="product_code" header="Mã SP" />
                 <Column field="product_name" header="Tên sản phẩm" />
                 <Column field="inbound" header="Nhập" align="right">
@@ -190,21 +174,13 @@ onMounted(async () => {
                 </Column>
                 <Column field="balance" header="Tồn cuối" align="right">
                   <template #body="{ data }">
-                    <span
-                      :class="
-                        data.balance < 0
-                          ? 'text-red-600 font-bold'
-                          : 'font-semibold'
-                      "
-                    >
+                    <span :class="data.balance < 0 ? 'text-red-600 font-bold' : 'font-semibold'">
                       {{ fmt(data.balance) }}
                     </span>
                   </template>
                 </Column>
                 <template #empty
-                  ><EmptyState
-                    text="Chưa có dữ liệu nhập/xuất kho."
-                    icon="pi pi-box"
+                  ><EmptyState text="Chưa có dữ liệu nhập/xuất kho." icon="pi pi-box"
                 /></template>
               </AppDataTable>
             </TabPanel>
@@ -237,9 +213,7 @@ onMounted(async () => {
                   <template #body="{ data }">{{ fmt(data.quantity) }}</template>
                 </Column>
                 <Column field="unit_cost" header="Đơn giá nhập" align="right">
-                  <template #body="{ data }">{{
-                    fmtVnd(data.unit_cost)
-                  }}</template>
+                  <template #body="{ data }">{{ fmtVnd(data.unit_cost) }}</template>
                 </Column>
                 <template #empty
                   ><EmptyState text="Không có lô hàng nào." icon="pi pi-box"
@@ -264,9 +238,7 @@ onMounted(async () => {
                   </template>
                 </Column>
                 <template #empty
-                  ><EmptyState
-                    text="Chưa có phiếu kiểm kê nào."
-                    icon="pi pi-clipboard"
+                  ><EmptyState text="Chưa có phiếu kiểm kê nào." icon="pi pi-clipboard"
                 /></template>
               </AppDataTable>
             </TabPanel>
@@ -287,17 +259,10 @@ onMounted(async () => {
     >
       <div class="grid grid-cols-2 gap-4 py-2">
         <FormField label="Ngày kiểm kê">
-          <DatePicker
-            v-model="countForm.date"
-            dateFormat="dd/mm/yy"
-            class="w-full"
-          />
+          <DatePicker v-model="countForm.date" dateFormat="dd/mm/yy" class="w-full" />
         </FormField>
         <FormField label="Ghi chú">
-          <InputText
-            v-model="countForm.note"
-            placeholder="Ví dụ: Cuối quý 3/2026"
-          />
+          <InputText v-model="countForm.note" placeholder="Ví dụ: Cuối quý 3/2026" />
         </FormField>
       </div>
 
@@ -344,21 +309,12 @@ onMounted(async () => {
         </Column>
         <Column header="Tồn sổ cái" align="right">
           <template #body="{ data }">
-            {{
-              fmt(
-                summary.find((r) => r.product_code === data.product_code)
-                  ?.balance ?? 0,
-              )
-            }}
+            {{ fmt(summary.find((r) => r.product_code === data.product_code)?.balance ?? 0) }}
           </template>
         </Column>
         <Column header="Đếm thực tế">
           <template #body="{ index }">
-            <InputNumber
-              v-model="countForm.items[index].counted_qty"
-              :min="0"
-              class="w-full"
-            />
+            <InputNumber v-model="countForm.items[index].counted_qty" :min="0" class="w-full" />
           </template>
         </Column>
         <Column header="">
@@ -412,9 +368,7 @@ onMounted(async () => {
             </span>
           </template>
         </Column>
-        <template #empty
-          ><EmptyState text="Không có dữ liệu." icon="pi pi-inbox"
-        /></template>
+        <template #empty><EmptyState text="Không có dữ liệu." icon="pi pi-inbox" /></template>
       </AppDataTable>
     </AppDialog>
   </div>

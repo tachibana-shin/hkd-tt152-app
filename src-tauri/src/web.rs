@@ -11,12 +11,12 @@
 
 use crate::commands;
 use crate::helpers::require_role;
+use crate::models::AppState;
 use crate::models::{
     AttendanceEntryInput, CashEntryInput, CountItemInput, EmployeeInput, ImportEntryInput,
-    InboundItemInput, InvoiceItemInput, OutboundInvoiceInput, OutboundItemInput,
-    PayrollLineInput, UserInput,
+    InboundItemInput, InvoiceItemInput, OutboundInvoiceInput, OutboundItemInput, PayrollLineInput,
+    UserInput,
 };
-use crate::models::AppState;
 use axum::extract::Path;
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -67,6 +67,7 @@ fn to_camel_case(s: &str) -> String {
 }
 
 /// Trích tham số từ body JSON (chấp nhận cả khóa camelCase lẫn snake_case).
+#[allow(clippy::result_large_err)] // Response của axum là kiểu opaque lớn — không thể thu nhỏ.
 fn extract_arg<T: DeserializeOwned>(body: &serde_json::Value, name: &str) -> Result<T, Response> {
     let key = to_camel_case(name);
     let v = body
@@ -133,7 +134,10 @@ fn ok_payload(s: &str) -> Response {
     match serde_json::from_str::<serde_json::Value>(s) {
         Ok(v) => (
             StatusCode::OK,
-            [(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))],
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            )],
             v.to_string(),
         )
             .into_response(),
@@ -152,7 +156,10 @@ fn ok_payload(s: &str) -> Response {
 fn err_json(status: StatusCode, msg: String) -> Response {
     (
         status,
-        [(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))],
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
         json!({ "error": msg }).to_string(),
     )
         .into_response()
@@ -173,8 +180,10 @@ fn log_request(cmd: &str, status: u16, detail: &str) {
     println!("{line}");
     if let Some(app) = APP.get() {
         if let Ok(dir) = app.path().app_data_dir() {
-            if let Ok(mut f) =
-                std::fs::OpenOptions::new().create(true).append(true).open(dir.join("web.log"))
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("web.log"))
             {
                 let _ = writeln!(f, "{line}");
             }
@@ -299,9 +308,13 @@ pub async fn api_invoke(
             vat_rate: f64,
             pit_rate: f64
         ),
-        "delete_industry_group" => mx!(commands::catalog::delete_industry_group, body, code: String),
+        "delete_industry_group" => {
+            mx!(commands::catalog::delete_industry_group, body, code: String)
+        }
         "get_warehouses" => mx!(commands::catalog::get_warehouses, body),
-        "save_warehouse" => mx!(commands::catalog::save_warehouse, body, code: String, name: String),
+        "save_warehouse" => {
+            mx!(commands::catalog::save_warehouse, body, code: String, name: String)
+        }
         "get_suppliers" => mx!(commands::catalog::get_suppliers, body),
         "save_supplier" => mx!(
             commands::catalog::save_supplier,
@@ -537,7 +550,10 @@ pub async fn api_invoke(
 
 /// Serve assets nhúng (dist) — fallback index.html cho route client-side (SPA).
 pub async fn serve_assets(uri: Uri) -> Response {
-    let resolver = APP.get().expect("web: app handle chưa được đặt").asset_resolver();
+    let resolver = APP
+        .get()
+        .expect("web: app handle chưa được đặt")
+        .asset_resolver();
     let path = uri.path().trim_start_matches('/').to_string();
     let asset = if path.is_empty() {
         resolver.get("index.html".into())
@@ -563,10 +579,7 @@ pub async fn serve_assets(uri: Uri) -> Response {
 
 pub fn router() -> Router {
     Router::new()
-        .route(
-            "/api/health",
-            get(|| async { "ok" }),
-        )
+        .route("/api/health", get(|| async { "ok" }))
         .route("/api/{cmd}", post(api_invoke))
         .fallback(get(serve_assets))
 }

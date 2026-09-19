@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 /// Sổ nhật ký theo kỳ — nguồn cho S2a-HKD, S2b-HKD, in ấn, xuất Excel
 #[tauri::command]
@@ -258,12 +258,20 @@ fn period_range(period: &str, no: i64) -> Result<(i64, i64), String> {
 ///     - GTGT = (DT tăng - DT giảm) x tỷ lệ ngành
 ///     - TNCN: theo doanh thu (x tỷ lệ ngành) hoặc theo lợi nhuận (x 15% — ở tổng hợp)
 ///   Nhóm 3/4 (> 3 tỷ)        → TNCN theo lợi nhuận x 17%/20% (ở tổng hợp)
-pub(crate) fn build_tax_declaration(rows: Vec<TaxAgg>, method: &str, group: i64) -> Vec<TaxDeclarationRow> {
+pub(crate) fn build_tax_declaration(
+    rows: Vec<TaxAgg>,
+    method: &str,
+    group: i64,
+) -> Vec<TaxDeclarationRow> {
     let exempt = group == 1;
     rows.into_iter()
         .map(|r| {
             let base = r.revenue_up - r.revenue_down;
-            let vat_tax = if exempt { 0.0 } else { round2(base * r.vat_rate) };
+            let vat_tax = if exempt {
+                0.0
+            } else {
+                round2(base * r.vat_rate)
+            };
             let pit_tax = if exempt || group != 2 || method != "revenue" {
                 0.0
             } else {
@@ -299,7 +307,12 @@ pub(crate) async fn get_tax_declaration(
     // Nhóm hộ xác định theo tổng doanh thu CẢ NĂM (không phụ thuộc kỳ khai).
     let group = {
         let year_rows = load_tax_agg(&pool, year, 0).await?;
-        tax_group(year_rows.iter().map(|r| r.revenue_up - r.revenue_down).sum())
+        tax_group(
+            year_rows
+                .iter()
+                .map(|r| r.revenue_up - r.revenue_down)
+                .sum(),
+        )
     };
     let rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
     let out = build_tax_declaration(rows, &method, group);
@@ -324,11 +337,17 @@ pub(crate) async fn get_tax_overview(
     );
 
     let year_rows = load_tax_agg(&pool, year, 0).await?;
-    let year_revenue: f64 = year_rows.iter().map(|r| r.revenue_up - r.revenue_down).sum();
+    let year_revenue: f64 = year_rows
+        .iter()
+        .map(|r| r.revenue_up - r.revenue_down)
+        .sum();
     let group = tax_group(year_revenue);
 
     let period_rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
-    let period_revenue: f64 = period_rows.iter().map(|r| r.revenue_up - r.revenue_down).sum();
+    let period_revenue: f64 = period_rows
+        .iter()
+        .map(|r| r.revenue_up - r.revenue_down)
+        .sum();
 
     // Chi phí trong kỳ (phiếu chi PC, trừ điều chỉnh giảm chi phí).
     let (exp_up, exp_down): (f64, f64) = sqlx::query_as(
@@ -374,7 +393,11 @@ pub(crate) async fn get_tax_overview(
     };
 
     let profit_rate = if group == 2 {
-        if method == "profit" { 0.15 } else { 0.0 }
+        if method == "profit" {
+            0.15
+        } else {
+            0.0
+        }
     } else if group == 3 {
         0.17
     } else if group == 4 {
@@ -545,10 +568,46 @@ mod tests {
         seed_product(&pool, "P2", "Hàng 2", 0.01).await;
 
         // Trong kỳ 05/2026: P1 1 tỷ + P2 500tr → tổng năm > 1 tỷ (nhóm 2)
-        add_journal_px(&pool, "2026-05-10", "PX1", "P1", "PPHH", 1000.0, 1_000_000.0, 1_000_000_000.0, 0.01, 0.005).await;
-        add_journal_px(&pool, "2026-05-11", "PX2", "P2", "PPHH", 500.0, 1_000_000.0, 500_000_000.0, 0.01, 0.005).await;
+        add_journal_px(
+            &pool,
+            "2026-05-10",
+            "PX1",
+            "P1",
+            "PPHH",
+            1000.0,
+            1_000_000.0,
+            1_000_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-05-11",
+            "PX2",
+            "P2",
+            "PPHH",
+            500.0,
+            1_000_000.0,
+            500_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
         // Ngoài kỳ (06/2026) — không được tính vào tờ khai tháng 5
-        add_journal_px(&pool, "2026-06-01", "PX3", "P2", "PPHH", 100.0, 1_000_000.0, 100_000_000.0, 0.01, 0.005).await;
+        add_journal_px(
+            &pool,
+            "2026-06-01",
+            "PX3",
+            "P2",
+            "PPHH",
+            100.0,
+            1_000_000.0,
+            100_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
 
         let out = build_tax_declaration(load_tax_agg(&pool, 2026, 5).await.unwrap(), "revenue", 2);
         let pphh = out.iter().find(|r| r.industry_code == "PPHH").unwrap();
@@ -574,11 +633,59 @@ mod tests {
         // Kỳ khai theo quý 2/2026 gồm tháng 4 + 5 + 6
         let pool = test_pool().await;
         seed_product(&pool, "P1", "Hàng thường", 0.01).await;
-        add_journal_px(&pool, "2026-04-10", "PX1", "P1", "PPHH", 100.0, 1_000_000.0, 100_000_000.0, 0.01, 0.005).await;
-        add_journal_px(&pool, "2026-05-10", "PX2", "P1", "PPHH", 100.0, 1_000_000.0, 100_000_000.0, 0.01, 0.005).await;
-        add_journal_px(&pool, "2026-06-10", "PX3", "P1", "PPHH", 100.0, 1_000_000.0, 100_000_000.0, 0.01, 0.005).await;
+        add_journal_px(
+            &pool,
+            "2026-04-10",
+            "PX1",
+            "P1",
+            "PPHH",
+            100.0,
+            1_000_000.0,
+            100_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-05-10",
+            "PX2",
+            "P1",
+            "PPHH",
+            100.0,
+            1_000_000.0,
+            100_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-06-10",
+            "PX3",
+            "P1",
+            "PPHH",
+            100.0,
+            1_000_000.0,
+            100_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
         // Ngoài quý 2
-        add_journal_px(&pool, "2026-07-01", "PX4", "P1", "PPHH", 10.0, 1_000_000.0, 10_000_000.0, 0.01, 0.005).await;
+        add_journal_px(
+            &pool,
+            "2026-07-01",
+            "PX4",
+            "P1",
+            "PPHH",
+            10.0,
+            1_000_000.0,
+            10_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
 
         let out = build_tax_declaration(
             load_tax_agg_range(&pool, 2026, 4, 6).await.unwrap(),

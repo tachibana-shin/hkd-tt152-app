@@ -21,10 +21,7 @@ defineProps<{
     <Column field="posting_date" header="Ngày ghi sổ" />
     <Column field="entry_type" header="Loại">
       <template #body="{ data }">
-        <Tag
-          :value="data.entry_type"
-          :severity="typeSeverity(data.entry_type)"
-        />
+        <Tag :value="data.entry_type" :severity="typeSeverity(data.entry_type)" />
       </template>
     </Column>
     <Column field="description" header="Diễn giải" />
@@ -41,10 +38,7 @@ defineProps<{
     <Column field="industry_code" header="Nhóm ngành" />
     <Column field="tax_period" header="Kỳ thuế" />
     <template #empty>
-      <EmptyState
-        text="Không có dòng dữ liệu nào được nhận diện."
-        icon="pi pi-file-excel"
-      />
+      <EmptyState text="Không có dòng dữ liệu nào được nhận diện." icon="pi pi-file-excel" />
     </template>
   </AppDataTable>
 </template>

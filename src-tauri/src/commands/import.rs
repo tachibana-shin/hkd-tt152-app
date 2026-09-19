@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 /// Nhập khối NHAP LIEU (sheet NHAP LIEU của file mẫu HKD) vào journal_entry.
 /// Không tạo stock_lot như PNK/PXK thủ công — dữ liệu lịch sử chỉ phục vụ sổ sách
@@ -40,7 +40,11 @@ pub(crate) async fn import_nhap_lieu(
         )
         .bind(&it.posting_date)
         .bind(&it.voucher_no)
-        .bind(if it.doc_date.is_empty() { &it.posting_date } else { &it.doc_date })
+        .bind(if it.doc_date.is_empty() {
+            &it.posting_date
+        } else {
+            &it.doc_date
+        })
         .bind(&it.description)
         .bind(&it.product_code)
         .bind(&it.supplier_code)
@@ -55,7 +59,11 @@ pub(crate) async fn import_nhap_lieu(
         .bind(it.vat_rate)
         .bind(it.pit_rate)
         .bind(it.tax_period)
-        .bind(if it.unit_code.is_empty() { "HKD" } else { &it.unit_code })
+        .bind(if it.unit_code.is_empty() {
+            "HKD"
+        } else {
+            &it.unit_code
+        })
         .bind(&it.adjust_code)
         .bind(&it.note)
         .execute(&mut *tx)

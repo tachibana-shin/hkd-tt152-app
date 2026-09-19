@@ -27,7 +27,8 @@ const profitLoss = () => revenueNet() - expenseNet();
         <i class="pi pi-chart-pie text-blue-500"></i> Tổng quan
       </h3>
       <p class="text-gray-500">
-        Xin chào, <span class="font-medium text-gray-700">{{ auth.currentUser?.display_name || "bạn" }}</span>
+        Xin chào,
+        <span class="font-medium text-gray-700">{{ auth.currentUser?.display_name || "bạn" }}</span>
       </p>
       <p class="text-gray-500 mt-1 flex items-center gap-1.5">
         <i class="pi pi-shop text-gray-400"></i>
@@ -51,10 +52,16 @@ const profitLoss = () => revenueNet() - expenseNet();
       </div>
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
         <p class="text-sm text-gray-500 mb-1 flex items-center gap-1.5">
-          <i class="pi pi-chart-line" :class="profitLoss() >= 0 ? 'text-green-600' : 'text-red-600'"></i>
+          <i
+            class="pi pi-chart-line"
+            :class="profitLoss() >= 0 ? 'text-green-600' : 'text-red-600'"
+          ></i>
           Lãi / Lỗ
         </p>
-        <p class="text-2xl font-bold" :class="profitLoss() >= 0 ? 'text-green-600' : 'text-red-600'">
+        <p
+          class="text-2xl font-bold"
+          :class="profitLoss() >= 0 ? 'text-green-600' : 'text-red-600'"
+        >
           {{ fmt(profitLoss()) }}
         </p>
       </div>
@@ -62,19 +69,31 @@ const profitLoss = () => revenueNet() - expenseNet();
 
     <!-- Quick links -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <router-link to="/inbound" class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center">
+      <router-link
+        to="/inbound"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
+      >
         <i class="pi pi-arrow-down text-2xl text-blue-500"></i>
         <p class="mt-2 text-sm font-medium">Nhập kho</p>
       </router-link>
-      <router-link to="/outbound" class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center">
+      <router-link
+        to="/outbound"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
+      >
         <i class="pi pi-arrow-up text-2xl text-orange-500"></i>
         <p class="mt-2 text-sm font-medium">Xuất kho</p>
       </router-link>
-      <router-link to="/invoices" class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center">
+      <router-link
+        to="/invoices"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
+      >
         <i class="pi pi-file text-2xl text-purple-500"></i>
         <p class="mt-2 text-sm font-medium">Hóa đơn</p>
       </router-link>
-      <router-link to="/inventory" class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center">
+      <router-link
+        to="/inventory"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
+      >
         <i class="pi pi-inbox text-2xl text-teal-500"></i>
         <p class="mt-2 text-sm font-medium">Tồn kho</p>
       </router-link>

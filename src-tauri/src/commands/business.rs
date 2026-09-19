@@ -5,16 +5,13 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub(crate) async fn get_business_info(state: State<'_, AppState>) -> Result<String, String> {
-    let row: BusinessInfo = sqlx::query_as!(
-        BusinessInfo,
-        "SELECT name FROM business WHERE id = 1"
-    )
-    .fetch_one(&*state.pool.read().await)
-    .await
-    .map_err(|e| e.to_string())?;
+    let row: BusinessInfo = sqlx::query_as!(BusinessInfo, "SELECT name FROM business WHERE id = 1")
+        .fetch_one(&*state.pool.read().await)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(row.name)
 }
 

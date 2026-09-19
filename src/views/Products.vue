@@ -133,8 +133,7 @@ function removeSelected() {
         });
         // Đã chọn hết trang hiện tại → lùi về trang trước nếu còn.
         const allOnPageSelected =
-          products.value.length > 0 &&
-          products.value.every((p) => ids.includes(p.id));
+          products.value.length > 0 && products.value.every((p) => ids.includes(p.id));
         if (allOnPageSelected && first.value > 0) {
           first.value = Math.max(0, first.value - rowsPerPage.value);
         }
@@ -252,9 +251,7 @@ function onProductSaved() {
         >
           <template #header>
             <span class="text-sm text-gray-500">
-              <template v-if="selectedCount > 0">
-                Đã chọn {{ selectedCount }} sản phẩm
-              </template>
+              <template v-if="selectedCount > 0"> Đã chọn {{ selectedCount }} sản phẩm </template>
               <template v-else>Tổng {{ totalProducts }} sản phẩm</template>
             </span>
           </template>
@@ -332,8 +329,8 @@ function onProductSaved() {
               <Tag
                 v-if="data.industry_code"
                 :value="
-                  industryGroups.find((g) => g.code === data.industry_code)
-                    ?.name ?? data.industry_code
+                  industryGroups.find((g) => g.code === data.industry_code)?.name ??
+                  data.industry_code
                 "
                 severity="secondary"
               />
@@ -367,10 +364,7 @@ function onProductSaved() {
           </Column>
           <Column field="import_tax_rate" header="Thuế nhập" sortable>
             <template #body="{ data }">
-              <Tag
-                :value="data.import_tax_rate * 100 + '%'"
-                severity="secondary"
-              />
+              <Tag :value="data.import_tax_rate * 100 + '%'" severity="secondary" />
             </template>
             <template #filter="{ filterModel, filterCallback }">
               <Select
@@ -385,11 +379,7 @@ function onProductSaved() {
 
           <template #empty>
             <EmptyState
-              :text="
-                hasActiveFilter
-                  ? 'Không tìm thấy sản phẩm phù hợp.'
-                  : 'Chưa có sản phẩm.'
-              "
+              :text="hasActiveFilter ? 'Không tìm thấy sản phẩm phù hợp.' : 'Chưa có sản phẩm.'"
               icon="pi pi-box"
             />
           </template>

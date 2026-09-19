@@ -38,7 +38,11 @@ function onFileSelect(e: { files: File[] }) {
 
 async function readFile() {
   if (!file.value) {
-    toast.add({ severity: "warn", summary: "Chưa chọn file", detail: "Hãy chọn file Excel mẫu trước khi đọc." });
+    toast.add({
+      severity: "warn",
+      summary: "Chưa chọn file",
+      detail: "Hãy chọn file Excel mẫu trước khi đọc.",
+    });
     return;
   }
   reading.value = true;
@@ -176,12 +180,7 @@ function reset() {
           :auto="false"
           @select="onFileSelect"
         />
-        <Button
-          label="Đọc file"
-          icon="pi pi-file-excel"
-          :loading="reading"
-          @click="readFile"
-        />
+        <Button label="Đọc file" icon="pi pi-file-excel" :loading="reading" @click="readFile" />
         <span v-if="fileName" class="text-sm text-gray-600 flex items-center gap-1">
           <i-mdi-file-excel class="text-emerald-600" />
           {{ fileName }}
@@ -207,7 +206,11 @@ function reset() {
       <div v-else class="flex flex-wrap items-center gap-3">
         <Button
           v-if="auth.canAccounting"
-          :label="parsedRows.length ? `Nhập ${parsedRows.length} dòng vào phần mềm` : 'Nhập dữ liệu vào phần mềm'"
+          :label="
+            parsedRows.length
+              ? `Nhập ${parsedRows.length} dòng vào phần mềm`
+              : 'Nhập dữ liệu vào phần mềm'
+          "
           icon="pi pi-database"
           :loading="importing"
           @click="confirmImport"

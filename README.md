@@ -15,7 +15,7 @@
 - 🧮 **Tự động tính thuế** theo nhóm ngành: tờ khai theo kỳ, ghép **giảm thuế GTGT**
   (tỷ lệ giảm 80%, thuế giảm = doanh thu × tỷ lệ × 20%).
 - 💰 **Bảng lương & BHXH/TNCN**: công thức khớp bộ mẫu Excel, tự ghi phiếu chi lương.
-- 🕒 **Chấm công** theo ngày, khớp ký hiệu sheet *Cham Cong*, nạp thẳng vào bảng lương.
+- 🕒 **Chấm công** theo ngày, khớp ký hiệu sheet _Cham Cong_, nạp thẳng vào bảng lương.
 - 📦 **Kho theo lô (FIFO)**: nhập kho tạo lô, xuất kho trừ lô, kiểm kê điều chỉnh.
 - 🧾 **Hóa đơn & HĐĐT**: lập hóa đơn nháp, liên kết hóa đơn điện tử (connector mô phỏng cục bộ).
 - 👥 **Đa người dùng & phân quyền**: `admin` / `ketoan` / `kho` / `xem`; kiểm tra vai trò **ở backend**.
@@ -26,26 +26,26 @@
 
 ## 🧩 Tính năng theo màn hình
 
-| Màn hình | Route | Nghiệp vụ chính |
-|---|---|---|
-| 📊 Tổng quan | `/` | Bảng điều khiển nhanh |
-| 🛒 Danh mục sản phẩm | `/products` | Hàng hóa/dịch vụ, giá bán–giá vốn, VAT, tồn tối thiểu |
-| 📒 Danh mục tài khoản | `/accounts` | Hệ thống tài khoản + số dư đầu kỳ |
-| 🏷️ Đối tác & kho | `/catalogs` | Kho, khách hàng, nhà cung cấp, nhóm ngành |
-| 💵 Phiếu thu / chi | `/cash` | Phiếu thu (`PT`) / chi (`PC`), hạch toán Nợ/Có |
-| 📥 Nhập kho | `/inbound` | Phiếu nhập kho (`PN`), tạo lô FIFO |
-| 📤 Xuất kho / Bán hàng | `/outbound` | Phiếu xuất kho (`PX`), trừ lô FIFO, kiểm tra tồn |
-| 📦 Tồn kho | `/inventory` | NXT theo lô, phiếu kiểm kê điều chỉnh |
-| 🧾 Hóa đơn | `/invoices` | Lập hóa đơn nháp, chi tiết, liên kết HĐĐT |
-| 🖨️ In phiếu | `/print/:voucherNo` | In PNK `01-VT` / PXK `02-VT`, số tiền bằng chữ |
-| 🧮 Kế toán HKD | `/accounting` | Tờ khai theo nhóm ngành, bảng kê giảm thuế GTGT, tờ khai theo kỳ, sổ sách, sao lưu |
-| 📚 Sổ nhật ký chung | `/ledger` | Sổ NKC theo bộ lọc |
-| 💼 Bảng lương | `/payroll` | Nhân viên, lập bảng lương, BHXH/TNCN, chi lương |
-| 🕒 Chấm công | `/attendance` | Lưới công theo ngày, tổng công theo kỳ |
-| 📄 Nhập liệu Excel | `/import` | Nhập khối dữ liệu sheet `NHAP LIEU` |
-| 📝 Nhật ký hoạt động | `/audit` | Audit log (ai, khi nào, thao tác gì) |
-| 👥 Người dùng | `/users` | Tài khoản & phân quyền |
-| 🏠 Hồ sơ HKD | `/profiles` | Tạo/đổi tên/xóa/chuyển hồ sơ kinh doanh |
+| Màn hình               | Route               | Nghiệp vụ chính                                                                    |
+| ---------------------- | ------------------- | ---------------------------------------------------------------------------------- |
+| 📊 Tổng quan           | `/`                 | Bảng điều khiển nhanh                                                              |
+| 🛒 Danh mục sản phẩm   | `/products`         | Hàng hóa/dịch vụ, giá bán–giá vốn, VAT, tồn tối thiểu                              |
+| 📒 Danh mục tài khoản  | `/accounts`         | Hệ thống tài khoản + số dư đầu kỳ                                                  |
+| 🏷️ Đối tác & kho       | `/catalogs`         | Kho, khách hàng, nhà cung cấp, nhóm ngành                                          |
+| 💵 Phiếu thu / chi     | `/cash`             | Phiếu thu (`PT`) / chi (`PC`), hạch toán Nợ/Có                                     |
+| 📥 Nhập kho            | `/inbound`          | Phiếu nhập kho (`PN`), tạo lô FIFO                                                 |
+| 📤 Xuất kho / Bán hàng | `/outbound`         | Phiếu xuất kho (`PX`), trừ lô FIFO, kiểm tra tồn                                   |
+| 📦 Tồn kho             | `/inventory`        | NXT theo lô, phiếu kiểm kê điều chỉnh                                              |
+| 🧾 Hóa đơn             | `/invoices`         | Lập hóa đơn nháp, chi tiết, liên kết HĐĐT                                          |
+| 🖨️ In phiếu            | `/print/:voucherNo` | In PNK `01-VT` / PXK `02-VT`, số tiền bằng chữ                                     |
+| 🧮 Kế toán HKD         | `/accounting`       | Tờ khai theo nhóm ngành, bảng kê giảm thuế GTGT, tờ khai theo kỳ, sổ sách, sao lưu |
+| 📚 Sổ nhật ký chung    | `/ledger`           | Sổ NKC theo bộ lọc                                                                 |
+| 💼 Bảng lương          | `/payroll`          | Nhân viên, lập bảng lương, BHXH/TNCN, chi lương                                    |
+| 🕒 Chấm công           | `/attendance`       | Lưới công theo ngày, tổng công theo kỳ                                             |
+| 📄 Nhập liệu Excel     | `/import`           | Nhập khối dữ liệu sheet `NHAP LIEU`                                                |
+| 📝 Nhật ký hoạt động   | `/audit`            | Audit log (ai, khi nào, thao tác gì)                                               |
+| 👥 Người dùng          | `/users`            | Tài khoản & phân quyền                                                             |
+| 🏠 Hồ sơ HKD           | `/profiles`         | Tạo/đổi tên/xóa/chuyển hồ sơ kinh doanh                                            |
 
 ---
 
@@ -150,11 +150,11 @@ App có sẵn một **web server local** (chỉ `127.0.0.1`) vừa serve fronten
 
 ## 🧪 Kiểm thử
 
-| Tầng | Vị trí | Lệnh | Phạm vi |
-|---|---|---|---|
-| **Rust (nghiệp vụ)** | `src-tauri/src/**/mod tests` | `cd src-tauri && cargo test` | FIFO, lương, tờ khai thuế, migration/seed, helper |
-| **E2E UI (Playwright)** | `e2e/playwright/` | `bun run test:e2e` | App thật qua **Chrome** trên cổng riêng + **DB cô lập** (không đụng dữ liệu thật): login, điều hướng, render dữ liệu, log console sạch, logout |
-| **E2E UI (WebKit đen)** | `e2e/` | `./e2e/run_e2e.sh` | App thật + WebKit inspector + **DB SQLite thật** làm nguồn sự thật |
+| Tầng                    | Vị trí                       | Lệnh                         | Phạm vi                                                                                                                                        |
+| ----------------------- | ---------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rust (nghiệp vụ)**    | `src-tauri/src/**/mod tests` | `cd src-tauri && cargo test` | FIFO, lương, tờ khai thuế, migration/seed, helper                                                                                              |
+| **E2E UI (Playwright)** | `e2e/playwright/`            | `bun run test:e2e`           | App thật qua **Chrome** trên cổng riêng + **DB cô lập** (không đụng dữ liệu thật): login, điều hướng, render dữ liệu, log console sạch, logout |
+| **E2E UI (WebKit đen)** | `e2e/`                       | `./e2e/run_e2e.sh`           | App thật + WebKit inspector + **DB SQLite thật** làm nguồn sự thật                                                                             |
 
 ```bash
 cd src-tauri && cargo test        # test lõi nghiệp vụ
@@ -192,7 +192,7 @@ trực tiếp, hoặc mở trace trong `bun run test:e2e:report`.
 
 ## 💾 Dữ liệu & tài khoản mặc định
 
-- 🔑 **Tài khoản quản trị mặc định:** `admin` / `admin123` (đổi được trong màn *Người dùng*).
+- 🔑 **Tài khoản quản trị mặc định:** `admin` / `admin123` (đổi được trong màn _Người dùng_).
 - 📂 **Vị trí dữ liệu (Linux):** `${XDG_DATA_HOME}/git.shin.hdk-tt152-app/profiles/<hồ sơ>/hkd.db`
   (mặc định `~/.local/share/...`); bản sao lưu nằm ở thư mục `backups/` cùng cấp.
 - 👤 **Vai trò:** `admin` (toàn quyền), `ketoan` (kế toán), `kho` (thủ kho), `xem` (chỉ xem — mặc định).

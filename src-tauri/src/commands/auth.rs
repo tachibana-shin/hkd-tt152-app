@@ -106,12 +106,11 @@ pub(crate) async fn get_current_user(state: State<'_, AppState>) -> Result<Strin
 #[tauri::command]
 pub(crate) async fn list_users(state: State<'_, AppState>) -> Result<String, String> {
     require_role(&state, &["admin"]).await?;
-    let rows: Vec<UserRow> = sqlx::query_as(
-        "SELECT id, username, display_name, role, active FROM app_user ORDER BY id",
-    )
-    .fetch_all(&*state.pool.read().await)
-    .await
-    .map_err(|e| e.to_string())?;
+    let rows: Vec<UserRow> =
+        sqlx::query_as("SELECT id, username, display_name, role, active FROM app_user ORDER BY id")
+            .fetch_all(&*state.pool.read().await)
+            .await
+            .map_err(|e| e.to_string())?;
     Ok(json!(rows).to_string())
 }
 
@@ -128,20 +127,18 @@ pub(crate) async fn save_user(
             "Vai trò không hợp lệ '{}' (chấp nhận: {})",
             input.role,
             roles.join(", ")
-        )
-        .into());
+        ));
     }
     let username = input.username.trim();
     if username.is_empty() {
         return Err("Thiếu tên đăng nhập".into());
     }
     let is_create = {
-        let exists: Option<i64> =
-            sqlx::query_scalar("SELECT id FROM app_user WHERE username = ?")
-                .bind(username)
-                .fetch_optional(&*state.pool.read().await)
-                .await
-                .map_err(|e| e.to_string())?;
+        let exists: Option<i64> = sqlx::query_scalar("SELECT id FROM app_user WHERE username = ?")
+            .bind(username)
+            .fetch_optional(&*state.pool.read().await)
+            .await
+            .map_err(|e| e.to_string())?;
         exists.is_none()
     };
     if is_create {
@@ -201,10 +198,7 @@ pub(crate) async fn save_user(
 
 /// Xóa người dùng. Không tự xóa được chính mình; không xóa admin cuối cùng. Chỉ admin.
 #[tauri::command]
-pub(crate) async fn delete_user(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<String, String> {
+pub(crate) async fn delete_user(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin"]).await?;
     let current = state.current_user.lock().await.clone();
     if let Some(u) = current {
@@ -212,13 +206,12 @@ pub(crate) async fn delete_user(
             return Err("Không thể xóa tài khoản đang đăng nhập".into());
         }
     }
-    let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT username, role FROM app_user WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(&*state.pool.read().await)
-    .await
-    .map_err(|e| e.to_string())?;
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT username, role FROM app_user WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&*state.pool.read().await)
+            .await
+            .map_err(|e| e.to_string())?;
     let Some((username, role)) = row else {
         return Err("Không tìm thấy người dùng".into());
     };

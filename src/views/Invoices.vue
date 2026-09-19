@@ -143,9 +143,7 @@ function openLinkHddt(inv: Invoice) {
   linkTarget.value = inv;
   linkForm.hddtNo = inv.e_invoice_no ?? "";
   linkForm.hddtSymbol = inv.e_invoice_symbol ?? "";
-  linkForm.hddtDate = inv.e_invoice_date
-    ? new Date(inv.e_invoice_date)
-    : new Date();
+  linkForm.hddtDate = inv.e_invoice_date ? new Date(inv.e_invoice_date) : new Date();
   linkDialog.value = true;
 }
 
@@ -248,10 +246,7 @@ onMounted(async () => {
                       ? 'Đã dán'
                       : 'Đã liên kết HĐĐT'
                 "
-                :severity="
-                  statusBadge[data.status as keyof typeof statusBadge] ??
-                  'secondary'
-                "
+                :severity="statusBadge[data.status as keyof typeof statusBadge] ?? 'secondary'"
               />
             </template>
           </Column>
@@ -259,9 +254,7 @@ onMounted(async () => {
             <template #body="{ data }">{{ data.e_invoice_no || "—" }}</template>
           </Column>
           <Column header="Ký hiệu">
-            <template #body="{ data }">{{
-              data.e_invoice_symbol || "—"
-            }}</template>
+            <template #body="{ data }">{{ data.e_invoice_symbol || "—" }}</template>
           </Column>
           <Column field="voucher_no" header="Phiếu xuất">
             <template #body="{ data }">{{ data.voucher_no || "—" }}</template>
@@ -306,19 +299,10 @@ onMounted(async () => {
           <InputText v-model="form.number" disabled size="small" />
         </FormField>
         <FormField label="Ngày lập">
-          <DatePicker
-            v-model="form.date"
-            dateFormat="dd/mm/yy"
-            size="small"
-            class="w-full"
-          />
+          <DatePicker v-model="form.date" dateFormat="dd/mm/yy" size="small" class="w-full" />
         </FormField>
         <FormField label="MST khách hàng">
-          <InputText
-            v-model="form.customer_tax_code"
-            placeholder="Mã số thuế"
-            size="small"
-          />
+          <InputText v-model="form.customer_tax_code" placeholder="Mã số thuế" size="small" />
         </FormField>
         <FormField label="Khách hàng" required class="col-span-3">
           <div class="flex gap-2">
@@ -389,9 +373,7 @@ onMounted(async () => {
             <span class="text-gray-500">Số HĐ:</span>
             <b>{{ detail.invoice.number }}</b>
           </div>
-          <div>
-            <span class="text-gray-500">Ngày:</span> {{ detail.invoice.date }}
-          </div>
+          <div><span class="text-gray-500">Ngày:</span> {{ detail.invoice.date }}</div>
           <div>
             <span class="text-gray-500">Khách hàng:</span>
             {{ detail.invoice.customer }}
@@ -435,26 +417,25 @@ onMounted(async () => {
             ><b>{{ fmt(detail.invoice.total) }} đ</b>
           </div>
           <div class="flex gap-6">
-            <span class="text-gray-500"
-              >Thuế GTGT phải nộp (theo tỷ lệ nhóm ngành):</span
-            ><b>{{
-              fmt(
-                (detail.items as InvoiceItem[]).reduce(
-                  (s, it) => s + it.subtotal * (it.vat_rate ?? 0),
-                  0,
-                ),
-              )
-            }}
+            <span class="text-gray-500">Thuế GTGT phải nộp (theo tỷ lệ nhóm ngành):</span
+            ><b
+              >{{
+                fmt(
+                  (detail.items as InvoiceItem[]).reduce(
+                    (s, it) => s + it.subtotal * (it.vat_rate ?? 0),
+                    0,
+                  ),
+                )
+              }}
               đ</b
             >
           </div>
           <div class="flex gap-6 text-base font-bold text-primary-600">
-            <span>Tổng tiền thanh toán:</span
-            ><span>{{ fmt(detail.invoice.total) }} đ</span>
+            <span>Tổng tiền thanh toán:</span><span>{{ fmt(detail.invoice.total) }} đ</span>
           </div>
           <p class="text-xs text-gray-400">
-            Hóa đơn bán hàng của HKD không tách thuế GTGT — thuế nộp theo tỷ lệ
-            nhóm ngành trên doanh thu (báo cáo thuế).
+            Hóa đơn bán hàng của HKD không tách thuế GTGT — thuế nộp theo tỷ lệ nhóm ngành trên
+            doanh thu (báo cáo thuế).
           </p>
         </div>
       </template>
@@ -473,9 +454,8 @@ onMounted(async () => {
     >
       <div class="flex flex-col gap-4 py-2">
         <p v-if="linkTarget" class="text-sm text-gray-600">
-          Hóa đơn <b>{{ linkTarget.number }}</b> —
-          {{ linkTarget.customer || "—" }}. Sau khi lưu, chuyển sang trạng thái
-          <b>Đã liên kết HĐĐT</b>.
+          Hóa đơn <b>{{ linkTarget.number }}</b> — {{ linkTarget.customer || "—" }}. Sau khi lưu,
+          chuyển sang trạng thái <b>Đã liên kết HĐĐT</b>.
         </p>
         <FormField label="Số HĐĐT" required>
           <InputText
@@ -492,11 +472,7 @@ onMounted(async () => {
           />
         </FormField>
         <FormField label="Ngày HĐĐT">
-          <DatePicker
-            v-model="linkForm.hddtDate"
-            dateFormat="dd/mm/yy"
-            class="w-full"
-          />
+          <DatePicker v-model="linkForm.hddtDate" dateFormat="dd/mm/yy" class="w-full" />
         </FormField>
       </div>
     </AppDialog>

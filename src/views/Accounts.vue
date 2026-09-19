@@ -22,12 +22,8 @@ const form = reactive({
   opening_credit: 0,
 });
 
-const totalDebit = computed(() =>
-  accounts.value.reduce((s, a) => s + a.opening_debit, 0),
-);
-const totalCredit = computed(() =>
-  accounts.value.reduce((s, a) => s + a.opening_credit, 0),
-);
+const totalDebit = computed(() => accounts.value.reduce((s, a) => s + a.opening_debit, 0));
+const totalCredit = computed(() => accounts.value.reduce((s, a) => s + a.opening_credit, 0));
 
 async function load() {
   loading.value = true;
@@ -159,13 +155,7 @@ onMounted(load);
           class="mr-2"
           @click="openCreate"
         />
-        <Button
-          label="Tải lại"
-          icon="pi pi-refresh"
-          outlined
-          :loading="loading"
-          @click="load"
-        />
+        <Button label="Tải lại" icon="pi pi-refresh" outlined :loading="loading" @click="load" />
       </template>
     </Toolbar>
 
@@ -180,12 +170,7 @@ onMounted(load);
           <Column field="opening_credit" header="Dư Có đầu kỳ" align="right">
             <template #body="{ data }">{{ fmtVnd(data.opening_credit) }}</template>
           </Column>
-          <Column
-            v-if="auth.canAccounting"
-            header=""
-            align="center"
-            style="width: 120px"
-          >
+          <Column v-if="auth.canAccounting" header="" align="center" style="width: 120px">
             <template #body="{ data }">
               <div class="flex justify-center gap-1">
                 <Button
@@ -208,9 +193,7 @@ onMounted(load);
               </div>
             </template>
           </Column>
-          <template #empty
-            ><EmptyState text="Chưa có tài khoản." icon="pi pi-book"
-          /></template>
+          <template #empty><EmptyState text="Chưa có tài khoản." icon="pi pi-book" /></template>
         </AppDataTable>
         <div
           v-if="accounts.length"
@@ -248,11 +231,7 @@ onMounted(load);
           />
         </FormField>
         <FormField label="Tên tài khoản" required>
-          <InputText
-            size="small"
-            v-model="form.name"
-            placeholder="VD: Tiền gửi ngân hàng"
-          />
+          <InputText size="small" v-model="form.name" placeholder="VD: Tiền gửi ngân hàng" />
         </FormField>
         <FormField label="Dư Nợ đầu kỳ">
           <InputNumber
@@ -277,8 +256,8 @@ onMounted(load);
           />
         </FormField>
         <p class="col-span-2 text-xs text-gray-400">
-          Mã tài khoản dùng chung với hạch toán (phiếu thu/chi, xuất kho...).
-          Sửa mã không cho phép — nhập lại tài khoản mới nếu cần đổi mã.
+          Mã tài khoản dùng chung với hạch toán (phiếu thu/chi, xuất kho...). Sửa mã không cho phép
+          — nhập lại tài khoản mới nếu cần đổi mã.
         </p>
       </div>
     </AppDialog>

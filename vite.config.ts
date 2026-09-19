@@ -19,11 +19,33 @@ const vitePort = Number(process.env.VITE_PORT || 1420);
 // cho PrimeVue v5 (thiếu DatePicker/Select/Toast/ConfirmDialog/Tabs…), nên khai báo tường minh
 // để auto-import theo nhu cầu thay vì đăng ký toàn cục trong main.ts.
 const PRIMEVUE_COMPONENTS = [
-  "AutoComplete", "Avatar", "Button", "Card", "Checkbox", "Column", "ConfirmDialog",
-  "DataTable", "DatePicker", "Dialog", "Divider", "FileUpload", "IconField",
-  "InputIcon", "InputNumber", "InputText", "ProgressSpinner", "Select",
-  "Tab", "TabList", "TabPanel", "TabPanels", "Tabs", "Tag", "Toast",
-  "ToggleSwitch", "Toolbar",
+  "AutoComplete",
+  "Avatar",
+  "Button",
+  "Card",
+  "Checkbox",
+  "Column",
+  "ConfirmDialog",
+  "DataTable",
+  "DatePicker",
+  "Dialog",
+  "Divider",
+  "FileUpload",
+  "IconField",
+  "InputIcon",
+  "InputNumber",
+  "InputText",
+  "ProgressSpinner",
+  "Select",
+  "Tab",
+  "TabList",
+  "TabPanel",
+  "TabPanels",
+  "Tabs",
+  "Tag",
+  "Toast",
+  "ToggleSwitch",
+  "Toolbar",
 ];
 
 const PrimeVueLocalResolver = () => ({
@@ -90,9 +112,7 @@ export default defineConfig(() => ({
     proxy: {
       "/api": { target: apiProxyTarget, changeOrigin: true },
     },
-    hmr: host
-      ? { protocol: "ws", host, port: 1421 }
-      : undefined,
+    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     watch: {
       ignored: ["**/src-tauri/**"],
     },

@@ -30,10 +30,7 @@ const entryTypeOptions = [
   { label: "Phiếu thu (PT)", value: "PT" },
   { label: "Phiếu chi (PC)", value: "PC" },
 ];
-const filterTypeOptions = [
-  { label: "Toàn bộ", value: "" },
-  ...entryTypeOptions,
-];
+const filterTypeOptions = [{ label: "Toàn bộ", value: "" }, ...entryTypeOptions];
 const tagSeverity: Record<string, "success" | "warn"> = {
   PT: "success",
   PC: "warn",
@@ -53,14 +50,11 @@ const form = reactive({
 });
 
 const filteredEntries = computed(() =>
-  typeFilter.value
-    ? entries.value.filter((e) => e.entry_type === typeFilter.value)
-    : entries.value,
+  typeFilter.value ? entries.value.filter((e) => e.entry_type === typeFilter.value) : entries.value,
 );
 
 const objectCode = computed({
-  get: () =>
-    form.entry_type === "PT" ? form.customer_code : form.supplier_code,
+  get: () => (form.entry_type === "PT" ? form.customer_code : form.supplier_code),
   set: (v: string) => {
     const code = v ?? "";
     if (form.entry_type === "PT") form.customer_code = code;
@@ -110,10 +104,7 @@ function onTypeChange() {
 async function loadEntries() {
   loading.value = true;
   try {
-    const [pt, pc] = await Promise.all([
-      api.getJournalEntries("PT"),
-      api.getJournalEntries("PC"),
-    ]);
+    const [pt, pc] = await Promise.all([api.getJournalEntries("PT"), api.getJournalEntries("PC")]);
     entries.value = [...pt, ...pc].sort((a, b) =>
       a.posting_date === b.posting_date
         ? a.voucher_no.localeCompare(b.voucher_no)
@@ -221,21 +212,14 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button
-          v-if="auth.canAccounting"
-          label="Tạo phiếu"
-          icon="pi pi-plus"
-          @click="openCreate"
-        />
+        <Button v-if="auth.canAccounting" label="Tạo phiếu" icon="pi pi-plus" @click="openCreate" />
       </template>
     </Toolbar>
 
     <Card>
       <template #content>
         <div class="mb-3 flex items-center justify-between gap-3">
-          <span class="text-sm text-gray-500"
-            >Tổng số phiếu: {{ entries.length }}</span
-          >
+          <span class="text-sm text-gray-500">Tổng số phiếu: {{ entries.length }}</span>
           <div class="flex items-center gap-2">
             <i class="pi pi-filter text-gray-400" />
             <Select
@@ -247,21 +231,12 @@ onMounted(async () => {
             />
           </div>
         </div>
-        <AppDataTable
-          :value="filteredEntries"
-          :loading="loading"
-          stripedRows
-          paginator
-          :rows="10"
-        >
+        <AppDataTable :value="filteredEntries" :loading="loading" stripedRows paginator :rows="10">
           <Column field="posting_date" header="Ngày" />
           <Column field="voucher_no" header="Số phiếu" />
           <Column field="entry_type" header="Loại">
             <template #body="{ data }">
-              <Tag
-                :value="data.entry_type"
-                :severity="tagSeverity[data.entry_type]"
-              />
+              <Tag :value="data.entry_type" :severity="tagSeverity[data.entry_type]" />
             </template>
           </Column>
           <Column field="description" header="Diễn giải" />
@@ -278,11 +253,7 @@ onMounted(async () => {
           </Column>
           <template #empty>
             <EmptyState
-              :text="
-                entries.length
-                  ? 'Không có phiếu khớp bộ lọc.'
-                  : 'Chưa có phiếu thu/chi.'
-              "
+              :text="entries.length ? 'Không có phiếu khớp bộ lọc.' : 'Chưa có phiếu thu/chi.'"
               icon="pi pi-wallet"
             />
           </template>
@@ -311,11 +282,7 @@ onMounted(async () => {
           />
         </FormField>
         <FormField label="Ngày ghi sổ" required>
-          <DatePicker
-            v-model="form.posting_date"
-            dateFormat="dd/mm/yy"
-            class="w-full"
-          />
+          <DatePicker v-model="form.posting_date" dateFormat="dd/mm/yy" class="w-full" />
         </FormField>
         <FormField label="Số phiếu" required>
           <InputText v-model="form.voucher_no" />
@@ -324,15 +291,11 @@ onMounted(async () => {
           <InputText
             v-model="form.description"
             :placeholder="
-              form.entry_type === 'PT'
-                ? 'Thu tiền bán hàng...'
-                : 'Chi phí hoạt động...'
+              form.entry_type === 'PT' ? 'Thu tiền bán hàng...' : 'Chi phí hoạt động...'
             "
           />
         </FormField>
-        <FormField
-          :label="form.entry_type === 'PT' ? 'Khách hàng' : 'Nhà cung cấp'"
-        >
+        <FormField :label="form.entry_type === 'PT' ? 'Khách hàng' : 'Nhà cung cấp'">
           <Select
             v-model="objectCode"
             :options="form.entry_type === 'PT' ? customers : suppliers"
@@ -380,10 +343,7 @@ onMounted(async () => {
         </FormField>
       </div>
       <div class="mt-3 flex items-center gap-1 text-xs text-gray-400">
-        <span
-          >Đơn vị: HKD · Nợ {{ form.debit_account }} / Có
-          {{ form.credit_account }}</span
-        >
+        <span>Đơn vị: HKD · Nợ {{ form.debit_account }} / Có {{ form.credit_account }}</span>
         <i
           class="pi pi-info-circle cursor-help text-xs text-gray-400"
           v-tooltip="'Chọn từ danh mục tài khoản (màn Tài khoản); mặc định theo loại phiếu.'"

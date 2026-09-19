@@ -249,12 +249,7 @@ const bizConfigVisible = ref(false);
         severity="secondary"
         @click="bizConfigVisible = true"
       />
-      <Button
-        v-if="auth.isAdmin"
-        label="Tạo hồ sơ mới"
-        icon="pi pi-plus"
-        @click="openCreate"
-      />
+      <Button v-if="auth.isAdmin" label="Tạo hồ sơ mới" icon="pi pi-plus" @click="openCreate" />
     </div>
 
     <Card>
@@ -264,17 +259,12 @@ const bizConfigVisible = ref(false);
           :loading="profile.loading"
           stripedRows
           size="small"
-          :row-class="
-            (row: { active: boolean }) => (row.active ? 'highlight-row' : '')
-          "
+          :row-class="(row: { active: boolean }) => (row.active ? 'highlight-row' : '')"
         >
           <Column field="name" header="Tên hồ sơ">
             <template #body="{ data }">
               <span class="font-medium">{{ data.name }}</span>
-              <i
-                v-if="data.active"
-                class="pi pi-check-circle text-primary-600 ml-1"
-              ></i>
+              <i v-if="data.active" class="pi pi-check-circle text-primary-600 ml-1"></i>
             </template>
           </Column>
           <Column field="key" header="Thư mục dữ liệu" />
@@ -362,10 +352,7 @@ const bizConfigVisible = ref(false);
       <div class="space-y-3">
         <div class="flex items-center gap-2 text-sm text-gray-500">
           <i class="pi pi-info-circle shrink-0 text-sky-500" />
-          <span
-            >Dữ liệu riêng biệt; tài khoản quản trị mặc định
-            <b>admin/admin123</b>.</span
-          >
+          <span>Dữ liệu riêng biệt; tài khoản quản trị mặc định <b>admin/admin123</b>.</span>
         </div>
         <FormField label="Tên hồ sơ" required>
           <InputText
@@ -388,11 +375,7 @@ const bizConfigVisible = ref(false);
       @action="doRename"
     >
       <FormField label="Tên hồ sơ" required>
-        <InputText
-          v-model="renameName"
-          class="w-full"
-          @keyup.enter="doRename"
-        />
+        <InputText v-model="renameName" class="w-full" @keyup.enter="doRename" />
       </FormField>
     </AppDialog>
 
@@ -409,8 +392,8 @@ const bizConfigVisible = ref(false);
         <div class="flex items-center gap-2 text-sm text-gray-500">
           <i class="pi pi-info-circle shrink-0 text-sky-500" />
           <span
-            >Khởi động app lần sau sẽ tự đăng nhập hồ sơ này bằng đúng tài khoản
-            bên dưới (mật khẩu được lưu trên máy này).</span
+            >Khởi động app lần sau sẽ tự đăng nhập hồ sơ này bằng đúng tài khoản bên dưới (mật khẩu
+            được lưu trên máy này).</span
           >
         </div>
         <FormField label="Tên đăng nhập" required>

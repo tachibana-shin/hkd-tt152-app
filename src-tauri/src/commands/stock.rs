@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 /// Một lần "lấy" hàng ra khỏi 1 lô theo FIFO.
 #[derive(Debug, PartialEq)]
@@ -89,12 +89,20 @@ pub(crate) async fn save_inbound_core(
     //   production→ Nợ 155 (thành phẩm) / Có 154 (chi phí SXKD dở dang)
     //   other     → Nợ 152 / Có 154 (người dùng tự chọn nếu cần)
     let debit = if debit_account.trim().is_empty() {
-        if inbound_type == "production" { "155" } else { "152" }
+        if inbound_type == "production" {
+            "155"
+        } else {
+            "152"
+        }
     } else {
         debit_account
     };
     let credit = if credit_account.trim().is_empty() {
-        if inbound_type == "production" { "154" } else { "331" }
+        if inbound_type == "production" {
+            "154"
+        } else {
+            "331"
+        }
     } else {
         credit_account
     };
@@ -290,10 +298,7 @@ pub(crate) async fn save_inbound_core(
     // ngân hàng (hàng đã trả ngay ngay trên PNK) hoặc chưa chọn nhà cung cấp.
     let mut pc_no = String::new();
     let credit_is_cash = credit == "111" || credit == "112";
-    if pay_now
-        && inbound_type == "purchase"
-        && !supplier_code.trim().is_empty()
-        && !credit_is_cash
+    if pay_now && inbound_type == "purchase" && !supplier_code.trim().is_empty() && !credit_is_cash
     {
         let pay = round2(total + vat_total);
         if pay > 0.0 {
@@ -827,21 +832,30 @@ pub(crate) async fn save_inbound(
     // Công tắc "khấu trừ GTGT đầu vào" (mặc định TẮT) — tắt thì bỏ qua thuế nhập
     // kể cả khi form gửi lên (hộ nộp thuế theo doanh thu không được khấu trừ).
     let pool = state.pool.read().await;
-    let vat_deduct: (String,) =
-        sqlx::query_as("SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0')")
-            .fetch_one(&*pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    let vat_deduct: (String,) = sqlx::query_as(
+        "SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0')",
+    )
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
     let vat_rate = if vat_deduct.0 == "1" { vat_rate } else { 0.0 };
 
     // TK Nợ/Có (kể cả mặc định theo loại nhập) phải có trong danh mục tài khoản.
     let debit = if debit_account.trim().is_empty() {
-        if inbound_type == "production" { "155" } else { "152" }
+        if inbound_type == "production" {
+            "155"
+        } else {
+            "152"
+        }
     } else {
         &debit_account
     };
     let credit = if credit_account.trim().is_empty() {
-        if inbound_type == "production" { "154" } else { "331" }
+        if inbound_type == "production" {
+            "154"
+        } else {
+            "331"
+        }
     } else {
         &credit_account
     };
@@ -1249,13 +1263,14 @@ mod tests {
         assert_eq!((qty2, dep2), (5.0, false));
 
         // Sổ bán hàng: Nợ 131 / Có 511, đúng tỷ lệ ngành PPHH
-        let (etype, debit, credit, amount, vat): (String, String, String, f64, f64) = sqlx::query_as(
-            "SELECT entry_type, debit_account, credit_account, amount, vat_rate
+        let (etype, debit, credit, amount, vat): (String, String, String, f64, f64) =
+            sqlx::query_as(
+                "SELECT entry_type, debit_account, credit_account, amount, vat_rate
              FROM journal_entry WHERE voucher_no = 'PXK-01'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(etype, "PX");
         assert_eq!(debit, "131");
         assert_eq!(credit, "511");
@@ -1289,7 +1304,10 @@ mod tests {
         assert!(err.contains("Không đủ tồn kho"));
 
         // Không có bút toán nào được ghi và lô giữ nguyên (rollback)
-        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry").await, 0);
+        assert_eq!(
+            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry").await,
+            0
+        );
         assert_eq!(
             scalar_f64(&pool, "SELECT quantity FROM stock_lot").await,
             5.0
@@ -1323,13 +1341,12 @@ mod tests {
         .await
         .expect("xuất đúng kho W2");
         assert_eq!(r.cogs, 3_000.0); // 3 x 1000 (lô W2)
-        let (q1, q_w1): (f64, i64) = sqlx::query_as(
-            "SELECT quantity, warehouse_id FROM stock_lot WHERE warehouse_id = ?",
-        )
-        .bind(w1)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (q1, q_w1): (f64, i64) =
+            sqlx::query_as("SELECT quantity, warehouse_id FROM stock_lot WHERE warehouse_id = ?")
+                .bind(w1)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(q1, 10.0);
         assert_eq!(q_w1, w1);
 
@@ -1394,10 +1411,7 @@ mod tests {
         assert_eq!(r.entries, 1);
         assert_eq!(r.revenue, 1_500_000.0);
         assert_eq!(r.cogs, 0.0);
-        assert_eq!(
-            scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await,
-            0
-        );
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await, 0);
 
         let (etype, debit, credit, amount, industry, vat, pit): (
             String,
@@ -1522,7 +1536,11 @@ mod tests {
         .expect("xuất kho");
         assert_eq!(r.pt_no, "");
         assert_eq!(
-            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'").await,
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'"
+            )
+            .await,
             0
         );
     }
@@ -1849,7 +1867,11 @@ mod tests {
         .expect("nhập kho");
         assert_eq!(r.pc_no, "");
         assert_eq!(
-            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PC'").await,
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PC'"
+            )
+            .await,
             0
         );
     }
@@ -1883,7 +1905,11 @@ mod tests {
         .expect("nhập kho");
         assert_eq!(r.pc_no, "");
         assert_eq!(
-            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PC'").await,
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PC'"
+            )
+            .await,
             0
         );
     }
@@ -2002,8 +2028,14 @@ mod tests {
         assert!(err.contains("Không đủ tồn kho"));
 
         // Rollback: không ghi bút toán, lô giữ nguyên
-        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry").await, 0);
-        assert_eq!(scalar_f64(&pool, "SELECT quantity FROM stock_lot").await, 3.0);
+        assert_eq!(
+            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry").await,
+            0
+        );
+        assert_eq!(
+            scalar_f64(&pool, "SELECT quantity FROM stock_lot").await,
+            3.0
+        );
     }
 
     // Tăng (up): bên bán thêm → nhập kho như phiếu thường (Nợ 152 / Có 331).
@@ -2146,7 +2178,11 @@ mod tests {
         .expect("điều chỉnh");
         assert_eq!(r.pt_no, "");
         assert_eq!(
-            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'").await,
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'"
+            )
+            .await,
             0
         );
     }
@@ -2184,7 +2220,11 @@ mod tests {
             18.0
         );
         assert_eq!(
-            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'").await,
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'"
+            )
+            .await,
             0
         );
     }
@@ -2240,10 +2280,7 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(
-            (number.as_str(), status.as_str()),
-            ("PXK-INV1", "draft")
-        );
+        assert_eq!((number.as_str(), status.as_str()), ("PXK-INV1", "draft"));
         assert_eq!(customer, "Cửa hàng Mây");
         assert_eq!(tax, "MST-KH1");
         assert_eq!(total, 6_000.0); // 3 x 2000

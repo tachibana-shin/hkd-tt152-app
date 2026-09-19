@@ -1,11 +1,11 @@
 #![allow(unused_imports)]
 
 use crate::models::{AppState, ProductInfo};
+use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::State;
 use tauri::Manager;
-use serde_json::json;
+use tauri::State;
 pub(crate) async fn resolve_product(
     tx: &mut SqliteTransaction<'_>,
     code: &str,
@@ -44,10 +44,11 @@ pub(crate) async fn resolve_warehouse(
     .bind(product_code)
     .fetch_one(&mut **tx)
     .await
-    .map_err(|_| format!("Không có kho nào. Vui lòng tạo kho trước."))?;
+    .map_err(|_| "Không có kho nào. Vui lòng tạo kho trước.".to_string())?;
     Ok(row.0)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn insert_journal_entry(
     tx: &mut SqliteTransaction<'_>,
     posting_date: &str,
@@ -163,15 +164,14 @@ pub(crate) async fn audit(app: &AppState, action: &str, entity: &str, detail: &s
         .as_ref()
         .map(|u| u.username.clone())
         .unwrap_or_default();
-    let _ = sqlx::query(
-        "INSERT INTO audit_log (action, entity, detail, username) VALUES (?, ?, ?, ?)",
-    )
-    .bind(action)
-    .bind(entity)
-    .bind(detail)
-    .bind(username)
-    .execute(&*app.pool.read().await)
-    .await;
+    let _ =
+        sqlx::query("INSERT INTO audit_log (action, entity, detail, username) VALUES (?, ?, ?, ?)")
+            .bind(action)
+            .bind(entity)
+            .bind(detail)
+            .bind(username)
+            .execute(&*app.pool.read().await)
+            .await;
 }
 
 #[cfg(test)]

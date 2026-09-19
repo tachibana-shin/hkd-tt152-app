@@ -8,8 +8,7 @@ import type { Warehouse, Customer, Supplier, IndustryGroup } from "@/types";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
-const { warehouses, suppliers, customers, industryGroups, loading } =
-  storeToRefs(catalog);
+const { warehouses, suppliers, customers, industryGroups, loading } = storeToRefs(catalog);
 const toast = useToast();
 const confirm = useConfirm();
 
@@ -47,9 +46,7 @@ const igSelection = ref<IndustryGroup[]>([]);
 const whSelection = ref<Warehouse[]>([]);
 const cuSelection = ref<Customer[]>([]);
 const suSelection = ref<Supplier[]>([]);
-const igDialogTitle = computed(() =>
-  igEditing.value ? "Sửa nhóm ngành" : "Thêm nhóm ngành",
-);
+const igDialogTitle = computed(() => (igEditing.value ? "Sửa nhóm ngành" : "Thêm nhóm ngành"));
 
 function openIgCreate() {
   igEditing.value = false;
@@ -110,10 +107,7 @@ async function saveIg() {
 function deleteSelectedIg() {
   const rows = [...igSelection.value];
   if (!rows.length) return;
-  const label =
-    rows.length === 1
-      ? `nhóm ngành ${rows[0].code}`
-      : `${rows.length} nhóm ngành`;
+  const label = rows.length === 1 ? `nhóm ngành ${rows[0].code}` : `${rows.length} nhóm ngành`;
   confirm.require({
     message: `Xóa ${label} đã chọn?`,
     header: "Xác nhận xóa",
@@ -185,12 +179,7 @@ onMounted(() => catalog.loadAll());
         </div>
       </template>
       <template #end>
-        <Button
-          label="Tải lại"
-          icon="pi pi-refresh"
-          severity="secondary"
-          @click="reload"
-        />
+        <Button label="Tải lại" icon="pi pi-refresh" severity="secondary" @click="reload" />
       </template>
     </Toolbar>
 
@@ -198,20 +187,16 @@ onMounted(() => catalog.loadAll());
       <template #content>
         <Tabs v-model:value="tab">
           <TabList>
-            <Tab value="warehouses"
-              ><i class="pi pi-warehouse mr-2" />Kho hàng</Tab
-            >
-            <Tab value="customers"
-              ><i class="pi pi-users mr-2" />Khách hàng</Tab
-            >
-            <Tab value="suppliers"
-              ><i class="pi pi-truck mr-2" />Nhà cung cấp</Tab
-            >
+            <Tab value="warehouses"><i class="pi pi-warehouse mr-2" />Kho hàng</Tab>
+            <Tab value="customers"><i class="pi pi-users mr-2" />Khách hàng</Tab>
+            <Tab value="suppliers"><i class="pi pi-truck mr-2" />Nhà cung cấp</Tab>
             <Tab value="industryGroups"
               ><i class="pi pi-sitemap mr-2" />Nhóm ngành
               <i
                 class="pi pi-info-circle text-xs text-gray-400 cursor-help"
-                v-tooltip="'Tỷ lệ GTGT/TNCN áp dụng cho doanh thu bán ra của nhóm ngành (TT 152/2025).'"
+                v-tooltip="
+                  'Tỷ lệ GTGT/TNCN áp dụng cho doanh thu bán ra của nhóm ngành (TT 152/2025).'
+                "
             /></Tab>
           </TabList>
           <TabPanels>
@@ -472,19 +457,13 @@ onMounted(() => catalog.loadAll());
                 <Column field="code" header="Mã" />
                 <Column field="name" header="Tên nhóm" />
                 <Column field="vat_rate" header="Thuế GTGT (%)">
-                  <template #body="{ data }">{{
-                    data.vat_rate * 100 + "%"
-                  }}</template>
+                  <template #body="{ data }">{{ data.vat_rate * 100 + "%" }}</template>
                 </Column>
                 <Column field="pit_rate" header="Thuế TNCN (%)">
-                  <template #body="{ data }">{{
-                    data.pit_rate * 100 + "%"
-                  }}</template>
+                  <template #body="{ data }">{{ data.pit_rate * 100 + "%" }}</template>
                 </Column>
                 <template #empty
-                  ><EmptyState
-                    text="Chưa có nhóm ngành nào."
-                    icon="pi pi-sitemap"
+                  ><EmptyState text="Chưa có nhóm ngành nào." icon="pi pi-sitemap"
                 /></template>
               </AppDataTable>
             </TabPanel>
@@ -514,35 +493,16 @@ onMounted(() => catalog.loadAll());
     >
       <div class="grid grid-cols-2 gap-4 py-2">
         <FormField label="Mã" required>
-          <InputText
-            v-model="igForm.code"
-            :disabled="igEditing"
-            placeholder="PPHH"
-          />
+          <InputText v-model="igForm.code" :disabled="igEditing" placeholder="PPHH" />
         </FormField>
         <FormField label="Tên nhóm" required>
-          <InputText
-            v-model="igForm.name"
-            placeholder="Phân phối, cung cấp hàng hóa"
-          />
+          <InputText v-model="igForm.name" placeholder="Phân phối, cung cấp hàng hóa" />
         </FormField>
         <FormField label="Thuế GTGT (%)">
-          <InputNumber
-            v-model="igForm.vat_rate"
-            :min="0"
-            :max="100"
-            mode="decimal"
-            suffix="%"
-          />
+          <InputNumber v-model="igForm.vat_rate" :min="0" :max="100" mode="decimal" suffix="%" />
         </FormField>
         <FormField label="Thuế TNCN (%)">
-          <InputNumber
-            v-model="igForm.pit_rate"
-            :min="0"
-            :max="100"
-            mode="decimal"
-            suffix="%"
-          />
+          <InputNumber v-model="igForm.pit_rate" :min="0" :max="100" mode="decimal" suffix="%" />
         </FormField>
         <p class="col-span-2 text-xs text-gray-400">
           Tỷ lệ áp dụng cho doanh thu bán ra của nhóm ngành này (TT 152/2025).

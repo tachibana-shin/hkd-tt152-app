@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 /// Phiếu thu (PT) / phiếu chi (PC) — ghi bút toán tiền vào `journal_entry`
 /// (đối chiếu sheet P.THU / P.CHI của bộ mẫu Excel HKD).
 /// Khác với PNK/PXK: không tạo `stock_lot`, chỉ ghi sổ nhật ký.
@@ -24,19 +24,31 @@ pub(crate) async fn save_cash_entry(
     if input.posting_date.is_empty() || input.voucher_no.is_empty() {
         return Err("Thiếu ngày ghi sổ hoặc số phiếu".into());
     }
-    let unit_code = if input.unit_code.is_empty() { "HKD" } else { &input.unit_code };
+    let unit_code = if input.unit_code.is_empty() {
+        "HKD"
+    } else {
+        &input.unit_code
+    };
 
     let pool = state.pool.read().await;
 
     // Tài khoản Nợ/Có (kể cả mặc định theo loại phiếu) phải có trong danh mục
     // tài khoản (màn Tài khoản) — đảm bảo hạch toán dùng đúng DMTK của hộ.
     let debit: &str = if input.debit_account.trim().is_empty() {
-        if input.entry_type == "PT" { "111" } else { "642" }
+        if input.entry_type == "PT" {
+            "111"
+        } else {
+            "642"
+        }
     } else {
         &input.debit_account
     };
     let credit: &str = if input.credit_account.trim().is_empty() {
-        if input.entry_type == "PT" { "511" } else { "111" }
+        if input.entry_type == "PT" {
+            "511"
+        } else {
+            "111"
+        }
     } else {
         &input.credit_account
     };

@@ -2,10 +2,10 @@
 
 Hai tầng kiểm thử:
 
-| Tầng | Vị trí | Lệnh | Phạm vi |
-|------|--------|------|---------|
+| Tầng                 | Vị trí                       | Lệnh                         | Phạm vi                                                                             |
+| -------------------- | ---------------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
 | **Rust (nghiệp vụ)** | `src-tauri/src/**/mod tests` | `cd src-tauri && cargo test` | Lõi tính toán tách khỏi command: FIFO, lương, tờ khai thuế, migration/seed, helpers |
-| **E2E UI** | `e2e/` | `./e2e/run_e2e.sh` | App thật + WebKit inspector + **DB SQLite thật** làm nguồn sự thật |
+| **E2E UI**           | `e2e/`                       | `./e2e/run_e2e.sh`           | App thật + WebKit inspector + **DB SQLite thật** làm nguồn sự thật                  |
 
 ## 1. Test Rust
 
@@ -41,24 +41,24 @@ Chạy app **thật** (Tauri/webview), thao tác DOM qua WebKit remote inspector
 
 Các bước có sẵn (thứ tự khuyến nghị):
 
-| Bước | Kiểm chứng (ngoài UI còn đối chiếu DB) |
-|------|----------------------------------------|
-| `login` | sai mật khẩu bị từ chối (toast) → đăng nhập `admin/admin123`; DB có user admin |
-| `warehouse` | tạo kho `KHO1`, khách `KH001`, NCC `NCC001` ở Danh mục |
-| `product` | tạo `SP001` (tên/ĐVT) |
-| `inbound` | phiếu nhập `PN001`: ghi sổ + tạo lô kho |
-| `outbound` | phiếu xuất `PX001`: ghi sổ + trừ lô FIFO |
-| `print` | in phiếu: mở `/print/PN001`, đúng mẫu `01-VT`, dòng SP, tổng tiền, số tiền bằng chữ, có gọi lệnh in (đã stub); chứng từ sai báo lỗi |
-| `invoice` | hóa đơn nháp đúng khách + tổng tiền |
-| `cash` | phiếu thu `PT` đúng số tiền |
-| `backup` | "Tạo sao lưu" → danh sách có `hkd-backup-<yyyyMMdd-HHMMSS>.db`, file tồn tại > 4KB trên đĩa, audit `backup` |
-| `employee` | nhân viên `NV001` + lương HĐ/BH |
-| `attendance` | "Cả tháng" + lưu; DB có bản ghi công |
-| `payroll` | lập bảng lương, lấy công từ chấm công, lưu; số công & net_pay |
-| `import` | gắn file Excel fixture → "Đọc file" nhận diện 2 dòng → nhập; DB thêm 2 bút toán `PN101`/`PX101`, audit `import` |
-| `users` | thêm người dùng `kho01` vai trò Kho; DB lưu vai trò + mật khẩu đã băm |
-| `reports` | mở được các trang sổ cái / kế toán / kho |
-| `role` | đăng xuất → đăng nhập `kho01`: menu ẩn Người dùng/Bảng lương/Kế toán HKD, hiện Nhập kho/Sản phẩm; đăng nhập lại admin |
+| Bước         | Kiểm chứng (ngoài UI còn đối chiếu DB)                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `login`      | sai mật khẩu bị từ chối (toast) → đăng nhập `admin/admin123`; DB có user admin                                                      |
+| `warehouse`  | tạo kho `KHO1`, khách `KH001`, NCC `NCC001` ở Danh mục                                                                              |
+| `product`    | tạo `SP001` (tên/ĐVT)                                                                                                               |
+| `inbound`    | phiếu nhập `PN001`: ghi sổ + tạo lô kho                                                                                             |
+| `outbound`   | phiếu xuất `PX001`: ghi sổ + trừ lô FIFO                                                                                            |
+| `print`      | in phiếu: mở `/print/PN001`, đúng mẫu `01-VT`, dòng SP, tổng tiền, số tiền bằng chữ, có gọi lệnh in (đã stub); chứng từ sai báo lỗi |
+| `invoice`    | hóa đơn nháp đúng khách + tổng tiền                                                                                                 |
+| `cash`       | phiếu thu `PT` đúng số tiền                                                                                                         |
+| `backup`     | "Tạo sao lưu" → danh sách có `hkd-backup-<yyyyMMdd-HHMMSS>.db`, file tồn tại > 4KB trên đĩa, audit `backup`                         |
+| `employee`   | nhân viên `NV001` + lương HĐ/BH                                                                                                     |
+| `attendance` | "Cả tháng" + lưu; DB có bản ghi công                                                                                                |
+| `payroll`    | lập bảng lương, lấy công từ chấm công, lưu; số công & net_pay                                                                       |
+| `import`     | gắn file Excel fixture → "Đọc file" nhận diện 2 dòng → nhập; DB thêm 2 bút toán `PN101`/`PX101`, audit `import`                     |
+| `users`      | thêm người dùng `kho01` vai trò Kho; DB lưu vai trò + mật khẩu đã băm                                                               |
+| `reports`    | mở được các trang sổ cái / kế toán / kho                                                                                            |
+| `role`       | đăng xuất → đăng nhập `kho01`: menu ẩn Người dùng/Bảng lương/Kế toán HKD, hiện Nhập kho/Sản phẩm; đăng nhập lại admin               |
 
 > Bước `import` cần fixture Excel tại `e2e/fixtures/nhap-lieu-e2e.xlsx`
 > (`run_e2e.sh` tự sinh bằng SheetJS nếu thiếu và truyền qua `E2E_IMPORT_FILE`).
@@ -71,15 +71,15 @@ nên **không đụng dữ liệu thật**. DB kiểm chứng:
 
 Biến môi trường hữu ích:
 
-| Biến | Mặc định | Ý nghĩa |
-|------|----------|---------|
-| `E2E_DATA_HOME` | `${TMPDIR:-/tmp}/hkd-tt152-e2e/data` | `XDG_DATA_HOME` riêng cho app test |
-| `E2E_INSPECT_PORT` | `9223` | Cổng WebKit remote inspector |
-| `E2E_LOG_DIR` | `${TMPDIR:-/tmp}/hkd-tt152-e2e/log` | Nơi ghi log Vite/app/Xvfb |
-| `E2E_IMPORT_FILE` | `e2e/fixtures/nhap-lieu-e2e.xlsx` | File Excel cho bước `import` |
-| `E2E_USE_XVFB` | `1` | `0` để dùng `DISPLAY` hiện tại thay vì Xvfb |
-| `E2E_XVFB_DISPLAY` | `:99` | Display Xvfb dùng cho app |
-| `E2E_KEEP_VITE` | `0` | `1` để giữ Vite dev server lại sau khi chạy (mặc định script tự dọn Vite nó khởi động) |
+| Biến               | Mặc định                             | Ý nghĩa                                                                                |
+| ------------------ | ------------------------------------ | -------------------------------------------------------------------------------------- |
+| `E2E_DATA_HOME`    | `${TMPDIR:-/tmp}/hkd-tt152-e2e/data` | `XDG_DATA_HOME` riêng cho app test                                                     |
+| `E2E_INSPECT_PORT` | `9223`                               | Cổng WebKit remote inspector                                                           |
+| `E2E_LOG_DIR`      | `${TMPDIR:-/tmp}/hkd-tt152-e2e/log`  | Nơi ghi log Vite/app/Xvfb                                                              |
+| `E2E_IMPORT_FILE`  | `e2e/fixtures/nhap-lieu-e2e.xlsx`    | File Excel cho bước `import`                                                           |
+| `E2E_USE_XVFB`     | `1`                                  | `0` để dùng `DISPLAY` hiện tại thay vì Xvfb                                            |
+| `E2E_XVFB_DISPLAY` | `:99`                                | Display Xvfb dùng cho app                                                              |
+| `E2E_KEEP_VITE`    | `0`                                  | `1` để giữ Vite dev server lại sau khi chạy (mặc định script tự dọn Vite nó khởi động) |
 
 ### Cơ chế
 

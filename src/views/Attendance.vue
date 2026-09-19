@@ -9,29 +9,41 @@ const auth = useAuthStore();
 
 // ─── Trạng thái chấm công (khớp ký hiệu sheet "Cham Cong" bộ mẫu TT152) ───
 // Chu kỳ khi click: X → NC → P → H → CT → TS → O → CO → KL → (trống) → X...
-const STATUS_CYCLE: AttendanceStatus[] = [
-  "X", "NC", "P", "H", "CT", "TS", "O", "CO", "KL", "",
-];
+const STATUS_CYCLE: AttendanceStatus[] = ["X", "NC", "P", "H", "CT", "TS", "O", "CO", "KL", ""];
 /** Các trạng thái tính 1 công (NC tính 0.5, còn lại 0) */
 const COUNT_ONE = new Set<AttendanceStatus>(["X", "P", "H", "CT", "TS", "O", "CO"]);
 
 const LABELS: Record<AttendanceStatus, string> = {
-  X: "X", NC: "½", P: "P", H: "H", CT: "CT",
-  TS: "TS", O: "O", CO: "CO", KL: "KL", "": "",
+  X: "X",
+  NC: "½",
+  P: "P",
+  H: "H",
+  CT: "CT",
+  TS: "TS",
+  O: "O",
+  CO: "CO",
+  KL: "KL",
+  "": "",
 };
 
-const STYLE: Record<AttendanceStatus, { chip: string; cell: string; text: string; desc: string }> = {
-  X:  { chip: "bg-emerald-500", cell: "bg-emerald-100", text: "text-emerald-700 font-bold", desc: "công đủ" },
-  NC: { chip: "bg-amber-400",   cell: "bg-amber-100",  text: "text-amber-700",             desc: "nửa công" },
-  P:  { chip: "bg-sky-500",     cell: "bg-sky-100",    text: "text-sky-700",               desc: "phép" },
-  H:  { chip: "bg-cyan-500",    cell: "bg-cyan-100",   text: "text-cyan-700",              desc: "học tập" },
-  CT: { chip: "bg-violet-500",  cell: "bg-violet-100", text: "text-violet-700",            desc: "công tác" },
-  TS: { chip: "bg-pink-500",    cell: "bg-pink-100",   text: "text-pink-700",              desc: "thai sản" },
-  O:  { chip: "bg-orange-500",  cell: "bg-orange-100", text: "text-orange-700",            desc: "ốm" },
-  CO: { chip: "bg-rose-500",    cell: "bg-rose-100",   text: "text-rose-700",              desc: "con ốm" },
-  KL: { chip: "bg-slate-400",   cell: "bg-slate-200",  text: "text-slate-500",             desc: "không lương" },
-  "": { chip: "bg-gray-200",    cell: "bg-white",      text: "text-gray-300",              desc: "nghỉ / chưa chấm" },
-};
+const STYLE: Record<AttendanceStatus, { chip: string; cell: string; text: string; desc: string }> =
+  {
+    X: {
+      chip: "bg-emerald-500",
+      cell: "bg-emerald-100",
+      text: "text-emerald-700 font-bold",
+      desc: "công đủ",
+    },
+    NC: { chip: "bg-amber-400", cell: "bg-amber-100", text: "text-amber-700", desc: "nửa công" },
+    P: { chip: "bg-sky-500", cell: "bg-sky-100", text: "text-sky-700", desc: "phép" },
+    H: { chip: "bg-cyan-500", cell: "bg-cyan-100", text: "text-cyan-700", desc: "học tập" },
+    CT: { chip: "bg-violet-500", cell: "bg-violet-100", text: "text-violet-700", desc: "công tác" },
+    TS: { chip: "bg-pink-500", cell: "bg-pink-100", text: "text-pink-700", desc: "thai sản" },
+    O: { chip: "bg-orange-500", cell: "bg-orange-100", text: "text-orange-700", desc: "ốm" },
+    CO: { chip: "bg-rose-500", cell: "bg-rose-100", text: "text-rose-700", desc: "con ốm" },
+    KL: { chip: "bg-slate-400", cell: "bg-slate-200", text: "text-slate-500", desc: "không lương" },
+    "": { chip: "bg-gray-200", cell: "bg-white", text: "text-gray-300", desc: "nghỉ / chưa chấm" },
+  };
 
 const DOW = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
 
@@ -195,11 +207,19 @@ function cellTitle(row: GridRow, idx: number, d: DayInfo): string {
 async function save() {
   if (!auth.canAccounting) return;
   if (!/^\d{4}-\d{2}$/.test(period.value)) {
-    toast.add({ severity: "warn", summary: "Kỳ không hợp lệ", detail: "Kỳ chấm công phải có dạng YYYY-MM" });
+    toast.add({
+      severity: "warn",
+      summary: "Kỳ không hợp lệ",
+      detail: "Kỳ chấm công phải có dạng YYYY-MM",
+    });
     return;
   }
   if (!rows.value.length) {
-    toast.add({ severity: "warn", summary: "Chưa có nhân viên", detail: "Không có nhân viên đang làm việc để chấm công" });
+    toast.add({
+      severity: "warn",
+      summary: "Chưa có nhân viên",
+      detail: "Không có nhân viên đang làm việc để chấm công",
+    });
     return;
   }
   saving.value = true;
@@ -252,119 +272,167 @@ onMounted(() => {
         <span>Bảng chấm công</span>
         <span class="text-xs text-gray-400">({{ rows.length }} NV)</span>
       </template>
-        <div class="flex flex-wrap items-end gap-3">
-          <div>
-            <label class="mb-1 block text-xs text-gray-500">Kỳ chấm công (YYYY-MM)</label>
-            <Select v-model="period" :options="periodOptions" editable placeholder="YYYY-MM" class="w-44" />
-          </div>
-          <Button label="Tải lại" icon="pi pi-refresh" severity="secondary" :loading="loading" @click="reload" />
-          <Button
-            v-if="auth.canAccounting"
-            label="Lưu chấm công"
-            icon="pi pi-save"
-            severity="success"
-            :loading="saving"
-            :disabled="!rows.length || loading"
-            @click="save"
-          />
-          <Tag
-            v-if="!auth.canAccounting"
-            value="Chỉ đọc"
-            severity="secondary"
-            icon="pi pi-eye"
+      <div class="flex flex-wrap items-end gap-3">
+        <div>
+          <label class="mb-1 block text-xs text-gray-500">Kỳ chấm công (YYYY-MM)</label>
+          <Select
+            v-model="period"
+            :options="periodOptions"
+            editable
+            placeholder="YYYY-MM"
+            class="w-44"
           />
         </div>
+        <Button
+          label="Tải lại"
+          icon="pi pi-refresh"
+          severity="secondary"
+          :loading="loading"
+          @click="reload"
+        />
+        <Button
+          v-if="auth.canAccounting"
+          label="Lưu chấm công"
+          icon="pi pi-save"
+          severity="success"
+          :loading="saving"
+          :disabled="!rows.length || loading"
+          @click="save"
+        />
+        <Tag v-if="!auth.canAccounting" value="Chỉ đọc" severity="secondary" icon="pi pi-eye" />
+      </div>
 
-        <!-- Chú giải màu -->
-        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-          <span class="text-gray-500">Ký hiệu:</span>
-          <span v-for="st in STATUS_CYCLE" :key="st" class="inline-flex items-center gap-1">
-            <span class="inline-block h-3.5 w-3.5 rounded border border-black/10" :class="STYLE[st].chip" />
-            <span :title="STYLE[st].desc">{{ st ? LABELS[st] : "Trống" }}</span>
-          </span>
-        </div>
+      <!-- Chú giải màu -->
+      <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+        <span class="text-gray-500">Ký hiệu:</span>
+        <span v-for="st in STATUS_CYCLE" :key="st" class="inline-flex items-center gap-1">
+          <span
+            class="inline-block h-3.5 w-3.5 rounded border border-black/10"
+            :class="STYLE[st].chip"
+          />
+          <span :title="STYLE[st].desc">{{ st ? LABELS[st] : "Trống" }}</span>
+        </span>
+      </div>
 
-        <!-- Lưới chấm công -->
-        <div class="mt-3 max-h-[620px] overflow-auto rounded-lg border">
-          <table class="w-full border-collapse text-sm">
-            <thead class="sticky top-0 z-10">
-              <tr>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600">
-                  Mã NV
-                </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600">
-                  Họ tên
-                </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600">
-                  Bộ phận
-                </th>
-                <th
-                  v-for="d in days"
-                  :key="d.day"
-                  class="border-b min-w-9 px-1 py-1.5 text-center text-sm font-semibold"
-                  :class="d.isSunday ? 'bg-rose-50 text-rose-600' : 'bg-gray-50 text-gray-600'"
+      <!-- Lưới chấm công -->
+      <div class="mt-3 max-h-[620px] overflow-auto rounded-lg border">
+        <table class="w-full border-collapse text-sm">
+          <thead class="sticky top-0 z-10">
+            <tr>
+              <th
+                class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600"
+              >
+                Mã NV
+              </th>
+              <th
+                class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600"
+              >
+                Họ tên
+              </th>
+              <th
+                class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-left text-sm font-semibold text-gray-600"
+              >
+                Bộ phận
+              </th>
+              <th
+                v-for="d in days"
+                :key="d.day"
+                class="border-b min-w-9 px-1 py-1.5 text-center text-sm font-semibold"
+                :class="d.isSunday ? 'bg-rose-50 text-rose-600' : 'bg-gray-50 text-gray-600'"
+              >
+                <div class="leading-4">{{ d.day }}</div>
+                <div class="text-[11px] font-normal leading-3">{{ DOW[d.dow] }}</div>
+              </th>
+              <th
+                class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-emerald-700"
+              >
+                Công
+              </th>
+              <th
+                class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-gray-600"
+              >
+                Nghỉ
+              </th>
+              <th
+                class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-gray-600"
+              >
+                Tiện ích
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rows" :key="r.code" class="border-b last:border-b-0">
+              <td class="whitespace-nowrap px-2 py-1 font-medium">{{ r.code }}</td>
+              <td class="whitespace-nowrap px-2 py-1">{{ r.name }}</td>
+              <td class="whitespace-nowrap px-2 py-1 text-gray-500">{{ r.department || "—" }}</td>
+              <td
+                v-for="(d, idx) in days"
+                :key="d.day"
+                class="p-0 text-center"
+                :class="cellBg(r, d, idx)"
+              >
+                <button
+                  type="button"
+                  class="block h-9 w-full text-sm leading-9 transition-colors hover:bg-black/5"
+                  :class="cellText(r, idx)"
+                  :title="cellTitle(r, idx, d)"
+                  @click="cycle(r, idx)"
                 >
-                  <div class="leading-4">{{ d.day }}</div>
-                  <div class="text-[11px] font-normal leading-3">{{ DOW[d.dow] }}</div>
-                </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-emerald-700">
-                  Công
-                </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-gray-600">
-                  Nghỉ
-                </th>
-                <th class="whitespace-nowrap border-b bg-gray-50 px-2 py-1.5 text-center text-sm font-semibold text-gray-600">
-                  Tiện ích
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in rows" :key="r.code" class="border-b last:border-b-0">
-                <td class="whitespace-nowrap px-2 py-1 font-medium">{{ r.code }}</td>
-                <td class="whitespace-nowrap px-2 py-1">{{ r.name }}</td>
-                <td class="whitespace-nowrap px-2 py-1 text-gray-500">{{ r.department || "—" }}</td>
-                <td
-                  v-for="(d, idx) in days"
-                  :key="d.day"
-                  class="p-0 text-center"
-                  :class="cellBg(r, d, idx)"
-                >
-                  <button
-                    type="button"
-                    class="block h-9 w-full text-sm leading-9 transition-colors hover:bg-black/5"
-                    :class="cellText(r, idx)"
-                    :title="cellTitle(r, idx, d)"
-                    @click="cycle(r, idx)"
-                  >
-                    {{ LABELS[r.cells[idx]] }}
-                  </button>
-                </td>
-                <td class="whitespace-nowrap px-2 py-1 text-center font-bold text-emerald-700">
-                  {{ totals.get(r.code)?.work.toFixed(1) }}
-                </td>
-                <td class="whitespace-nowrap px-2 py-1 text-center text-slate-500">
-                  {{ totals.get(r.code)?.unpaid }}
-                </td>
-                <td class="whitespace-nowrap px-2 py-1">
-                  <div class="flex justify-center gap-1">
-                    <Button v-if="auth.canAccounting" label="Cả tháng" icon="pi pi-calendar" size="small" severity="secondary" text :disabled="loading || saving" v-tooltip.top="'Đặt X vào các ngày (trừ Chủ nhật)'" @click="fillMonth(r)" />
-                    <Button v-if="auth.canAccounting" label="Xóa" icon="pi pi-trash" size="small" severity="danger" text :disabled="loading || saving" v-tooltip.top="'Xóa toàn bộ chấm công hàng này'" @click="clearRow(r)" />
-                  </div>
-                </td>
-              </tr>
-              <tr v-if="!rows.length">
-                <td :colspan="days.length + 6" class="px-3 py-8 text-center text-gray-400">
-                  Chưa có nhân viên — thêm ở màn Bảng lương.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                  {{ LABELS[r.cells[idx]] }}
+                </button>
+              </td>
+              <td class="whitespace-nowrap px-2 py-1 text-center font-bold text-emerald-700">
+                {{ totals.get(r.code)?.work.toFixed(1) }}
+              </td>
+              <td class="whitespace-nowrap px-2 py-1 text-center text-slate-500">
+                {{ totals.get(r.code)?.unpaid }}
+              </td>
+              <td class="whitespace-nowrap px-2 py-1">
+                <div class="flex justify-center gap-1">
+                  <Button
+                    v-if="auth.canAccounting"
+                    label="Cả tháng"
+                    icon="pi pi-calendar"
+                    size="small"
+                    severity="secondary"
+                    text
+                    :disabled="loading || saving"
+                    v-tooltip.top="'Đặt X vào các ngày (trừ Chủ nhật)'"
+                    @click="fillMonth(r)"
+                  />
+                  <Button
+                    v-if="auth.canAccounting"
+                    label="Xóa"
+                    icon="pi pi-trash"
+                    size="small"
+                    severity="danger"
+                    text
+                    :disabled="loading || saving"
+                    v-tooltip.top="'Xóa toàn bộ chấm công hàng này'"
+                    @click="clearRow(r)"
+                  />
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!rows.length">
+              <td :colspan="days.length + 6" class="px-3 py-8 text-center text-gray-400">
+                Chưa có nhân viên — thêm ở màn Bảng lương.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        <p class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-400">
-          <span>Công = X/P/H/CT/TS/O/CO (1) + NC (0.5).</span>
-          <Button label="Mở Bảng lương" icon="pi pi-arrow-right" size="small" text @click="router.push('/payroll')" />
-        </p>
+      <p class="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+        <span>Công = X/P/H/CT/TS/O/CO (1) + NC (0.5).</span>
+        <Button
+          label="Mở Bảng lương"
+          icon="pi pi-arrow-right"
+          size="small"
+          text
+          @click="router.push('/payroll')"
+        />
+      </p>
     </SectionCard>
   </div>
 </template>

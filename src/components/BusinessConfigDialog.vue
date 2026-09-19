@@ -221,11 +221,7 @@ async function save() {
       </FormField>
       <FormField label="Mã số thuế" required>
         <div class="flex gap-2">
-          <InputText
-            v-model="form.tax_code"
-            placeholder="VD: 0123456789"
-            class="min-w-0 flex-1"
-          />
+          <InputText v-model="form.tax_code" placeholder="VD: 0123456789" class="min-w-0 flex-1" />
           <Button
             label="Tra cứu"
             icon="pi pi-search"
@@ -271,26 +267,21 @@ async function save() {
     <div class="rounded-lg border border-gray-200 bg-surface-50 p-3 space-y-3">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-semibold text-gray-800">
-            Khấu trừ thuế GTGT đầu vào
-          </p>
+          <p class="text-sm font-semibold text-gray-800">Khấu trừ thuế GTGT đầu vào</p>
           <p class="text-xs text-gray-500">
-            Mặc định <b>TẮT</b> — hộ nộp thuế theo doanh thu không được khấu trừ,
-            giá nhập kho đã gồm thuế. Bật khi hộ nộp thuế theo lợi nhuận (xác định
-            được chi phí): nhập kho tách thuế vào TK 133, giá nhập = giá chưa thuế.
+            Mặc định <b>TẮT</b> — hộ nộp thuế theo doanh thu không được khấu trừ, giá nhập kho đã
+            gồm thuế. Bật khi hộ nộp thuế theo lợi nhuận (xác định được chi phí): nhập kho tách thuế
+            vào TK 133, giá nhập = giá chưa thuế.
           </p>
         </div>
         <ToggleSwitch v-model="form.vat_deduct" class="shrink-0" />
       </div>
-      <div
-        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-3"
-      >
+      <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-3">
         <div>
           <p class="text-sm font-semibold text-gray-800">Nhóm hộ kinh doanh</p>
           <p class="text-xs text-gray-500">
-            Xếp tự động theo tổng doanh thu cả năm (NĐ 68/2026 + NĐ 141/2026):
-            nhóm 1 ≤ 1 tỷ (miễn thuế) · nhóm 2 &gt; 1–3 tỷ · nhóm 3 &gt; 3–50 tỷ ·
-            nhóm 4 &gt; 50 tỷ.
+            Xếp tự động theo tổng doanh thu cả năm (NĐ 68/2026 + NĐ 141/2026): nhóm 1 ≤ 1 tỷ (miễn
+            thuế) · nhóm 2 &gt; 1–3 tỷ · nhóm 3 &gt; 3–50 tỷ · nhóm 4 &gt; 50 tỷ.
           </p>
         </div>
         <div class="shrink-0 text-right">

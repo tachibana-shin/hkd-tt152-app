@@ -106,31 +106,30 @@ async function save() {
           Các nhóm hộ kinh doanh từ 01/01/2026 (NĐ 68/2026/NĐ-CP + NĐ 141/2026/NĐ-CP):
         </p>
         <p>
-          • <b>Nhóm 1</b> — doanh thu ≤ 1 tỷ/năm: <b class="text-emerald-600">miễn thuế
-          GTGT + TNCN</b>, chỉ thông báo doanh thu năm (hạn 31/01 năm sau).
+          • <b>Nhóm 1</b> — doanh thu ≤ 1 tỷ/năm:
+          <b class="text-emerald-600">miễn thuế GTGT + TNCN</b>, chỉ thông báo doanh thu năm (hạn
+          31/01 năm sau).
         </p>
         <p>
-          • <b>Nhóm 2</b> — doanh thu &gt; 1 tỷ – 3 tỷ: thuế GTGT = doanh thu × tỷ lệ
-          ngành (1%/2%/3%/5%); thuế TNCN = doanh thu × tỷ lệ ngành (0,5%–5%)
-          <i>hoặc</i> lợi nhuận × 15%.
+          • <b>Nhóm 2</b> — doanh thu &gt; 1 tỷ – 3 tỷ: thuế GTGT = doanh thu × tỷ lệ ngành
+          (1%/2%/3%/5%); thuế TNCN = doanh thu × tỷ lệ ngành (0,5%–5%) <i>hoặc</i> lợi nhuận × 15%.
         </p>
         <p>
-          • <b>Nhóm 3</b> — doanh thu &gt; 3 tỷ – 50 tỷ: GTGT theo tỷ lệ ngành; TNCN =
-          lợi nhuận × <b>17%</b>.
+          • <b>Nhóm 3</b> — doanh thu &gt; 3 tỷ – 50 tỷ: GTGT theo tỷ lệ ngành; TNCN = lợi nhuận ×
+          <b>17%</b>.
         </p>
         <p>
-          • <b>Nhóm 4</b> — doanh thu &gt; 50 tỷ: GTGT theo tỷ lệ ngành; TNCN = lợi
-          nhuận × <b>20%</b>, kỳ khai theo tháng.
+          • <b>Nhóm 4</b> — doanh thu &gt; 50 tỷ: GTGT theo tỷ lệ ngành; TNCN = lợi nhuận ×
+          <b>20%</b>, kỳ khai theo tháng.
         </p>
         <p>
-          • <b>Khấu trừ thuế GTGT đầu vào</b>: hộ theo <b>lợi nhuận</b> được khấu
-          trừ GTGT đầu vào (nhập kho tách TK 133, giá nhập chưa thuế); hộ theo
-          <b>doanh thu</b> không được khấu trừ — giá nhập gồm thuế. Công tắc nằm ở
-          màn cấu hình hộ kinh doanh (mặc định tắt).
+          • <b>Khấu trừ thuế GTGT đầu vào</b>: hộ theo <b>lợi nhuận</b> được khấu trừ GTGT đầu vào
+          (nhập kho tách TK 133, giá nhập chưa thuế); hộ theo <b>doanh thu</b> không được khấu trừ —
+          giá nhập gồm thuế. Công tắc nằm ở màn cấu hình hộ kinh doanh (mặc định tắt).
         </p>
         <p class="pt-1 text-gray-400">
-          Ứng dụng tự xếp nhóm hộ theo tổng doanh thu cả năm tính từ dữ liệu kế
-          toán. Nhóm 3/4 luôn tính TNCN theo lợi nhuận bất kể lựa chọn bên trên.
+          Ứng dụng tự xếp nhóm hộ theo tổng doanh thu cả năm tính từ dữ liệu kế toán. Nhóm 3/4 luôn
+          tính TNCN theo lợi nhuận bất kể lựa chọn bên trên.
         </p>
       </div>
     </div>

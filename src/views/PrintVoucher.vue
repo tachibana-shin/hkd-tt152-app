@@ -27,10 +27,7 @@ const displayRows = computed(() =>
 );
 
 const total = computed(() =>
-  displayRows.value.reduce(
-    (s, r) => s + (r.amount > 0 ? r.amount : r.quantity * r.unit_price),
-    0,
-  ),
+  displayRows.value.reduce((s, r) => s + (r.amount > 0 ? r.amount : r.quantity * r.unit_price), 0),
 );
 
 const postedDateLabel = computed(() => formatVnDate(first.value?.posting_date ?? ""));
@@ -47,7 +44,18 @@ function formatVnDate(dateStr: string): string {
 
 // ─── Số tiền (nguyên VND) bằng chữ — tối đa hàng tỷ ───
 const ONES = ["", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"];
-const TENS = ["", "mười", "hai mươi", "ba mươi", "bốn mươi", "năm mươi", "sáu mươi", "bảy mươi", "tám mươi", "chín mươi"];
+const TENS = [
+  "",
+  "mười",
+  "hai mươi",
+  "ba mươi",
+  "bốn mươi",
+  "năm mươi",
+  "sáu mươi",
+  "bảy mươi",
+  "tám mươi",
+  "chín mươi",
+];
 
 /** Đọc số 1..99 */
 function readTwo(r: number): string {
@@ -160,16 +168,29 @@ onBeforeUnmount(() => {
     <!-- Thanh lệnh (ẩn khi in) -->
     <div class="print-hide mb-4 flex flex-wrap items-center gap-3">
       <Button label="In lại" icon="pi pi-print" @click="printNow" />
-      <Button label="Quay lại" icon="pi pi-arrow-left" severity="secondary" @click="router.back()" />
+      <Button
+        label="Quay lại"
+        icon="pi pi-arrow-left"
+        severity="secondary"
+        @click="router.back()"
+      />
     </div>
 
-    <div v-if="loading" class="print-hide rounded-lg bg-white p-10 text-center text-sm text-gray-500 shadow">
+    <div
+      v-if="loading"
+      class="print-hide rounded-lg bg-white p-10 text-center text-sm text-gray-500 shadow"
+    >
       Đang tải phiếu…
     </div>
 
     <div v-else-if="errorMsg" class="print-hide rounded-lg bg-white p-10 text-center shadow">
       <p class="mb-3 font-semibold text-red-600">{{ errorMsg }}</p>
-      <Button label="Quay lại" icon="pi pi-arrow-left" severity="secondary" @click="router.back()" />
+      <Button
+        label="Quay lại"
+        icon="pi pi-arrow-left"
+        severity="secondary"
+        @click="router.back()"
+      />
     </div>
 
     <!-- Vùng phiếu in -->
@@ -224,12 +245,16 @@ onBeforeUnmount(() => {
         <thead>
           <tr>
             <th class="w-9 border border-black px-1 py-1.5 text-center font-semibold">STT</th>
-            <th class="border border-black px-1 py-1.5 text-center font-semibold">Tên, nhãn hiệu, quy cách vật tư</th>
+            <th class="border border-black px-1 py-1.5 text-center font-semibold">
+              Tên, nhãn hiệu, quy cách vật tư
+            </th>
             <th class="w-16 border border-black px-1 py-1.5 text-center font-semibold">Mã</th>
             <th class="w-12 border border-black px-1 py-1.5 text-center font-semibold">ĐVT</th>
             <th class="w-16 border border-black px-1 py-1.5 text-center font-semibold">Số lượng</th>
             <th class="w-24 border border-black px-1 py-1.5 text-center font-semibold">Đơn giá</th>
-            <th class="w-28 border border-black px-1 py-1.5 text-center font-semibold">Thành tiền</th>
+            <th class="w-28 border border-black px-1 py-1.5 text-center font-semibold">
+              Thành tiền
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -243,7 +268,9 @@ onBeforeUnmount(() => {
             <td class="border border-black px-1 py-1 text-center">{{ r.unit }}</td>
             <td class="border border-black px-1 py-1 text-right">{{ fmt(r.quantity) }}</td>
             <td class="border border-black px-1 py-1 text-right">{{ fmtVnd(r.unit_price) }}</td>
-            <td class="border border-black px-1 py-1 text-right">{{ fmtVnd(r.amount > 0 ? r.amount : r.quantity * r.unit_price) }}</td>
+            <td class="border border-black px-1 py-1 text-right">
+              {{ fmtVnd(r.amount > 0 ? r.amount : r.quantity * r.unit_price) }}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -254,7 +281,9 @@ onBeforeUnmount(() => {
           Cộng thành tiền (bằng số):
           <span class="text-base font-bold">{{ fmt(total) }} đ</span>
         </p>
-        <p>Số tiền bằng chữ: <span class="font-semibold">{{ vndToWords(total) }}</span></p>
+        <p>
+          Số tiền bằng chữ: <span class="font-semibold">{{ vndToWords(total) }}</span>
+        </p>
       </div>
 
       <!-- Chữ ký -->

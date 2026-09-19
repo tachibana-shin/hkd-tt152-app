@@ -1,8 +1,15 @@
 import * as XLSX from "xlsx";
 
-export interface XlsxColumn { header: string; key: string; }
+export interface XlsxColumn {
+  header: string;
+  key: string;
+}
 
-export function exportXlsx(filename: string, columns: XlsxColumn[], rows: Record<string, unknown>[]) {
+export function exportXlsx(
+  filename: string,
+  columns: XlsxColumn[],
+  rows: Record<string, unknown>[],
+) {
   const header = columns.map((c) => c.header);
   const body = rows.map((r) => columns.map((c) => r[c.key] ?? ""));
   const ws = XLSX.utils.aoa_to_sheet([header, ...body]);

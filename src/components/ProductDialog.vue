@@ -84,10 +84,7 @@ watch(
     } else {
       // Thêm mới: tự sinh mã SP tiếp theo + mặc định từ cấu hình hộ kinh doanh.
       try {
-        const [code] = await Promise.all([
-          settings.nextProductCode(),
-          settings.load(),
-        ]);
+        const [code] = await Promise.all([settings.nextProductCode(), settings.load()]);
         Object.assign(form, {
           id: null,
           code,
@@ -176,12 +173,7 @@ async function save() {
   >
     <div class="grid grid-cols-2 gap-4 py-2">
       <FormField label="Mã sản phẩm" required>
-        <InputText
-          size="small"
-          v-model="form.code"
-          placeholder="SP001"
-          :disabled="!!product"
-        />
+        <InputText size="small" v-model="form.code" placeholder="SP001" :disabled="!!product" />
       </FormField>
       <FormField label="Đơn vị tính">
         <InputText size="small" v-model="form.unit" placeholder="Cái" />
@@ -194,8 +186,8 @@ async function save() {
           :disabled="!!product"
         />
         <p v-if="product" class="text-xs text-gray-400 mt-1">
-          Tên sản phẩm không đổi được sau khi tạo — tránh lệch với phiếu nhập /
-          xuất và hóa đơn đã lập.
+          Tên sản phẩm không đổi được sau khi tạo — tránh lệch với phiếu nhập / xuất và hóa đơn đã
+          lập.
         </p>
       </FormField>
       <FormField label="Loại">
@@ -214,9 +206,8 @@ async function save() {
           class="w-full"
         />
         <p class="text-xs text-gray-400 mt-1">
-          Thuế suất GTGT là thuế trên hóa đơn <b>mua vào</b> (đầu vào). HKD
-          không xuất VAT khi bán ra — thuế bán ra tính theo nhóm ngành khi ghi
-          phiếu xuất / hóa đơn.
+          Thuế suất GTGT là thuế trên hóa đơn <b>mua vào</b> (đầu vào). HKD không xuất VAT khi bán
+          ra — thuế bán ra tính theo nhóm ngành khi ghi phiếu xuất / hóa đơn.
         </p>
       </FormField>
       <FormField label="Nhóm ngành (cơ sở tính thuế bán ra)">
@@ -229,9 +220,7 @@ async function save() {
           size="small"
           class="w-full"
         />
-        <p class="text-xs text-gray-400 mt-1">
-          Tự điền vào dòng phiếu xuất / hóa đơn.
-        </p>
+        <p class="text-xs text-gray-400 mt-1">Tự điền vào dòng phiếu xuất / hóa đơn.</p>
       </FormField>
       <FormField label="Giá bán">
         <InputNumber

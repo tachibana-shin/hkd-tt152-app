@@ -135,8 +135,7 @@ function onProductSaved(code: string) {
 function onProductPick(index: number) {
   const p = catalog.productByCode(props.items[index].product_code);
   if (!p) return;
-  props.items[index].unit_price =
-    props.priceField === "sale_price" ? p.sale_price : p.cost_price;
+  props.items[index].unit_price = props.priceField === "sale_price" ? p.sale_price : p.cost_price;
   // Tự điền nhóm ngành theo sản phẩm (cơ sở tỷ lệ thuế bán ra) — vẫn sửa tay được.
   if (p.industry_code) props.items[index].industry_code = p.industry_code;
   // Tự điền kho xuất theo kho mặc định của sản phẩm — nếu dòng chưa chọn kho.
@@ -169,9 +168,7 @@ const tableRef = ref<{ $el: HTMLElement } | null>(null);
 function scrollToNewRow() {
   nextTick(() => {
     const root = tableRef.value?.$el;
-    const last = root?.querySelector<HTMLElement>(
-      ".p-datatable-tbody tr:last-child",
-    );
+    const last = root?.querySelector<HTMLElement>(".p-datatable-tbody tr:last-child");
     last?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   });
 }
@@ -182,8 +179,7 @@ watch(
       ? `${props.items.length}|${props.items[props.items.length - 1]?.product_code ?? ""}`
       : "0",
   (now, prev) => {
-    if (!(props.compact || props.preInput) || !props.canEdit || now === prev)
-      return;
+    if (!(props.compact || props.preInput) || !props.canEdit || now === prev) return;
     const last = props.items[props.items.length - 1];
     if (!props.items.length || last?.product_code) {
       emit("add");
@@ -233,9 +229,7 @@ watch(
     :sortable="false"
     :size="compact || preInput ? 'small' : 'large'"
     :style="compact || preInput ? 'overflow-x: hidden' : undefined"
-    :table-style="
-      compact || preInput ? 'table-layout: fixed; width: 100%' : undefined
-    "
+    :table-style="compact || preInput ? 'table-layout: fixed; width: 100%' : undefined"
   >
     <Column
       header="Sản phẩm"
@@ -392,10 +386,7 @@ watch(
         }}</span>
       </template>
     </Column>
-    <Column
-      header=""
-      :style="compact || preInput ? 'width: 48px' : undefined"
-    >
+    <Column header="" :style="compact || preInput ? 'width: 48px' : undefined">
       <template #body="{ index }">
         <Button
           v-if="canEdit"
@@ -408,9 +399,7 @@ watch(
         />
       </template>
     </Column>
-    <template #empty
-      ><EmptyState text="Chưa có dòng nào" icon="pi pi-list"
-    /></template>
+    <template #empty><EmptyState text="Chưa có dòng nào" icon="pi pi-list" /></template>
   </AppDataTable>
 
   <div class="mt-4 flex items-center justify-end gap-3">
@@ -419,9 +408,5 @@ watch(
   </div>
 
   <!-- Thêm hàng hóa nhanh — dùng chung dialog chuẩn (tự sinh mã + nhóm ngành + thuế) -->
-  <ProductDialog
-    v-model:visible="productDialog"
-    :show-action="canEdit"
-    @saved="onProductSaved"
-  />
+  <ProductDialog v-model:visible="productDialog" :show-action="canEdit" @saved="onProductSaved" />
 </template>

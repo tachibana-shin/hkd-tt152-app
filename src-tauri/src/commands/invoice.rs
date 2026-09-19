@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub(crate) async fn get_invoices(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<InvoiceRow> = sqlx::query_as!(
@@ -86,13 +86,12 @@ async fn save_invoice_core(
                 item.product_code
             ));
         }
-        let (vat_rate, pit_rate): (f64, f64) = sqlx::query_as(
-            "SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?",
-        )
-        .bind(&industry)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", industry))?;
+        let (vat_rate, pit_rate): (f64, f64) =
+            sqlx::query_as("SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?")
+                .bind(&industry)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", industry))?;
         basis.push((industry, vat_rate, pit_rate));
 
         // Sản phẩm dịch vụ (nhân công...) không theo dõi tồn kho → bỏ qua kiểm tra.
@@ -109,7 +108,8 @@ async fn save_invoice_core(
             .await
             .map_err(|e| e.to_string())?
         } else {
-            let wh_id = resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
+            let wh_id =
+                resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
             sqlx::query_as(
                 "SELECT COALESCE(SUM(quantity), 0.0) FROM stock_lot
                  WHERE product_id = ? AND warehouse_id = ? AND depleted = 0",
@@ -209,15 +209,8 @@ pub(crate) async fn save_invoice(
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let pool = state.pool.read().await;
-    let res = save_invoice_core(
-        &pool,
-        &number,
-        &date,
-        &customer,
-        &customer_tax_code,
-        &items,
-    )
-    .await?;
+    let res =
+        save_invoice_core(&pool, &number, &date, &customer, &customer_tax_code, &items).await?;
     audit(&state, "save", "invoice", &number).await;
     Ok(res.to_string())
 }
@@ -298,12 +291,11 @@ mod tests {
         assert_eq!(res["tax_payable"].as_f64().unwrap(), 150.0);
 
         // Dòng hóa đơn lưu đủ discount + kho xuất
-        let (subtotal, discount, wh): (f64, f64, String) = sqlx::query_as(
-            "SELECT subtotal, discount, warehouse_code FROM invoice_item",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let (subtotal, discount, wh): (f64, f64, String) =
+            sqlx::query_as("SELECT subtotal, discount, warehouse_code FROM invoice_item")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!((subtotal, discount), (15_000.0, 5_000.0));
         assert_eq!(wh, "W1");
     }
@@ -313,7 +305,8 @@ mod tests {
         let pool = test_pool().await;
         let p = seed_product(&pool, "HD-B", "Hàng B", 0.01).await;
         let w1 = seed_warehouse(&pool, "W1", "Kho 1").await;
-        let w2 = seed_warehouse(&pool, "W2", "Kho 2").await;
+        // W2 chỉ tồn tại trong DB — bài test khai kho bằng chuỗi "W2", không cần giữ biến.
+        seed_warehouse(&pool, "W2", "Kho 2").await;
         // W1 có 5, W2 không có gì
         add_stock_lot(&pool, p, w1, 5.0, 1000.0, "2026-01-01").await;
 

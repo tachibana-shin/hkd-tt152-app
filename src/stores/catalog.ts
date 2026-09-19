@@ -126,8 +126,7 @@ export const useCatalogStore = defineStore("catalog", () => {
     await loadIndustryGroups();
   }
 
-  const productByCode = (code: string) =>
-    products.value.find((p) => p.code === code);
+  const productByCode = (code: string) => products.value.find((p) => p.code === code);
 
   return {
     products,

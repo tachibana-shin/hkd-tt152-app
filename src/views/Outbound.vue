@@ -24,9 +24,7 @@ function printVoucher(row: { voucher_no: string }) {
 async function adjustFromVoucher(row: { voucher_no: string }) {
   try {
     const voucher = await api.getVoucher(row.voucher_no);
-    const lines = voucher.filter(
-      (r) => r.entry_type === "PX" && r.product_code && r.quantity > 0,
-    );
+    const lines = voucher.filter((r) => r.entry_type === "PX" && r.product_code && r.quantity > 0);
     if (!lines.length) {
       toast.add({
         severity: "warn",
@@ -260,12 +258,7 @@ onMounted(async () => {
         </div>
       </template>
       <template #end>
-        <Button
-          v-if="auth.canStock"
-          label="Tạo phiếu xuất"
-          icon="pi pi-plus"
-          @click="openCreate"
-        />
+        <Button v-if="auth.canStock" label="Tạo phiếu xuất" icon="pi pi-plus" @click="openCreate" />
       </template>
     </Toolbar>
 
@@ -285,9 +278,7 @@ onMounted(async () => {
           <Column field="product_code" header="Mã SP" />
           <Column field="description" header="Diễn giải" />
           <Column field="customer_name" header="Khách hàng">
-            <template #body="{ data }">{{
-              data.customer_name || "—"
-            }}</template>
+            <template #body="{ data }">{{ data.customer_name || "—" }}</template>
           </Column>
           <Column field="industry_code" header="Nhóm ngành">
             <template #body="{ data }">
@@ -356,10 +347,7 @@ onMounted(async () => {
             @change="onTypeChange"
           />
         </FormField>
-        <FormField
-          v-if="form.outbound_type === 'adjust'"
-          label="Hướng điều chỉnh"
-        >
+        <FormField v-if="form.outbound_type === 'adjust'" label="Hướng điều chỉnh">
           <Select
             v-model="form.adjust_dir"
             :options="adjustDirOptions"
@@ -411,15 +399,14 @@ onMounted(async () => {
         <FormField label="Ghi chú">
           <InputText v-model="form.note" size="small" />
         </FormField>
-        <FormField
-          v-if="form.outbound_type === 'sale'"
-          label="Thu tiền ngay"
-        >
+        <FormField v-if="form.outbound_type === 'sale'" label="Thu tiền ngay">
           <div class="flex h-full items-center gap-1.5">
             <ToggleSwitch v-model="form.receive_now" class="shrink-0" />
             <i
               class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
-              v-tooltip="'Bật: khi lưu sẽ tự tạo phiếu thu (PT) thu tiền của khách hàng — cần chọn Khách hàng.'"
+              v-tooltip="
+                'Bật: khi lưu sẽ tự tạo phiếu thu (PT) thu tiền của khách hàng — cần chọn Khách hàng.'
+              "
               aria-hidden="true"
             />
           </div>
@@ -439,7 +426,9 @@ onMounted(async () => {
           <span class="font-medium">Lập kèm hóa đơn bán hàng (tab Hóa đơn)</span>
           <i
             class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
-            v-tooltip="'Tự tạo 1 hóa đơn trong tab Hóa đơn với số hóa đơn = số phiếu xuất (liên kết 1-1, không lệch sổ). Khai trước Số HĐĐT + Ký hiệu + Ngày thì hóa đơn chuyển ngay thành Đã liên kết HĐĐT; để trống thì chỉ là hóa đơn nháp.'"
+            v-tooltip="
+              'Tự tạo 1 hóa đơn trong tab Hóa đơn với số hóa đơn = số phiếu xuất (liên kết 1-1, không lệch sổ). Khai trước Số HĐĐT + Ký hiệu + Ngày thì hóa đơn chuyển ngay thành Đã liên kết HĐĐT; để trống thì chỉ là hóa đơn nháp.'
+            "
             aria-hidden="true"
           />
         </label>
@@ -455,11 +444,7 @@ onMounted(async () => {
             />
           </FormField>
           <FormField label="Ký hiệu HĐĐT">
-            <InputText
-              v-model="form.e_invoice_symbol"
-              placeholder="VD: 1C24TT152"
-              size="small"
-            />
+            <InputText v-model="form.e_invoice_symbol" placeholder="VD: 1C24TT152" size="small" />
           </FormField>
           <FormField label="Ngày HĐĐT">
             <DatePicker

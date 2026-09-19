@@ -113,10 +113,22 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     product_code_prefix: raw.product_code_prefix ?? SETTING_DEFAULTS.product_code_prefix,
     product_code_start: num("product_code_start", SETTING_DEFAULTS.product_code_start),
     product_code_digits: num("product_code_digits", SETTING_DEFAULTS.product_code_digits),
-    product_vat_rate_options: list("product_vat_rate_options", SETTING_DEFAULTS.product_vat_rate_options),
-    product_vat_rate_default: num("product_vat_rate_default", SETTING_DEFAULTS.product_vat_rate_default),
-    product_import_tax_options: list("product_import_tax_options", SETTING_DEFAULTS.product_import_tax_options),
-    product_import_tax_default: num("product_import_tax_default", SETTING_DEFAULTS.product_import_tax_default),
+    product_vat_rate_options: list(
+      "product_vat_rate_options",
+      SETTING_DEFAULTS.product_vat_rate_options,
+    ),
+    product_vat_rate_default: num(
+      "product_vat_rate_default",
+      SETTING_DEFAULTS.product_vat_rate_default,
+    ),
+    product_import_tax_options: list(
+      "product_import_tax_options",
+      SETTING_DEFAULTS.product_import_tax_options,
+    ),
+    product_import_tax_default: num(
+      "product_import_tax_default",
+      SETTING_DEFAULTS.product_import_tax_default,
+    ),
     product_unit: raw.product_unit ?? SETTING_DEFAULTS.product_unit,
     product_min_stock: num("product_min_stock", SETTING_DEFAULTS.product_min_stock),
     tax_period: raw.tax_period || SETTING_DEFAULTS.tax_period,
@@ -183,25 +195,17 @@ export const api = {
   deleteProduct: (id: number) => call<string>("delete_product", { id }),
   deleteProducts: (ids: number[]) => call<string>("delete_products", { ids }),
 
-  getIndustryGroups: async () =>
-    parse<IndustryGroup[]>(await call<string>("get_industry_groups")),
-  saveIndustryGroup: (g: {
-    code: string;
-    name: string;
-    vat_rate: number;
-    pit_rate: number;
-  }) =>
+  getIndustryGroups: async () => parse<IndustryGroup[]>(await call<string>("get_industry_groups")),
+  saveIndustryGroup: (g: { code: string; name: string; vat_rate: number; pit_rate: number }) =>
     call<string>("save_industry_group", {
       code: g.code,
       name: g.name,
       vatRate: g.vat_rate,
       pitRate: g.pit_rate,
     }),
-  deleteIndustryGroup: (code: string) =>
-    call<string>("delete_industry_group", { code }),
+  deleteIndustryGroup: (code: string) => call<string>("delete_industry_group", { code }),
   getWarehouses: async () => parse<Warehouse[]>(await call<string>("get_warehouses")),
-  saveWarehouse: (code: string, name: string) =>
-    call<string>("save_warehouse", { code, name }),
+  saveWarehouse: (code: string, name: string) => call<string>("save_warehouse", { code, name }),
   nextWarehouseCode: () => call<string>("next_warehouse_code"),
   nextCustomerCode: () => call<string>("next_customer_code"),
   nextSupplierCode: () => call<string>("next_supplier_code"),
@@ -253,8 +257,7 @@ export const api = {
         dependents: e.dependents ?? 0,
       },
     }),
-  getPayrollPeriods: async () =>
-    parse<string[]>(await call<string>("get_payroll_periods")),
+  getPayrollPeriods: async () => parse<string[]>(await call<string>("get_payroll_periods")),
   getPayroll: async (period: string) =>
     parse<PayrollRow[]>(await call<string>("get_payroll", { period })),
   savePayroll: (
@@ -465,15 +468,11 @@ export const api = {
 
   // ─── REPORTS ───
   getTaxSummary: async (fromDate: string, toDate: string, unitCode: string) =>
-    parse<TaxSummaryRow[]>(
-      await call<string>("get_tax_summary", { fromDate, toDate, unitCode }),
-    ),
+    parse<TaxSummaryRow[]>(await call<string>("get_tax_summary", { fromDate, toDate, unitCode })),
   getRevenueExpense: async (fromDate: string, toDate: string) =>
     parse<RevenueExpenseRow>(await call<string>("get_revenue_expense", { fromDate, toDate })),
   getTrialBalance: async (fromDate: string, toDate: string) =>
-    parse<TrialBalanceRow[]>(
-      await call<string>("get_trial_balance", { fromDate, toDate }),
-    ),
+    parse<TrialBalanceRow[]>(await call<string>("get_trial_balance", { fromDate, toDate })),
 
   // ─── SỔ SÁCH ───
   getLedger: async (fromDate: string, toDate: string) =>
@@ -485,21 +484,15 @@ export const api = {
   restoreBackup: (filename: string) => call<string>("restore_backup", { filename }),
 
   // ─── HĐĐT ───
-  linkHddt: (args: {
-    invoiceId: number;
-    hddtNo: string;
-    hddtSymbol: string;
-    hddtDate: string;
-  }) =>
+  linkHddt: (args: { invoiceId: number; hddtNo: string; hddtSymbol: string; hddtDate: string }) =>
     call<string>("link_hddt", {
       invoiceId: args.invoiceId,
       hddtNo: args.hddtNo,
       hddtSymbol: args.hddtSymbol,
       hddtDate: args.hddtDate,
     }),
-  hddtStatus: async () => parse<{ mode: string; connected: boolean; note: string }>(
-    await call<string>("hddt_status"),
-  ),
+  hddtStatus: async () =>
+    parse<{ mode: string; connected: boolean; note: string }>(await call<string>("hddt_status")),
   hddtSendSimulated: (invoiceNo: string, symbol: string, total: number) =>
     call<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
 
@@ -508,28 +501,30 @@ export const api = {
     parse<AuditEntry[]>(await call<string>("get_audit_log", { limit })),
 
   // ─── IMPORT KHỐI NHAP LIEU ───
-  importNhapLieu: async (items: Array<{
-    posting_date: string;
-    voucher_no: string;
-    doc_date: string;
-    entry_type: string;
-    description: string;
-    product_code: string;
-    supplier_code: string;
-    customer_code: string;
-    quantity: number;
-    unit_price: number;
-    amount: number;
-    debit_account: string;
-    credit_account: string;
-    industry_code: string;
-    vat_rate: number;
-    pit_rate: number;
-    tax_period: number;
-    unit_code: string;
-    adjust_code: string;
-    note: string;
-  }>) =>
+  importNhapLieu: async (
+    items: Array<{
+      posting_date: string;
+      voucher_no: string;
+      doc_date: string;
+      entry_type: string;
+      description: string;
+      product_code: string;
+      supplier_code: string;
+      customer_code: string;
+      quantity: number;
+      unit_price: number;
+      amount: number;
+      debit_account: string;
+      credit_account: string;
+      industry_code: string;
+      vat_rate: number;
+      pit_rate: number;
+      tax_period: number;
+      unit_code: string;
+      adjust_code: string;
+      note: string;
+    }>,
+  ) =>
     parse<ImportResult>(
       await call<string>("import_nhap_lieu", {
         items: items.map((i) => ({
@@ -573,9 +568,7 @@ export const api = {
       })),
     }),
   getAttendanceWorkDays: async (period: string) =>
-    parse<AttendanceWorkDay[]>(
-      await call<string>("get_attendance_work_days", { period }),
-    ),
+    parse<AttendanceWorkDay[]>(await call<string>("get_attendance_work_days", { period })),
 
   // ─── TỜ KHAI THUẾ THEO KỲ ───
   // period: "year" | "quarter" | "month" | "occurrence"; periodNo: 1..12 (tháng) / 1..4 (quý) / 0 (năm)
@@ -586,9 +579,7 @@ export const api = {
 
   // Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)
   getTaxOverview: async (year: number, period: string, periodNo: number) =>
-    parse<TaxOverview>(
-      await call<string>("get_tax_overview", { year, period, periodNo }),
-    ),
+    parse<TaxOverview>(await call<string>("get_tax_overview", { year, period, periodNo })),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───
   getVoucher: async (voucherNo: string) =>
@@ -606,8 +597,7 @@ export const api = {
     const s = await call<string>("get_current_user");
     return s && s !== "null" ? parse<CurrentUser>(s) : null;
   },
-  listUsers: async (): Promise<AppUser[]> =>
-    parse<AppUser[]>(await call<string>("list_users")),
+  listUsers: async (): Promise<AppUser[]> => parse<AppUser[]>(await call<string>("list_users")),
   saveUser: (input: {
     username: string;
     display_name: string;
@@ -629,12 +619,10 @@ export const api = {
     call<string>("change_password", { oldPassword, newPassword }),
 
   // ─── HỒ SƠ HKD (multi-profile) ───
-  getProfiles: async (): Promise<Profile[]> =>
-    parse<Profile[]>(await call<string>("get_profiles")),
+  getProfiles: async (): Promise<Profile[]> => parse<Profile[]>(await call<string>("get_profiles")),
   createProfile: async (name: string): Promise<Profile> =>
     parse<Profile>(await call<string>("create_profile", { name })),
-  renameProfile: (key: string, name: string) =>
-    call<string>("rename_profile", { key, name }),
+  renameProfile: (key: string, name: string) => call<string>("rename_profile", { key, name }),
   deleteProfile: (key: string) => call<string>("delete_profile", { key }),
   switchProfile: async (key: string) =>
     parse<{ ok: boolean; key: string; name: string; active: boolean }>(

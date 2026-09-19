@@ -222,9 +222,7 @@ function exportDeclarationExcel() {
     pit_tax: r.pit_tax,
   }));
   const periodLabel =
-    declPeriod.value === "year"
-      ? "ca-nam"
-      : `${declPeriod.value}-${declPeriodNo.value}`;
+    declPeriod.value === "year" ? "ca-nam" : `${declPeriod.value}-${declPeriodNo.value}`;
   exportXlsx(`to-khai-thue-ky-${declYear.value}-${periodLabel}`, cols, rows);
 }
 
@@ -267,9 +265,7 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
     declPeriod.value = payload.period === "month" ? "month" : "quarter";
     const now = new Date();
     declPeriodNo.value =
-      declPeriod.value === "quarter"
-        ? Math.floor(now.getMonth() / 3) + 1
-        : now.getMonth() + 1;
+      declPeriod.value === "quarter" ? Math.floor(now.getMonth() / 3) + 1 : now.getMonth() + 1;
   } else if (
     (payload.period === "year" || payload.period === "per_occurrence") &&
     declPeriod.value !== "year"
@@ -291,12 +287,7 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
         </div>
       </template>
       <template #end>
-        <Button
-          label="Cấu hình hộ KD"
-          icon="pi pi-cog"
-          severity="secondary"
-          @click="openConfig"
-        />
+        <Button label="Cấu hình hộ KD" icon="pi pi-cog" severity="secondary" @click="openConfig" />
         <Button
           label="Cấu hình thuế"
           icon="pi pi-percentage"
@@ -304,11 +295,7 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
           v-tooltip.top="'Kỳ khai thuế + phương pháp tính TNCN (NĐ 68/2026, NĐ 141/2026)'"
           @click="openTaxConfig"
         />
-        <Button
-          label="Tải lại báo cáo"
-          icon="pi pi-refresh"
-          @click="loadReports"
-        />
+        <Button label="Tải lại báo cáo" icon="pi pi-refresh" @click="loadReports" />
       </template>
     </Toolbar>
 
@@ -333,15 +320,9 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
               class="w-44"
             />
           </div>
-          <Button
-            label="Xem báo cáo"
-            icon="pi pi-search"
-            size="small"
-            @click="loadReports"
-          />
+          <Button label="Xem báo cáo" icon="pi pi-search" size="small" @click="loadReports" />
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
-            <i class="pi pi-calendar mr-1" />Kỳ khai thuế:
-            <b>{{ taxPeriodLabel }}</b> • TNCN:
+            <i class="pi pi-calendar mr-1" />Kỳ khai thuế: <b>{{ taxPeriodLabel }}</b> • TNCN:
             <b>{{ taxMethodLabel }}</b>
             <span class="mx-1 text-gray-300">|</span>
             Năm hiện tại:
@@ -353,21 +334,15 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
 
     <!-- Tờ khai thuế theo nhóm ngành -->
     <SectionCard title="Tờ khai thuế (theo nhóm ngành - TT 152/2025)">
-      <template #icon
-        ><i-mdi-file-certificate class="text-rose-500"
-      /></template>
+      <template #icon><i-mdi-file-certificate class="text-rose-500" /></template>
       <AppDataTable :value="taxRows" :loading="loading" stripedRows>
         <Column field="industry_code" header="Mã ngành" />
         <Column field="industry_name" header="Nhóm ngành nghề" />
         <Column field="vat_rate" header="Thuế GTGT" align="right">
-          <template #body="{ data }"
-            >{{ (data.vat_rate * 100).toFixed(1) }}%</template
-          >
+          <template #body="{ data }">{{ (data.vat_rate * 100).toFixed(1) }}%</template>
         </Column>
         <Column field="pit_rate" header="Thuế TNCN" align="right">
-          <template #body="{ data }"
-            >{{ (data.pit_rate * 100).toFixed(1) }}%</template
-          >
+          <template #body="{ data }">{{ (data.pit_rate * 100).toFixed(1) }}%</template>
         </Column>
         <Column field="revenue_up" header="Doanh thu tính thuế" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_up) }}</template>
@@ -386,38 +361,25 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
           </template>
         </Column>
         <template #empty
-          ><EmptyState
-            text="Chưa có dữ liệu doanh thu trong kỳ."
-            icon="pi pi-chart-line"
+          ><EmptyState text="Chưa có dữ liệu doanh thu trong kỳ." icon="pi pi-chart-line"
         /></template>
       </AppDataTable>
-      <div
-        v-if="taxRows.length"
-        class="mt-4 flex justify-end gap-8 text-sm border-t pt-3"
-      >
+      <div v-if="taxRows.length" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
         <span class="text-gray-500">Tổng thuế GTGT:</span>
-        <b class="text-rose-600"
-          >{{ fmt(taxRows.reduce((s, r) => s + r.vat_tax, 0)) }} đ</b
-        >
+        <b class="text-rose-600">{{ fmt(taxRows.reduce((s, r) => s + r.vat_tax, 0)) }} đ</b>
         <span class="text-gray-500 ml-4">Tổng thuế TNCN:</span>
-        <b class="text-rose-600"
-          >{{ fmt(taxRows.reduce((s, r) => s + r.pit_tax, 0)) }} đ</b
-        >
+        <b class="text-rose-600">{{ fmt(taxRows.reduce((s, r) => s + r.pit_tax, 0)) }} đ</b>
       </div>
     </SectionCard>
 
     <!-- Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 -->
     <SectionCard title="Tổng hợp thuế phải nộp (NĐ 68/2026, NĐ 141/2026)">
-      <template #icon
-        ><i-mdi-calculator-variant class="text-indigo-500"
-      /></template>
+      <template #icon><i-mdi-calculator-variant class="text-indigo-500" /></template>
       <div v-if="overview" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
           <span class="text-gray-500 block text-xs mb-1">Nhóm hộ kinh doanh</span>
           <b>{{ groupLabel }}</b>
-          <div class="text-xs text-gray-400">
-            DT cả năm: {{ fmt(overview.year_revenue) }} đ
-          </div>
+          <div class="text-xs text-gray-400">DT cả năm: {{ fmt(overview.year_revenue) }} đ</div>
         </div>
         <div>
           <span class="text-gray-500 block text-xs mb-1">Doanh thu kỳ khai</span>
@@ -449,35 +411,27 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
         </div>
         <div class="col-span-2 md:col-span-2">
           <span class="text-gray-500 block text-xs mb-1">Tổng thuế phải nộp kỳ</span>
-          <b class="text-primary-600 text-lg"
-            >{{ fmt(overview.total_tax) }} đ</b
-          >
+          <b class="text-primary-600 text-lg">{{ fmt(overview.total_tax) }} đ</b>
         </div>
       </div>
       <p v-if="overview?.group === 1" class="mt-3 text-xs text-emerald-600">
-        Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ
-        cần thông báo doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm
-        sau).
+        Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ cần thông báo
+        doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm sau).
       </p>
       <p v-else class="mt-3 text-xs text-gray-400">
-        Căn cứ: Nghị định 68/2026/NĐ-CP (bãi bỏ thuế khoán, chuyển sang kê khai),
-        Nghị định 141/2026/NĐ-CP (ngưỡng miễn thuế 1 tỷ đồng/năm), Luật Thuế GTGT
-        2024, Luật Thuế TNCN 2025. Nhóm hộ xếp theo tổng doanh thu cả năm; TNCN
-        nhóm 2 theo doanh thu × tỷ lệ ngành hoặc lợi nhuận × 15%; nhóm 3/4 theo
-        lợi nhuận × 17%/20%.
+        Căn cứ: Nghị định 68/2026/NĐ-CP (bãi bỏ thuế khoán, chuyển sang kê khai), Nghị định
+        141/2026/NĐ-CP (ngưỡng miễn thuế 1 tỷ đồng/năm), Luật Thuế GTGT 2024, Luật Thuế TNCN 2025.
+        Nhóm hộ xếp theo tổng doanh thu cả năm; TNCN nhóm 2 theo doanh thu × tỷ lệ ngành hoặc lợi
+        nhuận × 15%; nhóm 3/4 theo lợi nhuận × 17%/20%.
       </p>
     </SectionCard>
 
     <!-- Tờ khai thuế theo kỳ (To Khai Thue) -->
     <SectionCard>
-      <template #icon
-        ><i-mdi-clipboard-text-outline class="text-violet-500"
-      /></template>
+      <template #icon><i-mdi-clipboard-text-outline class="text-violet-500" /></template>
       <template #title>
         <span>Tờ khai thuế theo kỳ</span>
-        <span class="text-xs font-normal text-gray-400"
-          >Nhóm theo ngành nghề</span
-        >
+        <span class="text-xs font-normal text-gray-400">Nhóm theo ngành nghề</span>
       </template>
       <template #actions>
         <Button
@@ -551,40 +505,28 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
         </Column>
         <Column header="DT tính thuế GTGT – Tăng" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_up) }}</template>
-          <template #footer>{{
-            declRows.length ? fmtVnd(declTotals.revenue_up) : ""
-          }}</template>
+          <template #footer>{{ declRows.length ? fmtVnd(declTotals.revenue_up) : "" }}</template>
         </Column>
         <Column header="DT tính thuế GTGT – Giảm" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
-          <template #footer>{{
-            declRows.length ? fmtVnd(declTotals.revenue_down) : ""
-          }}</template>
+          <template #footer>{{ declRows.length ? fmtVnd(declTotals.revenue_down) : "" }}</template>
         </Column>
         <Column header="Thuế GTGT" align="right">
           <template #body="{ data }">{{ fmtVnd(data.vat_tax) }}</template>
-          <template #footer>{{
-            declRows.length ? fmtVnd(declTotals.vat_tax) : ""
-          }}</template>
+          <template #footer>{{ declRows.length ? fmtVnd(declTotals.vat_tax) : "" }}</template>
         </Column>
         <Column header="Thuế GTGT phải nộp" align="right">
           <template #body="{ data }">
             <b>{{ fmtVnd(data.vat_payable) }}</b>
           </template>
-          <template #footer>{{
-            declRows.length ? fmtVnd(declTotals.vat_payable) : ""
-          }}</template>
+          <template #footer>{{ declRows.length ? fmtVnd(declTotals.vat_payable) : "" }}</template>
         </Column>
         <Column header="Thuế TNCN phải nộp" align="right">
           <template #body="{ data }">{{ fmtVnd(data.pit_tax) }}</template>
-          <template #footer>{{
-            declRows.length ? fmtVnd(declTotals.pit_tax) : ""
-          }}</template>
+          <template #footer>{{ declRows.length ? fmtVnd(declTotals.pit_tax) : "" }}</template>
         </Column>
         <template #empty
-          ><EmptyState
-            text="Chưa có dữ liệu doanh thu trong kỳ này."
-            icon="pi pi-chart-line"
+          ><EmptyState text="Chưa có dữ liệu doanh thu trong kỳ này." icon="pi pi-chart-line"
         /></template>
       </AppDataTable>
     </SectionCard>
@@ -618,9 +560,7 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
           </template>
         </Column>
         <template #empty
-          ><EmptyState
-            text="Chưa có tài khoản nào trong danh mục (DMTK)."
-            icon="pi pi-book"
+          ><EmptyState text="Chưa có tài khoản nào trong danh mục (DMTK)." icon="pi pi-book"
         /></template>
       </AppDataTable>
       <div
@@ -628,24 +568,30 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
         class="mt-4 flex flex-wrap items-center justify-end gap-6 text-sm border-t pt-3"
       >
         <span class="text-gray-500"
-          >Tổng Dư đầu: <b class="text-amber-700">{{ fmt(tb.reduce((s, r) => s + r.opening_debit, 0)) }}</b>
+          >Tổng Dư đầu:
+          <b class="text-amber-700">{{ fmt(tb.reduce((s, r) => s + r.opening_debit, 0)) }}</b>
           <span class="text-gray-400">/</span>
-          <b class="text-amber-700">{{ fmt(tb.reduce((s, r) => s + r.opening_credit, 0)) }}</b> đ</span
+          <b class="text-amber-700">{{ fmt(tb.reduce((s, r) => s + r.opening_credit, 0)) }}</b>
+          đ</span
         >
         <span class="text-gray-500"
-          >Phát sinh: <b class="text-primary-600">{{ fmt(tb.reduce((s, r) => s + r.debit_mvmt, 0)) }}</b>
+          >Phát sinh:
+          <b class="text-primary-600">{{ fmt(tb.reduce((s, r) => s + r.debit_mvmt, 0)) }}</b>
           <span class="text-gray-400">/</span>
-          <b class="text-primary-600">{{ fmt(tb.reduce((s, r) => s + r.credit_mvmt, 0)) }}</b> đ</span
+          <b class="text-primary-600">{{ fmt(tb.reduce((s, r) => s + r.credit_mvmt, 0)) }}</b>
+          đ</span
         >
         <span class="text-gray-500"
-          >Dư cuối: <b class="text-emerald-700">{{ fmt(tb.reduce((s, r) => s + r.closing_debit, 0)) }}</b>
+          >Dư cuối:
+          <b class="text-emerald-700">{{ fmt(tb.reduce((s, r) => s + r.closing_debit, 0)) }}</b>
           <span class="text-gray-400">/</span>
-          <b class="text-emerald-700">{{ fmt(tb.reduce((s, r) => s + r.closing_credit, 0)) }}</b> đ</span
+          <b class="text-emerald-700">{{ fmt(tb.reduce((s, r) => s + r.closing_credit, 0)) }}</b>
+          đ</span
         >
       </div>
       <p class="mt-2 text-xs text-gray-400">
-        Số dư đầu kỳ nhập tại màn Tài khoản; phát sinh lấy từ sổ nhật ký
-        (journal_entry) trong khoảng ngày đã chọn.
+        Số dư đầu kỳ nhập tại màn Tài khoản; phát sinh lấy từ sổ nhật ký (journal_entry) trong
+        khoảng ngày đã chọn.
       </p>
     </SectionCard>
 
@@ -665,38 +611,24 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
         <div class="space-y-3">
           <div class="flex justify-between items-center">
             <span class="text-sm text-gray-600">Doanh thu bán hàng</span>
-            <b class="text-emerald-600"
-              >{{ fmt(re.revenue_up - re.revenue_down) }} đ</b
-            >
+            <b class="text-emerald-600">{{ fmt(re.revenue_up - re.revenue_down) }} đ</b>
           </div>
           <div class="flex justify-between items-center text-xs text-gray-400">
-            <span
-              >— trong đó giảm trừ doanh thu: {{ fmt(re.revenue_down) }} đ</span
-            >
+            <span>— trong đó giảm trừ doanh thu: {{ fmt(re.revenue_down) }} đ</span>
           </div>
           <Divider />
           <div class="flex justify-between items-center">
             <span class="text-sm text-gray-600">Chi phí kinh doanh</span>
-            <b class="text-red-600"
-              >{{ fmt(re.expense_up - re.expense_down) }} đ</b
-            >
+            <b class="text-red-600">{{ fmt(re.expense_up - re.expense_down) }} đ</b>
           </div>
           <div class="flex justify-between items-center text-xs text-gray-400">
-            <span
-              >— trong đó giảm trừ chi phí: {{ fmt(re.expense_down) }} đ</span
-            >
+            <span>— trong đó giảm trừ chi phí: {{ fmt(re.expense_down) }} đ</span>
           </div>
           <Divider />
           <div class="flex justify-between items-center text-base">
             <span class="font-semibold">Lợi nhuận trước thuế</span>
             <b class="text-primary-600">
-              {{
-                fmt(
-                  re.revenue_up -
-                    re.revenue_down -
-                    (re.expense_up - re.expense_down),
-                )
-              }}
+              {{ fmt(re.revenue_up - re.revenue_down - (re.expense_up - re.expense_down)) }}
               đ
             </b>
           </div>
@@ -705,9 +637,7 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
 
       <!-- Sổ sách (mẫu TT 152) -->
       <SectionCard title="Sổ sách theo mẫu TT 152/2025">
-        <template #icon
-          ><i-mdi-book-open-page-variant class="text-sky-500"
-        /></template>
+        <template #icon><i-mdi-book-open-page-variant class="text-sky-500" /></template>
         <div class="grid grid-cols-2 gap-3">
           <Button
             label="Sổ S2a-HKD"
@@ -757,11 +687,7 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
     </div>
 
     <!-- Dialog cấu hình -->
-    <BusinessConfigDialog
-      v-model:visible="configDialog"
-      :config="config"
-      @saved="loadReports"
-    />
+    <BusinessConfigDialog v-model:visible="configDialog" :config="config" @saved="loadReports" />
 
     <!-- Dialog cấu hình kê khai thuế -->
     <TaxConfigDialog

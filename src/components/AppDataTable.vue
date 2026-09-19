@@ -149,7 +149,7 @@ export default defineComponent({
     // client-side DataTable tự lọc mọi cột (không cần global-filter-fields);
     // với bảng server-side thì `search` event để màn hình reload.
     const tableFilters = computed(() => ({
-      ...((attrs.filters as Record<string, unknown> | null) ?? {}),
+      ...(attrs.filters as Record<string, string>),
       global: { value: search.value, matchMode: "contains" },
     }));
 
@@ -199,9 +199,7 @@ export default defineComponent({
       }
       const now = Date.now();
       const isDoubleTap =
-        lastTap.rowKey === rowKey &&
-        lastTap.field === field &&
-        now - lastTap.t <= DOUBLE_TAP_MS;
+        lastTap.rowKey === rowKey && lastTap.field === field && now - lastTap.t <= DOUBLE_TAP_MS;
       lastTap = { rowKey, field, t: now };
       if (tapResetTimer) clearTimeout(tapResetTimer);
 
@@ -360,20 +358,16 @@ export default defineComponent({
           severity: filterRowVisible.value ? "primary" : "secondary",
           onClick: toggleFilterRow,
         }),
-        h(
-          IconField,
-          { style: { flex: "1 1 220px", maxWidth: "360px" } },
-          [
-            h(InputIcon, {}, [h("i", { class: "pi pi-search" })]),
-            h(InputText, {
-              size: "small",
-              type: "search",
-              modelValue: search.value,
-              "onUpdate:modelValue": onSearchInput,
-              placeholder: "Tìm kiếm…",
-            }),
-          ],
-        ),
+        h(IconField, { style: { flex: "1 1 220px", maxWidth: "360px" } }, [
+          h(InputIcon, {}, [h("i", { class: "pi pi-search" })]),
+          h(InputText, {
+            size: "small",
+            type: "search",
+            modelValue: search.value,
+            "onUpdate:modelValue": onSearchInput,
+            placeholder: "Tìm kiếm…",
+          }),
+        ]),
       ];
       if (screenHeader.length) {
         children.push(h("div", { class: "flex-1 min-w-[240px]" }, screenHeader));

@@ -118,26 +118,49 @@ const menuItems: MenuItem[] = [
   { label: "Tổng quan", icon: "pi pi-home", to: "/", roles: ["admin", "ketoan", "kho", "xem"] },
   { label: "Sản phẩm", icon: "pi pi-box", to: "/products", roles: ["admin", "ketoan", "kho"] },
   { label: "Tài khoản", icon: "pi pi-list", to: "/accounts", roles: ["admin", "ketoan"] },
-  { label: "Đối tác & Kho", icon: "pi pi-users", to: "/catalogs", roles: ["admin", "ketoan", "kho"] },
+  {
+    label: "Đối tác & Kho",
+    icon: "pi pi-users",
+    to: "/catalogs",
+    roles: ["admin", "ketoan", "kho"],
+  },
   { label: "Bảng lương", icon: "pi pi-id-card", to: "/payroll", roles: ["admin", "ketoan"] },
   { label: "Chấm công", icon: "pi pi-calendar", to: "/attendance", roles: ["admin", "ketoan"] },
   { label: "Thu / Chi", icon: "pi pi-wallet", to: "/cash", roles: ["admin", "ketoan"] },
-  { label: "Sổ nhật ký", icon: "pi pi-book", to: "/ledger", roles: ["admin", "ketoan", "kho", "xem"] },
+  {
+    label: "Sổ nhật ký",
+    icon: "pi pi-book",
+    to: "/ledger",
+    roles: ["admin", "ketoan", "kho", "xem"],
+  },
   { label: "Nhập liệu", icon: "pi pi-file-excel", to: "/import", roles: ["admin", "ketoan"] },
-  { label: "Nhập kho", icon: "pi pi-arrow-down", to: "/inbound", roles: ["admin", "ketoan", "kho"] },
+  {
+    label: "Nhập kho",
+    icon: "pi pi-arrow-down",
+    to: "/inbound",
+    roles: ["admin", "ketoan", "kho"],
+  },
   { label: "Xuất kho", icon: "pi pi-arrow-up", to: "/outbound", roles: ["admin", "ketoan", "kho"] },
-  { label: "Tồn kho", icon: "pi pi-inbox", to: "/inventory", roles: ["admin", "ketoan", "kho", "xem"] },
+  {
+    label: "Tồn kho",
+    icon: "pi pi-inbox",
+    to: "/inventory",
+    roles: ["admin", "ketoan", "kho", "xem"],
+  },
   { label: "Hóa đơn", icon: "pi pi-file", to: "/invoices", roles: ["admin", "ketoan"] },
   { label: "Nhật ký HĐ", icon: "pi pi-history", to: "/audit", roles: ["admin", "ketoan", "xem"] },
   { label: "Kế toán HKD", icon: "pi pi-calculator", to: "/accounting", roles: ["admin", "ketoan"] },
   { label: "Người dùng", icon: "pi pi-user-edit", to: "/users", roles: ["admin"] },
-  { label: "Hồ sơ HKD", icon: "pi pi-database", to: "/profiles", roles: ["admin", "ketoan", "kho", "xem"] },
+  {
+    label: "Hồ sơ HKD",
+    icon: "pi pi-database",
+    to: "/profiles",
+    roles: ["admin", "ketoan", "kho", "xem"],
+  },
   { label: "Cài đặt", icon: "pi pi-cog", to: "/settings", roles: ["admin", "ketoan"] },
 ];
 
-const visibleMenu = computed(() =>
-  menuItems.filter((m) => m.roles.includes(auth.role)),
-);
+const visibleMenu = computed(() => menuItems.filter((m) => m.roles.includes(auth.role)));
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Quản trị",
@@ -170,7 +193,10 @@ onMounted(() => {
 
 <template>
   <!-- Đang khôi phục phiên đăng nhập → màn chờ -->
-  <div v-if="auth.loading || !bootstrapped" class="flex h-screen items-center justify-center bg-gray-50">
+  <div
+    v-if="auth.loading || !bootstrapped"
+    class="flex h-screen items-center justify-center bg-gray-50"
+  >
     <ProgressSpinner />
   </div>
 
@@ -216,15 +242,15 @@ onMounted(() => {
       </nav>
 
       <!-- Footer -->
-      <div class="px-4 py-3 border-t border-gray-700 text-xs text-gray-500">
-        v0.3.0 · SQLite
-      </div>
+      <div class="px-4 py-3 border-t border-gray-700 text-xs text-gray-500">v0.3.0 · SQLite</div>
     </aside>
 
     <!-- Main content -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- Header -->
-      <header class="bg-white border-b border-gray-200 px-6 py-3 shadow-sm flex items-center justify-between">
+      <header
+        class="bg-white border-b border-gray-200 px-6 py-3 shadow-sm flex items-center justify-between"
+      >
         <h2 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h2>
         <div class="flex items-center gap-3">
           <!-- Bật/tắt giao diện sáng-tối -->
@@ -241,14 +267,10 @@ onMounted(() => {
             class="flex flex-col items-end leading-tight hover:opacity-80 transition-opacity"
             v-tooltip.bottom="'Quản lý / chuyển hồ sơ hộ kinh doanh'"
           >
-            <span
-              class="flex items-center gap-1.5 text-sm font-semibold text-gray-800"
-            >
+            <span class="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
               <i class="pi pi-building text-primary-600"></i>
               <span>{{
-                business.config?.name?.trim() ||
-                profile.activeName ||
-                "Chưa có thông tin HKD"
+                business.config?.name?.trim() || profile.activeName || "Chưa có thông tin HKD"
               }}</span>
             </span>
             <span v-if="business.config?.tax_code" class="text-[11px] text-gray-400">
@@ -259,9 +281,16 @@ onMounted(() => {
           <span class="text-sm text-gray-500">
             {{ auth.currentUser?.display_name || auth.currentUser?.username }}
           </span>
-          <Tag :value="ROLE_LABEL[auth.role] ?? auth.role" :severity="auth.isAdmin ? 'danger' : 'info'" />
+          <Tag
+            :value="ROLE_LABEL[auth.role] ?? auth.role"
+            :severity="auth.isAdmin ? 'danger' : 'info'"
+          />
           <Avatar
-            :label="(auth.currentUser?.display_name || auth.currentUser?.username || '?').slice(0, 1).toUpperCase()"
+            :label="
+              (auth.currentUser?.display_name || auth.currentUser?.username || '?')
+                .slice(0, 1)
+                .toUpperCase()
+            "
             shape="circle"
             class="bg-primary-500"
           />

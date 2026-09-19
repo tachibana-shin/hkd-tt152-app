@@ -47,8 +47,7 @@ async function create() {
 
 function restore(filename: string) {
   confirm.require({
-    message:
-      "Sẽ ghi đè toàn bộ dữ liệu hiện tại. Cần khởi động lại ứng dụng sau khi khôi phục.",
+    message: "Sẽ ghi đè toàn bộ dữ liệu hiện tại. Cần khởi động lại ứng dụng sau khi khôi phục.",
     header: "Khôi phục sao lưu",
     icon: "pi pi-exclamation-triangle",
     acceptClass: "p-button-danger",
@@ -82,19 +81,9 @@ function restore(filename: string) {
   >
     <div class="flex flex-col gap-4 py-2">
       <div>
-        <Button
-          v-if="auth.isAdmin"
-          label="Tạo sao lưu"
-          icon="pi pi-database"
-          @click="create"
-        />
+        <Button v-if="auth.isAdmin" label="Tạo sao lưu" icon="pi pi-database" @click="create" />
       </div>
-      <AppDataTable
-        :value="backups"
-        :loading="loading"
-        stripedRows
-        size="small"
-      >
+      <AppDataTable :value="backups" :loading="loading" stripedRows size="small">
         <Column header="Tên file">
           <template #body="{ data }">{{ data }}</template>
         </Column>

@@ -66,7 +66,12 @@ async function save() {
       product_unit: st.product_unit.trim() || "Cái",
       product_min_stock: String(Math.max(0, st.product_min_stock)),
     });
-    toast.add({ severity: "success", summary: "Đã lưu cài đặt", detail: "Giá trị mặc định sẽ áp dụng cho sản phẩm mới", life: 2500 });
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu cài đặt",
+      detail: "Giá trị mặc định sẽ áp dụng cho sản phẩm mới",
+      life: 2500,
+    });
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
   } finally {
@@ -75,7 +80,10 @@ async function save() {
 }
 
 const previewCode = computed(() => {
-  const n = String(Math.max(1, st.product_code_start)).padStart(Math.min(12, Math.max(1, st.product_code_digits)), "0");
+  const n = String(Math.max(1, st.product_code_start)).padStart(
+    Math.min(12, Math.max(1, st.product_code_digits)),
+    "0",
+  );
   return `${st.product_code_prefix.trim() || "SP"}${n}`;
 });
 
@@ -131,12 +139,20 @@ onMounted(() => {
           <h3 class="font-semibold">Cài đặt mặc định</h3>
           <i
             class="pi pi-info-circle cursor-help text-xs text-gray-400"
-            v-tooltip.right="'Các thông tư / chính sách thuế thay đổi liên tục — giá trị mặc định được cấu hình tại đây thay vì sửa trong code.'"
+            v-tooltip.right="
+              'Các thông tư / chính sách thuế thay đổi liên tục — giá trị mặc định được cấu hình tại đây thay vì sửa trong code.'
+            "
           />
         </div>
       </template>
       <template #end>
-        <Button label="Lưu cài đặt" icon="pi pi-check" :loading="saving" :disabled="loading" @click="save" />
+        <Button
+          label="Lưu cài đặt"
+          icon="pi pi-check"
+          :loading="saving"
+          :disabled="loading"
+          @click="save"
+        />
       </template>
     </Toolbar>
 
@@ -149,26 +165,32 @@ onMounted(() => {
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
               <i class="pi pi-globe text-primary-500" /> Dùng app qua trình duyệt (Chrome)
             </h4>
-            <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div
+              class="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4"
+            >
               <div class="flex items-center gap-3">
                 <ToggleSwitch v-model="webEnabled" :disabled="!inTauri" @change="onWebToggle" />
                 <div>
                   <p class="font-medium">Bật web server (http://127.0.0.1)</p>
                   <p class="text-xs text-gray-500 mt-0.5">
                     <template v-if="webEnabled">
-                      Đang chạy — mở bằng Chrome: <b>{{ webUrl }}</b> (cùng dữ liệu & phiên
-                      đăng nhập, chỉ dùng được trên máy này){{ inTauri ? "" : " — bật/tắt từ cửa sổ app desktop." }}
+                      Đang chạy — mở bằng Chrome: <b>{{ webUrl }}</b> (cùng dữ liệu & phiên đăng
+                      nhập, chỉ dùng được trên máy này){{
+                        inTauri ? "" : " — bật/tắt từ cửa sổ app desktop."
+                      }}
                     </template>
                     <template v-else>
-                      Web server đang TẮT — app chỉ dùng được từ cửa sổ desktop. Bật lên để mở
-                      app bằng Chrome trên cùng máy.
+                      Web server đang TẮT — app chỉ dùng được từ cửa sổ desktop. Bật lên để mở app
+                      bằng Chrome trên cùng máy.
                     </template>
                   </p>
                 </div>
               </div>
               <i
                 class="pi pi-info-circle cursor-help text-xs text-gray-400"
-                v-tooltip.right="'Bản cài đặt (production) mặc định tắt web server vì lý do bảo mật; bản dev chạy `bun run tauri dev` thì luôn bật. Web server chỉ chạy trên 127.0.0.1 — không lộ ra mạng ngoài. Toggle chỉ dùng được từ cửa sổ app desktop.'"
+                v-tooltip.right="
+                  'Bản cài đặt (production) mặc định tắt web server vì lý do bảo mật; bản dev chạy `bun run tauri dev` thì luôn bật. Web server chỉ chạy trên 127.0.0.1 — không lộ ra mạng ngoài. Toggle chỉ dùng được từ cửa sổ app desktop.'
+                "
               />
             </div>
           </section>
@@ -192,7 +214,8 @@ onMounted(() => {
               </FormField>
             </div>
             <p class="text-xs text-gray-500 mt-1">
-              Mã tiếp theo sẽ có dạng <b class="text-gray-700">{{ previewCode }}</b> (tự tăng theo mã lớn nhất đã có).
+              Mã tiếp theo sẽ có dạng <b class="text-gray-700">{{ previewCode }}</b> (tự tăng theo
+              mã lớn nhất đã có).
             </p>
           </section>
 
@@ -201,12 +224,13 @@ onMounted(() => {
           <!-- Thuế suất GTGT -->
           <section>
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-              <i class="pi pi-percentage text-primary-500" /> Thuế suất GTGT đầu vào (%) — trên hóa đơn mua hàng
+              <i class="pi pi-percentage text-primary-500" /> Thuế suất GTGT đầu vào (%) — trên hóa
+              đơn mua hàng
             </h4>
             <p class="text-xs text-gray-500 mb-3">
-              Ghi nhận thuế suất trên hóa đơn <b>mua vào</b> (nhà cung cấp cộng %
-              này khi xuất hàng cho hộ). HKD không xuất VAT khi bán ra — thuế
-              bán ra theo tỷ lệ nhóm ngành trên doanh thu.
+              Ghi nhận thuế suất trên hóa đơn <b>mua vào</b> (nhà cung cấp cộng % này khi xuất hàng
+              cho hộ). HKD không xuất VAT khi bán ra — thuế bán ra theo tỷ lệ nhóm ngành trên doanh
+              thu.
             </p>
             <div class="grid grid-cols-2 gap-4">
               <FormField label="Danh sách lựa chọn (cách nhau bởi dấu phẩy)">

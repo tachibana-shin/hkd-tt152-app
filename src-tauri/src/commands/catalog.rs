@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub(crate) async fn get_accounts(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<AccountRow> = sqlx::query_as!(
@@ -49,10 +49,7 @@ pub(crate) async fn save_account(
 /// Xóa tài khoản khỏi DMTK. journal_entry lưu mã tài khoản dạng text (không
 /// khóa ngoại) nên việc xóa dòng DMTK không làm hỏng bút toán đã ghi.
 #[tauri::command]
-pub(crate) async fn delete_account(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<String, String> {
+pub(crate) async fn delete_account(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let row: Option<(String,)> = sqlx::query_as("SELECT code FROM account WHERE id = ?")
         .bind(id)
@@ -299,12 +296,11 @@ pub(crate) async fn save_product(
     // thì xóa (nếu chưa dùng) và tạo sản phẩm mới.
     {
         let pool = state.pool.read().await;
-        let existing: Option<(String,)> =
-            sqlx::query_as("SELECT name FROM product WHERE code = ?")
-                .bind(&code)
-                .fetch_optional(&*pool)
-                .await
-                .map_err(|e| e.to_string())?;
+        let existing: Option<(String,)> = sqlx::query_as("SELECT name FROM product WHERE code = ?")
+            .bind(&code)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?;
         if let Some((old_name,)) = existing {
             if old_name != name {
                 return Err(format!(
@@ -541,7 +537,12 @@ async fn next_entity_code(
             }
         }
     }
-    Ok(format!("{}{:0>width$}", prefix, max_num + 1, width = digits))
+    Ok(format!(
+        "{}{:0>width$}",
+        prefix,
+        max_num + 1,
+        width = digits
+    ))
 }
 
 #[tauri::command]
@@ -599,10 +600,25 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
 
     // Cột được phép lọc / sắp xếp (whitelist — tránh SQL injection từ client).
     const TEXT_FIELDS: &[&str] = &["code", "name", "unit", "industry_code"];
-    const NUM_FIELDS: &[&str] = &["sale_price", "cost_price", "min_stock", "vat_rate", "import_tax_rate"];
+    const NUM_FIELDS: &[&str] = &[
+        "sale_price",
+        "cost_price",
+        "min_stock",
+        "vat_rate",
+        "import_tax_rate",
+    ];
     const SORTABLE: &[&str] = &[
-        "id", "code", "name", "unit", "sale_price", "cost_price",
-        "min_stock", "vat_rate", "import_tax_rate", "is_service", "industry_code",
+        "id",
+        "code",
+        "name",
+        "unit",
+        "sale_price",
+        "cost_price",
+        "min_stock",
+        "vat_rate",
+        "import_tax_rate",
+        "is_service",
+        "industry_code",
     ];
 
     let mut clauses: Vec<String> = Vec::new();
@@ -640,12 +656,17 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
                 return m.to_lowercase();
             }
         }
-        f.match_mode.clone().unwrap_or_else(|| "contains".into()).to_lowercase()
+        f.match_mode
+            .clone()
+            .unwrap_or_else(|| "contains".into())
+            .to_lowercase()
     };
 
     // Filter từng cột với matchMode → SQL.
     for field in TEXT_FIELDS.iter().chain(NUM_FIELDS.iter()) {
-        let Some(f) = ev.filters.get(*field) else { continue };
+        let Some(f) = ev.filters.get(*field) else {
+            continue;
+        };
         let Some(v) = filter_value(f) else { continue };
         let is_empty = match &v {
             serde_json::Value::String(s) => s.trim().is_empty(),
@@ -663,12 +684,18 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
         match mode.as_str() {
             "startswith" | "starts" => {
                 clauses.push(format!("{} LIKE ? || '%'", expr));
-                let s = v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
+                let s = v
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| v.to_string());
                 params.push(BindVal::Str(s));
             }
             "endswith" | "ends" => {
                 clauses.push(format!("{} LIKE '%' || ?", expr));
-                let s = v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
+                let s = v
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| v.to_string());
                 params.push(BindVal::Str(s));
             }
             "equals" | "eq" => {
@@ -687,7 +714,10 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
             _ => {
                 // contains (mặc định)
                 clauses.push(format!("{} LIKE '%' || ? || '%'", expr));
-                let s = v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
+                let s = v
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| v.to_string());
                 params.push(BindVal::Str(s));
             }
         }
@@ -705,7 +735,11 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
         for m in meta.iter().take(4) {
             if let Some(f) = &m.field {
                 if SORTABLE.contains(&f.as_str()) {
-                    let dir = if m.order.unwrap_or(1) < 0 { "DESC" } else { "ASC" };
+                    let dir = if m.order.unwrap_or(1) < 0 {
+                        "DESC"
+                    } else {
+                        "ASC"
+                    };
                     sorts.push(format!("{} {}", f, dir));
                 }
             }
@@ -714,7 +748,11 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
     if sorts.is_empty() {
         if let Some(f) = &ev.sort_field {
             if SORTABLE.contains(&f.as_str()) {
-                let dir = if ev.sort_order.unwrap_or(1) < 0 { "DESC" } else { "ASC" };
+                let dir = if ev.sort_order.unwrap_or(1) < 0 {
+                    "DESC"
+                } else {
+                    "ASC"
+                };
                 sorts.push(format!("{} {}", f, dir));
             }
         }
@@ -753,8 +791,12 @@ pub(crate) async fn get_products_page(
     let mut rows_q = sqlx::query_as::<_, ProductRow>(&q.sql);
     for p in &q.params {
         match p {
-            BindVal::Str(s) => { rows_q = rows_q.bind(s.clone()); }
-            BindVal::Num(n) => { rows_q = rows_q.bind(*n); }
+            BindVal::Str(s) => {
+                rows_q = rows_q.bind(s.clone());
+            }
+            BindVal::Num(n) => {
+                rows_q = rows_q.bind(*n);
+            }
         }
     }
     let rows = rows_q
@@ -767,8 +809,12 @@ pub(crate) async fn get_products_page(
     let mut count_q = sqlx::query_scalar::<_, i64>(&q.count_sql);
     for p in &q.params {
         match p {
-            BindVal::Str(s) => { count_q = count_q.bind(s.clone()); }
-            BindVal::Num(n) => { count_q = count_q.bind(*n); }
+            BindVal::Str(s) => {
+                count_q = count_q.bind(s.clone());
+            }
+            BindVal::Num(n) => {
+                count_q = count_q.bind(*n);
+            }
         }
     }
     let total = count_q.fetch_one(&*pool).await.map_err(|e| e.to_string())?;
@@ -786,8 +832,12 @@ mod tests {
         let mut query = sqlx::query_as::<_, ProductRow>(&q.sql);
         for p in &q.params {
             match p {
-                BindVal::Str(s) => { query = query.bind(s.clone()); }
-                BindVal::Num(n) => { query = query.bind(*n); }
+                BindVal::Str(s) => {
+                    query = query.bind(s.clone());
+                }
+                BindVal::Num(n) => {
+                    query = query.bind(*n);
+                }
             }
         }
         query
@@ -802,8 +852,12 @@ mod tests {
         let mut query = sqlx::query_scalar::<_, i64>(&q.count_sql);
         for p in &q.params {
             match p {
-                BindVal::Str(s) => { query = query.bind(s.clone()); }
-                BindVal::Num(n) => { query = query.bind(*n); }
+                BindVal::Str(s) => {
+                    query = query.bind(s.clone());
+                }
+                BindVal::Num(n) => {
+                    query = query.bind(*n);
+                }
             }
         }
         query.fetch_one(pool).await.expect("run count")
@@ -846,10 +900,9 @@ mod tests {
         assert_eq!(rows[0].code, "SP003");
 
         // (4) Whitelist chặn sort field độc hại → rơi về mặc định code ASC.
-        let ev: ProductPageEvent = serde_json::from_str(
-            r#"{"sortField":"name; DROP TABLE product","sortOrder":1}"#,
-        )
-        .unwrap();
+        let ev: ProductPageEvent =
+            serde_json::from_str(r#"{"sortField":"name; DROP TABLE product","sortOrder":1}"#)
+                .unwrap();
         let q = build_product_page_query(&ev).unwrap();
         assert!(!q.sql.to_lowercase().contains("drop table"));
         assert!(q.sql.contains("ORDER BY code ASC"));

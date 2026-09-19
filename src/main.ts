@@ -39,7 +39,7 @@ app.use(PrimeVue, {
     options: { darkModeSelector: ".dark" },
   },
   unstyled: false,
-  license: 'Hacked by Tachibana Shin'
+  license: "Hacked by Tachibana Shin",
 });
 app.use(ToastService);
 app.use(ConfirmationService);

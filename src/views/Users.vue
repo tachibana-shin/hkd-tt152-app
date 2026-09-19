@@ -190,8 +190,7 @@ async function savePw() {
   }
 }
 
-const roleLabel = (r: string) =>
-  ROLES.find((x) => x.value === r)?.label.split(" (")[0] ?? r;
+const roleLabel = (r: string) => ROLES.find((x) => x.value === r)?.label.split(" (")[0] ?? r;
 
 load();
 </script>
@@ -201,9 +200,7 @@ load();
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2">
         <i class="pi pi-user-edit text-lg text-primary-600"></i>
-        <h3 class="text-lg font-semibold text-gray-800">
-          Người dùng &amp; vai trò
-        </h3>
+        <h3 class="text-lg font-semibold text-gray-800">Người dùng &amp; vai trò</h3>
         <i
           class="pi pi-info-circle text-sm text-gray-400 cursor-help"
           v-tooltip.right="ROLE_HINT"
@@ -223,13 +220,7 @@ load();
 
     <Card>
       <template #content>
-        <AppDataTable
-          :value="users"
-          :loading="loading"
-          stripedRows
-          size="small"
-          data-key="id"
-        >
+        <AppDataTable :value="users" :loading="loading" stripedRows size="small" data-key="id">
           <Column field="username" header="Tên đăng nhập" />
           <Column field="display_name" header="Họ tên" />
           <Column header="Vai trò">
@@ -332,14 +323,8 @@ load();
           </p>
         </FormField>
         <div class="flex items-center gap-2">
-          <Checkbox
-            v-model="form.active"
-            :binary="true"
-            input-id="user-active"
-          />
-          <label for="user-active" class="text-sm text-gray-700"
-            >Tài khoản hoạt động</label
-          >
+          <Checkbox v-model="form.active" :binary="true" input-id="user-active" />
+          <label for="user-active" class="text-sm text-gray-700">Tài khoản hoạt động</label>
         </div>
       </div>
     </AppDialog>

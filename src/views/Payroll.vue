@@ -184,9 +184,7 @@ async function useAttendanceWorkDays() {
   }
   attLoading.value = true;
   try {
-    const workDays: AttendanceWorkDay[] = await api.getAttendanceWorkDays(
-      selectedPeriod.value,
-    );
+    const workDays: AttendanceWorkDay[] = await api.getAttendanceWorkDays(selectedPeriod.value);
     // Kỳ chưa có Ô nào được chấm (bảng chấm công còn trống) → báo để sang
     // màn Chấm công nhập. Lưu ý: backend giờ trả cả người 0 công, nên không
     // dùng workDays.length để nhận biết "chưa có dữ liệu".
@@ -195,8 +193,7 @@ async function useAttendanceWorkDays() {
       toast.add({
         severity: "info",
         summary: "Chưa có dữ liệu chấm công",
-        detail:
-          "Chưa có dữ liệu chấm công cho kỳ này — sang màn 'Chấm công' để nhập.",
+        detail: "Chưa có dữ liệu chấm công cho kỳ này — sang màn 'Chấm công' để nhập.",
       });
       return;
     }
@@ -299,9 +296,7 @@ onMounted(() => {
             @click="openEmpEdit(data)"
           />
         </template>
-        <template #empty
-          ><EmptyState text="Chưa có nhân viên." icon="pi pi-users"
-        /></template>
+        <template #empty><EmptyState text="Chưa có nhân viên." icon="pi pi-users" /></template>
       </AppDataTable>
     </SectionCard>
 
@@ -354,10 +349,7 @@ onMounted(() => {
           :disabled="!payrollRows.length || payrollLoading"
           @click="savePayrollTable"
         />
-        <span
-          v-if="periods.includes(selectedPeriod)"
-          class="text-xs text-gray-400"
-        >
+        <span v-if="periods.includes(selectedPeriod)" class="text-xs text-gray-400">
           Kỳ này đã có bảng lương.
         </span>
       </div>

@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use tauri::{State, Manager, AppHandle};
+use tauri::{AppHandle, Manager, State};
 
 /// ─── Cổng HĐĐT (hóa đơn điện tử) — scaffold kết nối ───
 ///
@@ -21,7 +21,6 @@ use tauri::{State, Manager, AppHandle};
 ///
 /// TODO(hddt): bổ sung cấu hình `hddt_endpoint`, `hddt_username` vào bảng
 /// `business` + màn hình cài đặt; giữ chế độ mô phỏng làm mặc định.
-
 /// Gửi hóa đơn (mô phỏng) — luôn trả OK để app dùng được ngay.
 pub(crate) fn send_invoice_simulated(
     invoice_no: &str,
@@ -30,9 +29,7 @@ pub(crate) fn send_invoice_simulated(
 ) -> Result<String, String> {
     Ok(format!(
         "SIMULATED|{}|{}|{}",
-        symbol,
-        invoice_no,
-        total as i64
+        symbol, invoice_no, total as i64
     ))
 }
 
