@@ -77,6 +77,36 @@ const emit = defineEmits<{
 
 const catalog = useCatalogStore();
 
+// Cảnh báo thiếu tồn realtime (báo đỏ ngay trên dòng khi SL > tồn đúng kho):
+// chỉ bật khi bảng có cột Kho xuất (kho trên dòng quyết định tồn so sánh).
+// Không đồng bộ block; loadOnhand nạp 1 lần (có guard in catalog store).
+if (props.showWarehouse) catalog.loadOnhand();
+
+/** Sản phẩm trên dòng có cần tồn kho không (dịch vụ/nhân công → không). */
+function needsStock(it: LineItem): boolean {
+  if (!it.product_code) return false;
+  const p = catalog.productByCode(it.product_code);
+  return !!p && !p.is_service;
+}
+
+/**
+ * Số lượng thiếu so với tồn theo đúng kho xuất trên dòng (kho rỗng → tổng mọi kho).
+ * Trả về 0 khi: chưa chọn sản phẩm / là dịch vụ / chưa nạp tồn / đủ hàng.
+ */
+function shortageAt(index: number): number {
+  const it = props.items[index];
+  if (!it.quantity || !needsStock(it)) return 0;
+  const avail = catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
+  return Math.max(0, it.quantity - avail);
+}
+
+/** Tồn còn lại tại kho trên dòng (cho tooltip "còn X"); 0 nếu chưa nạp. */
+function onhandLineAt(index: number): number {
+  const it = props.items[index];
+  if (!it.product_code || !needsStock(it)) return 0;
+  return catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
+}
+
 // Thêm hàng hóa nhanh (chưa có trong danh mục) — mở ProductDialog chuẩn;
 // lưu xong gắn sản phẩm mới vào dòng trống cuối (chế độ nhập liên tục) hoặc
 // thêm dòng mới có sẵn sản phẩm đó.
@@ -249,12 +279,26 @@ watch(
       "
     >
       <template #body="{ index }">
-        <InputNumber
-          v-model="items[index].quantity"
-          :min="0"
-          :size="compact || preInput ? 'small' : undefined"
-          class="w-full"
-        />
+        <div class="flex w-full flex-col gap-0.5">
+          <InputNumber
+            v-model="items[index].quantity"
+            :min="0"
+            :size="compact || preInput ? 'small' : undefined"
+            class="w-full"
+            :class="{ '!ring-2 !ring-red-500 !border-red-500': shortageAt(index) > 0 }"
+            :tooltip="
+              showWarehouse && onhandLineAt(index) > 0
+                ? `Còn ${fmt(onhandLineAt(index))}`
+                : undefined
+            "
+          />
+          <span
+            v-if="shortageAt(index) > 0"
+            class="text-[11px] font-semibold leading-none text-red-600"
+          >
+            Thiếu {{ fmt(shortageAt(index)) }}
+          </span>
+        </div>
       </template>
     </Column>
     <Column

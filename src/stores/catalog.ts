@@ -8,11 +8,40 @@ export const useCatalogStore = defineStore("catalog", () => {
   const customers = ref<Customer[]>([]);
   const industryGroups = ref<IndustryGroup[]>([]);
   const loading = ref(false);
+  const loadingOnhand = ref(false);
 
-  // Trang sản phẩm cho màn Danh mục sản phẩm (lazy load — không tải toàn bộ).
+  // Trang sản phẩm cho màn Danh mục sản phẩm (lazy-load theo event PrimeVue).
   const pageProducts = ref<Product[]>([]);
   const totalProducts = ref(0);
   const productsLoading = ref(false);
+
+  // Tồn theo (sản phẩm × kho) — khóa "product|kho" (kho rỗng = tổng mọi kho).
+  // Nạp lazy qua loadOnhand chỉ khi popup cần (bảng dòng có cột Kho/Tồn).
+  const onhand = ref(new Map<string, number>());
+
+  /** Nạp tất cả lô tồn → cộng dồn theo (sản phẩm × kho) cho cảnh báo thiếu tồn. */
+  async function loadOnhand() {
+    if (onhand.value.size || loadingOnhand.value) return;
+    loadingOnhand.value = true;
+    try {
+      const lots = await api.getStockLots();
+      const m = new Map<string, number>();
+      for (const lot of lots) {
+        const keyAll = lot.product_code + "|";
+        m.set(keyAll, (m.get(keyAll) ?? 0) + lot.quantity);
+        const keyWh = lot.product_code + "|" + lot.warehouse_code;
+        m.set(keyWh, (m.get(keyWh) ?? 0) + lot.quantity);
+      }
+      onhand.value = m;
+    } finally {
+      loadingOnhand.value = false;
+    }
+  }
+
+  /** Tồn còn lại của sản phẩm tại kho (rỗng → tổng mọi kho); 0 nếu chưa nạp. */
+  function onhandAt(productCode: string, warehouseCode = "") {
+    return onhand.value.get(productCode + "|" + warehouseCode) ?? 0;
+  }
 
   async function loadAll() {
     loading.value = true;
@@ -110,6 +139,10 @@ export const useCatalogStore = defineStore("catalog", () => {
     pageProducts,
     totalProducts,
     productsLoading,
+    onhand,
+    loadingOnhand,
+    loadOnhand,
+    onhandAt,
     loadAll,
     loadIndustryGroups,
     loadProductsPage,
