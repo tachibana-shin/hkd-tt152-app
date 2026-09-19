@@ -78,6 +78,48 @@ function printVoucher(row: { voucher_no: string }) {
   router.push("/print/" + encodeURIComponent(row.voucher_no));
 }
 
+// Lập phiếu điều chỉnh (trả lại NCC) nhanh từ 1 phiếu nhập gốc: tự điền nhà cung
+// cấp + từng mặt hàng (SL, đơn giá) theo đúng chứng từ đang xem.
+async function adjustFromVoucher(row: { voucher_no: string }) {
+  try {
+    const voucher = await api.getVoucher(row.voucher_no);
+    const lines = voucher.filter(
+      (r) => r.entry_type === "PN" && r.product_code && r.quantity > 0,
+    );
+    if (!lines.length) {
+      toast.add({
+        severity: "warn",
+        summary: "Không điều chỉnh được",
+        detail: `Chứng từ ${row.voucher_no} không có dòng hàng hóa để trả lại`,
+      });
+      return;
+    }
+    Object.assign(form, {
+      posting_date: new Date(),
+      description: `Trả lại NCC — theo ${row.voucher_no}`,
+      supplier_code: voucher[0]?.supplier_code ?? "",
+      note: "",
+      items: lines.map((l) => ({
+        product_code: l.product_code,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        discount: 0,
+      })),
+      inbound_type: "adjust",
+      adjust_dir: "down",
+      reference_no: row.voucher_no,
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+    });
+    nextVoucherNo();
+    dialog.value = true;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
+  }
+}
+
 const dialog = ref(false);
 const saving = ref(false);
 
@@ -235,8 +277,8 @@ onMounted(async () => {
           stripedRows
           paginator
           :rows="10"
-          actions-header="In"
-          actions-width="64"
+          actions-header="Thao tác"
+          actions-width="96"
         >
           <Column field="voucher_no" header="Số phiếu" />
           <Column field="posting_date" header="Ngày" />
@@ -255,13 +297,27 @@ onMounted(async () => {
             <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
           </Column>
           <template #actions="{ data }">
-            <Button
-              icon="pi pi-print"
-              text
-              rounded
-              size="small"
-              @click="printVoucher(data)"
-            />
+            <div class="flex justify-center gap-1">
+              <Button
+                v-if="!data.adjust_code"
+                icon="pi pi-undo"
+                text
+                rounded
+                size="small"
+                aria-label="Lập phiếu điều chỉnh (trả lại NCC)"
+                v-tooltip="'Lập phiếu điều chỉnh (trả lại NCC)'"
+                @click="adjustFromVoucher(data)"
+              />
+              <Button
+                icon="pi pi-print"
+                text
+                rounded
+                size="small"
+                aria-label="In phiếu"
+                v-tooltip="'In phiếu'"
+                @click="printVoucher(data)"
+              />
+            </div>
           </template>
           <template #empty
             ><EmptyState text="Chưa có phiếu nhập kho." icon="pi pi-download"
@@ -272,7 +328,11 @@ onMounted(async () => {
 
     <AppDialog
       v-model:visible="dialog"
-      header="Tạo phiếu nhập kho"
+      :header="
+        form.inbound_type === 'adjust'
+          ? 'Tạo phiếu điều chỉnh hóa đơn mua'
+          : 'Tạo phiếu nhập kho'
+      "
       width="max-w-3xl"
       action-label="Lưu phiếu"
       :saving="saving"

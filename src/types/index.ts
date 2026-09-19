@@ -469,5 +469,6 @@ export interface VoucherRow {
   amount: number;
   debit_account: string;
   credit_account: string;
+  industry_code: string;
   note: string;
 }

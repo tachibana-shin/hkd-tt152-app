@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
+import { api } from "@/db";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const catalog = useCatalogStore();
@@ -16,6 +17,45 @@ const router = useRouter();
 
 function printVoucher(row: { voucher_no: string }) {
   router.push("/print/" + encodeURIComponent(row.voucher_no));
+}
+
+// Lập phiếu điều chỉnh (khách trả lại hàng) nhanh từ 1 phiếu xuất gốc: tự điền
+// khách hàng + từng mặt hàng (SL, đơn giá, nhóm ngành) theo đúng chứng từ.
+async function adjustFromVoucher(row: { voucher_no: string }) {
+  try {
+    const voucher = await api.getVoucher(row.voucher_no);
+    const lines = voucher.filter(
+      (r) => r.entry_type === "PX" && r.product_code && r.quantity > 0,
+    );
+    if (!lines.length) {
+      toast.add({
+        severity: "warn",
+        summary: "Không điều chỉnh được",
+        detail: `Chứng từ ${row.voucher_no} không có dòng hàng hóa để trả lại`,
+      });
+      return;
+    }
+    Object.assign(form, {
+      posting_date: new Date(),
+      description: `Khách trả lại — theo ${row.voucher_no}`,
+      customer_code: voucher[0]?.customer_code ?? "",
+      note: "",
+      outbound_type: "adjust",
+      adjust_dir: "down",
+      receive_now: false,
+      items: lines.map((l) => ({
+        product_code: l.product_code,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        industry_code: l.industry_code || "PPHH",
+        warehouse_code: "", // rỗng → kho mặc định của sản phẩm
+      })),
+    });
+    nextVoucherNo();
+    dialog.value = true;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
+  }
 }
 
 const dialog = ref(false);
@@ -204,8 +244,8 @@ onMounted(async () => {
           stripedRows
           paginator
           :rows="10"
-          actions-header="In"
-          actions-width="64"
+          actions-header="Thao tác"
+          actions-width="96"
         >
           <Column field="voucher_no" header="Số phiếu" />
           <Column field="posting_date" header="Ngày" />
@@ -229,13 +269,27 @@ onMounted(async () => {
             <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
           </Column>
           <template #actions="{ data }">
-            <Button
-              icon="pi pi-print"
-              text
-              rounded
-              size="small"
-              @click="printVoucher(data)"
-            />
+            <div class="flex justify-center gap-1">
+              <Button
+                v-if="!data.adjust_code"
+                icon="pi pi-undo"
+                text
+                rounded
+                size="small"
+                aria-label="Lập phiếu điều chỉnh (khách trả lại)"
+                v-tooltip="'Lập phiếu điều chỉnh (khách trả lại)'"
+                @click="adjustFromVoucher(data)"
+              />
+              <Button
+                icon="pi pi-print"
+                text
+                rounded
+                size="small"
+                aria-label="In phiếu"
+                v-tooltip="'In phiếu'"
+                @click="printVoucher(data)"
+              />
+            </div>
           </template>
           <template #empty
             ><EmptyState text="Chưa có phiếu xuất kho." icon="pi pi-upload"

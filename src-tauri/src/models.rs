@@ -571,6 +571,7 @@ pub(crate) struct VoucherRow {
     pub(crate) amount: f64,
     pub(crate) debit_account: String,
     pub(crate) credit_account: String,
+    pub(crate) industry_code: String,
     pub(crate) note: String,
 }
 

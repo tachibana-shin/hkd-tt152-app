@@ -943,7 +943,8 @@ pub(crate) async fn get_voucher(
                 je.product_code, COALESCE(p.name, '') AS product_name, COALESCE(p.unit, '') AS unit,
                 je.supplier_code, COALESCE(s.name, '') AS supplier_name,
                 je.customer_code, COALESCE(c.name, '') AS customer_name,
-                je.quantity, je.unit_price, je.amount, je.debit_account, je.credit_account, je.note
+                je.quantity, je.unit_price, je.amount, je.debit_account, je.credit_account,
+                je.industry_code, je.note
          FROM journal_entry je
          LEFT JOIN product p ON p.code = je.product_code
          LEFT JOIN supplier s ON s.code = je.supplier_code
