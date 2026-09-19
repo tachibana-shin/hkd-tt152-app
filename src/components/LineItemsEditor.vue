@@ -242,15 +242,10 @@ watch(
       :style="compact ? 'min-width: 200px' : preInput ? 'min-width: 240px' : undefined"
     >
       <template #body="{ index }">
-        <Select
+        <ProductSelect
           v-model="items[index].product_code"
-          :options="products"
-          optionLabel="name"
-          optionValue="code"
-          filter
-          showClear
+          :warehouse-code="items[index].warehouse_code ?? ''"
           :size="compact || preInput ? 'small' : undefined"
-          class="w-full"
           @change="onProductPick(index)"
         />
       </template>

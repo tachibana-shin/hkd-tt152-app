@@ -10,7 +10,7 @@ const catalog = useCatalogStore();
 const stock = useStockStore();
 const invoice = useInvoiceStore();
 const auth = useAuthStore();
-const { products, warehouses } = storeToRefs(catalog);
+const { warehouses } = storeToRefs(catalog);
 const { summary, lots, loading } = storeToRefs(stock);
 const { counts, countDetail, loading: cntLoading } = storeToRefs(invoice);
 const toast = useToast();
@@ -323,14 +323,11 @@ onMounted(async () => {
       >
         <Column header="Sản phẩm">
           <template #body="{ index }">
-            <Select
+            <ProductSelect
               v-model="countForm.items[index].product_code"
-              :options="products"
-              optionLabel="name"
-              optionValue="code"
-              filter
-              showClear
-              class="w-full"
+              :warehouse-code="countForm.items[index].warehouse_code ?? ''"
+              size="small"
+              :show-clear="false"
             />
           </template>
         </Column>
