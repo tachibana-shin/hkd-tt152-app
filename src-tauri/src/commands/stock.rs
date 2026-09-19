@@ -373,6 +373,10 @@ pub(crate) struct OutboundResult {
     pub(crate) cogs: f64,
     /// Số phiếu thu (PT) tự tạo khi bật "Thu tiền ngay" (rỗng nếu không tạo).
     pub(crate) pt_no: String,
+    /// Số hóa đơn bán hàng tự lập kèm (tab "Hóa đơn") — rỗng nếu không lập.
+    pub(crate) invoice_no: String,
+    /// "draft" | "official" — trạng thái hóa đơn vừa lập kèm (rỗng nếu không lập).
+    pub(crate) invoice_status: String,
 }
 
 /// Số phiếu thu (PT) tiếp theo: lấy số lớn nhất đang có + 1 (PT001, PT002…).
@@ -416,15 +420,23 @@ pub(crate) async fn save_outbound_core(
     receive_now: bool,
     outbound_type: &str,
     adjust_dir: &str,
+    invoice: &OutboundInvoiceInput,
 ) -> Result<OutboundResult, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
     let mut revenue_total = 0.0;
     let mut cogs_total = 0.0;
+    // Dòng mặt hàng của hóa đơn lập kèm (chỉ các phiếu thực tăng doanh thu).
+    let mut invoice_lines: Vec<(i64, f64, f64, String, f64, f64)> = Vec::new();
 
     // Điều chỉnh GIẢM hóa đơn bán (khách trả lại / giảm doanh thu): ghi đảo doanh
     // thu và nhập lại hàng về kho, KHÔNG xuất FIFO và không tạo phiếu thu.
     let is_adjust_down = outbound_type == "adjust" && adjust_dir == "down";
+    // Hóa đơn bán hàng chỉ lập KÈM cho phiếu thực tăng doanh thu (bán thường /
+    // điều chỉnh tăng); phiếu giảm (khách trả lại) chỉ ghi đảo doanh thu → không
+    // phát hành hóa đơn mới.
+    let is_sale = outbound_type == "sale" || (outbound_type == "adjust" && adjust_dir == "up");
+    let make_invoice = is_sale && !invoice.number.trim().is_empty() && !items.is_empty();
 
     for item in items {
         let product = resolve_product(&mut tx, &item.product_code).await?;
@@ -467,6 +479,16 @@ pub(crate) async fn save_outbound_core(
             } else {
                 ("131", "511", "")
             };
+            if !is_adjust_down {
+                invoice_lines.push((
+                    product.id,
+                    item.quantity,
+                    item.unit_price,
+                    industry.clone(),
+                    vat_rate,
+                    pit_rate,
+                ));
+            }
             insert_journal_entry(
                 &mut tx,
                 posting_date,
@@ -620,6 +642,14 @@ pub(crate) async fn save_outbound_core(
             note,
         )
         .await?;
+        invoice_lines.push((
+            product.id,
+            item.quantity,
+            item.unit_price,
+            industry.clone(),
+            vat_rate,
+            pit_rate,
+        ));
         revenue_total += amount;
         cogs_total += cogs;
     }
@@ -666,12 +696,82 @@ pub(crate) async fn save_outbound_core(
         }
     }
 
+    // ─── Hóa đơn bán hàng lập KÈM phiếu xuất (tab "Hóa đơn") ───
+    // Tự sinh 1 hóa đơn cho phiếu xuất thực tăng doanh thu: số hóa đơn = số phiếu
+    // xuất (liên kết 1-1, "không lệch sổ"). Khai Số HĐĐT + Ký hiệu + Ngày ngay trên
+    // phiếu → hóa đơn chuyển thành "Đã liên kết HĐĐT"; ngược lại chỉ là hóa đơn
+    // nháp (draft), có thể liên kết HĐĐT sau từ tab "Hóa đơn".
+    let mut inv_no = String::new();
+    let mut inv_status = String::new();
+    if make_invoice && !invoice_lines.is_empty() {
+        let (customer_name, customer_tax) = if customer_code.trim().is_empty() {
+            (String::new(), String::new())
+        } else {
+            let r = sqlx::query_as::<_, (String, String)>(
+                "SELECT name, COALESCE(tax_code, '') FROM customer WHERE code = ?",
+            )
+            .bind(customer_code)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            r.unwrap_or_default()
+        };
+        inv_no = invoice.number.clone();
+        inv_status = if invoice.e_invoice_no.trim().is_empty() {
+            "draft".to_string()
+        } else {
+            "official".to_string()
+        };
+        let total_value = round2(revenue_total);
+        let res = sqlx::query!(
+            "INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount,
+                                  status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no)
+             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+            inv_no,
+            posting_date,
+            customer_name,
+            customer_tax,
+            total_value,
+            inv_status,
+            invoice.e_invoice_no,
+            invoice.e_invoice_symbol,
+            invoice.e_invoice_date,
+            voucher_no
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+        let inv_id = res.last_insert_rowid();
+        // Dòng chi tiết hóa đơn — giữ nguyên nhóm ngành / tỷ lệ thuế đã hạch toán.
+        for (pid, qty, price, ind, vat, pit) in &invoice_lines {
+            let subtotal = qty * price;
+            sqlx::query(
+                "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
+                                           industry_code, vat_rate, pit_rate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(inv_id)
+            .bind(pid)
+            .bind(qty)
+            .bind(price)
+            .bind(subtotal)
+            .bind(ind)
+            .bind(vat)
+            .bind(pit)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(OutboundResult {
         entries: items.len(),
         revenue: revenue_total,
         cogs: cogs_total,
         pt_no,
+        invoice_no: inv_no,
+        invoice_status: inv_status,
     })
 }
 
@@ -823,6 +923,8 @@ pub(crate) async fn save_outbound(
     receive_now: bool,
     outbound_type: String,
     adjust_dir: String,
+    create_invoice: bool,
+    invoice: OutboundInvoiceInput,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     if items.is_empty() {
@@ -851,6 +953,16 @@ pub(crate) async fn save_outbound(
     } else {
         unit_code
     };
+    // "Lập kèm hóa đơn bán hàng" (tab Hóa đơn): tắt → bỏ qua hoàn toàn (rỗng số
+    // hóa đơn); bật mà chưa nhập số → mặc định số hóa đơn = số phiếu xuất (liên
+    // kết 1-1 với phiếu, "không lệch sổ"). Chỉ phiếu thực tăng doanh thu (bán
+    // thường / điều chỉnh tăng) mới được lập; phiếu trả lại không phát hành.
+    let mut invoice = invoice;
+    if !create_invoice {
+        invoice.number = String::new();
+    } else if invoice.number.trim().is_empty() {
+        invoice.number = voucher_no.clone();
+    }
     // "Thu tiền ngay": phiếu thu tự tạo ghi Nợ 111 tiền mặt → TK này phải có
     // trong danh mục (chỉ khi có khách hàng — chưa biết thu của ai thì không tạo,
     // và không tạo cho phiếu điều chỉnh hóa đơn).
@@ -879,6 +991,7 @@ pub(crate) async fn save_outbound(
             receive_now,
             outbound_type,
             adjust_dir,
+            &invoice,
         )
         .await?
     };
@@ -890,6 +1003,8 @@ pub(crate) async fn save_outbound(
         "cogs": r.cogs,
         "profit": r.revenue - r.cogs,
         "pt_no": r.pt_no,
+        "invoice_no": r.invoice_no,
+        "invoice_status": r.invoice_status,
     })
     .to_string())
 }
@@ -1108,6 +1223,7 @@ mod tests {
             false,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("xuất kho");
@@ -1166,6 +1282,7 @@ mod tests {
             false,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .unwrap_err();
@@ -1201,6 +1318,7 @@ mod tests {
             false,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("xuất đúng kho W2");
@@ -1228,6 +1346,7 @@ mod tests {
             false,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .unwrap_err();
@@ -1266,6 +1385,7 @@ mod tests {
             false,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("xuất dịch vụ không cần tồn kho");
@@ -1325,6 +1445,7 @@ mod tests {
             true,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("xuất kho thu tiền ngay");
@@ -1368,6 +1489,7 @@ mod tests {
             true,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("xuất kho 2");
@@ -1394,6 +1516,7 @@ mod tests {
             true,
             "sale",
             "",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("xuất kho");
@@ -1951,6 +2074,7 @@ mod tests {
             false,
             "adjust",
             "down",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("điều chỉnh giảm hóa đơn bán");
@@ -2016,6 +2140,7 @@ mod tests {
             true,
             "adjust",
             "down",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("điều chỉnh");
@@ -2046,6 +2171,7 @@ mod tests {
             true,
             "adjust",
             "up",
+            &OutboundInvoiceInput::default(),
         )
         .await
         .expect("điều chỉnh tăng hóa đơn bán");
@@ -2060,6 +2186,219 @@ mod tests {
         assert_eq!(
             scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'").await,
             0
+        );
+    }
+
+    // ─── Phiếu xuất tự lập hóa đơn bán hàng kèm (tab "Hóa đơn") ───
+
+    // Bán hàng bật "Lập kèm hóa đơn": hóa đơn số = số phiếu xuất, status 'draft'
+    // (chưa khai HĐĐT), liên kết voucher_no = PX, tổng tiền = doanh thu; tên +
+    // MST khách hàng lấy từ danh mục; đủ dòng chi tiết với nhóm ngành + tỷ lệ thuế.
+    #[tokio::test]
+    async fn xuat_kho_tu_dong_lap_hoa_don_nhap() {
+        let pool = test_pool().await;
+        seed_customer(&pool, "KH1", "Cửa hàng Mây").await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+
+        let inv = OutboundInvoiceInput {
+            number: "PXK-INV1".into(),
+            ..Default::default()
+        };
+        let r = save_outbound_core(
+            &pool,
+            "2026-07-01",
+            "PXK-INV1",
+            "Bán hàng lập hóa đơn",
+            "KH1",
+            "HKD",
+            &[out_wh("P1", 3.0, 2000.0, "W1")],
+            "",
+            false,
+            "sale",
+            "",
+            &inv,
+        )
+        .await
+        .expect("xuất kho kèm hóa đơn");
+
+        assert_eq!(r.invoice_no, "PXK-INV1");
+        assert_eq!(r.invoice_status, "draft");
+
+        let (number, status, customer, tax, total, vno): (
+            String,
+            String,
+            String,
+            String,
+            f64,
+            String,
+        ) = sqlx::query_as(
+            "SELECT number, status, customer, customer_tax_code, total, voucher_no
+             FROM invoice",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (number.as_str(), status.as_str()),
+            ("PXK-INV1", "draft")
+        );
+        assert_eq!(customer, "Cửa hàng Mây");
+        assert_eq!(tax, "MST-KH1");
+        assert_eq!(total, 6_000.0); // 3 x 2000
+        assert_eq!(vno, "PXK-INV1");
+
+        // Dòng chi tiết hóa đơn: đủ hàng, nhóm ngành + tỷ lệ thuế theo bút toán.
+        let (qty, price, subtotal, ind): (f64, f64, f64, String) = sqlx::query_as(
+            "SELECT quantity, unit_price, subtotal, industry_code FROM invoice_item",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((qty, price, subtotal), (3.0, 2000.0, 6_000.0));
+        assert_eq!(ind, "PPHH");
+    }
+
+    // Khai Số HĐĐT + Ký hiệu + Ngày ngay trên phiếu → hóa đơn kèm chuyển thành
+    // "Đã liên kết HĐĐT" (official) trong chính lần lưu phiếu.
+    #[tokio::test]
+    async fn xuat_kho_kem_hddt_thanh_hoa_don_lien_ket() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+
+        let inv = OutboundInvoiceInput {
+            number: "PXK-HD1".into(),
+            e_invoice_no: "E2026/001".into(),
+            e_invoice_symbol: "1C26TT152".into(),
+            e_invoice_date: "2026-07-02".into(),
+        };
+        let r = save_outbound_core(
+            &pool,
+            "2026-07-02",
+            "PXK-HD1",
+            "Bán hàng phát hành HĐĐT",
+            "",
+            "HKD",
+            &[out_wh("P1", 2.0, 5000.0, "W1")],
+            "",
+            false,
+            "sale",
+            "",
+            &inv,
+        )
+        .await
+        .expect("xuất kho kèm HĐĐT");
+
+        assert_eq!(r.invoice_status, "official");
+        let (status, eno, esym, edate): (String, String, String, String) = sqlx::query_as(
+            "SELECT status, e_invoice_no, e_invoice_symbol, e_invoice_date FROM invoice",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "official");
+        assert_eq!(eno, "E2026/001");
+        assert_eq!(esym, "1C26TT152");
+        assert_eq!(edate, "2026-07-02");
+    }
+
+    // Điều chỉnh GIẢM (khách trả lại) — dù gửi kèm thông tin hóa đơn cũng KHÔNG
+    // lập hóa đơn mới (chỉ ghi đảo doanh thu / nhập lại hàng về kho).
+    #[tokio::test]
+    async fn xuat_kho_dieu_chinh_giam_khong_lap_hoa_don() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+
+        let inv = OutboundInvoiceInput {
+            number: "PXK-DC-RET".into(),
+            ..Default::default()
+        };
+        let r = save_outbound_core(
+            &pool,
+            "2026-07-03",
+            "PXK-DC-RET",
+            "Khách trả lại",
+            "",
+            "HKD",
+            &[out("P1", 2.0, 2000.0)],
+            "",
+            false,
+            "adjust",
+            "down",
+            &inv,
+        )
+        .await
+        .expect("điều chỉnh giảm");
+        assert_eq!(r.invoice_no, "");
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM invoice").await, 0);
+    }
+
+    // Không bật "Lập kèm hóa đơn" (số hóa đơn rỗng) → không tạo bản ghi hóa đơn.
+    #[tokio::test]
+    async fn xuat_kho_khong_lap_hoa_don_khi_tat() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+
+        let r = save_outbound_core(
+            &pool,
+            "2026-07-04",
+            "PXK-NOINV",
+            "Bán lẻ không cần hóa đơn",
+            "",
+            "HKD",
+            &[out_wh("P1", 1.0, 2000.0, "W1")],
+            "",
+            false,
+            "sale",
+            "",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .expect("xuất kho không kèm hóa đơn");
+        assert_eq!(r.invoice_no, "");
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM invoice").await, 0);
+    }
+
+    // Điều chỉnh TĂNG cũng là phiếu tăng doanh thu → lập hóa đơn kèm như bán thường.
+    #[tokio::test]
+    async fn xuat_kho_dieu_chinh_tang_tu_lap_hoa_don() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+
+        let inv = OutboundInvoiceInput {
+            number: "PXK-DC-UP".into(),
+            ..Default::default()
+        };
+        let r = save_outbound_core(
+            &pool,
+            "2026-07-05",
+            "PXK-DC-UP",
+            "Điều chỉnh tăng",
+            "KH1",
+            "HKD",
+            &[out_wh("P1", 2.0, 3000.0, "W1")],
+            "",
+            false,
+            "adjust",
+            "up",
+            &inv,
+        )
+        .await
+        .expect("điều chỉnh tăng kèm hóa đơn");
+        assert_eq!(r.invoice_no, "PXK-DC-UP");
+        assert_eq!(r.invoice_status, "draft");
+        assert_eq!(
+            scalar_f64(&pool, "SELECT total FROM invoice").await,
+            6_000.0 // 2 x 3000
         );
     }
 }

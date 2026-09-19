@@ -303,6 +303,15 @@ export const api = {
     outbound_type: "" | "sale" | "adjust";
     /** Hướng điều chỉnh khi loại xuất = "adjust": down = khách trả lại/giảm doanh thu, up = tăng. */
     adjust_dir: "" | "up" | "down";
+    /** Lập kèm hóa đơn bán hàng (tab "Hóa đơn") — mặc định bật cho phiếu bán. */
+    create_invoice?: boolean;
+    /** Thông tin hóa đơn lập kèm: số mặc định = số phiếu xuất; khai HĐĐT → hóa đơn chuyển ngay thành "Đã liên kết HĐĐT". */
+    invoice?: {
+      number: string;
+      e_invoice_no: string;
+      e_invoice_symbol: string;
+      e_invoice_date: string;
+    };
   }) =>
     invoke<string>("save_outbound", {
       postingDate: args.posting_date,
@@ -315,6 +324,13 @@ export const api = {
       receiveNow: args.receive_now,
       outboundType: args.outbound_type,
       adjustDir: args.adjust_dir,
+      createInvoice: args.create_invoice ?? true,
+      invoice: {
+        number: args.invoice?.number ?? "",
+        eInvoiceNo: args.invoice?.e_invoice_no ?? "",
+        eInvoiceSymbol: args.invoice?.e_invoice_symbol ?? "",
+        eInvoiceDate: args.invoice?.e_invoice_date ?? "",
+      },
     }),
 
   getJournalEntries: (entryType = "", fromDate = "", toDate = "") =>

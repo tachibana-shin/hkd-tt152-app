@@ -265,6 +265,8 @@ export interface Invoice {
   e_invoice_no?: string;
   e_invoice_symbol?: string;
   e_invoice_date?: string;
+  /** Số phiếu xuất nguồn khi hóa đơn được lập kèm phiếu xuất (rỗng nếu lập tay). */
+  voucher_no?: string;
   items?: InvoiceItem[];
 }
 

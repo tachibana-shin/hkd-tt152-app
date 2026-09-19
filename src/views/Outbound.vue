@@ -43,6 +43,10 @@ async function adjustFromVoucher(row: { voucher_no: string }) {
       outbound_type: "adjust",
       adjust_dir: "down",
       receive_now: false,
+      create_invoice: false, // phiếu trả lại không phát hành hóa đơn mới
+      e_invoice_no: "",
+      e_invoice_symbol: "",
+      e_invoice_date: null,
       items: lines.map((l) => ({
         product_code: l.product_code,
         quantity: l.quantity,
@@ -75,6 +79,12 @@ const form = reactive({
   adjust_dir: "up" as "up" | "down",
   // Thu tiền ngay: bật mặc định — khi lưu tự tạo phiếu thu (PT) thu tiền khách.
   receive_now: true,
+  // Lập kèm hóa đơn bán hàng (tab "Hóa đơn") — số hóa đơn = số phiếu xuất:
+  // bật mặc định cho phiếu thực tăng doanh thu (bán thường / điều chỉnh tăng).
+  create_invoice: true,
+  e_invoice_no: "",
+  e_invoice_symbol: "",
+  e_invoice_date: null as Date | null,
   items: [] as {
     product_code: string;
     quantity: number;
@@ -125,6 +135,10 @@ function openCreate() {
     outbound_type: "sale",
     adjust_dir: "up",
     receive_now: true,
+    create_invoice: true,
+    e_invoice_no: "",
+    e_invoice_symbol: "",
+    e_invoice_date: null,
     items: [],
   });
   nextVoucherNo();
@@ -191,6 +205,19 @@ async function save() {
         receive_now: form.outbound_type === "sale" && form.receive_now,
         outbound_type: form.outbound_type,
         adjust_dir: form.adjust_dir,
+        // Lập kèm hóa đơn bán hàng (tab "Hóa đơn") — chỉ phiếu thực tăng doanh
+        // thu; backend tự bỏ qua với phiếu giảm/trả lại. Số hóa đơn = số phiếu
+        // xuất (liên kết 1-1). Khai HĐĐT → hóa đơn chuyển ngay thành "Đã liên kết".
+        create_invoice:
+          (form.outbound_type === "sale" ||
+            (form.outbound_type === "adjust" && form.adjust_dir === "up")) &&
+          form.create_invoice,
+        invoice: {
+          number: form.voucher_no,
+          e_invoice_no: form.e_invoice_no,
+          e_invoice_symbol: form.e_invoice_symbol,
+          e_invoice_date: iso(form.e_invoice_date),
+        },
       }),
     );
     toast.add({
@@ -198,6 +225,12 @@ async function save() {
       summary: `Đã xuất kho ${form.voucher_no}`,
       detail: `Doanh thu: ${fmt(res.revenue)} đ • Lãi gộp: ${fmt(res.profit)} đ${
         res.pt_no ? ` • Đã tạo phiếu thu ${res.pt_no}` : ""
+      }${
+        res.invoice_no
+          ? ` • Đã lập hóa đơn ${res.invoice_no} (${
+              res.invoice_status === "official" ? "Đã liên kết HĐĐT" : "Nháp"
+            })`
+          : ""
       }`,
     });
     dialog.value = false;
@@ -391,6 +424,53 @@ onMounted(async () => {
             />
           </div>
         </FormField>
+      </div>
+
+      <!-- Hóa đơn bán hàng lập KÈM phiếu xuất (tab "Hóa đơn") -->
+      <div
+        v-if="
+          form.outbound_type === 'sale' ||
+          (form.outbound_type === 'adjust' && form.adjust_dir === 'up')
+        "
+        class="mt-3 flex flex-col gap-3 rounded-lg border border-dashed border-gray-300 p-3"
+      >
+        <label class="flex items-center gap-2 text-sm">
+          <ToggleSwitch v-model="form.create_invoice" class="shrink-0" />
+          <span class="font-medium">Lập kèm hóa đơn bán hàng (tab Hóa đơn)</span>
+          <i
+            class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
+            v-tooltip="'Tự tạo 1 hóa đơn trong tab Hóa đơn với số hóa đơn = số phiếu xuất (liên kết 1-1, không lệch sổ). Khai trước Số HĐĐT + Ký hiệu + Ngày thì hóa đơn chuyển ngay thành Đã liên kết HĐĐT; để trống thì chỉ là hóa đơn nháp.'"
+            aria-hidden="true"
+          />
+        </label>
+        <div v-if="form.create_invoice" class="grid grid-cols-4 gap-3">
+          <FormField label="Số hóa đơn">
+            <InputText :model-value="form.voucher_no" disabled size="small" />
+          </FormField>
+          <FormField label="Số HĐĐT">
+            <InputText
+              v-model="form.e_invoice_no"
+              placeholder="trống = hóa đơn nháp"
+              size="small"
+            />
+          </FormField>
+          <FormField label="Ký hiệu HĐĐT">
+            <InputText
+              v-model="form.e_invoice_symbol"
+              placeholder="VD: 1C24TT152"
+              size="small"
+            />
+          </FormField>
+          <FormField label="Ngày HĐĐT">
+            <DatePicker
+              v-model="form.e_invoice_date"
+              dateFormat="dd/mm/yy"
+              showClear
+              size="small"
+              class="w-full"
+            />
+          </FormField>
+        </div>
       </div>
 
       <LineItemsEditor

@@ -273,6 +273,9 @@ pub(crate) struct InvoiceRow {
     pub(crate) e_invoice_no: String,
     pub(crate) e_invoice_symbol: String,
     pub(crate) e_invoice_date: String,
+    /// Số phiếu xuất nguồn (PX) khi hóa đơn được lập kèm phiếu xuất (rỗng nếu
+    /// lập tay từ tab Hóa đơn) — liên kết 1-1, truy vết khi cần.
+    pub(crate) voucher_no: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -330,6 +333,21 @@ pub(crate) struct OutboundItemInput {
     /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
     #[serde(default)]
     pub(crate) warehouse_code: String,
+}
+
+/// Thông tin hóa đơn bán hàng lập KÈM theo phiếu xuất (tab "Hóa đơn").
+/// Phiếu xuất thực tăng doanh thu (bán thường / điều chỉnh tăng) sẽ tự sinh 1
+/// hóa đơn, số hóa đơn mặc định = số phiếu xuất (liên kết 1-1, không lệch sổ).
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OutboundInvoiceInput {
+    /// Số hóa đơn — rỗng = KHÔNG lập hóa đơn kèm theo phiếu.
+    pub(crate) number: String,
+    /// Số HĐĐT: khai → hóa đơn chuyển ngay thành "Đã liên kết HĐĐT" (official).
+    pub(crate) e_invoice_no: String,
+    pub(crate) e_invoice_symbol: String,
+    /// Ngày HĐĐT (ISO yyyy-MM-dd hoặc rỗng).
+    pub(crate) e_invoice_date: String,
 }
 
 #[derive(serde::Deserialize)]

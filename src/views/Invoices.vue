@@ -248,6 +248,9 @@ onMounted(async () => {
               data.e_invoice_symbol || "—"
             }}</template>
           </Column>
+          <Column field="voucher_no" header="Phiếu xuất">
+            <template #body="{ data }">{{ data.voucher_no || "—" }}</template>
+          </Column>
           <template #actions="{ data }">
             <Button
               v-if="auth.canAccounting && data.status === 'draft'"

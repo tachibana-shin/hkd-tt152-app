@@ -82,6 +82,15 @@ export const useStockStore = defineStore("stock", () => {
     outbound_type: "" | "sale" | "adjust";
     /** Hướng điều chỉnh khi outbound_type = "adjust": down (khách trả lại) | up (tăng). */
     adjust_dir: "" | "up" | "down";
+    /** Lập kèm hóa đơn bán hàng (tab "Hóa đơn") — mặc định bật cho phiếu bán. */
+    create_invoice?: boolean;
+    /** Thông tin hóa đơn lập kèm: số mặc định = số phiếu xuất. */
+    invoice?: {
+      number: string;
+      e_invoice_no: string;
+      e_invoice_symbol: string;
+      e_invoice_date: string;
+    };
   }) {
     const res = await api.saveOutbound(args);
     await Promise.all([loadEntries("PX"), loadSummary(), loadLots()]);

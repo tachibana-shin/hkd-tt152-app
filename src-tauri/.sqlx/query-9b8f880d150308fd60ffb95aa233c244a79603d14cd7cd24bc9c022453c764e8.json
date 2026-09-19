@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,\n                status, e_invoice_no, e_invoice_symbol, e_invoice_date\n         FROM invoice WHERE id = ?",
+  "query": "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,\n                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no\n         FROM invoice ORDER BY date DESC, id DESC",
   "describe": {
     "columns": [
       {
@@ -57,12 +57,18 @@
         "name": "e_invoice_date",
         "ordinal": 10,
         "type_info": "Text"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 11,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -76,5 +82,5 @@
       false
     ]
   },
-  "hash": "e2eab16718e3563de2c06f45d07c68dc109f5decff907c3f1c8e068c9bb5718f"
+  "hash": "9b8f880d150308fd60ffb95aa233c244a79603d14cd7cd24bc9c022453c764e8"
 }

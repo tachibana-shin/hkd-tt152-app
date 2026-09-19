@@ -59,6 +59,21 @@ pub(crate) async fn seed_warehouse(pool: &SqlitePool, code: &str, name: &str) ->
         .expect("warehouse id")
 }
 
+pub(crate) async fn seed_customer(pool: &SqlitePool, code: &str, name: &str) -> i64 {
+    sqlx::query("INSERT INTO customer (code, name, tax_code) VALUES (?, ?, ?)")
+        .bind(code)
+        .bind(name)
+        .bind(format!("MST-{}", code))
+        .execute(pool)
+        .await
+        .expect("seed customer");
+    sqlx::query_scalar("SELECT id FROM customer WHERE code = ?")
+        .bind(code)
+        .fetch_one(pool)
+        .await
+        .expect("customer id")
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn seed_employee(
     pool: &SqlitePool,
