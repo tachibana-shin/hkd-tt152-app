@@ -280,6 +280,10 @@ export interface InvoiceItem {
   quantity: number;
   unit_price: number;
   subtotal: number;
+  /** Số tiền chiết khấu thương mại (đ) — giá trị dòng = Thành tiền − Tiền CK. */
+  discount?: number;
+  /** Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm). */
+  warehouse_code?: string;
   /** Nhóm ngành của dòng (cơ sở tỷ lệ thuế bán ra). */
   industry_code?: string;
   vat_rate?: number;

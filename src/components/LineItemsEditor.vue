@@ -27,6 +27,13 @@ const props = withDefaults(
     showAmount?: boolean;
     /** Hiện cột CK% + Tiền CK (thay cột Thành tiền) — dùng cho phiếu nhập mua. */
     showDiscount?: boolean;
+    /** Hiện cột ĐVT (đơn vị tính) chỉ đọc trên từng dòng. */
+    showUnit?: boolean;
+    /**
+     * Cột Thành tiền nhập trực tiếp (HĐĐT kiểu HKD): gõ số tiền cả dòng,
+     * tự tính lại Đơn giá = Thành tiền ÷ SL để tổng không lệch.
+     */
+    amountInput?: boolean;
     /**
      * Chế độ gọn (bảng Mặt hàng của popup phiếu nhập kho): bảng size small,
      * cột số hẹp, cột sản phẩm co giãn rộng, không scroll ngang, và nhập liên tục
@@ -34,9 +41,9 @@ const props = withDefaults(
      */
     compact?: boolean;
     /**
-     * Nhập liên tục + size small nhưng KHÔNG ép bảng fixed-layout (bảng vẫn
-     * scroll ngang tự nhiên khi nhiều cột). Dùng cho phiếu xuất — có thêm cột
-     * Nhóm ngành + Kho xuất nên không thể gò vào khổ cố định như phiếu nhập.
+     * Nhập liên tục + size small; cột có độ rộng cố định để bảng không bị
+     * phình (cột Sản phẩm lấy phần còn lại, scroll ngang khi chật). Dùng cho
+     * phiếu xuất — có thêm cột Nhóm ngành + Kho xuất.
      */
     preInput?: boolean;
     priceField?: "cost_price" | "sale_price";
@@ -51,6 +58,8 @@ const props = withDefaults(
     showWarehouse: false,
     showAmount: false,
     showDiscount: false,
+    showUnit: false,
+    amountInput: false,
     compact: false,
     preInput: false,
     showAddProduct: false,
@@ -111,6 +120,12 @@ function onProductPick(index: number) {
 function lineNet(it: LineItem): number {
   const d = props.showDiscount ? (it.discount ?? 0) : 0;
   return it.quantity * it.unit_price - d;
+}
+
+/** Gõ thẳng Thành tiền cả dòng → quy về Đơn giá (SL × Đơn giá luôn khớp). */
+function onAmountChange(index: number, amount: number | null) {
+  const qty = props.items[index].quantity || 1;
+  props.items[index].unit_price = Math.round(((amount ?? 0) / qty) * 100) / 100;
 }
 
 const total = computed(() => props.items.reduce((s, it) => s + lineNet(it), 0));
@@ -187,12 +202,14 @@ watch(
     :resizable-columns="false"
     :sortable="false"
     :size="compact || preInput ? 'small' : 'large'"
-    :style="compact ? 'overflow-x: hidden' : undefined"
-    :table-style="compact ? 'table-layout: fixed; width: 100%' : undefined"
+    :style="compact || preInput ? 'overflow-x: hidden' : undefined"
+    :table-style="
+      compact || preInput ? 'table-layout: fixed; width: 100%' : undefined
+    "
   >
     <Column
       header="Sản phẩm"
-      :style="compact ? 'min-width: 200px' : undefined"
+      :style="compact ? 'min-width: 200px' : preInput ? 'min-width: 240px' : undefined"
     >
       <template #body="{ index }">
         <Select
@@ -209,9 +226,26 @@ watch(
       </template>
     </Column>
     <Column
+      v-if="showUnit"
+      header="ĐVT"
+      :style="compact || preInput ? 'width: 88px' : 'width: 120px'"
+    >
+      <template #body="{ index }">
+        <span class="text-gray-600">{{
+          catalog.productByCode(items[index].product_code)?.unit || "—"
+        }}</span>
+      </template>
+    </Column>
+    <Column
       header="SL"
       :style="
-        compact ? 'width: 72px' : showIndustry ? 'width: 100px' : 'width: 110px'
+        compact
+          ? 'width: 72px'
+          : preInput
+            ? 'width: 80px'
+            : showIndustry
+              ? 'width: 100px'
+              : 'width: 110px'
       "
     >
       <template #body="{ index }">
@@ -226,7 +260,13 @@ watch(
     <Column
       header="Đơn giá"
       :style="
-        compact ? 'width: 110px' : showIndustry ? 'width: 140px' : 'width: 150px'
+        compact
+          ? 'width: 110px'
+          : preInput
+            ? 'width: 140px'
+            : showIndustry
+              ? 'width: 140px'
+              : 'width: 150px'
       "
     >
       <template #body="{ index }">
@@ -241,7 +281,11 @@ watch(
         />
       </template>
     </Column>
-    <Column v-if="showIndustry" header="Nhóm ngành">
+    <Column
+      v-if="showIndustry"
+      header="Nhóm ngành"
+      :style="preInput ? 'width: 160px' : compact ? 'width: 140px' : undefined"
+    >
       <template #body="{ index }">
         <Select
           v-model="items[index].industry_code"
@@ -254,7 +298,11 @@ watch(
         />
       </template>
     </Column>
-    <Column v-if="showWarehouse" header="Kho xuất">
+    <Column
+      v-if="showWarehouse"
+      header="Kho xuất"
+      :style="preInput ? 'width: 160px' : compact ? 'width: 150px' : undefined"
+    >
       <template #body="{ index }">
         <Select
           v-model="items[index].warehouse_code"
@@ -283,16 +331,32 @@ watch(
       </template>
     </Column>
     <Column
-      v-if="showAmount && !showDiscount"
+      v-if="showAmount"
       header="Thành tiền"
       align="right"
       :style="compact ? 'width: 130px' : undefined"
     >
       <template #body="{ index }">
-        <span class="font-medium">{{ fmtVnd(lineNet(items[index])) }}</span>
+        <InputNumber
+          v-if="amountInput"
+          :model-value="items[index].quantity * items[index].unit_price"
+          @update:model-value="(v) => onAmountChange(index, v)"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          :size="compact || preInput ? 'small' : undefined"
+          class="w-full"
+        />
+        <span v-else class="font-medium">{{
+          fmtVnd(items[index].quantity * items[index].unit_price)
+        }}</span>
       </template>
     </Column>
-    <Column header="" :style="compact ? 'width: 48px' : undefined">
+    <Column
+      header=""
+      :style="compact || preInput ? 'width: 48px' : undefined"
+    >
       <template #body="{ index }">
         <Button
           v-if="canEdit"

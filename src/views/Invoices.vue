@@ -10,13 +10,24 @@ import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 const auth = useAuthStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
-const { products, customers, industryGroups } = storeToRefs(catalog);
+const { products, customers, industryGroups, warehouses } = storeToRefs(catalog);
 const { invoices, detail, loading } = storeToRefs(invoiceStore);
 const toast = useToast();
 
 const draftDialog = ref(false);
 const detailDialog = ref(false);
 const saving = ref(false);
+
+// ─── Thêm khách hàng nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
+const customerDialog = ref(false);
+
+function onCustomerSaved(code: string) {
+  const c = catalog.customers.find((x) => x.code === code);
+  if (c) {
+    form.customer = c.name;
+    if (c.tax_code) form.customer_tax_code = c.tax_code;
+  }
+}
 
 const linkDialog = ref(false);
 const linking = ref(false);
@@ -37,6 +48,8 @@ const form = reactive({
     quantity: number;
     unit_price: number;
     industry_code?: string;
+    discount?: number;
+    warehouse_code?: string;
   }[],
 });
 
@@ -67,6 +80,8 @@ function addRow() {
     quantity: 1,
     unit_price: 0,
     industry_code: "",
+    discount: 0,
+    warehouse_code: "",
   });
 }
 
@@ -280,7 +295,7 @@ onMounted(async () => {
     <AppDialog
       v-model:visible="draftDialog"
       header="Lập hóa đơn bán hàng (nháp)"
-      width="max-w-3xl"
+      width="max-w-6xl"
       action-label="Lập hóa đơn"
       :saving="saving"
       :show-action="auth.canAccounting"
@@ -288,12 +303,13 @@ onMounted(async () => {
     >
       <div class="grid grid-cols-3 gap-4 py-2">
         <FormField label="Số hóa đơn">
-          <InputText v-model="form.number" disabled />
+          <InputText v-model="form.number" disabled size="small" />
         </FormField>
         <FormField label="Ngày lập">
           <DatePicker
             v-model="form.date"
             dateFormat="dd/mm/yy"
+            size="small"
             class="w-full"
           />
         </FormField>
@@ -301,25 +317,39 @@ onMounted(async () => {
           <InputText
             v-model="form.customer_tax_code"
             placeholder="Mã số thuế"
+            size="small"
           />
         </FormField>
         <FormField label="Khách hàng" required class="col-span-3">
-          <Select
-            v-model="form.customer"
-            :options="customers"
-            optionLabel="name"
-            optionValue="name"
-            :editable="true"
-            filter
-            class="w-full"
-            placeholder="Chọn hoặc nhập tên khách hàng"
-            @change="
-              (e: any) => {
-                const c = customers.find((x) => x.name === e.value) as any;
-                if (c?.tax_code) form.customer_tax_code = (c as any).tax_code;
-              }
-            "
-          />
+          <div class="flex gap-2">
+            <Select
+              v-model="form.customer"
+              :options="customers"
+              optionLabel="name"
+              optionValue="name"
+              :editable="true"
+              filter
+              size="small"
+              class="w-full"
+              placeholder="Chọn hoặc nhập tên khách hàng"
+              @change="
+                (e: any) => {
+                  const c = customers.find((x) => x.name === e.value) as any;
+                  if (c?.tax_code) form.customer_tax_code = (c as any).tax_code;
+                }
+              "
+            />
+            <Button
+              v-if="auth.canAccounting"
+              icon="pi pi-plus"
+              text
+              rounded
+              severity="secondary"
+              aria-label="Thêm khách hàng nhanh"
+              v-tooltip="'Thêm khách hàng nhanh'"
+              @click="customerDialog = true"
+            />
+          </div>
         </FormField>
       </div>
 
@@ -327,10 +357,18 @@ onMounted(async () => {
         :items="form.items"
         :products="products"
         :industry-groups="industryGroups"
+        :warehouses="warehouses"
         :can-edit="auth.canAccounting"
         price-field="sale_price"
         show-industry
-        info="Nhóm ngành tự lấy theo sản phẩm (đổi được trên dòng). Hàng hóa phải có đủ tồn kho; sản phẩm dịch vụ (nhân công...) không cần tồn kho."
+        show-amount
+        amount-input
+        show-discount
+        show-unit
+        show-warehouse
+        compact
+        show-add-product
+        info="Nhập thẳng Thành tiền từng dòng (Đơn giá tự tính = Thành tiền ÷ SL, đổi SL được). Nhóm ngành tự lấy theo sản phẩm (đổi được trên dòng). Tiền CK trừ vào giá trị dòng (Thành tiền − CK). Hàng hóa phải có đủ tồn kho theo đúng kho xuất trên dòng; sản phẩm dịch vụ (nhân công...) không cần tồn kho."
         total-label="Tổng tiền:"
         @add="addRow"
         @remove="removeRow"
@@ -377,8 +415,18 @@ onMounted(async () => {
           <Column field="unit_price" header="Đơn giá" align="right">
             <template #body="{ data }">{{ fmtVnd(data.unit_price) }}</template>
           </Column>
-          <Column field="subtotal" header="Thành tiền" align="right">
-            <template #body="{ data }">{{ fmtVnd(data.subtotal) }}</template>
+          <Column header="Thành tiền" align="right">
+            <template #body="{ data }">{{
+              fmtVnd((data as InvoiceItem).quantity * (data as InvoiceItem).unit_price)
+            }}</template>
+          </Column>
+          <Column header="Tiền CK" align="right">
+            <template #body="{ data }">{{
+              (data as InvoiceItem).discount ? fmtVnd((data as InvoiceItem).discount ?? 0) : "—"
+            }}</template>
+          </Column>
+          <Column header="Giá trị dòng" align="right">
+            <template #body="{ data }">{{ fmtVnd((data as InvoiceItem).subtotal) }}</template>
           </Column>
         </AppDataTable>
         <div class="mt-4 flex flex-col items-end gap-1 text-sm">
@@ -452,5 +500,13 @@ onMounted(async () => {
         </FormField>
       </div>
     </AppDialog>
+
+    <!-- Thêm khách hàng nhanh — dùng chung dialog chuẩn (tự sinh mã + tra cứu MST) -->
+    <PartnerDialog
+      v-model:visible="customerDialog"
+      kind="customer"
+      :show-action="auth.canAccounting"
+      @saved="onCustomerSaved"
+    />
   </div>
 </template>

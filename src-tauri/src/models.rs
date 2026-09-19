@@ -288,6 +288,10 @@ pub(crate) struct InvoiceItemRow {
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
     pub(crate) subtotal: f64,
+    /// Số tiền chiết khấu thương mại (đ) — giá trị dòng = Thành tiền − Tiền CK.
+    pub(crate) discount: f64,
+    /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
+    pub(crate) warehouse_code: String,
     /// Nhóm ngành của dòng (cơ sở tỷ lệ thuế bán ra).
     pub(crate) industry_code: String,
     pub(crate) vat_rate: f64,
@@ -358,6 +362,12 @@ pub(crate) struct InvoiceItemInput {
     /// Nhóm ngành dòng (rỗng → lấy theo sản phẩm).
     #[serde(default)]
     pub(crate) industry_code: String,
+    /// Số tiền chiết khấu thương mại (đ) — cột "Tiền CK" (mặc định 0).
+    #[serde(default)]
+    pub(crate) discount: f64,
+    /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
+    #[serde(default)]
+    pub(crate) warehouse_code: String,
 }
 
 #[derive(serde::Deserialize)]

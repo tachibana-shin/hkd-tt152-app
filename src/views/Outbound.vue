@@ -338,7 +338,7 @@ onMounted(async () => {
           ? 'Tạo phiếu điều chỉnh hóa đơn bán'
           : 'Tạo phiếu xuất kho / Bán hàng'
       "
-      width="max-w-3xl"
+      width="max-w-4xl"
       action-label="Lưu phiếu"
       :saving="saving"
       :show-action="auth.canStock"
