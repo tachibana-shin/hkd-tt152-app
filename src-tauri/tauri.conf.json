@@ -15,8 +15,10 @@
         "title": "HKD Kế Toán - TT 152/2025",
         "width": 1200,
         "height": 800,
-        "minWidth": 900,
-        "minHeight": 600
+        "minWidth": 720,
+        "minHeight": 480,
+        "center": true,
+        "preventOverflow": true
       }
     ],
     "security": {
