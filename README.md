@@ -149,16 +149,40 @@ Bản production vừa chạy vừa mở sẵn một **web server local** (chỉ
 | Tầng | Vị trí | Lệnh | Phạm vi |
 |---|---|---|---|
 | **Rust (nghiệp vụ)** | `src-tauri/src/**/mod tests` | `cd src-tauri && cargo test` | FIFO, lương, tờ khai thuế, migration/seed, helper |
-| **E2E UI** | `e2e/` | `./e2e/run_e2e.sh` | App thật + WebKit inspector + **DB SQLite thật** làm nguồn sự thật |
+| **E2E UI (Playwright)** | `e2e/playwright/` | `bun run test:e2e` | App thật qua **Chrome** trên cổng riêng + **DB cô lập** (không đụng dữ liệu thật): login, điều hướng, render dữ liệu, log console sạch, logout |
+| **E2E UI (WebKit đen)** | `e2e/` | `./e2e/run_e2e.sh` | App thật + WebKit inspector + **DB SQLite thật** làm nguồn sự thật |
 
 ```bash
 cd src-tauri && cargo test        # test lõi nghiệp vụ
+
+bun run test:e2e                  # E2E Playwright trên Chrome (tự chạy tauri dev: Vite 1421 + web server 45821, DB riêng)
+bun run test:e2e:headed           # chạy có cửa sổ Chrome để xem
+bun run test:e2e:debug            # chạy từng test, dừng chờ thao tác (Playwright Inspector)
+bun run test:e2e:report           # mở báo cáo HTML (kể cả trace của test fail)
 
 ./e2e/run_e2e.sh                  # chạy toàn bộ luồng E2E (16 bước)
 ./e2e/run_e2e.sh login product    # chỉ chạy vài bước
 ```
 
 > Chi tiết 16 bước, biến môi trường và cơ chế Xvfb: xem [`e2e/README.md`](e2e/README.md).
+
+### 🤖 E2E bằng Playwright (Chrome)
+
+Vì app đã chạy được trên Chrome (web server nhúng), E2E dùng Playwright điều khiển
+**Chrome hệ thống** (không tải Chromium riêng). **Không cần build trước** — mỗi lần
+chạy test, Playwright tự khởi động **một instance `bun run tauri dev` riêng** cô lập:
+
+- `HKD_WEB_PORT=45821` — web server nhúng của app ở cổng riêng, không đụng app người
+  dùng (45731). `HKD_DATA_DIR=<thư mục tạm>` — DB hoàn toàn cô lập; seed sẵn thông tin
+  HKD + 1 sản phẩm mẫu để test render dữ liệu thật. Đường dẫn DB của lần chạy gần nhất
+  nằm ở `/tmp/hkd-e2e-dir`.
+- `VITE_PORT=1421` + proxy `/api` → `http://127.0.0.1:45821` — Vite dev server ở cổng
+  riêng, không đụng `bun run tauri dev` của người dùng (1420).
+- Playwright chờ `GET /api/health` (qua proxy Vite → app) trả `200` mới bắt đầu test —
+  đảm bảo cả Vite lẫn app đã sẵn sàng, không bị race lúc boot.
+
+Debug test khi fail: `bun run test:e2e:debug` (Playwright Inspector), `--headed` để xem
+trực tiếp, hoặc mở trace trong `bun run test:e2e:report`.
 
 ---
 

@@ -10,6 +10,11 @@ import process from "node:process";
 
 const host = process.env.TAURI_DEV_HOST;
 
+// E2E/Playwright: cho phép trỏ proxy /api sang web server của app ở cổng khác
+// (HKD_WEB_PORT) và đổi cổng Vite để không đụng dev server 1420 của người dùng.
+const apiProxyTarget = process.env.VITE_API_PROXY || "http://127.0.0.1:45731";
+const vitePort = Number(process.env.VITE_PORT || 1420);
+
 // PrimeVue component dùng trong app. Resolver có sẵn của unplugin-vue-components chưa cập nhật
 // cho PrimeVue v5 (thiếu DatePicker/Select/Toast/ConfirmDialog/Tabs…), nên khai báo tường minh
 // để auto-import theo nhu cầu thay vì đăng ký toàn cục trong main.ts.
@@ -76,15 +81,15 @@ export default defineConfig(() => ({
     ],
   },
   // Khi dùng app qua trình duyệt (Chrome) ở dev — chính app desktop chạy web server
-  // local 127.0.0.1:45731, proxy /api qua đó.
-  proxy: {
-    "/api": { target: "http://127.0.0.1:45731", changeOrigin: true },
-  },
+  // local (mặc định 127.0.0.1:45731), proxy /api qua đó. Nằm trong `server.proxy`.
   clearScreen: false,
   server: {
-    port: 1420,
+    port: vitePort,
     strictPort: true,
     host: host || false,
+    proxy: {
+      "/api": { target: apiProxyTarget, changeOrigin: true },
+    },
     hmr: host
       ? { protocol: "ws", host, port: 1421 }
       : undefined,

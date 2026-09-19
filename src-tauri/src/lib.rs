@@ -17,10 +17,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let app_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to get app data dir");
+            // Test/E2E: trỏ app vào thư mục dữ liệu riêng (cô lập, không đụng dữ liệu thật).
+            let app_dir = std::env::var("HKD_DATA_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| {
+                    app.path()
+                        .app_data_dir()
+                        .expect("failed to get app data dir")
+                });
             std::fs::create_dir_all(&app_dir).ok();
             let profiles_dir = app_dir.join("profiles");
             std::fs::create_dir_all(&profiles_dir).ok();

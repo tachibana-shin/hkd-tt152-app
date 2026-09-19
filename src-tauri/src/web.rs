@@ -552,6 +552,10 @@ pub async fn serve_assets(uri: Uri) -> Response {
 
 pub fn router() -> Router {
     Router::new()
+        .route(
+            "/api/health",
+            get(|| async { "ok" }),
+        )
         .route("/api/{cmd}", post(api_invoke))
         .fallback(get(serve_assets))
 }
@@ -560,6 +564,27 @@ pub fn router() -> Router {
 pub fn start_server(app: AppHandle) {
     init_app(&app);
     tauri::async_runtime::spawn(async move {
+        // Test/E2E: khóa cổng cố định (chỉ 1 cổng, không tự dò) — tránh test nhầm instance khác.
+        if let Ok(p) = std::env::var("HKD_WEB_PORT") {
+            if let Ok(port) = p.trim().parse::<u16>() {
+                let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                match tokio::net::TcpListener::bind(addr).await {
+                    Ok(listener) => {
+                        println!(
+                            "[web] Dùng được trên trình duyệt: http://127.0.0.1:{}  (mở bằng Chrome)",
+                            port
+                        );
+                        if let Err(e) = axum::serve(listener, router()).await {
+                            eprintln!("[web] Lỗi server: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[web] Không bind được cổng {port} ({e}) — thoát chế độ web");
+                    }
+                }
+                return;
+            }
+        }
         for port in WEB_PORT..=WEB_PORT + 20 {
             let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
             match tokio::net::TcpListener::bind(addr).await {
