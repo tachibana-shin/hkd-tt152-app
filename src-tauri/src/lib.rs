@@ -5,6 +5,7 @@ mod helpers;
 mod models;
 #[cfg(test)]
 mod test_support;
+mod web;
 
 use crate::models::AppState;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -66,6 +67,9 @@ pub fn run() {
                 pool: tokio::sync::RwLock::new(pool),
                 current_user: tokio::sync::Mutex::new(None),
             });
+
+            // Web server local (127.0.0.1): dùng app qua trình duyệt ở production.
+            crate::web::start_server(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

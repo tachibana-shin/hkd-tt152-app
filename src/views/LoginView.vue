@@ -3,6 +3,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
 import { useThemeStore } from "@/stores/theme";
 import { useToast } from "primevue/usetoast";
+import { api, inTauri } from "@/db";
 
 const auth = useAuthStore();
 const profile = useProfileStore();
@@ -14,6 +15,9 @@ const password = ref("");
 const autoLogin = ref(false);
 const submitting = ref(false);
 
+// URL web server local — cho biết mở Chrome vào đâu để dùng app như web (chỉ trong app desktop).
+const browserUrl = ref("");
+
 // Tên đăng nhập nhập lần trước của hồ sơ này được ghi nhớ (lưu ở profile_prefs.json);
 // nếu đã bật tự động đăng nhập thì tích sẵn ô "Tự động đăng nhập".
 onMounted(async () => {
@@ -23,6 +27,13 @@ onMounted(async () => {
   const pref = profile.prefsOf(key);
   username.value = pref.last_username ?? "";
   autoLogin.value = !!pref.auto_login && !!pref.username && !!pref.password;
+  if (inTauri) {
+    try {
+      browserUrl.value = await api.webUrl();
+    } catch {
+      /* web server không khả dụng — bỏ qua */
+    }
+  }
 });
 
 async function doLogin() {
@@ -146,6 +157,9 @@ const roleHint = computed(() => {
           <p>Tài khoản mặc định: <b>admin</b> / <b>admin123</b></p>
           <p v-if="auth.currentUser" class="text-primary-600 font-medium">
             Đã đăng nhập: {{ auth.currentUser.display_name }} ({{ roleHint }})
+          </p>
+          <p v-if="browserUrl" class="flex items-center gap-1">
+            <i class="pi pi-globe"></i> Mở bằng Chrome: <b>{{ browserUrl }}</b>
           </p>
         </div>
       </div>

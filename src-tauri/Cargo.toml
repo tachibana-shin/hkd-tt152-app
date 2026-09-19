@@ -30,6 +30,8 @@ chrono = "0.4"
 # Tra cứu MST qua masothue.com (backend fetch để tránh CORS/Cloudflare)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "cookies"] }
 regex = "1"
+# Web server local (127.0.0.1) — dùng app qua Chrome ở production.
+axum = "0.8"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

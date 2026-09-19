@@ -1,5 +1,43 @@
 // Typed Tauri invoke wrappers — single entry point cho mọi backend call.
 import { invoke } from "@tauri-apps/api/core";
+
+// Chạy trong app Tauri hay trong trình duyệt thường (Chrome)?
+// - App desktop: dùng IPC invoke như cũ.
+// - Trình duyệt: production app tự chạy web server local (127.0.0.1) — gọi REST API
+//   /api/<cmd> cùng tham số JSON (camelCase), kết quả/`Err` giống hệt invoke.
+const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export { inTauri };
+
+async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (inTauri) {
+    return invoke<T>(cmd, args);
+  }
+  let res: Response;
+  try {
+    res = await fetch(`/api/${cmd}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args ?? {}),
+    });
+  } catch (e) {
+    throw new Error(`Không kết nối được app (${String(e)})`);
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try {
+      msg = (JSON.parse(text) as { error?: string }).error ?? text;
+    } catch {
+      /* giữ nguyên text */
+    }
+    throw new Error(msg);
+  }
+  // Trả nguyên chuỗi text — khớp hợp đồng của invoke (Tauri trả String) để caller dùng
+  // `parse()` JSON.parse đúng MỘT lần. Nếu parse ở đây sẽ thành "double-parse" (JSON.parse
+  // trên object → `"[object Object]" is not valid JSON`) làm mọi API qua `parse()` vỡ.
+  return text as T;
+}
 import type {
   BusinessConfig,
   AppSettings,
@@ -89,10 +127,10 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
 
 // ─── INFO / CONFIG ───
 export const api = {
-  getBusinessInfo: () => invoke<string>("get_business_info"),
-  getBusinessConfig: async () => parse<BusinessConfig>(await invoke<string>("get_business_config")),
+  getBusinessInfo: () => call<string>("get_business_info"),
+  getBusinessConfig: async () => parse<BusinessConfig>(await call<string>("get_business_config")),
   saveBusinessConfig: (cfg: Partial<BusinessConfig>) =>
-    invoke<string>("save_business_config", {
+    call<string>("save_business_config", {
       name: cfg.name ?? "",
       taxCode: cfg.tax_code ?? "",
       address: cfg.address ?? "",
@@ -106,31 +144,31 @@ export const api = {
 
   // ─── CÀI ĐẶT MẶC ĐỊNH ───
   getAppSettings: async () =>
-    normalizeAppSettings(parse<Record<string, string>>(await invoke<string>("get_app_settings"))),
+    normalizeAppSettings(parse<Record<string, string>>(await call<string>("get_app_settings"))),
   saveAppSettings: (settings: Record<string, string>) =>
-    invoke<string>("save_app_settings", { settings }),
-  nextProductCode: () => invoke<string>("next_product_code"),
+    call<string>("save_app_settings", { settings }),
+  nextProductCode: () => call<string>("next_product_code"),
 
   // ─── MASTER DATA ───
-  getAccounts: async () => parse<Account[]>(await invoke<string>("get_accounts")),
+  getAccounts: async () => parse<Account[]>(await call<string>("get_accounts")),
   saveAccount: (p: Partial<Account>) =>
-    invoke<string>("save_account", {
+    call<string>("save_account", {
       code: p.code ?? "",
       name: p.name ?? "",
       openingDebit: p.opening_debit ?? 0,
       openingCredit: p.opening_credit ?? 0,
     }),
-  deleteAccount: (id: number) => invoke<string>("delete_account", { id }),
-  getProducts: async () => parse<Product[]>(await invoke<string>("get_products")),
+  deleteAccount: (id: number) => call<string>("delete_account", { id }),
+  getProducts: async () => parse<Product[]>(await call<string>("get_products")),
   /** Lấy 1 trang sản phẩm theo event lazy của PrimeVue DataTable (server-side sort/filter/page). */
   getProductsPage: async (lazyEvent: unknown) =>
     parse<{ rows: Product[]; total: number }>(
-      await invoke<string>("get_products_page", {
+      await call<string>("get_products_page", {
         lazyEvent: JSON.stringify(lazyEvent),
       }),
     ),
   saveProduct: (p: Partial<Product>) =>
-    invoke<string>("save_product", {
+    call<string>("save_product", {
       code: p.code ?? "",
       name: p.name ?? "",
       unit: p.unit ?? "Cái",
@@ -142,44 +180,44 @@ export const api = {
       isService: p.is_service ?? false,
       industryCode: p.industry_code ?? "",
     }),
-  deleteProduct: (id: number) => invoke<string>("delete_product", { id }),
-  deleteProducts: (ids: number[]) => invoke<string>("delete_products", { ids }),
+  deleteProduct: (id: number) => call<string>("delete_product", { id }),
+  deleteProducts: (ids: number[]) => call<string>("delete_products", { ids }),
 
   getIndustryGroups: async () =>
-    parse<IndustryGroup[]>(await invoke<string>("get_industry_groups")),
+    parse<IndustryGroup[]>(await call<string>("get_industry_groups")),
   saveIndustryGroup: (g: {
     code: string;
     name: string;
     vat_rate: number;
     pit_rate: number;
   }) =>
-    invoke<string>("save_industry_group", {
+    call<string>("save_industry_group", {
       code: g.code,
       name: g.name,
       vatRate: g.vat_rate,
       pitRate: g.pit_rate,
     }),
   deleteIndustryGroup: (code: string) =>
-    invoke<string>("delete_industry_group", { code }),
-  getWarehouses: async () => parse<Warehouse[]>(await invoke<string>("get_warehouses")),
+    call<string>("delete_industry_group", { code }),
+  getWarehouses: async () => parse<Warehouse[]>(await call<string>("get_warehouses")),
   saveWarehouse: (code: string, name: string) =>
-    invoke<string>("save_warehouse", { code, name }),
-  nextWarehouseCode: () => invoke<string>("next_warehouse_code"),
-  nextCustomerCode: () => invoke<string>("next_customer_code"),
-  nextSupplierCode: () => invoke<string>("next_supplier_code"),
-  nextEmployeeCode: () => invoke<string>("next_employee_code"),
-  getSuppliers: async () => parse<Supplier[]>(await invoke<string>("get_suppliers")),
+    call<string>("save_warehouse", { code, name }),
+  nextWarehouseCode: () => call<string>("next_warehouse_code"),
+  nextCustomerCode: () => call<string>("next_customer_code"),
+  nextSupplierCode: () => call<string>("next_supplier_code"),
+  nextEmployeeCode: () => call<string>("next_employee_code"),
+  getSuppliers: async () => parse<Supplier[]>(await call<string>("get_suppliers")),
   saveSupplier: (s: Partial<Supplier>) =>
-    invoke<string>("save_supplier", {
+    call<string>("save_supplier", {
       code: s.code ?? "",
       name: s.name ?? "",
       address: s.address ?? "",
       taxCode: s.tax_code ?? "",
       phone: s.phone ?? "",
     }),
-  getCustomers: async () => parse<Customer[]>(await invoke<string>("get_customers")),
+  getCustomers: async () => parse<Customer[]>(await call<string>("get_customers")),
   saveCustomer: (c: Partial<Customer>) =>
-    invoke<string>("save_customer", {
+    call<string>("save_customer", {
       code: c.code ?? "",
       name: c.name ?? "",
       address: c.address ?? "",
@@ -190,15 +228,15 @@ export const api = {
   // ─── TRA CỨU MST (masothue.com qua backend) ───
   /** Tra cứu MST → 1 kết quả (single), danh sách (multiple) hoặc không thấy. */
   lookupTaxCode: async (mst: string): Promise<LookupOutcome> =>
-    parse<LookupOutcome>(await invoke<string>("lookup_tax_code", { mst })),
+    parse<LookupOutcome>(await call<string>("lookup_tax_code", { mst })),
   /** Lấy chi tiết từ URL masothue (dùng khi chọn trong danh sách). */
   lookupTaxDetail: async (url: string): Promise<TaxInfo> =>
-    parse<TaxInfo>(await invoke<string>("lookup_tax_detail", { url })),
+    parse<TaxInfo>(await call<string>("lookup_tax_detail", { url })),
 
   // ─── NHÂN SỰ & BẢNG LƯƠNG ───
-  getEmployees: async () => parse<Employee[]>(await invoke<string>("get_employees")),
+  getEmployees: async () => parse<Employee[]>(await call<string>("get_employees")),
   saveEmployee: (e: Partial<Employee>) =>
-    invoke<string>("save_employee", {
+    call<string>("save_employee", {
       input: {
         code: e.code ?? "",
         name: e.name ?? "",
@@ -216,9 +254,9 @@ export const api = {
       },
     }),
   getPayrollPeriods: async () =>
-    parse<string[]>(await invoke<string>("get_payroll_periods")),
+    parse<string[]>(await call<string>("get_payroll_periods")),
   getPayroll: async (period: string) =>
-    parse<PayrollRow[]>(await invoke<string>("get_payroll", { period })),
+    parse<PayrollRow[]>(await call<string>("get_payroll", { period })),
   savePayroll: (
     period: string,
     items: Array<{
@@ -230,7 +268,7 @@ export const api = {
       note: string;
     }>,
   ) =>
-    invoke<string>("save_payroll", {
+    call<string>("save_payroll", {
       period,
       items: items.map((i) => ({
         employeeCode: i.employee_code,
@@ -267,7 +305,7 @@ export const api = {
     /** Hướng điều chỉnh khi loại nhập = "adjust": up = bên bán thêm hàng, down = bên bán trừ bớt (trả lại NCC). */
     adjust_dir: "" | "up" | "down";
   }) =>
-    invoke<string>("save_inbound", {
+    call<string>("save_inbound", {
       postingDate: args.posting_date,
       voucherNo: args.voucher_no,
       description: args.description,
@@ -314,7 +352,7 @@ export const api = {
       e_invoice_date: string;
     };
   }) =>
-    invoke<string>("save_outbound", {
+    call<string>("save_outbound", {
       postingDate: args.posting_date,
       voucherNo: args.voucher_no,
       description: args.description,
@@ -335,7 +373,7 @@ export const api = {
     }),
 
   getJournalEntries: (entryType = "", fromDate = "", toDate = "") =>
-    invoke<string>("get_journal_entries", { entryType, fromDate, toDate }).then(parse) as Promise<
+    call<string>("get_journal_entries", { entryType, fromDate, toDate }).then(parse) as Promise<
       JournalEntryRow[]
     >,
 
@@ -356,7 +394,7 @@ export const api = {
     unit_code: string;
     note: string;
   }) =>
-    invoke<string>("save_cash_entry", {
+    call<string>("save_cash_entry", {
       input: {
         entryType: input.entry_type,
         postingDate: input.posting_date,
@@ -377,15 +415,15 @@ export const api = {
 
   // ─── STOCK ───
   getStockLots: async (productCode = "") =>
-    parse<StockLot[]>(await invoke<string>("get_stock_lots", { productCode })),
+    parse<StockLot[]>(await call<string>("get_stock_lots", { productCode })),
   getInventorySummary: async () =>
-    parse<InventoryRow[]>(await invoke<string>("get_inventory_summary")),
+    parse<InventoryRow[]>(await call<string>("get_inventory_summary")),
 
   // ─── INVOICES ───
-  getInvoices: async () => parse<Invoice[]>(await invoke<string>("get_invoices")),
+  getInvoices: async () => parse<Invoice[]>(await call<string>("get_invoices")),
   getInvoiceDetail: async (id: number) =>
     parse<{ invoice: Invoice; items: InvoiceItem[] }>(
-      await invoke<string>("get_invoice_detail", { id }),
+      await call<string>("get_invoice_detail", { id }),
     ),
   saveInvoice: (args: {
     number: string;
@@ -401,7 +439,7 @@ export const api = {
       warehouse_code?: string;
     }[];
   }) =>
-    invoke<string>("save_invoice", {
+    call<string>("save_invoice", {
       number: args.number,
       date: args.date,
       customer: args.customer,
@@ -411,15 +449,15 @@ export const api = {
 
   // ─── INVENTORY COUNT ───
   getInventoryCounts: async () =>
-    parse<InventoryCount[]>(await invoke<string>("get_inventory_counts")),
+    parse<InventoryCount[]>(await call<string>("get_inventory_counts")),
   getInventoryCountDetail: async (id: number) =>
-    parse<CountItemRow[]>(await invoke<string>("get_inventory_count_detail", { id })),
+    parse<CountItemRow[]>(await call<string>("get_inventory_count_detail", { id })),
   saveInventoryCount: (args: {
     date: string;
     note: string;
     items: { product_code: string; warehouse_code: string; counted_qty: number }[];
   }) =>
-    invoke<string>("save_inventory_count", {
+    call<string>("save_inventory_count", {
       date: args.date,
       note: args.note,
       items: args.items,
@@ -428,23 +466,23 @@ export const api = {
   // ─── REPORTS ───
   getTaxSummary: async (fromDate: string, toDate: string, unitCode: string) =>
     parse<TaxSummaryRow[]>(
-      await invoke<string>("get_tax_summary", { fromDate, toDate, unitCode }),
+      await call<string>("get_tax_summary", { fromDate, toDate, unitCode }),
     ),
   getRevenueExpense: async (fromDate: string, toDate: string) =>
-    parse<RevenueExpenseRow>(await invoke<string>("get_revenue_expense", { fromDate, toDate })),
+    parse<RevenueExpenseRow>(await call<string>("get_revenue_expense", { fromDate, toDate })),
   getTrialBalance: async (fromDate: string, toDate: string) =>
     parse<TrialBalanceRow[]>(
-      await invoke<string>("get_trial_balance", { fromDate, toDate }),
+      await call<string>("get_trial_balance", { fromDate, toDate }),
     ),
 
   // ─── SỔ SÁCH ───
   getLedger: async (fromDate: string, toDate: string) =>
-    parse<LedgerRow[]>(await invoke<string>("get_ledger", { fromDate, toDate })),
+    parse<LedgerRow[]>(await call<string>("get_ledger", { fromDate, toDate })),
 
   // ─── BACKUP / RESTORE ───
-  createBackup: () => invoke<string>("create_backup"),
-  listBackups: async () => parse<string[]>(await invoke<string>("list_backups")),
-  restoreBackup: (filename: string) => invoke<string>("restore_backup", { filename }),
+  createBackup: () => call<string>("create_backup"),
+  listBackups: async () => parse<string[]>(await call<string>("list_backups")),
+  restoreBackup: (filename: string) => call<string>("restore_backup", { filename }),
 
   // ─── HĐĐT ───
   linkHddt: (args: {
@@ -453,21 +491,21 @@ export const api = {
     hddtSymbol: string;
     hddtDate: string;
   }) =>
-    invoke<string>("link_hddt", {
+    call<string>("link_hddt", {
       invoiceId: args.invoiceId,
       hddtNo: args.hddtNo,
       hddtSymbol: args.hddtSymbol,
       hddtDate: args.hddtDate,
     }),
   hddtStatus: async () => parse<{ mode: string; connected: boolean; note: string }>(
-    await invoke<string>("hddt_status"),
+    await call<string>("hddt_status"),
   ),
   hddtSendSimulated: (invoiceNo: string, symbol: string, total: number) =>
-    invoke<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
+    call<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
 
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>
-    parse<AuditEntry[]>(await invoke<string>("get_audit_log", { limit })),
+    parse<AuditEntry[]>(await call<string>("get_audit_log", { limit })),
 
   // ─── IMPORT KHỐI NHAP LIEU ───
   importNhapLieu: async (items: Array<{
@@ -493,7 +531,7 @@ export const api = {
     note: string;
   }>) =>
     parse<ImportResult>(
-      await invoke<string>("import_nhap_lieu", {
+      await call<string>("import_nhap_lieu", {
         items: items.map((i) => ({
           postingDate: i.posting_date,
           voucherNo: i.voucher_no,
@@ -521,12 +559,12 @@ export const api = {
 
   // ─── CHẤM CÔNG THEO NGÀY ───
   getAttendance: async (period: string) =>
-    parse<AttendanceRow[]>(await invoke<string>("get_attendance", { period })),
+    parse<AttendanceRow[]>(await call<string>("get_attendance", { period })),
   saveAttendance: (
     period: string,
     entries: { employee_code: string; work_date: string; status: string }[],
   ) =>
-    invoke<string>("save_attendance", {
+    call<string>("save_attendance", {
       period,
       entries: entries.map((e) => ({
         employeeCode: e.employee_code,
@@ -536,36 +574,38 @@ export const api = {
     }),
   getAttendanceWorkDays: async (period: string) =>
     parse<AttendanceWorkDay[]>(
-      await invoke<string>("get_attendance_work_days", { period }),
+      await call<string>("get_attendance_work_days", { period }),
     ),
 
   // ─── TỜ KHAI THUẾ THEO KỲ ───
   // period: "year" | "quarter" | "month" | "occurrence"; periodNo: 1..12 (tháng) / 1..4 (quý) / 0 (năm)
   getTaxDeclaration: async (year: number, period: string, periodNo: number) =>
     parse<TaxDeclarationRow[]>(
-      await invoke<string>("get_tax_declaration", { year, period, periodNo }),
+      await call<string>("get_tax_declaration", { year, period, periodNo }),
     ),
 
   // Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)
   getTaxOverview: async (year: number, period: string, periodNo: number) =>
     parse<TaxOverview>(
-      await invoke<string>("get_tax_overview", { year, period, periodNo }),
+      await call<string>("get_tax_overview", { year, period, periodNo }),
     ),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───
   getVoucher: async (voucherNo: string) =>
-    parse<VoucherRow[]>(await invoke<string>("get_voucher", { voucherNo })),
+    parse<VoucherRow[]>(await call<string>("get_voucher", { voucherNo })),
 
   // ─── ĐĂNG NHẬP / PHÂN QUYỀN ───
   login: async (username: string, password: string): Promise<CurrentUser> =>
-    parse<CurrentUser>(await invoke<string>("login", { username, password })),
-  logout: () => invoke<string>("logout"),
+    parse<CurrentUser>(await call<string>("login", { username, password })),
+  logout: () => call<string>("logout"),
+  // URL web server local (browser mode) — trả chuỗi rỗng nếu không chạy được.
+  webUrl: () => call<string>("web_url"),
   getCurrentUser: async (): Promise<CurrentUser | null> => {
-    const s = await invoke<string>("get_current_user");
+    const s = await call<string>("get_current_user");
     return s && s !== "null" ? parse<CurrentUser>(s) : null;
   },
   listUsers: async (): Promise<AppUser[]> =>
-    parse<AppUser[]>(await invoke<string>("list_users")),
+    parse<AppUser[]>(await call<string>("list_users")),
   saveUser: (input: {
     username: string;
     display_name: string;
@@ -573,7 +613,7 @@ export const api = {
     role: Role;
     active: boolean;
   }) =>
-    invoke<string>("save_user", {
+    call<string>("save_user", {
       input: {
         username: input.username,
         displayName: input.display_name,
@@ -582,30 +622,30 @@ export const api = {
         active: input.active,
       },
     }),
-  deleteUser: (id: number) => invoke<string>("delete_user", { id }),
+  deleteUser: (id: number) => call<string>("delete_user", { id }),
   changePassword: (oldPassword: string, newPassword: string) =>
-    invoke<string>("change_password", { oldPassword, newPassword }),
+    call<string>("change_password", { oldPassword, newPassword }),
 
   // ─── HỒ SƠ HKD (multi-profile) ───
   getProfiles: async (): Promise<Profile[]> =>
-    parse<Profile[]>(await invoke<string>("get_profiles")),
+    parse<Profile[]>(await call<string>("get_profiles")),
   createProfile: async (name: string): Promise<Profile> =>
-    parse<Profile>(await invoke<string>("create_profile", { name })),
+    parse<Profile>(await call<string>("create_profile", { name })),
   renameProfile: (key: string, name: string) =>
-    invoke<string>("rename_profile", { key, name }),
-  deleteProfile: (key: string) => invoke<string>("delete_profile", { key }),
+    call<string>("rename_profile", { key, name }),
+  deleteProfile: (key: string) => call<string>("delete_profile", { key }),
   switchProfile: async (key: string) =>
     parse<{ ok: boolean; key: string; name: string; active: boolean }>(
-      await invoke<string>("switch_profile", { key }),
+      await call<string>("switch_profile", { key }),
     ),
   /** Tùy chọn đăng nhập của mọi hồ sơ (đọc được trước khi đăng nhập). */
   getProfilePrefs: async (): Promise<Record<string, ProfilePrefs>> =>
-    parse<Record<string, ProfilePrefs>>(await invoke<string>("get_profile_prefs")),
+    parse<Record<string, ProfilePrefs>>(await call<string>("get_profile_prefs")),
   saveProfilePref: (key: string, prefs: ProfilePrefs) =>
-    invoke<string>("save_profile_pref", { key, prefs }),
+    call<string>("save_profile_pref", { key, prefs }),
   /** Mở hồ sơ từ màn hình chọn hồ sơ lúc khởi động (không cần đăng nhập). */
   selectProfile: async (key: string) =>
     parse<{ ok: boolean; key: string; name: string; active: boolean }>(
-      await invoke<string>("select_profile", { key }),
+      await call<string>("select_profile", { key }),
     ),
 };

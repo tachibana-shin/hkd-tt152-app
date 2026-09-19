@@ -56,6 +56,12 @@
 │  Vue 3 + TypeScript         │  ───────────────▶  │  Tauri 2 (Rust)              │
 │  PrimeVue · Tailwind · Pinia │  ◀───────────────  │  sqlx · SQLite · migrations  │
 └─────────────────────────────┘      commands       └──────────────────────────────┘
+       │   ▲                                              │
+       │   │ fetch /api/<cmd> (cùng JSON, camelCase)      │ web server local
+       ▼   │                                              ▼
+┌─────────────────────────────┐     127.0.0.1:45731      ┌──────────────────────────────┐
+│  Trình duyệt (Chrome)       │  ─────────────────────▶  │  axum (nhúng trong app)      │
+└─────────────────────────────┘   serve dist nhúng       └──────────────────────────────┘
 ```
 
 - **Backend (Rust):** module hóa theo nghiệp vụ (`auth`, `stock`, `payroll`, `accounting`,
@@ -119,6 +125,22 @@ bun run build          # vue-tsc --noEmit + vite build
 cd src-tauri && cargo build          # build app (debug)
 cd src-tauri && cargo build --release
 ```
+
+### 🌐 Dùng app qua trình duyệt (Chrome)
+
+Bản production vừa chạy vừa mở sẵn một **web server local** (chỉ `127.0.0.1`):
+
+- **Cổng mặc định:** `45731` (nếu bận, tự dò cổng trống kế tiếp — xem log `[web]`).
+- **Cách dùng:** chạy app như bình thường → mở Chrome vào `http://127.0.0.1:45731`.
+- **Cùng dữ liệu & phiên đăng nhập:** trình duyệt gọi đúng các command backend (REST
+  `/api/<cmd>`) qua lớp transport chung `src/db/index.ts` — trong app dùng IPC, trong
+  trình duyệt dùng `fetch`, tự chọn theo môi trường (`__TAURI_INTERNALS__`).
+- Ở **dev** cũng dùng được: `bun run tauri dev` (chạy app) rồi mở `http://localhost:1420`
+  (Vite proxy `/api` về cổng web server của app).
+- **Ngữ nghĩa HTTP:** `200` thành công; `400` lỗi nghiệp vụ/tham số; `401` sai tài khoản/mật khẩu
+  khi đăng nhập; `404` lệnh không hỗ trợ; `500` chỉ còn dành cho lỗi thật sự của server.
+- **Nhật ký yêu cầu:** mỗi request web được ghi vào `web.log` (thư mục dữ liệu app, cạnh `hkd.db`)
+  — gồm thời gian, lệnh, mã HTTP và thông báo lỗi (không ghi mật khẩu).
 
 ---
 

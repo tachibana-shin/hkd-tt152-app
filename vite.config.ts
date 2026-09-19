@@ -75,6 +75,11 @@ export default defineConfig(() => ({
       ...PRIMEVUE_COMPONENTS.map((name) => `primevue/${name.toLowerCase()}`),
     ],
   },
+  // Khi dùng app qua trình duyệt (Chrome) ở dev — chính app desktop chạy web server
+  // local 127.0.0.1:45731, proxy /api qua đó.
+  proxy: {
+    "/api": { target: "http://127.0.0.1:45731", changeOrigin: true },
+  },
   clearScreen: false,
   server: {
     port: 1420,

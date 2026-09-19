@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import type { RevenueExpenseRow } from "@/types";
+import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { fmtVnd as fmt } from "@/utils/format";
 
@@ -10,11 +10,8 @@ const businessName = ref("...");
 const revExp = ref<RevenueExpenseRow | null>(null);
 
 onMounted(async () => {
-  businessName.value = await invoke("get_business_info");
-  revExp.value = await invoke("get_revenue_expense", {
-    fromDate: "2026-01-01",
-    toDate: "2026-12-31",
-  });
+  businessName.value = await api.getBusinessInfo();
+  revExp.value = await api.getRevenueExpense("2026-01-01", "2026-12-31");
 });
 
 const revenueNet = () => (revExp.value?.revenue_up ?? 0) - (revExp.value?.revenue_down ?? 0);
