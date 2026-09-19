@@ -3,15 +3,8 @@ import { storeToRefs } from "pinia";
 import { FilterMatchMode } from "@primevue/core/api";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
-import { api } from "@/db";
-import type {
-  Warehouse,
-  Customer,
-  Supplier,
-  IndustryGroup,
-  TaxInfo,
-  TaxResult,
-} from "@/types";
+import PartnerDialog from "@/components/PartnerDialog.vue";
+import type { Warehouse, Customer, Supplier, IndustryGroup } from "@/types";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
@@ -36,19 +29,14 @@ const dialog = ref(false);
 const dialogKind = ref<Kind>("warehouse");
 const editing = ref(false);
 const saving = ref(false);
-
-const form = reactive({
-  code: "",
-  name: "",
-  tax_code: "",
-  address: "",
-  phone: "",
-});
-
-// ─── Tra cứu MST ───
-const lookupLoading = ref(false);
-const lookupResults = ref<TaxResult[]>([]);
-const lookupSelectedUrl = ref("");
+// Đối tác đang sửa (thêm mới thì null) — PartnerDialog tự sinh mã khi thêm mới.
+const editingRow = ref<{
+  code: string;
+  name: string;
+  tax_code?: string;
+  address?: string;
+  phone?: string;
+} | null>(null);
 
 // ─── Nhóm ngành (Thêm / Sửa qua dialog; Xóa dòng đang chọn) ───
 const igDialog = ref(false);
@@ -154,203 +142,24 @@ function deleteSelectedIg() {
   });
 }
 
-const dialogTitle = computed(() => {
-  const base = editing.value ? "Sửa" : "Thêm";
-  switch (dialogKind.value) {
-    case "warehouse":
-      return `${base} kho`;
-    case "customer":
-      return `${base} khách hàng`;
-    default:
-      return `${base} nhà cung cấp`;
-  }
-});
-
-const kindLabel = computed(() => {
-  switch (dialogKind.value) {
-    case "warehouse":
-      return "kho";
-    case "customer":
-      return "khách hàng";
-    case "supplier":
-      return "nhà cung cấp";
-  }
-});
-
-const codePlaceholder = computed(() => {
-  switch (dialogKind.value) {
-    case "warehouse":
-      return "KHO01";
-    case "customer":
-      return "KH001";
-    case "supplier":
-      return "NCC001";
-  }
-});
-
-async function openCreate(kind: Kind) {
+function openCreate(kind: Kind) {
   dialogKind.value = kind;
   editing.value = false;
-  Object.assign(form, {
-    code: "",
-    name: "",
-    tax_code: "",
-    address: "",
-    phone: "",
-  });
-  resetLookup();
-  // Tự sinh mã: kho KHO001, khách KH001, nhà cung cấp NCC001... — vẫn sửa tay được.
-  const gen =
-    kind === "warehouse"
-      ? api.nextWarehouseCode()
-      : kind === "customer"
-        ? api.nextCustomerCode()
-        : api.nextSupplierCode();
-  try {
-    form.code = await gen;
-  } catch {
-    /* giữ trống — người dùng tự nhập */
-  }
+  editingRow.value = null;
   dialog.value = true;
 }
 
 function openEdit(kind: Kind, row: Warehouse | Customer | Supplier) {
   dialogKind.value = kind;
   editing.value = true;
-  Object.assign(form, {
+  editingRow.value = {
     code: row.code,
     name: row.name,
-    tax_code: "",
-    address: "",
-    phone: "",
-  });
-  if (kind !== "warehouse") {
-    const c = row as Customer;
-    form.tax_code = c.tax_code ?? "";
-    form.address = c.address ?? "";
-    form.phone = c.phone ?? "";
-  }
-  resetLookup();
+    tax_code: kind !== "warehouse" ? ((row as Customer).tax_code ?? "") : "",
+    address: kind !== "warehouse" ? ((row as Customer).address ?? "") : "",
+    phone: kind !== "warehouse" ? ((row as Customer).phone ?? "") : "",
+  };
   dialog.value = true;
-}
-
-function resetLookup() {
-  lookupLoading.value = false;
-  lookupResults.value = [];
-  lookupSelectedUrl.value = "";
-}
-
-/** Điền thông tin tra cứu được vào form (chỉ ghi đè khi có giá trị). */
-function applyTaxInfo(info: TaxInfo) {
-  const t = (v?: string) => (v ?? "").trim();
-  const name = t(info.name);
-  const addr = t(info.address);
-  const phone = t(info.phone);
-  if (name) form.name = name;
-  if (addr) form.address = addr;
-  if (phone) form.phone = phone;
-}
-
-async function runLookup() {
-  const mst = form.tax_code.trim();
-  if (!mst) {
-    toast.add({
-      severity: "warn",
-      summary: "Thiếu MST",
-      detail: "Nhập mã số thuế trước khi tra cứu",
-    });
-    return;
-  }
-  lookupLoading.value = true;
-  lookupResults.value = [];
-  lookupSelectedUrl.value = "";
-  try {
-    const outcome = await api.lookupTaxCode(mst);
-    if (outcome.kind === "single") {
-      applyTaxInfo(outcome.info);
-      toast.add({
-        severity: "success",
-        summary: "Đã tra cứu",
-        detail: `Tìm thấy: ${outcome.info.name ?? outcome.info.tax_code ?? mst}`,
-      });
-    } else if (outcome.kind === "multiple") {
-      lookupResults.value = outcome.results;
-      toast.add({
-        severity: "info",
-        summary: "Nhiều kết quả",
-        detail: `Có ${outcome.results.length} kết quả — chọn đúng bên dưới`,
-      });
-    } else {
-      toast.add({
-        severity: "warn",
-        summary: "Không tìm thấy",
-        detail: outcome.message,
-      });
-    }
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi tra cứu", detail: String(e) });
-  } finally {
-    lookupLoading.value = false;
-  }
-}
-
-async function applyLookupResult(url: string) {
-  if (!url) return;
-  try {
-    const info = await api.lookupTaxDetail(url);
-    applyTaxInfo(info);
-    lookupSelectedUrl.value = url;
-    toast.add({
-      severity: "success",
-      summary: "Đã điền thông tin",
-      detail: info.name ?? "Xong",
-    });
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi lấy chi tiết", detail: String(e) });
-  }
-}
-
-async function save() {
-  if (!form.code || !form.name) {
-    toast.add({
-      severity: "warn",
-      summary: "Thiếu thông tin",
-      detail: "Mã và tên là bắt buộc",
-    });
-    return;
-  }
-  saving.value = true;
-  try {
-    if (dialogKind.value === "warehouse") {
-      await catalog.saveWarehouse(form.code, form.name);
-    } else if (dialogKind.value === "customer") {
-      await catalog.saveCustomer({
-        code: form.code,
-        name: form.name,
-        tax_code: form.tax_code,
-        address: form.address,
-        phone: form.phone,
-      });
-    } else {
-      await catalog.saveSupplier({
-        code: form.code,
-        name: form.name,
-        tax_code: form.tax_code,
-        address: form.address,
-        phone: form.phone,
-      });
-    }
-    toast.add({
-      severity: "success",
-      summary: "Đã lưu",
-      detail: `Đã lưu ${kindLabel.value} ${form.code}`,
-    });
-    dialog.value = false;
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi lưu", detail: String(e) });
-  } finally {
-    saving.value = false;
-  }
 }
 
 async function reload() {
@@ -685,76 +494,13 @@ onMounted(() => catalog.loadAll());
     </Card>
 
     <!-- Dialog dùng chung: thêm / sửa kho, khách hàng, nhà cung cấp -->
-    <AppDialog
+    <PartnerDialog
       v-model:visible="dialog"
-      :header="dialogTitle"
-      width="max-w-xl"
-      action-label="Lưu"
-      :saving="saving"
+      :kind="dialogKind"
+      :editing="editing"
+      :initial="editingRow ?? undefined"
       :show-action="auth.canStock"
-      @action="save"
-    >
-      <div class="grid grid-cols-2 gap-4 py-2">
-        <FormField
-          :label="dialogKind === 'warehouse' ? 'Mã kho' : 'Mã'"
-          required
-        >
-          <InputText
-            v-model="form.code"
-            :placeholder="codePlaceholder"
-            :disabled="editing"
-          />
-        </FormField>
-        <FormField
-          :label="dialogKind === 'warehouse' ? 'Tên kho' : 'Tên'"
-          required
-        >
-          <InputText v-model="form.name" placeholder="Tên hiển thị" />
-        </FormField>
-
-        <template v-if="dialogKind !== 'warehouse'">
-          <FormField label="MST">
-            <div class="flex gap-2">
-              <InputText
-                v-model="form.tax_code"
-                placeholder="Mã số thuế"
-                class="min-w-0 flex-1"
-              />
-              <Button
-                label="Tra cứu"
-                icon="pi pi-search"
-                severity="secondary"
-                class="shrink-0 whitespace-nowrap"
-                :loading="lookupLoading"
-                :disabled="!form.tax_code.trim()"
-                @click="runLookup"
-              />
-            </div>
-          </FormField>
-          <FormField
-            v-if="lookupResults.length"
-            label="Kết quả tra cứu"
-            class="col-span-2"
-          >
-            <Select
-              v-model="lookupSelectedUrl"
-              :options="lookupResults"
-              option-label="name"
-              option-value="url"
-              placeholder="Có nhiều kết quả — chọn đúng hộ / doanh nghiệp…"
-              class="w-full"
-              @change="applyLookupResult($event.value)"
-            />
-          </FormField>
-          <FormField label="Điện thoại">
-            <InputText v-model="form.phone" placeholder="Số điện thoại" />
-          </FormField>
-          <FormField label="Địa chỉ" class="col-span-2">
-            <InputText v-model="form.address" placeholder="Địa chỉ" />
-          </FormField>
-        </template>
-      </div>
-    </AppDialog>
+    />
 
     <!-- Dialog thêm nhóm ngành -->
     <AppDialog

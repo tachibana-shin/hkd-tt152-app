@@ -315,6 +315,10 @@ pub(crate) struct InboundItemInput {
     pub(crate) product_code: String,
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
+    /// Số tiền chiết khấu thương mại (đ) — cột "Tiền CK" của Chứng từ mua hàng
+    /// (TT88). Giá trị nhập kho = Thành tiền − Tiền CK.
+    #[serde(default)]
+    pub(crate) discount: f64,
 }
 
 #[derive(serde::Deserialize)]

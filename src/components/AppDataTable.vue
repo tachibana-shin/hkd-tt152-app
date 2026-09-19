@@ -123,6 +123,8 @@ export default defineComponent({
      * `#filter` (hoặc prop `filter`) thì hiện ô lọc tương ứng.
      */
     filterToggle: { type: Boolean, default: true },
+    /** Cỡ bảng: "large" (mặc định) hay "small" (dùng cho bảng nhập liệu nhỏ). */
+    size: { type: String, default: "large" },
     /** Model của selection (v-model:selection). */
     selection: { type: null, default: undefined },
   },
@@ -388,7 +390,7 @@ export default defineComponent({
           "onUpdate:selection": (v: unknown) => emit("update:selection", v),
           filters: tableFilters.value,
           resizableColumns: props.resizableColumns,
-          size: "large",
+          size: props.size,
           showGridlines: true,
           stripedRows: true,
           // Chế độ dữ liệu tự phát hiện: màn có @page/@sort/@filter (như Products)

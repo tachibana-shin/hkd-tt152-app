@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// Bảng nhập dòng mặt hàng dùng chung cho phiếu nhập / phiếu xuất.
+// Bảng nhập dòng mặt hàng dùng chung cho phiếu nhập / phiếu xuất / hóa đơn.
 import { useCatalogStore } from "@/stores/catalog";
+import ProductDialog from "@/components/ProductDialog.vue";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 import type { IndustryGroup, Product, Warehouse } from "@/types";
 
@@ -10,6 +11,8 @@ interface LineItem {
   unit_price: number;
   industry_code?: string;
   warehouse_code?: string;
+  /** Số tiền chiết khấu thương mại (đ) — cột "Tiền CK" của CT MH (TT88). */
+  discount?: number;
 }
 
 const props = withDefaults(
@@ -22,15 +25,35 @@ const props = withDefaults(
     showIndustry?: boolean;
     showWarehouse?: boolean;
     showAmount?: boolean;
+    /** Hiện cột CK% + Tiền CK (thay cột Thành tiền) — dùng cho phiếu nhập mua. */
+    showDiscount?: boolean;
+    /**
+     * Chế độ gọn (bảng Mặt hàng của popup phiếu nhập kho): bảng size small,
+     * cột số hẹp, cột sản phẩm co giãn rộng, không scroll ngang, và nhập liên tục
+     * (pre-input) — điền xong dòng cuối tự thêm dòng trống, không cần nút "Thêm dòng".
+     */
+    compact?: boolean;
+    /**
+     * Nhập liên tục + size small nhưng KHÔNG ép bảng fixed-layout (bảng vẫn
+     * scroll ngang tự nhiên khi nhiều cột). Dùng cho phiếu xuất — có thêm cột
+     * Nhóm ngành + Kho xuất nên không thể gò vào khổ cố định như phiếu nhập.
+     */
+    preInput?: boolean;
     priceField?: "cost_price" | "sale_price";
     info?: string;
     totalLabel?: string;
+    /** Hiện nút "+ Thêm hàng hóa" (chưa có trong danh mục thì mở ProductDialog). */
+    showAddProduct?: boolean;
   }>(),
   {
     canEdit: true,
     showIndustry: false,
     showWarehouse: false,
     showAmount: false,
+    showDiscount: false,
+    compact: false,
+    preInput: false,
+    showAddProduct: false,
     priceField: "cost_price",
     industryGroups: () => [],
     warehouses: () => [],
@@ -44,6 +67,31 @@ const emit = defineEmits<{
 }>();
 
 const catalog = useCatalogStore();
+
+// Thêm hàng hóa nhanh (chưa có trong danh mục) — mở ProductDialog chuẩn;
+// lưu xong gắn sản phẩm mới vào dòng trống cuối (chế độ nhập liên tục) hoặc
+// thêm dòng mới có sẵn sản phẩm đó.
+const productDialog = ref(false);
+
+function onProductSaved(code: string) {
+  const last = props.items[props.items.length - 1];
+  const row = last && !last.product_code ? last : null;
+  if (row) {
+    row.product_code = code;
+    onProductPick(props.items.length - 1);
+  } else {
+    // Đủ các trường cho cả dòng nhập (discount) lẫn dòng xuất (ngành + kho).
+    props.items.push({
+      product_code: code,
+      quantity: 1,
+      unit_price: 0,
+      discount: 0,
+      industry_code: "",
+      warehouse_code: "",
+    });
+    onProductPick(props.items.length - 1);
+  }
+}
 
 function onProductPick(index: number) {
   const p = catalog.productByCode(props.items[index].product_code);
@@ -59,8 +107,45 @@ function onProductPick(index: number) {
   }
 }
 
-const total = computed(() =>
-  props.items.reduce((s, it) => s + it.quantity * it.unit_price, 0),
+/** Giá trị thực tế 1 dòng (giá trị nhập kho): Thành tiền − Tiền CK. */
+function lineNet(it: LineItem): number {
+  const d = props.showDiscount ? (it.discount ?? 0) : 0;
+  return it.quantity * it.unit_price - d;
+}
+
+const total = computed(() => props.items.reduce((s, it) => s + lineNet(it), 0));
+
+// Chế độ nhập liên tục (pre-input): mở form có sẵn 1 dòng trống, điền xong
+// dòng cuối (đã chọn sản phẩm) thì tự thêm dòng trống mới, không cần nút
+// "Thêm dòng". Bật qua `compact` (phiếu nhập) hoặc `preInput` (phiếu xuất).
+const tableRef = ref<{ $el: HTMLElement } | null>(null);
+
+/** Cuộn bảng xuống đúng dòng mới được thêm (dòng trống cuối) để luôn thấy. */
+function scrollToNewRow() {
+  nextTick(() => {
+    const root = tableRef.value?.$el;
+    const last = root?.querySelector<HTMLElement>(
+      ".p-datatable-tbody tr:last-child",
+    );
+    last?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+}
+
+watch(
+  () =>
+    props.items.length
+      ? `${props.items.length}|${props.items[props.items.length - 1]?.product_code ?? ""}`
+      : "0",
+  (now, prev) => {
+    if (!(props.compact || props.preInput) || !props.canEdit || now === prev)
+      return;
+    const last = props.items[props.items.length - 1];
+    if (!props.items.length || last?.product_code) {
+      emit("add");
+      scrollToNewRow();
+    }
+  },
+  { immediate: true },
 );
 </script>
 
@@ -75,18 +160,40 @@ const total = computed(() =>
         aria-hidden="true"
       />
     </h4>
-    <Button
-      v-if="canEdit"
-      label="Thêm dòng"
-      icon="pi pi-plus"
-      size="small"
-      text
-      @click="emit('add')"
-    />
+    <div class="flex items-center gap-2">
+      <Button
+        v-if="showAddProduct && canEdit"
+        label="Thêm hàng hóa"
+        icon="pi pi-plus"
+        size="small"
+        text
+        @click="productDialog = true"
+      />
+      <Button
+        v-if="canEdit && !compact && !preInput"
+        label="Thêm dòng"
+        icon="pi pi-plus"
+        size="small"
+        text
+        @click="emit('add')"
+      />
+    </div>
   </div>
 
-  <AppDataTable :value="items" class="mt-2" :resizable-columns="false" :sortable="false">
-    <Column header="Sản phẩm">
+  <AppDataTable
+    ref="tableRef"
+    :value="items"
+    class="mt-2"
+    :resizable-columns="false"
+    :sortable="false"
+    :size="compact || preInput ? 'small' : 'large'"
+    :style="compact ? 'overflow-x: hidden' : undefined"
+    :table-style="compact ? 'table-layout: fixed; width: 100%' : undefined"
+  >
+    <Column
+      header="Sản phẩm"
+      :style="compact ? 'min-width: 200px' : undefined"
+    >
       <template #body="{ index }">
         <Select
           v-model="items[index].product_code"
@@ -95,19 +202,32 @@ const total = computed(() =>
           optionValue="code"
           filter
           showClear
+          :size="compact || preInput ? 'small' : undefined"
           class="w-full"
           @change="onProductPick(index)"
         />
       </template>
     </Column>
-    <Column header="SL" :style="showIndustry ? 'width: 100px' : 'width: 110px'">
+    <Column
+      header="SL"
+      :style="
+        compact ? 'width: 72px' : showIndustry ? 'width: 100px' : 'width: 110px'
+      "
+    >
       <template #body="{ index }">
-        <InputNumber v-model="items[index].quantity" :min="0" class="w-full" />
+        <InputNumber
+          v-model="items[index].quantity"
+          :min="0"
+          :size="compact || preInput ? 'small' : undefined"
+          class="w-full"
+        />
       </template>
     </Column>
     <Column
       header="Đơn giá"
-      :style="showIndustry ? 'width: 140px' : 'width: 150px'"
+      :style="
+        compact ? 'width: 110px' : showIndustry ? 'width: 140px' : 'width: 150px'
+      "
     >
       <template #body="{ index }">
         <InputNumber
@@ -116,6 +236,7 @@ const total = computed(() =>
           mode="currency"
           currency="VND"
           locale="vi-VN"
+          :size="compact || preInput ? 'small' : undefined"
           class="w-full"
         />
       </template>
@@ -128,6 +249,7 @@ const total = computed(() =>
           optionLabel="name"
           optionValue="code"
           filter
+          :size="compact || preInput ? 'small' : undefined"
           class="w-full"
         />
       </template>
@@ -141,19 +263,36 @@ const total = computed(() =>
           optionValue="code"
           filter
           showClear
+          :size="compact || preInput ? 'small' : undefined"
           class="w-full"
           placeholder="Kho mặc định"
         />
       </template>
     </Column>
-    <Column v-if="showAmount" header="Thành tiền" align="right">
+    <Column v-if="showDiscount" header="Tiền CK" align="right" style="width: 120px">
       <template #body="{ index }">
-        <span class="font-medium">{{
-          fmtVnd(items[index].quantity * items[index].unit_price)
-        }}</span>
+        <InputNumber
+          v-model="items[index].discount"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          size="small"
+          class="w-full"
+        />
       </template>
     </Column>
-    <Column header="">
+    <Column
+      v-if="showAmount && !showDiscount"
+      header="Thành tiền"
+      align="right"
+      :style="compact ? 'width: 130px' : undefined"
+    >
+      <template #body="{ index }">
+        <span class="font-medium">{{ fmtVnd(lineNet(items[index])) }}</span>
+      </template>
+    </Column>
+    <Column header="" :style="compact ? 'width: 48px' : undefined">
       <template #body="{ index }">
         <Button
           v-if="canEdit"
@@ -175,4 +314,11 @@ const total = computed(() =>
     <span class="text-sm text-gray-500">{{ totalLabel }}</span>
     <span class="text-lg font-bold text-primary-600">{{ fmt(total) }} đ</span>
   </div>
+
+  <!-- Thêm hàng hóa nhanh — dùng chung dialog chuẩn (tự sinh mã + nhóm ngành + thuế) -->
+  <ProductDialog
+    v-model:visible="productDialog"
+    :show-action="canEdit"
+    @saved="onProductSaved"
+  />
 </template>

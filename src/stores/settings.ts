@@ -19,6 +19,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const defaultUnit = computed(() => settings.value?.product_unit ?? "Cái");
   const defaultMinStock = computed(() => settings.value?.product_min_stock ?? 0);
 
+  /** Hộ có được khấu trừ thuế GTGT đầu vào không (mặc định TẮT). */
+  const deductVat = computed(() => settings.value?.vat_deduct ?? false);
+
   async function nextProductCode() {
     return api.nextProductCode();
   }
@@ -37,6 +40,7 @@ export const useSettingsStore = defineStore("settings", () => {
     importTaxDefault,
     defaultUnit,
     defaultMinStock,
+    deductVat,
     nextProductCode,
     save,
   };

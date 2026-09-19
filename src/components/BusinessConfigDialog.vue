@@ -2,7 +2,9 @@
 // Dialog cấu hình hộ kinh doanh.
 import { useBusinessStore } from "@/stores/business";
 import { useAuthStore } from "@/stores/auth";
+import { useSettingsStore } from "@/stores/settings";
 import { api } from "@/db";
+import { fmtVnd } from "@/utils/format";
 import type { BusinessConfig, TaxInfo, TaxResult } from "@/types";
 
 const props = defineProps<{
@@ -19,6 +21,7 @@ const emit = defineEmits<{
 
 const business = useBusinessStore();
 const auth = useAuthStore();
+const settingsStore = useSettingsStore();
 const toast = useToast();
 const saving = ref(false);
 
@@ -32,7 +35,36 @@ const form = reactive({
   tax_code_issued_on: "",
   phone: "",
   email: "",
+  // Công tắc khấu trừ GTGT đầu vào — mặc định TẮT (hộ nộp thuế theo doanh thu).
+  vat_deduct: false,
 });
+
+// Nhóm hộ theo NĐ 68/2026 + NĐ 141/2026 — app tự xếp nhóm từ tổng doanh thu cả năm.
+const taxGroup = ref<number | null>(null);
+const yearRevenue = ref(0);
+const loadingGroup = ref(false);
+
+function loadGroup() {
+  taxGroup.value = null;
+  loadingGroup.value = true;
+  api
+    .getTaxOverview(new Date().getFullYear(), "year", 0)
+    .then((ov) => {
+      taxGroup.value = ov.group;
+      yearRevenue.value = ov.year_revenue;
+    })
+    .catch(() => {
+      taxGroup.value = null;
+    })
+    .finally(() => {
+      loadingGroup.value = false;
+    });
+}
+
+async function fillVatSetting() {
+  await settingsStore.load();
+  form.vat_deduct = settingsStore.deductVat;
+}
 
 // ─── Tra cứu MST hộ kinh doanh ───
 const lookupLoading = ref(false);
@@ -58,6 +90,8 @@ watch(
     lookupLoading.value = false;
     lookupResults.value = [];
     lookupSelectedUrl.value = "";
+    void fillVatSetting();
+    void loadGroup();
   },
 );
 
@@ -148,7 +182,11 @@ async function save() {
   }
   saving.value = true;
   try {
-    await business.save({ ...form });
+    const { vat_deduct, ...rest } = form;
+    await Promise.all([
+      business.save({ ...rest }),
+      api.saveAppSettings({ vat_deduct: vat_deduct ? "1" : "0" }),
+    ]);
     toast.add({ severity: "success", summary: "Đã lưu thông tin hộ kinh doanh" });
     emit("update:visible", false);
     emit("saved");
@@ -228,6 +266,44 @@ async function save() {
       <FormField label="Email" class="col-span-2">
         <InputText v-model="form.email" />
       </FormField>
+    </div>
+
+    <div class="rounded-lg border border-gray-200 bg-surface-50 p-3 space-y-3">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-semibold text-gray-800">
+            Khấu trừ thuế GTGT đầu vào
+          </p>
+          <p class="text-xs text-gray-500">
+            Mặc định <b>TẮT</b> — hộ nộp thuế theo doanh thu không được khấu trừ,
+            giá nhập kho đã gồm thuế. Bật khi hộ nộp thuế theo lợi nhuận (xác định
+            được chi phí): nhập kho tách thuế vào TK 133, giá nhập = giá chưa thuế.
+          </p>
+        </div>
+        <ToggleSwitch v-model="form.vat_deduct" class="shrink-0" />
+      </div>
+      <div
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-3"
+      >
+        <div>
+          <p class="text-sm font-semibold text-gray-800">Nhóm hộ kinh doanh</p>
+          <p class="text-xs text-gray-500">
+            Xếp tự động theo tổng doanh thu cả năm (NĐ 68/2026 + NĐ 141/2026):
+            nhóm 1 ≤ 1 tỷ (miễn thuế) · nhóm 2 &gt; 1–3 tỷ · nhóm 3 &gt; 3–50 tỷ ·
+            nhóm 4 &gt; 50 tỷ.
+          </p>
+        </div>
+        <div class="shrink-0 text-right">
+          <template v-if="loadingGroup">
+            <i class="pi pi-spin pi-spinner text-gray-400" />
+          </template>
+          <template v-else-if="taxGroup">
+            <p class="text-lg font-bold text-blue-600">Nhóm {{ taxGroup }}</p>
+            <p class="text-xs text-gray-500">{{ fmtVnd(yearRevenue) }} / năm</p>
+          </template>
+          <template v-else><p class="text-xs text-gray-400">—</p></template>
+        </div>
+      </div>
     </div>
   </AppDialog>
 </template>

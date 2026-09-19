@@ -51,6 +51,9 @@ async function save() {
     await api.saveAppSettings({
       tax_period: form.period,
       tax_method: form.method,
+      // Đồng bộ công tắc "Khấu trừ GTGT đầu vào": theo lợi nhuận → được khấu trừ
+      // (mặc định BẬT), theo doanh thu → không khấu trừ (mặc định TẮT).
+      vat_deduct: form.method === "profit" ? "1" : "0",
     });
     toast.add({
       severity: "success",
@@ -118,6 +121,12 @@ async function save() {
         <p>
           • <b>Nhóm 4</b> — doanh thu &gt; 50 tỷ: GTGT theo tỷ lệ ngành; TNCN = lợi
           nhuận × <b>20%</b>, kỳ khai theo tháng.
+        </p>
+        <p>
+          • <b>Khấu trừ thuế GTGT đầu vào</b>: hộ theo <b>lợi nhuận</b> được khấu
+          trừ GTGT đầu vào (nhập kho tách TK 133, giá nhập chưa thuế); hộ theo
+          <b>doanh thu</b> không được khấu trừ — giá nhập gồm thuế. Công tắc nằm ở
+          màn cấu hình hộ kinh doanh (mặc định tắt).
         </p>
         <p class="pt-1 text-gray-400">
           Ứng dụng tự xếp nhóm hộ theo tổng doanh thu cả năm tính từ dữ liệu kế

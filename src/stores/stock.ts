@@ -42,7 +42,19 @@ export const useStockStore = defineStore("stock", () => {
     warehouse_code: string;
     unit_code: string;
     note: string;
-    items: { product_code: string; quantity: number; unit_price: number }[];
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      discount: number; // số tiền CK — giá trị nhập kho = Thành tiền − Tiền CK
+    }[];
+    inbound_type: string; // purchase | production | other
+    reference_no: string;
+    vat_rate: number;
+    debit_account: string;
+    credit_account: string;
+    /** Trả tiền ngay: tự tạo phiếu chi (PC) thanh toán cho nhà cung cấp. */
+    pay_now: boolean;
   }) {
     const res = await api.saveInbound(args);
     await Promise.all([loadEntries("PN"), loadSummary(), loadLots()]);
@@ -62,6 +74,8 @@ export const useStockStore = defineStore("stock", () => {
       unit_price: number;
       industry_code: string;
     }[];
+    /** Thu tiền ngay: tự tạo phiếu thu (PT) của khách hàng khi lưu. */
+    receive_now: boolean;
   }) {
     const res = await api.saveOutbound(args);
     await Promise.all([loadEntries("PX"), loadSummary(), loadLots()]);

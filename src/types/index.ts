@@ -385,6 +385,9 @@ export interface AppSettings {
   tax_period: string;
   /** Phương pháp tính thuế TNCN: "revenue" (theo doanh thu) | "profit" (theo lợi nhuận) */
   tax_method: string;
+  /** Khấu trừ thuế GTGT đầu vào (hộ nộp thuế theo lợi nhuận mới được khấu trừ).
+   *  Mặc định TẮT — theo doanh thu, giá nhập kho đã gồm thuế, không tách TK 133. */
+  vat_deduct: boolean;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───

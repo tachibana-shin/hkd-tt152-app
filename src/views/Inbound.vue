@@ -2,16 +2,65 @@
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
+import { useSettingsStore } from "@/stores/settings";
 import { useStockStore } from "@/stores/stock";
+import PartnerDialog from "@/components/PartnerDialog.vue";
+import { api } from "@/db";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import type { Account } from "@/types";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
 const auth = useAuthStore();
+const settings = useSettingsStore();
 const { products, suppliers, warehouses } = storeToRefs(catalog);
 const { entries, loading } = storeToRefs(stock);
 const toast = useToast();
 const router = useRouter();
+
+// Danh mục tài khoản (DMTK) — chọn TK Nợ / TK Có theo loại nhập.
+const accounts = ref<Account[]>([]);
+const accountOptions = computed(() =>
+  accounts.value.map((a) => ({
+    code: a.code,
+    label: `${a.code} — ${a.name}`,
+  })),
+);
+
+// Loại phiếu nhập kho (TT 88/2021/TT-BTC — mẫu 03-VT): Phiếu nhập kho áp dụng cho
+// MỌI trường hợp hàng vào kho — mua ngoài (hóa đơn/bảng kê), tự sản xuất, gia công,
+// nhập khác (thừa kiểm kê...) — không chỉ riêng mua hàng.
+const typeOptions = [
+  { label: "Mua hàng ngoài", value: "purchase" },
+  { label: "Tự sản xuất / gia công", value: "production" },
+  { label: "Nhập khác", value: "other" },
+];
+
+// Gợi ý nội dung ô "Theo chứng từ" (cột "Theo..." của mẫu 03-VT) theo loại nhập.
+const referencePlaceholder = computed(() =>
+  form.inbound_type === "production"
+    ? "Số lệnh nhập kho / lệnh sản xuất (VD: Lệnh SX 015)"
+    : form.inbound_type === "other"
+      ? "Số chứng từ nhập khác (VD: Biên bản kiểm kê 01)"
+      : "Số hóa đơn / bảng kê (VD: HĐ 170 ngày 16/01/2026)",
+);
+
+// Đổi TK mặc định theo loại nhập (vẫn sửa tay được):
+//   purchase  → Nợ 152 hàng hóa / Có 331 phải trả người bán
+//   production→ Nợ 155 thành phẩm / Có 154 chi phí SXKD dở dang
+//   other     → Nợ 152 / Có 154 (người dùng tự chọn theo nghiệp vụ)
+function onTypeChange() {
+  if (form.inbound_type === "production") {
+    form.debit_account = "155";
+    form.credit_account = "154";
+  } else if (form.inbound_type === "other") {
+    form.debit_account = "152";
+    form.credit_account = "154";
+  } else {
+    form.debit_account = "152";
+    form.credit_account = "331";
+  }
+}
 
 function printVoucher(row: { voucher_no: string }) {
   router.push("/print/" + encodeURIComponent(row.voucher_no));
@@ -27,7 +76,19 @@ const form = reactive({
   supplier_code: "",
   warehouse_code: "",
   note: "",
-  items: [] as { product_code: string; quantity: number; unit_price: number }[],
+  items: [] as {
+    product_code: string;
+    quantity: number;
+    unit_price: number;
+    discount: number; // số tiền CK (đ)
+  }[],
+  inbound_type: "purchase" as "purchase" | "production" | "other",
+  reference_no: "",
+  vat_rate: 0,
+  debit_account: "152",
+  credit_account: "331",
+  // Trả tiền ngay: bật mặc định — khi lưu tự tạo phiếu chi (PC) thanh toán cho NCC.
+  pay_now: true,
 });
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
@@ -49,34 +110,40 @@ function openCreate() {
     warehouse_code: warehouses.value[0]?.code ?? "",
     note: "",
     items: [],
+    inbound_type: "purchase",
+    reference_no: "",
+    vat_rate: 0,
+    debit_account: "152",
+    credit_account: "331",
+    pay_now: true,
   });
   nextVoucherNo();
   dialog.value = true;
 }
 
 function addRow() {
-  form.items.push({ product_code: "", quantity: 1, unit_price: 0 });
+  form.items.push({ product_code: "", quantity: 1, unit_price: 0, discount: 0 });
 }
 
 function removeRow(i: number) {
   form.items.splice(i, 1);
 }
 
+// ─── Thêm nhà cung cấp nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
+const supplierDialog = ref(false);
+
+function onSupplierSaved(code: string) {
+  form.supplier_code = code;
+}
+
 async function save() {
-  if (!form.posting_date || !form.items.length) {
+  // Kiểu nhập liên tục (pre-input) luôn để lại dòng trống cuối → bỏ dòng chưa chọn hàng.
+  const rows = form.items.filter((it) => it.product_code);
+  if (!form.posting_date || !rows.length) {
     toast.add({
       severity: "warn",
       summary: "Thiếu thông tin",
       detail: "Cần ngày và ít nhất 1 mặt hàng",
-    });
-    return;
-  }
-  const invalid = form.items.find((it) => !it.product_code);
-  if (invalid) {
-    toast.add({
-      severity: "warn",
-      summary: "Thiếu mã sản phẩm",
-      detail: "Chọn sản phẩm cho từng dòng",
     });
     return;
   }
@@ -91,13 +158,23 @@ async function save() {
         warehouse_code: form.warehouse_code,
         unit_code: "HKD",
         note: form.note,
-        items: form.items.map((it) => ({ ...it })),
+        items: rows.map((it) => ({ ...it })),
+        inbound_type: form.inbound_type,
+        reference_no: form.reference_no,
+        // % → tỷ lệ (0-1); backend tự bỏ qua thuế nếu hộ chưa bật khấu trừ GTGT.
+        vat_rate: form.vat_rate / 100,
+        debit_account: form.debit_account,
+        credit_account: form.credit_account,
+        // Trả tiền ngay: backend tự tạo + liên kết phiếu chi (PC) cho nhà cung cấp.
+        pay_now: form.pay_now,
       }),
     );
     toast.add({
       severity: "success",
       summary: `Đã nhập kho ${form.voucher_no}`,
-      detail: `Tổng tiền: ${fmt(res.total)} đ`,
+      detail: `Giá trị nhập kho: ${fmt(res.total)} đ${
+        res.vat ? ` · VAT khấu trừ: ${fmt(res.vat)} đ` : ""
+      }${res.pc_no ? ` · Đã tạo phiếu chi ${res.pc_no}` : ""}`,
     });
     dialog.value = false;
   } catch (e) {
@@ -108,7 +185,8 @@ async function save() {
 }
 
 onMounted(async () => {
-  await Promise.all([catalog.loadAll(), stock.loadEntries("PN")]);
+  await Promise.all([catalog.loadAll(), stock.loadEntries("PN"), settings.load()]);
+  accounts.value = await api.getAccounts();
 });
 </script>
 
@@ -184,15 +262,27 @@ onMounted(async () => {
       @action="save"
     >
       <div class="grid grid-cols-3 gap-4 py-2">
+        <FormField label="Loại nhập">
+          <Select
+            v-model="form.inbound_type"
+            :options="typeOptions"
+            optionLabel="label"
+            optionValue="value"
+            size="small"
+            class="w-full"
+            @change="onTypeChange"
+          />
+        </FormField>
         <FormField label="Ngày nhập">
           <DatePicker
             v-model="form.posting_date"
             dateFormat="dd/mm/yy"
+            size="small"
             class="w-full"
           />
         </FormField>
         <FormField label="Số phiếu">
-          <InputText v-model="form.voucher_no" disabled />
+          <InputText v-model="form.voucher_no" disabled size="small" />
         </FormField>
         <FormField label="Kho nhập">
           <Select
@@ -200,25 +290,105 @@ onMounted(async () => {
             :options="warehouses"
             optionLabel="name"
             optionValue="code"
+            size="small"
             class="w-full"
           />
         </FormField>
-        <FormField label="Nhà cung cấp" class="col-span-2">
-          <Select
-            v-model="form.supplier_code"
-            :options="suppliers"
-            optionLabel="name"
-            optionValue="code"
-            :editable="true"
-            filter
+        <FormField label="Theo chứng từ" class="col-span-2">
+          <InputText
+            v-model="form.reference_no"
+            :placeholder="referencePlaceholder"
+            size="small"
+          />
+        </FormField>
+        <FormField
+          v-if="form.inbound_type === 'purchase'"
+          label="Nhà cung cấp"
+          class="col-span-2"
+        >
+          <div class="flex gap-2">
+            <Select
+              v-model="form.supplier_code"
+              :options="suppliers"
+              optionLabel="name"
+              optionValue="code"
+              :editable="true"
+              filter
+              size="small"
+              class="w-full"
+              placeholder="Chọn hoặc nhập tên NCC"
+            />
+            <Button
+              v-if="auth.canStock"
+              icon="pi pi-plus"
+              text
+              rounded
+              severity="secondary"
+              aria-label="Thêm nhà cung cấp nhanh"
+              v-tooltip="'Thêm nhà cung cấp nhanh'"
+              @click="supplierDialog = true"
+            />
+          </div>
+        </FormField>
+        <FormField
+          v-if="form.inbound_type === 'purchase' && settings.deductVat"
+          label="Thuế GTGT đầu vào (%)"
+        >
+          <InputNumber
+            v-model="form.vat_rate"
+            :min="0"
+            :max="30"
+            suffix=" %"
+            size="small"
             class="w-full"
-            placeholder="Chọn hoặc nhập tên NCC"
+          />
+        </FormField>
+        <FormField label="TK Nợ (kho)">
+          <Select
+            v-model="form.debit_account"
+            :options="accountOptions"
+            option-label="label"
+            option-value="code"
+            filter
+            size="small"
+            class="w-full"
+          />
+        </FormField>
+        <FormField label="TK Có (đối ứng)">
+          <Select
+            v-model="form.credit_account"
+            :options="accountOptions"
+            option-label="label"
+            option-value="code"
+            filter
+            size="small"
+            class="w-full"
           />
         </FormField>
         <FormField label="Diễn giải">
-          <InputText v-model="form.description" />
+          <InputText v-model="form.description" size="small" />
+        </FormField>
+        <FormField
+          v-if="form.inbound_type === 'purchase'"
+          label="Trả tiền ngay"
+        >
+          <div class="flex h-full items-center gap-1.5">
+            <ToggleSwitch v-model="form.pay_now" class="shrink-0" />
+            <i
+              class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
+              v-tooltip="'Bật: khi lưu sẽ tự tạo phiếu chi (PC) thanh toán cho nhà cung cấp — cần chọn Nhà cung cấp.'"
+              aria-hidden="true"
+            />
+          </div>
         </FormField>
       </div>
+      <p class="mt-1 text-xs text-gray-400">
+        Mua hàng ngoài: Nợ 152 / Có 331 — nhập số tiền chiết khấu ở cột Tiền CK,
+        giá trị nhập kho = Thành tiền − Tiền CK. Tự sản xuất, gia công: nhập kho
+        thành phẩm theo lệnh sản xuất (Nợ 155 / Có 154). Nhập khác: tùy chọn TK
+        Nợ/Có (thừa kiểm kê, điều chỉnh…). Đơn giá nhập = giá sau chiết khấu,
+        chưa thuế khi bật khấu trừ GTGT, ngược lại là giá đã gồm thuế.
+      </p>
 
       <LineItemsEditor
         :items="form.items"
@@ -226,9 +396,23 @@ onMounted(async () => {
         :can-edit="auth.canStock"
         price-field="cost_price"
         show-amount
+        compact
+        show-add-product
+        :show-discount="form.inbound_type === 'purchase'"
+        :total-label="
+          form.inbound_type === 'purchase' ? 'Giá trị nhập kho:' : 'Tổng tiền:'
+        "
         @add="addRow"
         @remove="removeRow"
       />
     </AppDialog>
+
+    <!-- Thêm nhà cung cấp nhanh — dùng chung dialog chuẩn (tự sinh mã + tra cứu MST) -->
+    <PartnerDialog
+      v-model:visible="supplierDialog"
+      kind="supplier"
+      :show-action="auth.canStock"
+      @saved="onSupplierSaved"
+    />
   </div>
 </template>

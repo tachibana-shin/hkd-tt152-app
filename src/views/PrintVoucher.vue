@@ -20,8 +20,14 @@ const isInbound = computed(() => entryType.value === "PN");
 const title = computed(() => (isInbound.value ? "PHIẾU NHẬP KHO" : "PHIẾU XUẤT KHO"));
 const formNo = computed(() => (isInbound.value ? "01-VT" : "02-VT"));
 
+/** Dòng bảng in: khi in Phiếu nhập kho (PN), lọc bỏ bút toán tách thuế GTGT đầu vào
+ *  (dòng không có mã hàng, SL = 0) để bảng in chỉ hiển thị dòng hàng hóa thực nhập. */
+const displayRows = computed(() =>
+  isInbound.value ? rows.value.filter((r) => r.product_code !== "") : rows.value,
+);
+
 const total = computed(() =>
-  rows.value.reduce(
+  displayRows.value.reduce(
     (s, r) => s + (r.amount > 0 ? r.amount : r.quantity * r.unit_price),
     0,
   ),
@@ -227,7 +233,7 @@ onBeforeUnmount(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(r, i) in rows" :key="i">
+          <tr v-for="(r, i) in displayRows" :key="i">
             <td class="border border-black px-1 py-1 text-center">{{ i + 1 }}</td>
             <td class="border border-black px-1 py-1 break-words">
               {{ r.product_name || r.product_code }}

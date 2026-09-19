@@ -3,6 +3,7 @@ import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
+import PartnerDialog from "@/components/PartnerDialog.vue";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
 const catalog = useCatalogStore();
@@ -26,6 +27,8 @@ const form = reactive({
   description: "Phiếu xuất kho / bán hàng",
   customer_code: "",
   note: "",
+  // Thu tiền ngay: bật mặc định — khi lưu tự tạo phiếu thu (PT) thu tiền khách.
+  receive_now: true,
   items: [] as {
     product_code: string;
     quantity: number;
@@ -52,10 +55,18 @@ function openCreate() {
     description: "Phiếu xuất kho / bán hàng",
     customer_code: "",
     note: "",
+    receive_now: true,
     items: [],
   });
   nextVoucherNo();
   dialog.value = true;
+}
+
+// ─── Thêm khách hàng nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
+const customerDialog = ref(false);
+
+function onCustomerSaved(code: string) {
+  form.customer_code = code;
 }
 
 function addRow() {
@@ -73,7 +84,9 @@ function removeRow(i: number) {
 }
 
 async function save() {
-  if (!form.posting_date || !form.items.length) {
+  // Kiểu nhập liên tục (pre-input) luôn để lại dòng trống cuối → bỏ dòng chưa chọn hàng.
+  const rows = form.items.filter((it) => it.product_code);
+  if (!form.posting_date || !rows.length) {
     toast.add({
       severity: "warn",
       summary: "Thiếu thông tin",
@@ -81,9 +94,7 @@ async function save() {
     });
     return;
   }
-  const invalid = form.items.find(
-    (it) => !it.product_code || !it.industry_code,
-  );
+  const invalid = rows.find((it) => !it.industry_code);
   if (invalid) {
     toast.add({
       severity: "warn",
@@ -102,16 +113,20 @@ async function save() {
         customer_code: form.customer_code,
         unit_code: "HKD",
         note: form.note,
-        items: form.items.map((it) => ({
+        items: rows.map((it) => ({
           ...it,
           warehouse_code: it.warehouse_code ?? "", // showClear có thể trả null
         })),
+        // Thu tiền ngay: backend tự tạo + liên kết phiếu thu (PT) của khách hàng.
+        receive_now: form.receive_now,
       }),
     );
     toast.add({
       severity: "success",
       summary: `Đã xuất kho ${form.voucher_no}`,
-      detail: `Doanh thu: ${fmt(res.revenue)} đ • Lãi gộp: ${fmt(res.profit)} đ`,
+      detail: `Doanh thu: ${fmt(res.revenue)} đ • Lãi gộp: ${fmt(res.profit)} đ${
+        res.pt_no ? ` • Đã tạo phiếu thu ${res.pt_no}` : ""
+      }`,
     });
     dialog.value = false;
   } catch (e) {
@@ -211,29 +226,53 @@ onMounted(async () => {
           <DatePicker
             v-model="form.posting_date"
             dateFormat="dd/mm/yy"
+            size="small"
             class="w-full"
           />
         </FormField>
         <FormField label="Số phiếu">
-          <InputText v-model="form.voucher_no" disabled />
+          <InputText v-model="form.voucher_no" disabled size="small" />
         </FormField>
         <FormField label="Diễn giải">
-          <InputText v-model="form.description" />
+          <InputText v-model="form.description" size="small" />
         </FormField>
         <FormField label="Khách hàng" class="col-span-2">
-          <Select
-            v-model="form.customer_code"
-            :options="customers"
-            optionLabel="name"
-            optionValue="code"
-            :editable="true"
-            filter
-            class="w-full"
-            placeholder="Chọn hoặc nhập tên khách hàng"
-          />
+          <div class="flex gap-2">
+            <Select
+              v-model="form.customer_code"
+              :options="customers"
+              optionLabel="name"
+              optionValue="code"
+              :editable="true"
+              filter
+              size="small"
+              class="w-full"
+              placeholder="Chọn hoặc nhập tên khách hàng"
+            />
+            <Button
+              v-if="auth.canStock"
+              icon="pi pi-plus"
+              text
+              rounded
+              severity="secondary"
+              aria-label="Thêm khách hàng nhanh"
+              v-tooltip="'Thêm khách hàng nhanh'"
+              @click="customerDialog = true"
+            />
+          </div>
         </FormField>
         <FormField label="Ghi chú">
-          <InputText v-model="form.note" />
+          <InputText v-model="form.note" size="small" />
+        </FormField>
+        <FormField label="Thu tiền ngay">
+          <div class="flex h-full items-center gap-1.5">
+            <ToggleSwitch v-model="form.receive_now" class="shrink-0" />
+            <i
+              class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
+              v-tooltip="'Bật: khi lưu sẽ tự tạo phiếu thu (PT) thu tiền của khách hàng — cần chọn Khách hàng.'"
+              aria-hidden="true"
+            />
+          </div>
         </FormField>
       </div>
 
@@ -246,10 +285,20 @@ onMounted(async () => {
         price-field="sale_price"
         show-industry
         show-warehouse
+        pre-input
+        show-add-product
         info="Xuất FIFO theo kho đã chọn ở từng dòng; dòng bỏ trống kho sẽ lấy kho mặc định của sản phẩm."
         @add="addRow"
         @remove="removeRow"
       />
     </AppDialog>
+
+    <!-- Thêm khách hàng nhanh — dùng chung dialog chuẩn (tự sinh mã + tra cứu MST) -->
+    <PartnerDialog
+      v-model:visible="customerDialog"
+      kind="customer"
+      :show-action="auth.canStock"
+      @saved="onCustomerSaved"
+    />
   </div>
 </template>

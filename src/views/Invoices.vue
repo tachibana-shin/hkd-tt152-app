@@ -81,7 +81,9 @@ const statusBadge = {
 };
 
 async function save() {
-  if (!form.items.length || !form.customer) {
+  // Kiểu nhập liên tục (pre-input) luôn để lại dòng trống cuối → bỏ dòng chưa chọn hàng.
+  const rows = form.items.filter((it) => it.product_code);
+  if (!rows.length || !form.customer) {
     toast.add({
       severity: "warn",
       summary: "Thiếu thông tin",
@@ -97,7 +99,7 @@ async function save() {
         date: iso(form.date),
         customer: form.customer,
         customer_tax_code: form.customer_tax_code,
-        items: form.items.map((it) => ({ ...it })),
+        items: rows.map((it) => ({ ...it })),
       }),
     );
     toast.add({

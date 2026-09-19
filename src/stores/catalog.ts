@@ -53,6 +53,9 @@ export const useCatalogStore = defineStore("catalog", () => {
 
   async function saveProduct(p: Partial<Product>) {
     await api.saveProduct(p);
+    // Làm mới danh sách đầy đủ — thêm nhanh từ phiếu nhập cần dòng mới
+    // hiện ngay trong ô chọn sản phẩm (màn Sản phẩm lazy-load riêng).
+    products.value = await api.getProducts();
   }
 
   async function deleteProduct(id: number) {

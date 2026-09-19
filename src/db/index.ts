@@ -54,6 +54,7 @@ const SETTING_DEFAULTS: AppSettings = {
   product_min_stock: 0,
   tax_period: "quarter", // Kỳ khai thuế: year | quarter | month | per_occurrence
   tax_method: "revenue", // Phương pháp TNCN: revenue (theo doanh thu) | profit (theo lợi nhuận)
+  vat_deduct: false, // Khấu trừ GTGT đầu vào — mặc định TẮT (theo doanh thu)
 };
 
 // Backend lưu mọi thứ dưới dạng chuỗi → chuẩn hóa về kiểu AppSettings.
@@ -82,6 +83,7 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     product_min_stock: num("product_min_stock", SETTING_DEFAULTS.product_min_stock),
     tax_period: raw.tax_period || SETTING_DEFAULTS.tax_period,
     tax_method: raw.tax_method || SETTING_DEFAULTS.tax_method,
+    vat_deduct: raw.vat_deduct === "1",
   };
 }
 
@@ -248,7 +250,19 @@ export const api = {
     warehouse_code: string;
     unit_code: string;
     note: string;
-    items: { product_code: string; quantity: number; unit_price: number }[];
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      discount: number; // số tiền CK (đ) — giá trị nhập kho = Thành tiền − Tiền CK
+    }[];
+    inbound_type: string; // purchase | production | other
+    reference_no: string; // số hóa đơn / lệnh nhập kho (cột "Theo..." mẫu 03-VT)
+    vat_rate: number; // % GTGT đầu vào (0-1); chỉ khấu trừ khi bật vat_deduct
+    debit_account: string;
+    credit_account: string;
+    /** Trả tiền ngay: tự tạo phiếu chi (PC) thanh toán cho nhà cung cấp. */
+    pay_now: boolean;
   }) =>
     invoke<string>("save_inbound", {
       postingDate: args.posting_date,
@@ -259,6 +273,12 @@ export const api = {
       unitCode: args.unit_code,
       items: args.items,
       note: args.note,
+      inboundType: args.inbound_type,
+      referenceNo: args.reference_no,
+      vatRate: args.vat_rate,
+      debitAccount: args.debit_account,
+      creditAccount: args.credit_account,
+      payNow: args.pay_now,
     }),
 
   saveOutbound: (args: {
@@ -274,6 +294,8 @@ export const api = {
       unit_price: number;
       industry_code: string;
     }[];
+    /** Thu tiền ngay: tự tạo phiếu thu (PT) của khách hàng khi lưu. */
+    receive_now: boolean;
   }) =>
     invoke<string>("save_outbound", {
       postingDate: args.posting_date,
@@ -283,6 +305,7 @@ export const api = {
       unitCode: args.unit_code,
       items: args.items,
       note: args.note,
+      receiveNow: args.receive_now,
     }),
 
   getJournalEntries: (entryType = "", fromDate = "", toDate = "") =>
