@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stock_lot (product_id, warehouse_id, quantity, unit_cost, received_at, depleted)\n                 VALUES (?, ?, ?, ?, ?, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "81a884dd30b57f4a5c55555d811d87e98e8f4a3eea25b4676fa13ee8ef00a2b7"
+}

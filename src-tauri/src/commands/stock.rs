@@ -80,6 +80,7 @@ pub(crate) async fn save_inbound_core(
     debit_account: &str,
     credit_account: &str,
     pay_now: bool,
+    adjust_dir: &str,
 ) -> Result<InboundResult, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
@@ -111,22 +112,111 @@ pub(crate) async fn save_inbound_core(
     };
 
     for item in items {
-        let wh_id = resolve_warehouse(&mut tx, warehouse_code, &item.product_code).await?;
-        let product_id = resolve_product(&mut tx, &item.product_code).await?.id;
         // Giá trị nhập kho = Thành tiền − Tiền CK (chiết khấu thương mại).
         // VAT đầu vào tính trên giá sau chiết khấu (CK được trừ vào giá tính thuế).
         let gross = round2(item.quantity * item.unit_price);
         // Tiền CK không thể vượt quá thành tiền (tránh giá trị âm).
         let discount = round2(item.discount.clamp(0.0, gross));
         let net = round2(gross - discount);
-        // Đơn giá thực tế sau chiết khấu — dùng cho giá vốn FIFO và ghi sổ.
-        let unit_cost = round2(net / item.quantity);
         // Thuế GTGT đầu vào — chỉ hạch toán khi hộ được khấu trừ (vat_rate > 0).
         let vat = if vat_rate > 0.0 {
             round2(net * vat_rate)
         } else {
             0.0
         };
+
+        // ─── Điều chỉnh GIẢM hóa đơn mua (bên bán trừ bớt): hàng trả lại NCC ───
+        // Trừ FIFO khỏi lô (giảm tồn thực tế, giống xuất kho) + ghi sổ đảo ngược:
+        //   Nợ TK đối ứng (mặc định 331 — giảm phải trả NCC) / Có TK hàng (mặc
+        //   định 152 — giảm giá trị hàng mua). Nếu khấu trừ GTGT, thêm bút toán
+        //   Nợ 331 / Có 133 (giảm thuế GTGT đầu vào). Đánh dấu adjust_code =
+        //   'GiamCP' để báo cáo và màn Tồn kho hiểu đây là dòng điều chỉnh.
+        if inbound_type == "adjust" && adjust_dir == "down" {
+            let wh = resolve_warehouse(&mut tx, warehouse_code, &item.product_code).await?;
+            let product_id = resolve_product(&mut tx, &item.product_code).await?.id;
+            let lots: Vec<(i64, f64, f64)> = sqlx::query_as(
+                "SELECT id, quantity, unit_cost FROM stock_lot
+                 WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
+                 ORDER BY received_at ASC, id ASC",
+            )
+            .bind(product_id)
+            .bind(wh)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            let (_, takes) = allocate_fifo(&lots, item.quantity).map_err(|short| {
+                format!(
+                    "Không đủ tồn kho để điều chỉnh giảm '{}': thiếu {:.2} (còn thiếu sau khi trừ hết các lô)",
+                    item.product_code, short
+                )
+            })?;
+            for t in takes {
+                sqlx::query!(
+                    "UPDATE stock_lot SET quantity = ?, depleted = ? WHERE id = ?",
+                    t.new_qty,
+                    t.depleted,
+                    t.lot_id
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+            insert_journal_entry(
+                &mut tx,
+                posting_date,
+                voucher_no,
+                "PN",
+                description,
+                &item.product_code,
+                supplier_code,
+                "",
+                item.quantity,
+                item.unit_price,
+                net,
+                credit,
+                debit,
+                "",
+                0.0,
+                0.0,
+                unit_code,
+                "GiamCP",
+                &note_full,
+            )
+            .await?;
+            if vat > 0.0 {
+                insert_journal_entry(
+                    &mut tx,
+                    posting_date,
+                    voucher_no,
+                    "PN",
+                    description,
+                    "",
+                    supplier_code,
+                    "",
+                    0.0,
+                    0.0,
+                    vat,
+                    credit,
+                    "133",
+                    "",
+                    0.0,
+                    0.0,
+                    unit_code,
+                    "GiamCP",
+                    &note_full,
+                )
+                .await?;
+            }
+            total += net;
+            vat_total += vat;
+            continue;
+        }
+
+        // ─── Nhập kho thường (mua ngoài / tự sản xuất / điều chỉnh tăng / khác) ───
+        let wh_id = resolve_warehouse(&mut tx, warehouse_code, &item.product_code).await?;
+        let product_id = resolve_product(&mut tx, &item.product_code).await?.id;
+        // Đơn giá thực tế sau chiết khấu — dùng cho giá vốn FIFO và ghi sổ.
+        let unit_cost = round2(net / item.quantity);
         // tạo stock_lot FIFO — giá vốn = đơn giá thực tế sau chiết khấu (chưa thuế khi khấu trừ)
         sqlx::query!(
             "INSERT INTO stock_lot (product_id, warehouse_id, quantity, unit_cost, received_at, depleted)
@@ -324,11 +414,17 @@ pub(crate) async fn save_outbound_core(
     items: &[OutboundItemInput],
     note: &str,
     receive_now: bool,
+    outbound_type: &str,
+    adjust_dir: &str,
 ) -> Result<OutboundResult, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
     let mut revenue_total = 0.0;
     let mut cogs_total = 0.0;
+
+    // Điều chỉnh GIẢM hóa đơn bán (khách trả lại / giảm doanh thu): ghi đảo doanh
+    // thu và nhập lại hàng về kho, KHÔNG xuất FIFO và không tạo phiếu thu.
+    let is_adjust_down = outbound_type == "adjust" && adjust_dir == "down";
 
     for item in items {
         let product = resolve_product(&mut tx, &item.product_code).await?;
@@ -365,6 +461,12 @@ pub(crate) async fn save_outbound_core(
         // Sản phẩm dịch vụ (nhân công...): không theo dõi tồn kho → chỉ ghi doanh thu,
         // không xuất FIFO, không giá vốn.
         if product.is_service {
+            // Điều chỉnh giảm dịch vụ: chỉ giảm doanh thu (Nợ 511 / Có 131).
+            let (debit, credit, adjust) = if is_adjust_down {
+                ("511", "131", "GiamDT")
+            } else {
+                ("131", "511", "")
+            };
             insert_journal_entry(
                 &mut tx,
                 posting_date,
@@ -377,11 +479,78 @@ pub(crate) async fn save_outbound_core(
                 item.quantity,
                 item.unit_price,
                 amount,
-                "131",
-                "511",
+                debit,
+                credit,
                 &industry,
                 vat_rate,
                 pit_rate,
+                unit_code,
+                adjust,
+                note,
+            )
+            .await?;
+            revenue_total += amount;
+            continue;
+        }
+
+        // ─── Điều chỉnh GIẢM hóa đơn bán: khách trả lại / giảm doanh thu ───
+        // 1) Giảm doanh thu + giảm phải thu: Nợ 511 / Có 131 (PX, adjust = 'GiamDT').
+        // 2) Nhập lại hàng về kho (lô mới, giá vốn theo đơn giá điều chỉnh) + ghi
+        //    giảm giá vốn hàng bán: Nợ 152 / Có 632.
+        if is_adjust_down {
+            let wh_id =
+                resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
+            sqlx::query!(
+                "INSERT INTO stock_lot (product_id, warehouse_id, quantity, unit_cost, received_at, depleted)
+                 VALUES (?, ?, ?, ?, ?, 0)",
+                product.id,
+                wh_id,
+                item.quantity,
+                item.unit_price,
+                posting_date
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            insert_journal_entry(
+                &mut tx,
+                posting_date,
+                voucher_no,
+                "PX",
+                description,
+                &item.product_code,
+                "",
+                customer_code,
+                item.quantity,
+                item.unit_price,
+                amount,
+                "511",
+                "131",
+                &industry,
+                vat_rate,
+                pit_rate,
+                unit_code,
+                "GiamDT",
+                note,
+            )
+            .await?;
+            insert_journal_entry(
+                &mut tx,
+                posting_date,
+                voucher_no,
+                "PN",
+                description,
+                &item.product_code,
+                "",
+                "",
+                item.quantity,
+                item.unit_price,
+                amount,
+                "152",
+                "632",
+                "",
+                0.0,
+                0.0,
                 unit_code,
                 "",
                 note,
@@ -458,9 +627,10 @@ pub(crate) async fn save_outbound_core(
     // Công tắc "Thu tiền ngay" (mặc định BẬT): bán hàng có khách hàng → tự tạo
     // phiếu thu (PT) trong cùng transaction: Nợ 111 tiền mặt / Có 131 phải thu
     // khách hàng. Số tiền = tổng doanh thu của PX. Liên kết qua ghi chú chứa số
-    // PX + mã khách hàng. Không tạo khi chưa chọn khách hàng (chưa biết thu của ai).
+    // PX + mã khách hàng. Không tạo khi chưa chọn khách hàng (chưa biết thu của ai)
+    // hoặc khi là phiếu điều chỉnh hóa đơn (không thu tiền mới).
     let mut pt_no = String::new();
-    if receive_now && !customer_code.trim().is_empty() {
+    if receive_now && outbound_type == "sale" && !customer_code.trim().is_empty() {
         let collect = round2(revenue_total);
         if collect > 0.0 {
             pt_no = next_pt_no(&mut tx).await?;
@@ -526,6 +696,7 @@ pub(crate) async fn save_inbound(
     debit_account: String,
     credit_account: String,
     pay_now: bool,
+    adjust_dir: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     if items.is_empty() {
@@ -536,9 +707,23 @@ pub(crate) async fn save_inbound(
     } else {
         &inbound_type
     };
-    if inbound_type != "purchase" && inbound_type != "production" && inbound_type != "other" {
-        return Err("Loại nhập không hợp lệ (purchase | production | other)".into());
+    if inbound_type != "purchase"
+        && inbound_type != "production"
+        && inbound_type != "other"
+        && inbound_type != "adjust"
+    {
+        return Err("Loại nhập không hợp lệ (purchase | production | other | adjust)".into());
     }
+    // Hướng điều chỉnh chỉ có ý nghĩa với loại nhập "adjust":
+    //   down = giảm (bên bán trừ bớt — trả lại NCC), up = tăng (bên bán thêm).
+    let adjust_dir = if inbound_type == "adjust" {
+        if adjust_dir != "down" && adjust_dir != "up" {
+            return Err("Hướng điều chỉnh không hợp lệ (down | up)".into());
+        }
+        adjust_dir.as_str()
+    } else {
+        ""
+    };
     // Công tắc "khấu trừ GTGT đầu vào" (mặc định TẮT) — tắt thì bỏ qua thuế nhập
     // kể cả khi form gửi lên (hộ nộp thuế theo doanh thu không được khấu trừ).
     let pool = state.pool.read().await;
@@ -609,6 +794,7 @@ pub(crate) async fn save_inbound(
         debit,
         credit,
         pay_now,
+        adjust_dir,
     )
     .await?;
     audit(&state, "save", "inbound", &voucher_no).await;
@@ -635,19 +821,40 @@ pub(crate) async fn save_outbound(
     items: Vec<OutboundItemInput>,
     note: String,
     receive_now: bool,
+    outbound_type: String,
+    adjust_dir: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     if items.is_empty() {
         return Err("Chưa có mặt hàng nào trong phiếu xuất".into());
     }
+    // Loại xuất: "sale" (bán hàng, mặc định) | "adjust" (điều chỉnh hóa đơn bán).
+    // Hướng điều chỉnh (khi adjust): down = khách trả lại/giảm doanh thu, up = tăng.
+    let outbound_type = if outbound_type.is_empty() {
+        "sale"
+    } else {
+        &outbound_type
+    };
+    if outbound_type != "sale" && outbound_type != "adjust" {
+        return Err("Loại xuất không hợp lệ (sale | adjust)".into());
+    }
+    let adjust_dir = if outbound_type == "adjust" {
+        if adjust_dir != "down" && adjust_dir != "up" {
+            return Err("Hướng điều chỉnh không hợp lệ (down | up)".into());
+        }
+        adjust_dir.as_str()
+    } else {
+        ""
+    };
     let unit_code = if unit_code.is_empty() {
         "HKD".to_string()
     } else {
         unit_code
     };
     // "Thu tiền ngay": phiếu thu tự tạo ghi Nợ 111 tiền mặt → TK này phải có
-    // trong danh mục (chỉ khi có khách hàng — chưa biết thu của ai thì không tạo).
-    if receive_now && !customer_code.trim().is_empty() {
+    // trong danh mục (chỉ khi có khách hàng — chưa biết thu của ai thì không tạo,
+    // và không tạo cho phiếu điều chỉnh hóa đơn).
+    if receive_now && outbound_type == "sale" && !customer_code.trim().is_empty() {
         let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM account WHERE code = '111'")
             .fetch_one(&*state.pool.read().await)
             .await
@@ -670,6 +877,8 @@ pub(crate) async fn save_outbound(
             &items,
             &note,
             receive_now,
+            outbound_type,
+            adjust_dir,
         )
         .await?
     };
@@ -896,6 +1105,8 @@ mod tests {
             &[out("P1", 15.0, 2000.0)],
             "",
             false,
+            "sale",
+            "",
         )
         .await
         .expect("xuất kho");
@@ -952,6 +1163,8 @@ mod tests {
             &[out("P1", 8.0, 2000.0)],
             "",
             false,
+            "sale",
+            "",
         )
         .await
         .unwrap_err();
@@ -985,6 +1198,8 @@ mod tests {
             &[out_wh("P1", 3.0, 2000.0, "W2")],
             "",
             false,
+            "sale",
+            "",
         )
         .await
         .expect("xuất đúng kho W2");
@@ -1010,6 +1225,8 @@ mod tests {
             &[out_wh("P1", 1.0, 2000.0, "W2")],
             "",
             false,
+            "sale",
+            "",
         )
         .await
         .unwrap_err();
@@ -1046,6 +1263,8 @@ mod tests {
             }],
             "",
             false,
+            "sale",
+            "",
         )
         .await
         .expect("xuất dịch vụ không cần tồn kho");
@@ -1103,6 +1322,8 @@ mod tests {
             &[out_wh("P1", 5.0, 2000.0, "W1")],
             "",
             true,
+            "sale",
+            "",
         )
         .await
         .expect("xuất kho thu tiền ngay");
@@ -1144,6 +1365,8 @@ mod tests {
             &[out_wh("P1", 1.0, 1000.0, "W1")],
             "",
             true,
+            "sale",
+            "",
         )
         .await
         .expect("xuất kho 2");
@@ -1168,6 +1391,8 @@ mod tests {
             &[out_wh("P1", 1.0, 1000.0, "W1")],
             "",
             true,
+            "sale",
+            "",
         )
         .await
         .expect("xuất kho");
@@ -1202,6 +1427,7 @@ mod tests {
             "152",
             "331",
             false,
+            "",
         )
         .await
         .expect("nhập kho");
@@ -1251,6 +1477,7 @@ mod tests {
             "152",
             "331",
             false,
+            "",
         )
         .await
         .expect("nhập kho khấu trừ");
@@ -1308,6 +1535,7 @@ mod tests {
             "155",
             "154",
             false,
+            "",
         )
         .await
         .expect("nhập kho sản xuất");
@@ -1360,6 +1588,7 @@ mod tests {
             "152",
             "331",
             false,
+            "",
         )
         .await
         .expect("nhập kho chiết khấu");
@@ -1411,6 +1640,7 @@ mod tests {
             "152",
             "331",
             true,
+            "",
         )
         .await
         .expect("nhập kho trả tiền ngay");
@@ -1459,6 +1689,7 @@ mod tests {
             "152",
             "331",
             true,
+            "",
         )
         .await
         .expect("nhập kho 2");
@@ -1488,6 +1719,7 @@ mod tests {
             "152",
             "331",
             true,
+            "",
         )
         .await
         .expect("nhập kho");
@@ -1521,12 +1753,311 @@ mod tests {
             "152",
             "111",
             true,
+            "",
         )
         .await
         .expect("nhập kho");
         assert_eq!(r.pc_no, "");
         assert_eq!(
             scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PC'").await,
+            0
+        );
+    }
+
+    // ─── Điều chỉnh hóa đơn mua (inbound_type = "adjust") ───
+
+    // Giảm (down): bên bán trừ bớt → trả lại NCC. Không tạo lô mới — trừ FIFO khỏi
+    // lô theo ngày nhập + ghi sổ đảo ngược: Nợ TK đối ứng (331) / Có TK hàng (152),
+    // kèm giảm thuế GTGT đầu vào (Nợ 331 / Có 133) khi khấu trừ.
+    #[tokio::test]
+    async fn nhap_kho_dieu_chinh_giam_tra_lai_ncc() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+        add_stock_lot(&pool, p, w, 10.0, 1200.0, "2026-02-01").await;
+
+        // Trả lại NCC 5 (đơn giá 1.000) → trừ FIFO lô đầu (5/10), ghi đảo ngược, VAT 10%.
+        let r = save_inbound_core(
+            &pool,
+            "2026-06-01",
+            "PNK-DC01",
+            "Điều chỉnh hóa đơn mua (trả lại NCC)",
+            "NCC1",
+            "W1",
+            "HKD",
+            &[inp("P1", 5.0, 1_000.0)],
+            "",
+            "adjust",
+            "HĐĐC 01",
+            0.1,
+            "152",
+            "331",
+            false,
+            "down",
+        )
+        .await
+        .expect("điều chỉnh giảm hóa đơn mua");
+
+        assert_eq!(r.entries, 1); // số dòng mặt hàng
+        assert_eq!(r.total, 5_000.0);
+        assert_eq!(r.vat, 500.0); // 5.000 × 10%
+
+        // Tồn giảm xuống 15 — KHÔNG tạo lô mới
+        assert_eq!(
+            scalar_f64(&pool, "SELECT SUM(quantity) FROM stock_lot").await,
+            15.0
+        );
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await, 2);
+        let (q1,): (f64,) =
+            sqlx::query_as("SELECT quantity FROM stock_lot ORDER BY received_at ASC LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(q1, 5.0); // lô đầu trừ 5
+
+        // Sổ đảo ngược: Nợ 331 / Có 152 (hàng) + Nợ 331 / Có 133 (thuế), adjust = GiamCP
+        let (debit, credit, adj): (String, String, String) = sqlx::query_as(
+            "SELECT debit_account, credit_account, adjust_code FROM journal_entry
+             WHERE voucher_no = 'PNK-DC01' AND debit_account = '331' AND credit_account = '152'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (debit.as_str(), credit.as_str(), adj.as_str()),
+            ("331", "152", "GiamCP")
+        );
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT COALESCE(SUM(amount),0) FROM journal_entry
+                 WHERE voucher_no = 'PNK-DC01' AND credit_account = '133'"
+            )
+            .await,
+            500.0
+        );
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'PNK-DC01' AND adjust_code = 'GiamCP'"
+            )
+            .await,
+            2
+        );
+    }
+
+    // Giảm nhưng không đủ tồn → báo lỗi và rollback toàn bộ.
+    #[tokio::test]
+    async fn nhap_kho_dieu_chinh_giam_thieu_ton_bao_loi() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 3.0, 1000.0, "2026-01-01").await;
+
+        let err = save_inbound_core(
+            &pool,
+            "2026-06-02",
+            "PNK-DC02",
+            "Trả lại NCC",
+            "NCC1",
+            "W1",
+            "HKD",
+            &[inp("P1", 5.0, 1_000.0)],
+            "",
+            "adjust",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "down",
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Không đủ tồn kho"));
+
+        // Rollback: không ghi bút toán, lô giữ nguyên
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry").await, 0);
+        assert_eq!(scalar_f64(&pool, "SELECT quantity FROM stock_lot").await, 3.0);
+    }
+
+    // Tăng (up): bên bán thêm → nhập kho như phiếu thường (Nợ 152 / Có 331).
+    #[tokio::test]
+    async fn nhap_kho_dieu_chinh_tang_nhap_nhu_thuong() {
+        let pool = test_pool().await;
+        seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        seed_warehouse(&pool, "W1", "Kho 1").await;
+
+        let r = save_inbound_core(
+            &pool,
+            "2026-06-03",
+            "PNK-DC03",
+            "Điều chỉnh hóa đơn mua (tăng)",
+            "NCC1",
+            "W1",
+            "HKD",
+            &[inp("P1", 4.0, 2_000.0)],
+            "",
+            "adjust",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "up",
+        )
+        .await
+        .expect("điều chỉnh tăng hóa đơn mua");
+
+        assert_eq!(r.entries, 1);
+        assert_eq!(r.total, 8_000.0);
+        assert_eq!(r.vat, 0.0);
+        assert_eq!(
+            scalar_f64(&pool, "SELECT SUM(quantity) FROM stock_lot").await,
+            4.0
+        );
+        let (debit, credit): (String, String) = sqlx::query_as(
+            "SELECT debit_account, credit_account FROM journal_entry WHERE voucher_no = 'PNK-DC03'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((debit.as_str(), credit.as_str()), ("152", "331"));
+    }
+
+    // ─── Điều chỉnh hóa đơn bán (outbound_type = "adjust") ───
+
+    // Giảm (down): khách trả lại → nhập lại hàng về kho (lô mới theo đơn giá điều
+    // chỉnh), giảm doanh thu (Nợ 511 / Có 131, adjust = GiamDT) + giảm giá vốn
+    // (Nợ 152 / Có 632). Không xuất FIFO, không tạo phiếu thu.
+    #[tokio::test]
+    async fn xuat_kho_dieu_chinh_giam_khach_tra_lai() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+
+        let r = save_outbound_core(
+            &pool,
+            "2026-06-10",
+            "PXK-DC01",
+            "Điều chỉnh hóa đơn bán (khách trả lại)",
+            "KH1",
+            "HKD",
+            &[out_wh("P1", 3.0, 2000.0, "W1")],
+            "",
+            false,
+            "adjust",
+            "down",
+        )
+        .await
+        .expect("điều chỉnh giảm hóa đơn bán");
+
+        assert_eq!(r.entries, 1); // số dòng mặt hàng
+        assert_eq!(r.revenue, 6_000.0);
+        assert_eq!(r.cogs, 0.0); // không xuất FIFO
+        assert_eq!(r.pt_no, "");
+
+        // Tồn tăng +3 (lô mới, đơn giá 2.000 = đơn giá điều chỉnh)
+        assert_eq!(
+            scalar_f64(&pool, "SELECT SUM(quantity) FROM stock_lot").await,
+            23.0
+        );
+        assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await, 2);
+        let (cost,): (f64,) =
+            sqlx::query_as("SELECT unit_cost FROM stock_lot ORDER BY id DESC LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cost, 2000.0);
+
+        // PX: Nợ 511 / Có 131 (giảm doanh thu), adjust = GiamDT
+        let (debit, credit, adj): (String, String, String) = sqlx::query_as(
+            "SELECT debit_account, credit_account, adjust_code FROM journal_entry
+             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PX'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (debit.as_str(), credit.as_str(), adj.as_str()),
+            ("511", "131", "GiamDT")
+        );
+        // PN: Nợ 152 / Có 632 (nhập lại hàng, giảm giá vốn)
+        let (debit, credit): (String, String) = sqlx::query_as(
+            "SELECT debit_account, credit_account FROM journal_entry
+             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PN'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((debit.as_str(), credit.as_str()), ("152", "632"));
+    }
+
+    // Điều chỉnh giảm — kể cả "thu tiền ngay = true" cũng KHÔNG tạo phiếu thu.
+    #[tokio::test]
+    async fn xuat_kho_dieu_chinh_giam_khong_tao_phieu_thu() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+
+        let r = save_outbound_core(
+            &pool,
+            "2026-06-11",
+            "PXK-DC02",
+            "Điều chỉnh hóa đơn bán",
+            "KH1",
+            "HKD",
+            &[out_wh("P1", 1.0, 2000.0, "W1")],
+            "",
+            true,
+            "adjust",
+            "down",
+        )
+        .await
+        .expect("điều chỉnh");
+        assert_eq!(r.pt_no, "");
+        assert_eq!(
+            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'").await,
+            0
+        );
+    }
+
+    // Tăng (up): ghi doanh thu như phiếu bán thường (FIFO), nhưng không tạo PT.
+    #[tokio::test]
+    async fn xuat_kho_dieu_chinh_tang_ghi_doanh_thu_khong_tao_pt() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+
+        let r = save_outbound_core(
+            &pool,
+            "2026-06-12",
+            "PXK-DC03",
+            "Điều chỉnh hóa đơn bán (tăng)",
+            "KH1",
+            "HKD",
+            &[out_wh("P1", 2.0, 3000.0, "W1")],
+            "",
+            true,
+            "adjust",
+            "up",
+        )
+        .await
+        .expect("điều chỉnh tăng hóa đơn bán");
+
+        assert_eq!(r.revenue, 6_000.0);
+        assert_eq!(r.cogs, 2_000.0); // xuất FIFO bình thường
+        assert_eq!(r.pt_no, "");
+        assert_eq!(
+            scalar_f64(&pool, "SELECT SUM(quantity) FROM stock_lot").await,
+            18.0
+        );
+        assert_eq!(
+            scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PT'").await,
             0
         );
     }

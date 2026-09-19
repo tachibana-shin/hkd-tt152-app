@@ -434,9 +434,12 @@ pub(crate) async fn get_inventory_summary(state: State<'_, AppState>) -> Result<
             p.code AS product_code,
             p.name AS product_name,
             p.unit,
-            COALESCE(SUM(CASE WHEN je.entry_type = 'PN' AND je.adjust_code != 'GiamCP' THEN je.quantity ELSE 0.0 END), 0.0) AS inbound,
+            COALESCE(SUM(CASE WHEN je.entry_type = 'PN' AND je.adjust_code != 'GiamCP' THEN je.quantity ELSE 0.0 END), 0.0)
+              - COALESCE(SUM(CASE WHEN je.entry_type = 'PN' AND je.adjust_code = 'GiamCP' THEN je.quantity ELSE 0.0 END), 0.0) AS inbound,
             COALESCE(SUM(CASE WHEN je.entry_type = 'PX' AND je.adjust_code != 'GiamDT' THEN je.quantity ELSE 0.0 END), 0.0) AS outbound,
-            (COALESCE(SUM(CASE WHEN je.entry_type = 'PN' AND je.adjust_code != 'GiamCP' THEN je.quantity ELSE 0.0 END), 0.0) - COALESCE(SUM(CASE WHEN je.entry_type = 'PX' AND je.adjust_code != 'GiamDT' THEN je.quantity ELSE 0.0 END), 0.0)) AS balance
+            (COALESCE(SUM(CASE WHEN je.entry_type = 'PN' AND je.adjust_code != 'GiamCP' THEN je.quantity ELSE 0.0 END), 0.0)
+              - COALESCE(SUM(CASE WHEN je.entry_type = 'PN' AND je.adjust_code = 'GiamCP' THEN je.quantity ELSE 0.0 END), 0.0)
+              - COALESCE(SUM(CASE WHEN je.entry_type = 'PX' AND je.adjust_code != 'GiamDT' THEN je.quantity ELSE 0.0 END), 0.0)) AS balance
          FROM product p
          LEFT JOIN journal_entry je ON je.product_code = p.code
          GROUP BY p.code

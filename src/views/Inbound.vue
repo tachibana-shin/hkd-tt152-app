@@ -34,6 +34,14 @@ const typeOptions = [
   { label: "Mua hàng ngoài", value: "purchase" },
   { label: "Tự sản xuất / gia công", value: "production" },
   { label: "Nhập khác", value: "other" },
+  { label: "Điều chỉnh hóa đơn mua", value: "adjust" },
+];
+
+// "Hướng điều chỉnh" chỉ xuất hiện với loại "adjust": bên bán trừ bớt (down —
+// trả lại NCC, giảm tồn + giảm phải trả) hoặc bên bán thêm (up — nhập như thường).
+const adjustDirOptions = [
+  { label: "Tăng (bên bán thêm)", value: "up" },
+  { label: "Giảm (trả lại NCC)", value: "down" },
 ];
 
 // Gợi ý nội dung ô "Theo chứng từ" (cột "Theo..." của mẫu 03-VT) theo loại nhập.
@@ -42,13 +50,17 @@ const referencePlaceholder = computed(() =>
     ? "Số lệnh nhập kho / lệnh sản xuất (VD: Lệnh SX 015)"
     : form.inbound_type === "other"
       ? "Số chứng từ nhập khác (VD: Biên bản kiểm kê 01)"
-      : "Số hóa đơn / bảng kê (VD: HĐ 170 ngày 16/01/2026)",
+      : form.inbound_type === "adjust"
+        ? "Số hóa đơn / chứng từ điều chỉnh (VD: HĐĐC 01 ngày 20/01/2026)"
+        : "Số hóa đơn / bảng kê (VD: HĐ 170 ngày 16/01/2026)",
 );
 
 // Đổi TK mặc định theo loại nhập (vẫn sửa tay được):
 //   purchase  → Nợ 152 hàng hóa / Có 331 phải trả người bán
 //   production→ Nợ 155 thành phẩm / Có 154 chi phí SXKD dở dang
 //   other     → Nợ 152 / Có 154 (người dùng tự chọn theo nghiệp vụ)
+//   adjust    → Nợ 152 / Có 331 (với hướng "Giảm" backend sẽ đảo ngược:
+//               Nợ TK đối ứng / Có 152 giảm hàng trả lại).
 function onTypeChange() {
   if (form.inbound_type === "production") {
     form.debit_account = "155";
@@ -82,11 +94,15 @@ const form = reactive({
     unit_price: number;
     discount: number; // số tiền CK (đ)
   }[],
-  inbound_type: "purchase" as "purchase" | "production" | "other",
+  inbound_type: "purchase" as "purchase" | "production" | "other" | "adjust",
   reference_no: "",
   vat_rate: 0,
   debit_account: "152",
   credit_account: "331",
+  // Hướng điều chỉnh hóa đơn mua (chỉ dùng khi loại = "adjust"):
+  //   up   = bên bán thêm → nhập kho như phiếu thường
+  //   down = bên bán trừ bớt → trả lại NCC, giảm tồn + giảm phải trả
+  adjust_dir: "up" as "up" | "down",
   // Trả tiền ngay: bật mặc định — khi lưu tự tạo phiếu chi (PC) thanh toán cho NCC.
   pay_now: true,
 });
@@ -115,6 +131,7 @@ function openCreate() {
     vat_rate: 0,
     debit_account: "152",
     credit_account: "331",
+    adjust_dir: "up",
     pay_now: true,
   });
   nextVoucherNo();
@@ -167,6 +184,7 @@ async function save() {
         credit_account: form.credit_account,
         // Trả tiền ngay: backend tự tạo + liên kết phiếu chi (PC) cho nhà cung cấp.
         pay_now: form.pay_now,
+        adjust_dir: form.adjust_dir,
       }),
     );
     toast.add({
@@ -271,6 +289,19 @@ onMounted(async () => {
             size="small"
             class="w-full"
             @change="onTypeChange"
+          />
+        </FormField>
+        <FormField
+          v-if="form.inbound_type === 'adjust'"
+          label="Hướng điều chỉnh"
+        >
+          <Select
+            v-model="form.adjust_dir"
+            :options="adjustDirOptions"
+            optionLabel="label"
+            optionValue="value"
+            size="small"
+            class="w-full"
           />
         </FormField>
         <FormField label="Ngày nhập">
@@ -388,6 +419,9 @@ onMounted(async () => {
         thành phẩm theo lệnh sản xuất (Nợ 155 / Có 154). Nhập khác: tùy chọn TK
         Nợ/Có (thừa kiểm kê, điều chỉnh…). Đơn giá nhập = giá sau chiết khấu,
         chưa thuế khi bật khấu trừ GTGT, ngược lại là giá đã gồm thuế.
+        Điều chỉnh hóa đơn mua — Giảm: trả lại NCC, trừ lô FIFO theo ngày nhập,
+        ghi Nợ TK đối ứng / Có TK hàng (kèm giảm thuế 133 nếu khấu trừ); Tăng:
+        nhập kho như phiếu thường.
       </p>
 
       <LineItemsEditor

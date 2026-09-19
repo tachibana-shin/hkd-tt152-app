@@ -27,6 +27,12 @@ const form = reactive({
   description: "Phiếu xuất kho / bán hàng",
   customer_code: "",
   note: "",
+  // Loại xuất: "sale" (bán hàng, mặc định) | "adjust" (điều chỉnh hóa đơn bán).
+  outbound_type: "sale" as "sale" | "adjust",
+  // Hướng điều chỉnh (chỉ dùng khi loại = "adjust"):
+  //   down = khách trả lại / giảm doanh thu (nhập lại hàng về kho)
+  //   up   = tăng thêm doanh thu
+  adjust_dir: "up" as "up" | "down",
   // Thu tiền ngay: bật mặc định — khi lưu tự tạo phiếu thu (PT) thu tiền khách.
   receive_now: true,
   items: [] as {
@@ -37,6 +43,27 @@ const form = reactive({
     warehouse_code: string;
   }[],
 });
+
+const typeOptions = [
+  { label: "Bán hàng", value: "sale" },
+  { label: "Điều chỉnh hóa đơn bán", value: "adjust" },
+];
+
+const adjustDirOptions = [
+  { label: "Tăng (tăng doanh thu)", value: "up" },
+  { label: "Giảm (khách trả lại)", value: "down" },
+];
+
+function onTypeChange() {
+  // Phiếu điều chỉnh hóa đơn không thu tiền mới → tắt "Thu tiền ngay".
+  if (form.outbound_type === "adjust") {
+    form.receive_now = false;
+    form.description = "Điều chỉnh hóa đơn bán";
+  } else {
+    form.receive_now = true;
+    form.description = "Phiếu xuất kho / bán hàng";
+  }
+}
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
@@ -55,6 +82,8 @@ function openCreate() {
     description: "Phiếu xuất kho / bán hàng",
     customer_code: "",
     note: "",
+    outbound_type: "sale",
+    adjust_dir: "up",
     receive_now: true,
     items: [],
   });
@@ -117,8 +146,11 @@ async function save() {
           ...it,
           warehouse_code: it.warehouse_code ?? "", // showClear có thể trả null
         })),
-        // Thu tiền ngay: backend tự tạo + liên kết phiếu thu (PT) của khách hàng.
-        receive_now: form.receive_now,
+        // Thu tiền ngay: backend tự tạo + liên kết phiếu thu (PT) của khách hàng
+        // (chỉ với phiếu bán hàng; phiếu điều chỉnh không thu tiền mới).
+        receive_now: form.outbound_type === "sale" && form.receive_now,
+        outbound_type: form.outbound_type,
+        adjust_dir: form.adjust_dir,
       }),
     );
     toast.add({
@@ -214,7 +246,11 @@ onMounted(async () => {
 
     <AppDialog
       v-model:visible="dialog"
-      header="Tạo phiếu xuất kho / Bán hàng"
+      :header="
+        form.outbound_type === 'adjust'
+          ? 'Tạo phiếu điều chỉnh hóa đơn bán'
+          : 'Tạo phiếu xuất kho / Bán hàng'
+      "
       width="max-w-3xl"
       action-label="Lưu phiếu"
       :saving="saving"
@@ -222,6 +258,30 @@ onMounted(async () => {
       @action="save"
     >
       <div class="grid grid-cols-3 gap-4 py-2">
+        <FormField label="Loại xuất">
+          <Select
+            v-model="form.outbound_type"
+            :options="typeOptions"
+            optionLabel="label"
+            optionValue="value"
+            size="small"
+            class="w-full"
+            @change="onTypeChange"
+          />
+        </FormField>
+        <FormField
+          v-if="form.outbound_type === 'adjust'"
+          label="Hướng điều chỉnh"
+        >
+          <Select
+            v-model="form.adjust_dir"
+            :options="adjustDirOptions"
+            optionLabel="label"
+            optionValue="value"
+            size="small"
+            class="w-full"
+          />
+        </FormField>
         <FormField label="Ngày xuất">
           <DatePicker
             v-model="form.posting_date"
@@ -264,7 +324,10 @@ onMounted(async () => {
         <FormField label="Ghi chú">
           <InputText v-model="form.note" size="small" />
         </FormField>
-        <FormField label="Thu tiền ngay">
+        <FormField
+          v-if="form.outbound_type === 'sale'"
+          label="Thu tiền ngay"
+        >
           <div class="flex h-full items-center gap-1.5">
             <ToggleSwitch v-model="form.receive_now" class="shrink-0" />
             <i

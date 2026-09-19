@@ -263,6 +263,8 @@ export const api = {
     credit_account: string;
     /** Trả tiền ngay: tự tạo phiếu chi (PC) thanh toán cho nhà cung cấp. */
     pay_now: boolean;
+    /** Hướng điều chỉnh khi loại nhập = "adjust": up = bên bán thêm hàng, down = bên bán trừ bớt (trả lại NCC). */
+    adjust_dir: "" | "up" | "down";
   }) =>
     invoke<string>("save_inbound", {
       postingDate: args.posting_date,
@@ -279,6 +281,7 @@ export const api = {
       debitAccount: args.debit_account,
       creditAccount: args.credit_account,
       payNow: args.pay_now,
+      adjustDir: args.adjust_dir,
     }),
 
   saveOutbound: (args: {
@@ -296,6 +299,10 @@ export const api = {
     }[];
     /** Thu tiền ngay: tự tạo phiếu thu (PT) của khách hàng khi lưu. */
     receive_now: boolean;
+    /** Loại xuất: "sale" (bán hàng) | "adjust" (điều chỉnh hóa đơn bán). */
+    outbound_type: "" | "sale" | "adjust";
+    /** Hướng điều chỉnh khi loại xuất = "adjust": down = khách trả lại/giảm doanh thu, up = tăng. */
+    adjust_dir: "" | "up" | "down";
   }) =>
     invoke<string>("save_outbound", {
       postingDate: args.posting_date,
@@ -306,6 +313,8 @@ export const api = {
       items: args.items,
       note: args.note,
       receiveNow: args.receive_now,
+      outboundType: args.outbound_type,
+      adjustDir: args.adjust_dir,
     }),
 
   getJournalEntries: (entryType = "", fromDate = "", toDate = "") =>
