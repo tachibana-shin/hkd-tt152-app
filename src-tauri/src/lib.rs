@@ -150,6 +150,8 @@ pub fn run() {
             commands::profile::select_profile,
             commands::settings::get_app_settings,
             commands::settings::save_app_settings,
+            crate::web::web_url,
+            crate::web::set_web_server,
             commands::tax_lookup::lookup_tax_code,
             commands::tax_lookup::lookup_tax_detail,
             commands::stock::save_inbound,

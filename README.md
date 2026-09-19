@@ -128,10 +128,14 @@ cd src-tauri && cargo build --release
 
 ### 🌐 Dùng app qua trình duyệt (Chrome)
 
-Bản production vừa chạy vừa mở sẵn một **web server local** (chỉ `127.0.0.1`):
+App có sẵn một **web server local** (chỉ `127.0.0.1`) vừa serve frontend vừa phơi REST API:
 
+- **Bật/tắt:** bản production (release) **mặc định TẮT** vì lý do bảo mật — bật trong
+  **Cài đặt → "Dùng app qua trình duyệt (Chrome)"** (toggle áp dụng ngay, không cần khởi động
+  lại; chỉ thao tác được từ **cửa sổ app desktop**). Bản dev chạy `bun run tauri dev` thì
+  **luôn bật**.
 - **Cổng mặc định:** `45731` (nếu bận, tự dò cổng trống kế tiếp — xem log `[web]`).
-- **Cách dùng:** chạy app như bình thường → mở Chrome vào `http://127.0.0.1:45731`.
+- **Cách dùng:** app đang chạy → mở Chrome vào `http://127.0.0.1:45731`.
 - **Cùng dữ liệu & phiên đăng nhập:** trình duyệt gọi đúng các command backend (REST
   `/api/<cmd>`) qua lớp transport chung `src/db/index.ts` — trong app dùng IPC, trong
   trình duyệt dùng `fetch`, tự chọn theo môi trường (`__TAURI_INTERNALS__`).

@@ -1,12 +1,16 @@
-//! Chế độ "dùng qua web" (production): app tự chạy 1 HTTP server trên 127.0.0.1,
-//! vừa serve frontend (dist nhúng sẵn trong binary) vừa phơi REST API gọi thẳng
-//! các command Tauri có sẵn. Mở Chrome vào http://127.0.0.1:<port> là dùng được
-//! app như web — cùng DB, cùng phiên đăng nhập với cửa sổ app desktop.
+//! Chế độ "dùng qua web": app tự chạy 1 HTTP server trên 127.0.0.1, vừa serve
+//! frontend (dist nhúng sẵn trong binary) vừa phơi REST API gọi thẳng các command
+//! Tauri có sẵn. Mở Chrome vào http://127.0.0.1:<port> là dùng được app như web —
+//! cùng DB, cùng phiên đăng nhập với cửa sổ app desktop.
+//!
+//! Mặc định: bản dev (debug) LUÔN bật để dùng qua Chrome khi gõ `bun run tauri dev`;
+//! bản production (release) mặc định TẮT — bật trong màn Cài đặt → "Bật web server".
 //!
 //! Vì chỉ bind 127.0.0.1 nên chỉ máy đang chạy app truy cập được; không lộ ra
 //! mạng ngoài.
 
 use crate::commands;
+use crate::helpers::require_role;
 use crate::models::{
     AttendanceEntryInput, CashEntryInput, CountItemInput, EmployeeInput, ImportEntryInput,
     InboundItemInput, InvoiceItemInput, OutboundInvoiceInput, OutboundItemInput,
@@ -22,7 +26,8 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::Write as _;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 
 /// Cổng mặc định; nếu bận sẽ tự dò cổng trống kế tiếp.
@@ -240,6 +245,12 @@ pub async fn api_invoke(
             body,
             settings: HashMap<String, String>
         ),
+
+        // ── Web server (browser mode) ──
+        // Chỉ web_url (đọc). set_web_server KHÔNG phơi qua /api: bật lại qua HTTP
+        // bất khả thi khi server đã tắt (request không tới nơi) — bật/tắt chỉ từ
+        // cửa sổ app desktop (IPC).
+        "web_url" => mx_none!(crate::web::web_url),
 
         // ── Danh mục: tài khoản kế toán ──
         "get_accounts" => mx!(commands::catalog::get_accounts, body),
@@ -560,35 +571,22 @@ pub fn router() -> Router {
         .fallback(get(serve_assets))
 }
 
-/// Khởi động web server local (127.0.0.1) trong nền.
-pub fn start_server(app: AppHandle) {
-    init_app(&app);
-    tauri::async_runtime::spawn(async move {
-        // Test/E2E: khóa cổng cố định (chỉ 1 cổng, không tự dò) — tránh test nhầm instance khác.
-        if let Ok(p) = std::env::var("HKD_WEB_PORT") {
-            if let Ok(port) = p.trim().parse::<u16>() {
-                let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-                match tokio::net::TcpListener::bind(addr).await {
-                    Ok(listener) => {
-                        println!(
-                            "[web] Dùng được trên trình duyệt: http://127.0.0.1:{}  (mở bằng Chrome)",
-                            port
-                        );
-                        if let Err(e) = axum::serve(listener, router()).await {
-                            eprintln!("[web] Lỗi server: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[web] Không bind được cổng {port} ({e}) — thoát chế độ web");
-                    }
-                }
-                return;
-            }
-        }
-        for port in WEB_PORT..=WEB_PORT + 20 {
+/// Handle của task web server đang chạy (None nếu đang tắt) — để dừng khi tắt trong Cài đặt.
+static SERVER_HANDLE: Mutex<Option<tauri::async_runtime::JoinHandle<Option<u16>>>> =
+    Mutex::new(None);
+/// Cổng web server đang bind (None nếu đang tắt) — để web_url / giao diện Cài đặt đọc.
+static CURRENT_PORT: Mutex<Option<u16>> = Mutex::new(None);
+
+/// Bind listener rồi serve đến khi bị hủy (tắt qua Cài đặt) hoặc lỗi.
+/// Ghi CURRENT_PORT ngay sau khi bind thành công.
+async fn bind_and_serve() -> Option<u16> {
+    // Test/E2E: khóa cổng cố định (chỉ 1 cổng, không tự dò) — tránh test nhầm instance khác.
+    if let Ok(p) = std::env::var("HKD_WEB_PORT") {
+        if let Ok(port) = p.trim().parse::<u16>() {
             let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
             match tokio::net::TcpListener::bind(addr).await {
                 Ok(listener) => {
+                    *CURRENT_PORT.lock().unwrap() = Some(port);
                     println!(
                         "[web] Dùng được trên trình duyệt: http://127.0.0.1:{}  (mở bằng Chrome)",
                         port
@@ -596,17 +594,134 @@ pub fn start_server(app: AppHandle) {
                     if let Err(e) = axum::serve(listener, router()).await {
                         eprintln!("[web] Lỗi server: {}", e);
                     }
-                    return;
+                    return Some(port);
                 }
                 Err(e) => {
-                    eprintln!("[web] Cổng {} bận ({}), thử cổng khác…", port, e);
+                    eprintln!("[web] Không bind được cổng {port} ({e}) — thoát chế độ web");
+                    return None;
                 }
             }
         }
-        eprintln!(
-            "[web] Không bind được cổng {}–{} — bỏ qua chế độ web",
-            WEB_PORT,
-            WEB_PORT + 20
-        );
-    });
+    }
+    for port in WEB_PORT..=WEB_PORT + 20 {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => {
+                *CURRENT_PORT.lock().unwrap() = Some(port);
+                println!(
+                    "[web] Dùng được trên trình duyệt: http://127.0.0.1:{}  (mở bằng Chrome)",
+                    port
+                );
+                if let Err(e) = axum::serve(listener, router()).await {
+                    eprintln!("[web] Lỗi server: {}", e);
+                }
+                return Some(port);
+            }
+            Err(e) => {
+                eprintln!("[web] Cổng {} bận ({}), thử cổng khác…", port, e);
+            }
+        }
+    }
+    eprintln!(
+        "[web] Không bind được cổng {}–{} — bỏ qua chế độ web",
+        WEB_PORT,
+        WEB_PORT + 20
+    );
+    None
+}
+
+/// Đang chạy → giữ nguyên, trả cổng hiện tại. Chưa chạy → khởi động và đợi bind xong.
+async fn ensure_server_running() -> Result<u16, String> {
+    if let Some(p) = *CURRENT_PORT.lock().unwrap() {
+        return Ok(p);
+    }
+    let handle = tauri::async_runtime::spawn(bind_and_serve());
+    *SERVER_HANDLE.lock().unwrap() = Some(handle);
+    // Bind local là tức thì — chỉ đợi vài giây cho chắc.
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some(p) = *CURRENT_PORT.lock().unwrap() {
+            return Ok(p);
+        }
+    }
+    *SERVER_HANDLE.lock().unwrap() = None;
+    Err(format!(
+        "Không mở được web server — các cổng {}–{} đều bận?",
+        WEB_PORT,
+        WEB_PORT + 20
+    ))
+}
+
+fn disable_server() {
+    if let Some(h) = SERVER_HANDLE.lock().unwrap().take() {
+        h.abort();
+    }
+    *CURRENT_PORT.lock().unwrap() = None;
+}
+
+/// Đọc cài đặt web_server_enabled từ DB (production): web server mặc định TẮT,
+/// chỉ bật khi người dùng bật trong Cài đặt.
+fn web_server_setting(app: &AppHandle) -> bool {
+    tauri::async_runtime::block_on(async {
+        let st = app.state::<AppState>();
+        let pool = st.pool.read().await;
+        match sqlx::query_scalar::<_, String>(
+            "SELECT value FROM app_setting WHERE key = 'web_server_enabled'",
+        )
+        .fetch_optional(&*pool)
+        .await
+        {
+            Ok(Some(v)) => v == "true",
+            _ => false,
+        }
+    })
+}
+
+/// Khởi động web server local (127.0.0.1) trong nền:
+/// - bản dev (debug): LUÔN bật (dùng app qua Chrome khi gõ `bun run tauri dev`);
+/// - bản production (release): mặc định TẮT — bật trong Cài đặt → "Bật web server".
+pub fn start_server(app: AppHandle) {
+    init_app(&app);
+    let enabled = cfg!(debug_assertions) || web_server_setting(&app);
+    if enabled {
+        let handle = tauri::async_runtime::spawn(bind_and_serve());
+        *SERVER_HANDLE.lock().unwrap() = Some(handle);
+    }
+}
+
+/// URL web server local (browser mode) nếu đang chạy, ngược lại trả "".
+#[tauri::command]
+pub(crate) async fn web_url() -> Result<String, String> {
+    Ok(match *CURRENT_PORT.lock().unwrap() {
+        Some(p) => format!("http://127.0.0.1:{}", p),
+        None => String::new(),
+    })
+}
+
+/// Bật/tắt web server (production) từ màn Cài đặt: lưu cài đặt rồi khởi động /
+/// dừng server ngay. Trả về `{enabled, url}`.
+#[tauri::command]
+pub(crate) async fn set_web_server(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    {
+        let pool = state.pool.read().await;
+        sqlx::query(
+            "INSERT INTO app_setting (key, value) VALUES ('web_server_enabled', ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(if enabled { "true" } else { "false" })
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    if enabled {
+        let port = ensure_server_running().await?;
+        Ok(json!({ "enabled": true, "url": format!("http://127.0.0.1:{}", port) }).to_string())
+    } else {
+        disable_server();
+        Ok(json!({ "enabled": false, "url": "" }).to_string())
+    }
 }

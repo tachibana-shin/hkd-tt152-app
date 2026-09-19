@@ -600,6 +600,8 @@ export const api = {
   logout: () => call<string>("logout"),
   // URL web server local (browser mode) — trả chuỗi rỗng nếu không chạy được.
   webUrl: () => call<string>("web_url"),
+  // Bật/tắt web server (production: mặc định TẮT — bật trong màn Cài đặt).
+  setWebServer: (enabled: boolean) => call<string>("set_web_server", { enabled }),
   getCurrentUser: async (): Promise<CurrentUser | null> => {
     const s = await call<string>("get_current_user");
     return s && s !== "null" ? parse<CurrentUser>(s) : null;

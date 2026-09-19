@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { api, inTauri } from "@/db";
 import { useSettingsStore } from "@/stores/settings";
 
 const settings = useSettingsStore();
@@ -78,7 +79,47 @@ const previewCode = computed(() => {
   return `${st.product_code_prefix.trim() || "SP"}${n}`;
 });
 
-onMounted(load);
+// ─── Web server (dùng app qua trình duyệt) — production mặc định TẮT ───
+const webEnabled = ref(false);
+const webUrl = ref("");
+
+async function loadWebStatus() {
+  try {
+    const url = await api.webUrl();
+    webEnabled.value = !!url;
+    webUrl.value = url || "";
+  } catch {
+    webEnabled.value = false;
+    webUrl.value = "";
+  }
+}
+
+/** Toggle áp dụng NGAY (không cần bấm "Lưu cài đặt") — lưu cài đặt + bật/tắt server.
+ *  Chỉ dùng từ cửa sổ app desktop (IPC); trong trình duyệt toggle bị khóa. */
+async function onWebToggle() {
+  if (!inTauri) return;
+  try {
+    const res = JSON.parse(await api.setWebServer(webEnabled.value));
+    webEnabled.value = !!res.enabled;
+    webUrl.value = res.url ?? "";
+    toast.add({
+      severity: "success",
+      summary: res.enabled ? "Đã bật web server" : "Đã tắt web server",
+      detail: res.enabled
+        ? `Mở bằng Chrome: ${webUrl.value}`
+        : "App chỉ dùng được từ cửa sổ desktop cho đến khi bật lại.",
+      life: 3000,
+    });
+  } catch (e) {
+    webEnabled.value = !webEnabled.value; // trả lại trạng thái cũ nếu thất bại
+    toast.add({ severity: "error", summary: "Lỗi web server", detail: String(e) });
+  }
+}
+
+onMounted(() => {
+  load();
+  loadWebStatus();
+});
 </script>
 
 <template>
@@ -103,6 +144,37 @@ onMounted(load);
       <template #content>
         <div v-if="loading" class="flex justify-center py-10"><ProgressSpinner /></div>
         <div v-else class="space-y-6">
+          <!-- Dùng app qua trình duyệt (web server) — production mặc định TẮT -->
+          <section>
+            <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+              <i class="pi pi-globe text-primary-500" /> Dùng app qua trình duyệt (Chrome)
+            </h4>
+            <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <div class="flex items-center gap-3">
+                <ToggleSwitch v-model="webEnabled" :disabled="!inTauri" @change="onWebToggle" />
+                <div>
+                  <p class="font-medium">Bật web server (http://127.0.0.1)</p>
+                  <p class="text-xs text-gray-500 mt-0.5">
+                    <template v-if="webEnabled">
+                      Đang chạy — mở bằng Chrome: <b>{{ webUrl }}</b> (cùng dữ liệu & phiên
+                      đăng nhập, chỉ dùng được trên máy này){{ inTauri ? "" : " — bật/tắt từ cửa sổ app desktop." }}
+                    </template>
+                    <template v-else>
+                      Web server đang TẮT — app chỉ dùng được từ cửa sổ desktop. Bật lên để mở
+                      app bằng Chrome trên cùng máy.
+                    </template>
+                  </p>
+                </div>
+              </div>
+              <i
+                class="pi pi-info-circle cursor-help text-xs text-gray-400"
+                v-tooltip.right="'Bản cài đặt (production) mặc định tắt web server vì lý do bảo mật; bản dev chạy `bun run tauri dev` thì luôn bật. Web server chỉ chạy trên 127.0.0.1 — không lộ ra mạng ngoài. Toggle chỉ dùng được từ cửa sổ app desktop.'"
+              />
+            </div>
+          </section>
+
+          <Divider />
+
           <!-- Mã sản phẩm tự sinh -->
           <section>
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
