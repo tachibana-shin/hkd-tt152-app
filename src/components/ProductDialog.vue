@@ -191,7 +191,12 @@ async function save() {
           size="small"
           v-model="form.name"
           placeholder="Tên hàng hóa / dịch vụ"
+          :disabled="!!product"
         />
+        <p v-if="product" class="text-xs text-gray-400 mt-1">
+          Tên sản phẩm không đổi được sau khi tạo — tránh lệch với phiếu nhập /
+          xuất và hóa đơn đã lập.
+        </p>
       </FormField>
       <FormField label="Loại">
         <Select

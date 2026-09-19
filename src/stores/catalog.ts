@@ -93,7 +93,7 @@ export const useCatalogStore = defineStore("catalog", () => {
 
   /** Xóa nhiều sản phẩm (dùng cho xóa hàng loạt theo checkbox). */
   async function deleteProducts(ids: number[]) {
-    await Promise.all(ids.map((id) => api.deleteProduct(id)));
+    await api.deleteProducts(ids);
   }
 
   async function saveWarehouse(code: string, name: string) {

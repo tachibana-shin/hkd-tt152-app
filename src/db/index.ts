@@ -143,6 +143,7 @@ export const api = {
       industryCode: p.industry_code ?? "",
     }),
   deleteProduct: (id: number) => invoke<string>("delete_product", { id }),
+  deleteProducts: (ids: number[]) => invoke<string>("delete_products", { ids }),
 
   getIndustryGroups: async () =>
     parse<IndustryGroup[]>(await invoke<string>("get_industry_groups")),

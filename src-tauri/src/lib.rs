@@ -111,6 +111,7 @@ pub fn run() {
             commands::catalog::save_customer,
             commands::catalog::save_product,
             commands::catalog::delete_product,
+            commands::catalog::delete_products,
             commands::catalog::next_product_code,
             commands::catalog::next_warehouse_code,
             commands::catalog::next_customer_code,

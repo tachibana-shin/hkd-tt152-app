@@ -294,6 +294,26 @@ pub(crate) async fn save_product(
     industry_code: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    // Không cho đổi tên sản phẩm đã tồn tại (tên cũ đã ghi trong phiếu kho /
+    // hóa đơn / bút toán) — tránh sự cố lệch số liệu. Người dùng cần đổi tên
+    // thì xóa (nếu chưa dùng) và tạo sản phẩm mới.
+    {
+        let pool = state.pool.read().await;
+        let existing: Option<(String,)> =
+            sqlx::query_as("SELECT name FROM product WHERE code = ?")
+                .bind(&code)
+                .fetch_optional(&*pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        if let Some((old_name,)) = existing {
+            if old_name != name {
+                return Err(format!(
+                    "Không được đổi tên sản phẩm '{}' — tên gốc đã ghi trong sổ: '{}'",
+                    code, old_name
+                ));
+            }
+        }
+    }
     sqlx::query(
         "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -321,15 +341,135 @@ pub(crate) async fn save_product(
     Ok("ok".into())
 }
 
+/// Kiểm tra sản phẩm có đang được dùng ở nghiệp vụ nào không (phiếu kho / lô
+/// FIFO, hóa đơn, kiểm kê, bút toán nhập liệu). Trả về chuỗi mô tả nơi sử dụng;
+/// None = chưa nơi nào dùng → được phép xóa.
+async fn find_product_usage(
+    pool: &sqlx::SqlitePool,
+    id: i64,
+    code: &str,
+) -> Result<Option<String>, String> {
+    let (lots, invoices, counts, entries): (i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT
+             (SELECT COUNT(*) FROM stock_lot WHERE product_id = ?),
+             (SELECT COUNT(*) FROM invoice_item WHERE product_id = ?),
+             (SELECT COUNT(*) FROM inventory_count_item WHERE product_id = ?),
+             (SELECT COUNT(*) FROM journal_entry WHERE product_code = ?)",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(id)
+    .bind(code)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut parts: Vec<String> = Vec::new();
+    if lots > 0 {
+        parts.push(format!("{} phiếu kho (tồn kho / lô)", lots));
+    }
+    if invoices > 0 {
+        parts.push(format!("{} dòng hóa đơn", invoices));
+    }
+    if counts > 0 {
+        parts.push(format!("{} lần kiểm kê", counts));
+    }
+    if entries > 0 {
+        parts.push(format!("{} bút toán nhập liệu", entries));
+    }
+    if parts.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(parts.join(", ")))
+    }
+}
+
+/// Xóa 1 sản phẩm — chỉ xóa khi chưa được dùng ở bất kỳ nghiệp vụ nào
+/// (phiếu kho, hóa đơn, kiểm kê, nhập liệu), tránh làm hỏng sổ sách đã ghi.
 #[tauri::command]
 pub(crate) async fn delete_product(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
-    sqlx::query!("DELETE FROM product WHERE id = ?", id)
-        .execute(&*state.pool.read().await)
+    let pool = state.pool.read().await;
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT code, name FROM product WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some((code, name)) = row else {
+        return Err("Không tìm thấy sản phẩm".into());
+    };
+    if let Some(used) = find_product_usage(&pool, id, &code).await? {
+        return Err(format!(
+            "Không xóa được sản phẩm '{}' ({}) — đang được dùng: {}",
+            name, code, used
+        ));
+    }
+    sqlx::query("DELETE FROM product WHERE id = ?")
+        .bind(id)
+        .execute(&*pool)
         .await
-        .map_err(|e| {
-            format!("Không thể xóa sản phẩm (đã phát sinh nghiệp vụ): {}", e)
-        })?;
+        .map_err(|e| format!("Không thể xóa sản phẩm '{}': {}", code, e))?;
+    audit(&state, "delete", "product", &code).await;
+    Ok("ok".into())
+}
+
+/// Xóa hàng loạt nhiều sản phẩm (theo checkbox). Kiểm tra TẤT CẢ trước — nếu có
+/// bất kỳ sản phẩm nào đang được dùng thì KHÔNG xóa sản phẩm nào cả
+/// (all-or-nothing), tránh xóa cục bộ gây sổ sách không nhất quán.
+#[tauri::command]
+pub(crate) async fn delete_products(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let pool = state.pool.read().await;
+
+    let mut blocked: Vec<String> = Vec::new();
+    let mut delete_targets: Vec<(i64, String)> = Vec::new();
+    for id in &ids {
+        let row: Option<(String, String)> =
+            sqlx::query_as("SELECT code, name FROM product WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&*pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        let Some((code, name)) = row else { continue };
+        match find_product_usage(&pool, *id, &code).await? {
+            Some(used) => blocked.push(format!("'{}' ({}) — {}", name, code, used)),
+            None => delete_targets.push((*id, code)),
+        }
+    }
+
+    if !blocked.is_empty() {
+        let mut msg = format!(
+            "Không xóa được {} sản phẩm (đang được dùng ở nghiệp vụ khác): ",
+            blocked.len()
+        );
+        for b in blocked.iter().take(3) {
+            msg.push_str(b);
+            msg.push_str("; ");
+        }
+        if blocked.len() > 3 {
+            msg.push_str(&format!("và {} sản phẩm khác.", blocked.len() - 3));
+        }
+        return Err(msg);
+    }
+
+    // Không sản phẩm nào bị chặn → xóa hết trong 1 transaction.
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    for (id, _) in &delete_targets {
+        sqlx::query("DELETE FROM product WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Không thể xóa sản phẩm: {}", e))?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    drop(pool);
+    for (_, code) in &delete_targets {
+        audit(&state, "delete", "product", code).await;
+    }
     Ok("ok".into())
 }
 
