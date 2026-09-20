@@ -138,6 +138,7 @@ pub fn run() {
             commands::hddt::hddt_logout,
             commands::hddt::hddt_change_password,
             commands::hddt::hddt_set_auto_change_password,
+            commands::hddt::hddt_list_invoices,
             commands::import::import_nhap_lieu,
             commands::inventory::get_inventory_counts,
             commands::inventory::get_inventory_count_detail,

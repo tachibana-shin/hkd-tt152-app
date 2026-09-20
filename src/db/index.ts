@@ -77,6 +77,8 @@ import type {
   HddtConfig,
   HddtStatus,
   HddtLoginResult,
+  HddtInvoiceList,
+  HddtInvoiceFilter,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -528,6 +530,28 @@ export const api = {
     parse<HddtLoginResult>(await call<string>("hddt_change_password")),
   hddtSendSimulated: (invoiceNo: string, symbol: string, total: number) =>
     call<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
+
+  /** Tra cứu hóa đơn trên cổng HĐĐT (trang `tra-cuu` — `/api/invoice/hdons/temp`).
+   *  `from`/`to` theo `dd/MM/yyyy`; `state` = cursor phân trang trả về từ response
+   *  trước (null = trang đầu). Trả `{datas, state, total, time}`. */
+  hddtListInvoices: async (f: HddtInvoiceFilter = {}) => {
+    const r = JSON.parse(
+      await call<string>("hddt_list_invoices", {
+        from: f.from ?? null,
+        to: f.to ?? null,
+        state_filter: f.state ?? null,
+        hdon: f.hdon ?? null,
+        khhdon: f.khhdon ?? null,
+        shdon: f.shdon ?? null,
+        mhso: f.mhso ?? null,
+        tthai: f.tthai ?? null,
+        ttxly: f.ttxly ?? null,
+        nbmst: f.nbmst ?? null,
+        size: f.size ?? 15,
+      }),
+    );
+    return r as HddtInvoiceList;
+  },
 
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>

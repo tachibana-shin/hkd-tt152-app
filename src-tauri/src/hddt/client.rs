@@ -25,7 +25,7 @@
 
 use crate::hddt::captcha::Captcha;
 use reqwest::cookie::Jar;
-use reqwest::header::{ACCEPT_LANGUAGE, CONTENT_TYPE};
+use reqwest::header::{HeaderValue, ACCEPT_LANGUAGE, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,6 +37,63 @@ pub(crate) const PATH_CAPTCHA: &str = "/api/captcha";
 pub(crate) const PATH_AUTHENTICATE: &str = "/api/security-taxpayer/authenticate";
 pub(crate) const PATH_PROFILE: &str = "/api/security-taxpayer/profile";
 pub(crate) const PATH_CHANGE_PASSWORD: &str = "/api/system-taxpayer/users/change-password";
+
+// Invoice list — verified LIVE (09/2026) from the portal's own "Tra cứu hóa đơn"
+// page for Hộ kinh doanh (`/quan-ly-hoa-don-phat-sinh/tra-cuu`):
+//   GET /api/invoice/hdons/temp?sort=ntao:desc&size=…&state=…&search=…
+// (single slash — the guard `api//…` blocks curl/browser-fetch without the F5
+// cookie; the real page fires the single-slash form, 200).
+// Response envelope: `{datas: [...], state, total, time}` where `state` is an
+// opaque pagination cursor (pass it back as `state=` for the next page).
+pub(crate) const PATH_HDONS_TEMP: &str = "/api/invoice/hdons/temp";
+
+/// Filters for the invoice list. Field names follow the portal's real search
+/// format (from `generateSearch`/`generateSearchString` in the portal bundle,
+/// verified against the live request `search=hthdon==3;ntao=ge=21/08/2026T00:00:00;
+/// ntao=le=20/09/2026T23:59:59;ttxly=in=(0,1,2,3,4,5,6)`):
+///   - equal  → `field==v`
+///   - range  → `field=ge=X;field=le=Y`
+///   - in     → `field=in=(a,b)`
+///
+/// joined by `;`.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct InvoiceQuery {
+    /// Page size (`size=`).
+    pub size: u32,
+    /// Opaque pagination cursor from a previous response (`state=`).
+    pub state: Option<String>,
+    /// Ngày tạo từ ngày (`ntao=ge=dd/MM/yyyyT00:00:00`).
+    pub from: Option<String>,
+    /// Ngày tạo đến ngày (`ntao=le=dd/MM/yyyyT23:59:59`).
+    pub to: Option<String>,
+    /// Loại hóa đơn (`hdon`, mã từ danh mục `dmhdons`).
+    pub hdon: Option<String>,
+    /// Ký hiệu hóa đơn (`khhdon`).
+    pub khhdon: Option<String>,
+    /// Số hóa đơn (`shdon`).
+    pub shdon: Option<String>,
+    /// Mã hồ sơ (`mhso`).
+    pub mhso: Option<String>,
+    /// Trạng thái hóa đơn (`tthai`): 1 Hóa đơn mới … 5 Bị điều chỉnh.
+    pub tthai: Option<String>,
+    /// Trạng thái xử lý (`ttxly`): single value → `ttxly==v`; `None` →
+    /// `ttxly=in=(0,1,2,3,4,5,6)` (trang thật luôn gửi dải này khi "Tất cả").
+    pub ttxly: Option<String>,
+    /// Mã số thuế lọc (`nbmst=in=(…)`, một giá trị).
+    pub nbmst: Option<String>,
+}
+
+/// Paginated invoice list returned by the portal.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct InvoiceList {
+    pub datas: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub state: Option<serde_json::Value>,
+    #[serde(default)]
+    pub total: u64,
+    #[serde(default)]
+    pub time: u64,
+}
 
 /// Successful login result: JWT token + taxpayer profile (if available).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +184,7 @@ impl HddtClient {
         let url = format!("{}{}", self.base, PATH_CAPTCHA);
         let resp = self
             .http
-            .get(&url)
+            .get(url)
             .send()
             .await
             .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
@@ -183,7 +240,7 @@ impl HddtClient {
         let url = format!("{}{}", self.base, PATH_PROFILE);
         let resp = self
             .http
-            .get(&url)
+            .get(url)
             .headers(anti_bot_headers())
             .bearer_auth(token)
             .send()
@@ -198,6 +255,64 @@ impl HddtClient {
             return Err(format!("Lỗi lấy hồ sơ HĐĐT (HTTP {status})."));
         }
         Ok(v)
+    }
+
+    /// List invoices from the portal (`GET {base}/api/invoice/hdons/temp`).
+    ///
+    /// Query params mirror the portal's own "Tra cứu hóa đơn" page (verified
+    /// live 09/2026): `sort=ntao:desc`, `size`, optional `state` (cursor) and a
+    /// `search` string built with the portal's own field operators. Response:
+    /// `{datas, state, total, time}`.
+    pub(crate) async fn query_invoices(
+        &self,
+        token: &str,
+        q: &InvoiceQuery,
+    ) -> Result<InvoiceList, String> {
+        let mut params: Vec<(&str, String)> = vec![("sort", "ntao:desc".to_string())];
+        params.push(("size", q.size.clamp(1, 500).to_string()));
+        if let Some(state) = q.state.as_deref().filter(|s| !s.is_empty()) {
+            params.push(("state", state.to_string()));
+        }
+        let search = build_search_string(q);
+        if !search.is_empty() {
+            params.push(("search", search));
+        }
+        let url =
+            reqwest::Url::parse_with_params(&format!("{}{}", self.base, PATH_HDONS_TEMP), &params)
+                .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
+        // Headers giống hệt request thật từ trang tra cứu (đã bắt 09/2026):
+        // `action: Tìm kiếm`, `end-point` = path trang, referer trang + Bearer.
+        let mut h = anti_bot_headers();
+        h.insert(
+            "Action",
+            HeaderValue::from_static("T%C3%ACm%20ki%E1%BA%BFm"),
+        );
+        h.insert(
+            "End-Point",
+            HeaderValue::from_static("/quan-ly-hoa-don-phat-sinh/tra-cuu"),
+        );
+        let resp = self
+            .http
+            .get(url)
+            .headers(h)
+            .bearer_auth(token)
+            .header(
+                reqwest::header::REFERER,
+                format!("{}/quan-ly-hoa-don-phat-sinh/tra-cuu", self.base),
+            )
+            .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+        let status = resp.status();
+        let v: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Phản hồi danh sách HĐĐT sai định dạng: {e}"))?;
+        if !status.is_success() {
+            return Err(format!("Lỗi lấy danh sách HĐĐT (HTTP {status}): {v}"));
+        }
+        serde_json::from_value(v).map_err(|e| format!("Dữ liệu danh sách HĐĐT sai định dạng: {e}"))
     }
 
     /// Change the portal password (`POST /api/system-taxpayers/users/change-password`,
@@ -280,6 +395,59 @@ impl HddtClient {
     }
 }
 
+/// Build the `search` query string for `hdons/temp` using the portal's own
+/// operator format (from `generateSearch` + `generateSearchString` in the portal
+/// bundle, cross-checked against the live request 09/2026):
+///
+///   - equal op → `field==value`
+///   - range → `field=ge=X;field=le=Y`
+///   - in → `field=in=(a,b)`
+///
+/// fields joined by `;`. Dates use `dd/MM/yyyyTHH:mm:ss` (the portal appends the
+/// time — `T00:00:00` từ ngày, `T23:59:59` đến ngày). `hthdon==3` ("Hóa đơn điện
+/// tử") luôn được thêm trước; `ttxly` rỗng → `in=(0,1,2,3,4,5,6)` (giống trang
+/// thật khi chọn "Tất cả").
+fn build_search_string(q: &InvoiceQuery) -> String {
+    let mut parts: Vec<String> = vec!["hthdon==3".to_string()];
+    fn push_eq(parts: &mut Vec<String>, field: &str, val: &str) {
+        if !val.is_empty() {
+            parts.push(format!("{field}=={val}"));
+        }
+    }
+    if let Some(v) = q.nbmst.as_deref() {
+        let v = v.trim();
+        if !v.is_empty() {
+            parts.push(format!("nbmst=in=({v})"));
+        }
+    }
+    if let Some(v) = q.hdon.as_deref() {
+        push_eq(&mut parts, "hdon", v.trim());
+    }
+    if let Some(v) = q.khhdon.as_deref() {
+        push_eq(&mut parts, "khhdon", v.trim().to_uppercase().as_str());
+    }
+    if let Some(v) = q.shdon.as_deref() {
+        push_eq(&mut parts, "shdon", v.trim());
+    }
+    if let Some(v) = q.mhso.as_deref() {
+        push_eq(&mut parts, "mhso", v.trim());
+    }
+    if let Some(v) = q.tthai.as_deref() {
+        push_eq(&mut parts, "tthai", v.trim());
+    }
+    if let Some(v) = q.from.as_deref().filter(|s| !s.is_empty()) {
+        parts.push(format!("ntao=ge={v}T00:00:00"));
+    }
+    if let Some(v) = q.to.as_deref().filter(|s| !s.is_empty()) {
+        parts.push(format!("ntao=le={v}T23:59:59"));
+    }
+    match q.ttxly.as_deref().filter(|s| !s.is_empty()) {
+        Some(v) => parts.push(format!("ttxly=={v}")),
+        None => parts.push("ttxly=in=(0,1,2,3,4,5,6)".to_string()),
+    }
+    parts.join(";")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +486,40 @@ mod tests {
         let c: Captcha = serde_json::from_str(raw).unwrap();
         assert_eq!(c.key.len(), 24);
         assert!(c.content.contains("<svg "));
+    }
+
+    #[test]
+    fn search_string_matches_live_request() {
+        // Request thật từ trang tra cứu (chụp 09/2026):
+        //   search=hthdon==3;ntao=ge=21/08/2026T00:00:00;ntao=le=20/09/2026T23:59:59;ttxly=in=(0,1,2,3,4,5,6)
+        let q = InvoiceQuery {
+            size: 15,
+            from: Some("21/08/2026".into()),
+            to: Some("20/09/2026".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_search_string(&q),
+            "hthdon==3;ntao=ge=21/08/2026T00:00:00;ntao=le=20/09/2026T23:59:59;ttxly=in=(0,1,2,3,4,5,6)"
+        );
+    }
+
+    #[test]
+    fn search_string_equal_and_in_operators() {
+        let q = InvoiceQuery {
+            size: 50,
+            hdon: Some("01GTKT0".into()),
+            khhdon: Some("01GTKT0/001".into()),
+            shdon: Some(" 12 ".into()),
+            mhso: Some("HOSO-1".into()),
+            tthai: Some("3".into()),
+            ttxly: Some("5".into()),
+            nbmst: Some("0108537801".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_search_string(&q),
+            "hthdon==3;nbmst=in=(0108537801);hdon==01GTKT0;khhdon==01GTKT0/001;shdon==12;mhso==HOSO-1;tthai==3;ttxly==5"
+        );
     }
 }

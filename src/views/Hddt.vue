@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { api } from "@/db";
-import type { HddtStatus } from "@/types";
+import type { HddtInvoiceRow, HddtStatus } from "@/types";
+import { HDDT_TTHAI, HDDT_TTXLY } from "@/types";
 
 const toast = useToast();
 
@@ -17,6 +18,153 @@ const showSavedPassword = ref(false);
 
 const status = ref<HddtStatus | null>(null);
 const lastError = ref("");
+
+// ─── Tra cứu hóa đơn (trang `tra-cuu` của cổng) ───
+const searchLoading = ref(false);
+const searchRows = ref<HddtInvoiceRow[]>([]);
+const searchTotal = ref(0);
+const searchTime = ref(0);
+const searchMsg = ref("");
+/** Ngày tạo từ → dd/MM/yyyy (mặc định: đầu tháng trước, như cổng). */
+const searchFrom = ref<Date | null>(null);
+/** Ngày tạo đến → dd/MM/yyyy (mặc định: hôm nay, như cổng). */
+const searchTo = ref<Date | null>(null);
+const searchTthai = ref("");
+const searchTtxly = ref("");
+const searchKhhdon = ref("");
+const searchShdon = ref("");
+const searchMhso = ref("");
+const searchHdon = ref("");
+/** Cursor phân trang (keySet) — stack các state đã đi qua. */
+const pageStates = ref<(string | null)[]>([null]);
+const pageIdx = ref(0);
+const pageSize = ref(15);
+
+const tthaiOptions = Object.entries(HDDT_TTHAI).map(([value, label]) => ({
+  label,
+  value,
+}));
+const ttxlyOptions = Object.entries(HDDT_TTXLY).map(([value, label]) => ({
+  label,
+  value,
+}));
+
+function defaultRange() {
+  const to = new Date();
+  const from = new Date();
+  from.setMonth(from.getMonth() - 1);
+  from.setDate(from.getDate() + 1); // cổng: subtract(1,"month").add(1,"days")
+  return { from, to };
+}
+
+function fmtDateVN(d: Date | null) {
+  if (!d) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${day}/${m}/${y}`;
+}
+
+/** Trạng thái hóa đơn → nhãn (rỗng nếu không biết mã). */
+function tthaiLabel(row: HddtInvoiceRow) {
+  return row.tthai != null ? (HDDT_TTHAI[Number(row.tthai)] ?? String(row.tthai)) : "—";
+}
+
+/** Trạng thái xử lý → nhãn (rỗng nếu không biết mã). */
+function ttxlyLabel(row: HddtInvoiceRow) {
+  return row.ttxly != null ? (HDDT_TTXLY[Number(row.ttxly)] ?? String(row.ttxly)) : "—";
+}
+
+function fmtMoney(v: unknown) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = typeof v === "number" ? v : Number(v);
+  if (Number.isNaN(n)) return String(v);
+  return n.toLocaleString("vi-VN");
+}
+
+async function runSearch(state: string | null) {
+  searchLoading.value = true;
+  searchMsg.value = "";
+  try {
+    const res = await api.hddtListInvoices({
+      from: fmtDateVN(searchFrom.value),
+      to: fmtDateVN(searchTo.value),
+      tthai: searchTthai.value || undefined,
+      ttxly: searchTtxly.value || undefined,
+      khhdon: searchKhhdon.value.trim() || undefined,
+      shdon: searchShdon.value.trim() || undefined,
+      mhso: searchMhso.value.trim() || undefined,
+      hdon: searchHdon.value.trim() || undefined,
+      size: pageSize.value,
+      state,
+    });
+    searchRows.value = res.datas ?? [];
+    searchTotal.value = res.total ?? 0;
+    searchTime.value = res.time ?? 0;
+    searchMsg.value = res.state
+      ? `Có ${searchTotal.value.toLocaleString("vi-VN")} kết quả (đã tải ${searchRows.value.length})`
+      : `Có ${searchTotal.value.toLocaleString("vi-VN")} kết quả`;
+    return res.state;
+  } catch (e) {
+    toastError("Lỗi tra cứu hóa đơn", e);
+    return null;
+  } finally {
+    searchLoading.value = false;
+  }
+}
+
+/** Bấm "Tìm kiếm" → bắt đầu từ trang đầu. */
+async function onSearchSubmit() {
+  pageStates.value = [null];
+  pageIdx.value = 0;
+  const st = await runSearch(null);
+  if (st) pageStates.value = [null, st];
+}
+
+/** Trang sau — dùng cursor `state` của trang hiện tại (keySet như cổng). */
+async function onNextPage() {
+  const curState = pageStates.value[pageIdx.value] ?? null;
+  if (pageIdx.value < pageStates.value.length - 1) {
+    // đã có cursor phía trước → quay lại
+    pageIdx.value += 1;
+    await runSearch(pageStates.value[pageIdx.value]);
+    return;
+  }
+  const st = await runSearch(curState);
+  if (st) {
+    pageStates.value = [...pageStates.value.slice(0, pageIdx.value + 1), st];
+    pageIdx.value += 1;
+  }
+}
+
+/** Trang trước — quay lại cursor đã lưu. */
+async function onPrevPage() {
+  if (pageIdx.value <= 0) return;
+  pageIdx.value -= 1;
+  await runSearch(pageStates.value[pageIdx.value]);
+}
+
+function onResetSearch() {
+  const { from, to } = defaultRange();
+  searchFrom.value = from;
+  searchTo.value = to;
+  searchTthai.value = "";
+  searchTtxly.value = "";
+  searchKhhdon.value = "";
+  searchShdon.value = "";
+  searchMhso.value = "";
+  searchHdon.value = "";
+}
+
+/** Có trang sau không: pageIdx chưa tới cuối stack, hoặc chưa lấy hết. */
+const canNextPage = computed(() => {
+  if (searchLoading.value) return false;
+  const lastState = pageStates.value[pageStates.value.length - 1];
+  if (pageIdx.value < pageStates.value.length - 1) return true;
+  // Trang hiện tại còn cursor → còn dữ liệu phía sau
+  return !!lastState;
+});
+const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
 
 // ─── Captcha nhập tay (khi tự giải thất bại) ───
 const manualVisible = ref(false);
@@ -338,6 +486,10 @@ async function tick() {
 
 onMounted(async () => {
   loading.value = true;
+  // Range mặc định như cổng: tháng trước → hôm nay.
+  const { from, to } = defaultRange();
+  searchFrom.value = from;
+  searchTo.value = to;
   try {
     await loadConfig();
     await tick();
@@ -600,6 +752,171 @@ onUnmounted(() => {
               </details>
             </div>
           </div>
+        </template>
+      </Card>
+
+      <!-- Tra cứu hóa đơn -->
+      <Card v-if="status?.logged_in">
+        <template #title>Tra cứu hóa đơn</template>
+        <template #content>
+          <div class="mb-3 flex flex-wrap items-end gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Từ ngày tạo</label>
+              <DatePicker v-model="searchFrom" dateFormat="dd/mm/yy" class="w-40" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Đến ngày tạo</label>
+              <DatePicker v-model="searchTo" dateFormat="dd/mm/yy" class="w-40" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Ký hiệu hóa đơn</label>
+              <InputText v-model="searchKhhdon" class="w-40" placeholder="VD: 01GTKT0" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Số hóa đơn</label>
+              <InputText v-model="searchShdon" class="w-32" placeholder="VD: 12" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Mã hồ sơ</label>
+              <InputText v-model="searchMhso" class="w-32" placeholder="Mã hồ sơ" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Loại hóa đơn</label>
+              <InputText v-model="searchHdon" class="w-28" placeholder="Mã loại" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Trạng thái hóa đơn</label>
+              <Select
+                v-model="searchTthai"
+                :options="tthaiOptions"
+                option-label="label"
+                option-value="value"
+                class="w-44"
+                :showClear="true"
+                placeholder="Tất cả"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Trạng thái xử lý</label>
+              <Select
+                v-model="searchTtxly"
+                :options="ttxlyOptions"
+                option-label="label"
+                option-value="value"
+                class="w-48"
+                :showClear="true"
+                placeholder="Tất cả"
+              />
+            </div>
+            <Button
+              label="Tìm kiếm"
+              icon="pi pi-search"
+              :loading="searchLoading"
+              @click="onSearchSubmit"
+            />
+            <Button
+              label="Bỏ tìm kiếm"
+              icon="pi pi-times"
+              severity="secondary"
+              text
+              @click="onResetSearch"
+            />
+          </div>
+
+          <div class="mb-2 flex flex-wrap items-center gap-3 text-sm">
+            <span v-if="searchMsg" class="text-gray-600">
+              <i class="pi pi-info-circle mr-1" />{{ searchMsg }}
+            </span>
+            <span v-else class="text-gray-400">
+              Bấm "Tìm kiếm" để tra cứu hóa đơn trên cổng HĐĐT (khoảng ngày mặc định: tháng trước →
+              hôm nay).
+            </span>
+            <div class="ml-auto flex items-center gap-2">
+              <Button
+                icon="pi pi-chevron-left"
+                size="small"
+                severity="secondary"
+                :disabled="!canPrevPage"
+                @click="onPrevPage"
+              />
+              <span class="text-xs text-gray-500">
+                Trang {{ pageIdx + 1 }} / {{ Math.max(1, Math.ceil(searchTotal / pageSize)) }}
+              </span>
+              <Button
+                icon="pi pi-chevron-right"
+                size="small"
+                severity="secondary"
+                :disabled="!canNextPage"
+                @click="onNextPage"
+              />
+            </div>
+          </div>
+
+          <AppDataTable
+            :value="searchRows"
+            :loading="searchLoading"
+            stripedRows
+            scrollable
+            scrollHeight="480px"
+            size="small"
+            class="mt-1"
+          >
+            <Column header="STT" :style="{ width: '3rem' }">
+              <template #body="{ index }">{{
+                searchRows.length === 0 ? "" : pageIdx * pageSize + index + 1
+              }}</template>
+            </Column>
+            <Column field="nbmst" header="Mã số thuế">
+              <template #body="{ data }">{{ data.nbmst || "—" }}</template>
+            </Column>
+            <Column field="khmshdon" header="Ký hiệu mẫu số">
+              <template #body="{ data }">{{ data.khmshdon || "—" }}</template>
+            </Column>
+            <Column field="khhdon" header="Ký hiệu hóa đơn">
+              <template #body="{ data }">{{ data.khhdon || "—" }}</template>
+            </Column>
+            <Column header="Ngày tạo HĐ">
+              <template #body="{ data }">{{ data.ntao || "—" }}</template>
+            </Column>
+            <Column header="Thông tin hóa đơn">
+              <template #body="{ data }">
+                <div class="text-xs leading-5">
+                  <div><b>MST:</b> {{ data.nmmst || "—" }}</div>
+                  <div><b>NNT:</b> {{ data.nmten || "—" }}</div>
+                </div>
+              </template>
+            </Column>
+            <Column header="Tổng tiền TT" align="right">
+              <template #body="{ data }">
+                {{ fmtMoney(data.tgtttbso)
+                }}<span v-if="data.dvtte" class="text-xs text-gray-500"> {{ data.dvtte }}</span>
+              </template>
+            </Column>
+            <Column field="mhso" header="Mã hồ sơ">
+              <template #body="{ data }">{{ data.mhso || "—" }}</template>
+            </Column>
+            <Column header="Trạng thái HĐ">
+              <template #body="{ data }">{{ tthaiLabel(data) }}</template>
+            </Column>
+            <Column header="Trạng thái xử lý">
+              <template #body="{ data }">
+                <Tag
+                  v-if="data.ttxly == 3"
+                  :value="ttxlyLabel(data)"
+                  severity="danger"
+                  :title="String(data.ldo ?? '')"
+                />
+                <Tag v-else-if="data.ttxly == 5" :value="ttxlyLabel(data)" severity="success" />
+                <Tag v-else :value="ttxlyLabel(data)" severity="secondary" />
+              </template>
+            </Column>
+            <Column field="ngtao" header="Người tạo HĐ">
+              <template #body="{ data }">{{ data.ngtao || "—" }}</template>
+            </Column>
+          </AppDataTable>
+          <p v-if="searchTime" class="mt-2 text-xs text-gray-400">
+            <i class="pi pi-clock mr-1" />Thời gian truy vấn cổng: {{ searchTime }} ms
+          </p>
         </template>
       </Card>
     </template>
