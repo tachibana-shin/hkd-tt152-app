@@ -40,3 +40,9 @@ __pycache__/
 #Excel files
 /*.xlsx
 /*.xlsb
+
+#Thong tin dang nhap HDDT (khong commit)
+/info.txt
+
+#HDDT captcha: unlabeled captchas (staging)
+/src-tauri/tools/hddt-captcha/new/

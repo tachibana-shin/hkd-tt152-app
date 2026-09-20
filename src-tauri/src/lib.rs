@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
 mod commands;
+mod hddt;
 mod helpers;
 mod models;
 #[cfg(test)]
@@ -127,6 +128,9 @@ pub fn run() {
             commands::catalog::next_employee_code,
             commands::hddt::hddt_status,
             commands::hddt::hddt_send_simulated,
+            commands::hddt::hddt_captcha,
+            commands::hddt::hddt_login,
+            commands::hddt::hddt_captcha_autosolve,
             commands::import::import_nhap_lieu,
             commands::inventory::get_inventory_counts,
             commands::inventory::get_inventory_count_detail,
