@@ -148,6 +148,7 @@ const menuItems: MenuItem[] = [
     roles: ["admin", "ketoan", "kho", "xem"],
   },
   { label: "Hóa đơn", icon: "pi pi-file", to: "/invoices", roles: ["admin", "ketoan"] },
+  { label: "HĐĐT", icon: "pi pi-cloud", to: "/hddt", roles: ["admin", "ketoan"] },
   { label: "Nhật ký HĐ", icon: "pi pi-history", to: "/audit", roles: ["admin", "ketoan", "xem"] },
   { label: "Kế toán HKD", icon: "pi pi-calculator", to: "/accounting", roles: ["admin", "ketoan"] },
   { label: "Người dùng", icon: "pi pi-user-edit", to: "/users", roles: ["admin"] },

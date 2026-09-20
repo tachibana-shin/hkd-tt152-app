@@ -36,12 +36,23 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 pub(crate) const PATH_CAPTCHA: &str = "/api/captcha";
 pub(crate) const PATH_AUTHENTICATE: &str = "/api/security-taxpayer/authenticate";
 pub(crate) const PATH_PROFILE: &str = "/api/security-taxpayer/profile";
+pub(crate) const PATH_CHANGE_PASSWORD: &str = "/api/system-taxpayer/users/change-password";
 
 /// Successful login result: JWT token + taxpayer profile (if available).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LoginSession {
     pub token: String,
     pub user: Option<serde_json::Value>,
+}
+
+/// Why an automatic login failed.
+#[derive(Debug)]
+pub(crate) enum LoginError {
+    /// The captcha could not be solved within the attempt budget → the UI should
+    /// fall back to letting the user type the code.
+    Captcha,
+    /// Network / protocol / credential error (message is already user-facing).
+    Other(String),
 }
 
 /// Client bound to one HDDT portal session — reuses a `reqwest::Client` (cookie
@@ -189,35 +200,83 @@ impl HddtClient {
         Ok(v)
     }
 
-    /// Single automatic login using a solver: try up to `max_attempts` captchas,
+    /// Change the portal password (`POST /api/system-taxpayers/users/change-password`,
+    /// no captcha — verified from the portal bundle 09/2026). The portal then
+    /// invalidates the current session, so the next login must use `new_password`.
+    ///
+    /// Payload: `{password: <old>, new_password: <new>}` + `Authorization: Bearer`.
+    pub(crate) async fn change_password(
+        &self,
+        token: &str,
+        old_password: &str,
+        new_password: &str,
+    ) -> Result<(), String> {
+        let url = format!("{}{}", self.base, PATH_CHANGE_PASSWORD);
+        let body = serde_json::json!({
+            "password": old_password,
+            "new_password": new_password,
+        });
+        let resp = self
+            .http
+            .post(&url)
+            .headers(anti_bot_headers())
+            .header(CONTENT_TYPE, "application/json")
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            let msg = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| {
+                    v.get("message")
+                        .and_then(|m| m.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| {
+                    let t = text.trim();
+                    if t.is_empty() {
+                        format!("HTTP {status}")
+                    } else {
+                        format!("HTTP {status}: {t}")
+                    }
+                });
+            return Err(format!("HĐĐT: Đổi mật khẩu thất bại — {msg}"));
+        }
+        Ok(())
+    }
+
+    /// Automatic login using a solver: try up to `max_attempts` captchas,
     /// reloading whenever the answer is wrong ("Mã captcha không đúng.").
+    ///
+    /// Returns [`LoginError::Captcha`] when the solver never passed, so the caller
+    /// can fall back to manual entry; any other failure is returned as
+    /// [`LoginError::Other`].
     pub(crate) async fn login_with_solver<S: crate::hddt::captcha::CaptchaSolver>(
         &self,
         solver: &S,
         max_attempts: usize,
-    ) -> Result<LoginSession, String> {
-        let mut last_err = "Chưa thử lần nào.".to_string();
-        for attempt in 1..=max_attempts {
-            let cap = self.fetch_captcha().await?;
+    ) -> Result<LoginSession, LoginError> {
+        for _ in 0..max_attempts {
+            let cap = self.fetch_captcha().await.map_err(LoginError::Other)?;
             let answer = match solver.solve(&cap) {
                 Ok(a) if !a.trim().is_empty() => a.trim().to_string(),
-                _ => {
-                    last_err = "Solver không ra kết quả.".into();
-                    continue;
-                }
+                _ => continue,
             };
             match self.authenticate(&cap.key, &answer).await {
                 Ok(token) => {
                     let user = self.profile(&token).await.ok();
                     return Ok(LoginSession { token, user });
                 }
-                Err(e) if e.starts_with("HĐĐT: Mã captcha") => {
-                    last_err = format!("{e} (lần {attempt}/{max_attempts})");
-                }
-                Err(e) => return Err(e),
+                // Wrong captcha → fetch a new one and retry.
+                Err(e) if e.starts_with("HĐĐT: Mã captcha") => continue,
+                Err(e) => return Err(LoginError::Other(e)),
             }
         }
-        Err(last_err)
+        Err(LoginError::Captcha)
     }
 }
 

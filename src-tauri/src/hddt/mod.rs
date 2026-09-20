@@ -12,8 +12,15 @@
 pub(crate) mod captcha;
 pub(crate) mod client;
 pub(crate) mod glyph;
+pub(crate) mod password;
+pub(crate) mod session;
 pub(crate) mod solver;
 
 pub(crate) use captcha::{Captcha, CaptchaSolver};
-pub(crate) use client::{HddtClient, LoginSession};
+pub(crate) use client::{HddtClient, LoginError, LoginSession};
+pub(crate) use password::generate_password;
+pub(crate) use session::{days_left_until, now_unix, rfc3339_to_unix, PortalSession};
 pub(crate) use solver::{classify_svg, GlyphTemplateSolver, CHARSET};
+
+#[cfg(test)]
+mod live;

@@ -71,6 +71,7 @@ pub fn run() {
             app.manage(AppState {
                 pool: tokio::sync::RwLock::new(pool),
                 current_user: tokio::sync::Mutex::new(None),
+                portal: tokio::sync::Mutex::new(None),
             });
 
             // Web server local (127.0.0.1): dùng app qua trình duyệt ở production.
@@ -126,11 +127,17 @@ pub fn run() {
             commands::catalog::next_customer_code,
             commands::catalog::next_supplier_code,
             commands::catalog::next_employee_code,
+            commands::hddt::hddt_get_config,
+            commands::hddt::hddt_get_password,
+            commands::hddt::hddt_save_config,
             commands::hddt::hddt_status,
             commands::hddt::hddt_send_simulated,
             commands::hddt::hddt_captcha,
             commands::hddt::hddt_login,
-            commands::hddt::hddt_captcha_autosolve,
+            commands::hddt::hddt_login_manual,
+            commands::hddt::hddt_logout,
+            commands::hddt::hddt_change_password,
+            commands::hddt::hddt_set_auto_change_password,
             commands::import::import_nhap_lieu,
             commands::inventory::get_inventory_counts,
             commands::inventory::get_inventory_count_detail,

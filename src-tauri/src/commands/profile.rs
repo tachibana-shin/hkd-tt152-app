@@ -281,6 +281,7 @@ pub(crate) async fn switch_profile(
     // Ghi audit với người dùng CŨ, rồi xóa phiên → buộc đăng nhập lại ở hồ sở mới
     audit(&state, "switch_profile", "profile", &key).await;
     *state.current_user.lock().await = None;
+    *state.portal.lock().await = None; // mỗi hồ sơ có tài khoản HĐĐT riêng
 
     // Ghi hồ sơ đang mở, rồi swap pool
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -373,6 +374,7 @@ pub(crate) async fn select_profile(
 
     // Chưa đăng nhập ở thời điểm này (khởi động) nhưng xóa phiên cho chắc chắn
     *state.current_user.lock().await = None;
+    *state.portal.lock().await = None;
 
     // Ghi hồ sơ đang mở, rồi swap pool
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;

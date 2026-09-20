@@ -86,6 +86,7 @@ pub(crate) async fn logout(state: State<'_, AppState>) -> Result<String, String>
         .map(|u| u.username.clone())
         .unwrap_or_default();
     *state.current_user.lock().await = None;
+    *state.portal.lock().await = None; // đăng xuất app → xóa luôn phiên cổng HĐĐT
     if !username.is_empty() {
         audit(&state, "logout", "auth", &username).await;
     }

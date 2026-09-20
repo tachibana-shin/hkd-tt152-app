@@ -445,7 +445,31 @@ pub async fn api_invoke(
         ),
 
         // ── HĐĐT ──
-        "hddt_status" => mx_none!(commands::hddt::hddt_status),
+        "hddt_get_config" => mx!(commands::hddt::hddt_get_config, body),
+        "hddt_get_password" => mx!(commands::hddt::hddt_get_password, body),
+        "hddt_save_config" => mx!(
+            commands::hddt::hddt_save_config,
+            body,
+            username: String,
+            password: String,
+            base_url: String
+        ),
+        "hddt_status" => mx!(commands::hddt::hddt_status, body),
+        "hddt_login" => mx!(commands::hddt::hddt_login, body),
+        "hddt_captcha" => mx!(commands::hddt::hddt_captcha, body),
+        "hddt_login_manual" => mx!(
+            commands::hddt::hddt_login_manual,
+            body,
+            captcha_key: String,
+            captcha_value: String
+        ),
+        "hddt_logout" => mx!(commands::hddt::hddt_logout, body),
+        "hddt_set_auto_change_password" => mx!(
+            commands::hddt::hddt_set_auto_change_password,
+            body,
+            enabled: bool
+        ),
+        "hddt_change_password" => mx!(commands::hddt::hddt_change_password, body),
         "hddt_send_simulated" => mx!(
             commands::hddt::hddt_send_simulated,
             body,

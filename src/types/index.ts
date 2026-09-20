@@ -455,6 +455,47 @@ export interface TaxOverview {
   total_tax: number;
 }
 
+// ─── HĐĐT (cổng hoadondientu.gdt.gov.vn) ───
+
+/** Tài khoản HĐĐT đã lưu (mật khẩu KHÔNG bao giờ trả về frontend). */
+export interface HddtConfig {
+  username: string;
+  base_url: string;
+  has_password: boolean;
+  configured: boolean;
+  /** Khi `true`, app sẽ tự đổi mật khẩu trước khi hết hạn (≤ 7 ngày). */
+  auto_change_password: boolean;
+}
+
+/** Trạng thái kết nối cổng HĐĐT. */
+export interface HddtStatus {
+  configured: boolean;
+  username: string;
+  logged_in: boolean;
+  /** Unix seconds — 0 nếu chưa đăng nhập. */
+  expires_at: number;
+  /** Số giây còn lại của token (âm = đã hết hạn). */
+  seconds_left: number;
+  /** Ngưỡng tự đăng nhập lại trước khi token hết hạn (giây). */
+  relogin_margin: number;
+  /** Hồ sơ người nộp thuế trả về từ cổng (null nếu chưa có). */
+  user: unknown | null;
+  /** Cài đặt `auto_change_password` hiện tại. */
+  auto_change_password: boolean;
+}
+
+/** Kết quả đăng nhập HĐĐT. `need_manual` = phải nhập captcha tay. */
+export interface HddtLoginResult {
+  ok: boolean;
+  need_manual: boolean;
+  reason?: string;
+  status?: HddtStatus;
+  /** Đã tự đổi mật khẩu thành công (mật khẩu mới đi kèm). */
+  password_rotated?: boolean;
+  /** Mật khẩu mới do hệ thống sinh — chỉ có khi `password_rotated` = true. */
+  new_password?: string;
+}
+
 // ─── Chi tiết chứng từ (in PNK 01-VT / PXK 02-VT) ───
 
 export interface VoucherRow {

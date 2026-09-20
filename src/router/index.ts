@@ -93,6 +93,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "Hóa đơn" },
   },
   {
+    path: "/hddt",
+    name: "hddt",
+    component: () => import("@/views/Hddt.vue"),
+    meta: { title: "Hóa đơn điện tử" },
+  },
+  {
     path: "/accounting",
     name: "accounting",
     component: () => import("@/views/Accounting.vue"),

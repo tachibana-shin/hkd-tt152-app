@@ -74,6 +74,9 @@ import type {
   ProfilePrefs,
   TaxInfo,
   LookupOutcome,
+  HddtConfig,
+  HddtStatus,
+  HddtLoginResult,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -491,8 +494,38 @@ export const api = {
       hddtSymbol: args.hddtSymbol,
       hddtDate: args.hddtDate,
     }),
-  hddtStatus: async () =>
-    parse<{ mode: string; connected: boolean; note: string }>(await call<string>("hddt_status")),
+  // Tài khoản cổng HĐĐT
+  hddtGetConfig: async () => parse<HddtConfig>(await call<string>("hddt_get_config")),
+  /** Đọc mật khẩu HĐĐT đã lưu (Plaintext, chỉ trong app local). */
+  hddtGetPassword: async () => parse<string>(await call<string>("hddt_get_password")),
+  hddtSaveConfig: async (args: { username: string; password: string; baseUrl: string }) =>
+    parse<HddtConfig>(
+      await call<string>("hddt_save_config", {
+        username: args.username,
+        password: args.password,
+        baseUrl: args.baseUrl,
+      }),
+    ),
+  hddtStatus: async () => parse<HddtStatus>(await call<string>("hddt_status")),
+  /** Đăng nhập (tự giải captcha); trả `need_manual=true` khi phải nhập tay. */
+  hddtLogin: async () => parse<HddtLoginResult>(await call<string>("hddt_login")),
+  /** Lấy captcha mới để người dùng nhập tay. */
+  hddtCaptcha: async () => parse<{ key: string; svg: string }>(await call<string>("hddt_captcha")),
+  hddtLoginManual: async (args: { captchaKey: string; captchaValue: string }) =>
+    parse<HddtLoginResult>(
+      await call<string>("hddt_login_manual", {
+        captchaKey: args.captchaKey,
+        captchaValue: args.captchaValue,
+      }),
+    ),
+  hddtLogout: () => call<string>("hddt_logout"),
+  hddtSetAutoChangePassword: async (enabled: boolean) =>
+    parse<{ auto_change_password: boolean }>(
+      await call<string>("hddt_set_auto_change_password", { enabled }),
+    ),
+  /** Đổi mật khẩu cổng (trả về mật khẩu mới để hiển thị 1 lần cho người dùng). */
+  hddtChangePassword: async () =>
+    parse<HddtLoginResult>(await call<string>("hddt_change_password")),
   hddtSendSimulated: (invoiceNo: string, symbol: string, total: number) =>
     call<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
 

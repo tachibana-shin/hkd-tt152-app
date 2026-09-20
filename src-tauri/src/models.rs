@@ -8,6 +8,9 @@ pub(crate) struct AppState {
     pub(crate) pool: tokio::sync::RwLock<SqlitePool>,
     /// Người dùng đang đăng nhập (None nếu chưa đăng nhập — buộc vào màn hình login)
     pub(crate) current_user: tokio::sync::Mutex<Option<CurrentUser>>,
+    /// HDDT portal session (JWT + expiry), refreshed automatically before it
+    /// expires. `None` = not logged in to the portal (or a different HKD profile).
+    pub(crate) portal: tokio::sync::Mutex<Option<crate::hddt::PortalSession>>,
 }
 
 // ─── NGƯỜI DÙNG / PHÂN QUYỀN ───
