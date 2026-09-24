@@ -27,7 +27,7 @@ Measured on the live portal (25/09/2026): leave-one-out 1356/1356, and
 | `evaluate.py` | Re-classifies the labeled set through `templates.bin` + leave-one-out. Expects 100%. |
 | `collect_captchas.py` | Fetches fresh captchas from the portal (urllib, no browser) to grow the sample set. |
 | `hard/` | Captchas the solver got wrong; read them by hand to label (captcha keys expire in minutes, so these are for labeling only). |
-| `labeled/` | Labeled samples `<index>_<key>_<ANSWER>.svg`. 37 mẫu gốc được commit; mẫu thu thập sau này gitignore (sinh lại bằng `live_harvest_captcha_templates`). |
+| `labeled/` | Labeled samples `<index>_<key>_<ANSWER>.svg` (226 files, 1356 glyphs) — commit cả lại để dựng lại `templates.bin` bất cứ lúc nào. |
 
 ## Data format
 
@@ -87,7 +87,7 @@ cd src-tauri
 # Tự thu hoạch: lấy captcha → solver đoán → đăng nhập thật.
 # Cổng chấp nhận = chuỗi đoán đúng 100% → lưu thẳng vào labeled/.
 HARVEST_ROUNDS=60 cargo test --lib live_harvest_captcha_templates -- --ignored
-# Cổng từ chối → biến thể glyph chưa có template, lưu vào hard/ để đọc tay.
+# Cổng từ chối → biến thể glyph chưa có template, lưu vào `hard/` để đọc tay.
 ```
 
 Sau khi có mẫu mới (tự thu hoạch hoặc đọc tay trong `hard/`):
