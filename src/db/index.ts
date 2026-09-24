@@ -82,6 +82,7 @@ import type {
   HddtSyncScanSummary,
   HddtSyncPreview,
   HddtSyncImport,
+  HddtSyncClearCache,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -610,6 +611,13 @@ export const api = {
       }),
     );
     return { imported: r.imported, failed: r.failed, results: r.results ?? [] };
+  },
+
+  /** Xoá cache đồng bộ: hóa đơn CHƯA nhập kho + dấu ngày đã quét. Hóa đơn đã
+   *  nhập kho giữ nguyên để không mất liên kết hóa đơn ↔ phiếu nhập. */
+  hddtSyncClearCache: async (): Promise<HddtSyncClearCache> => {
+    const r = JSON.parse(await call<string>("hddt_sync_clear_cache", {}));
+    return { invoicesDeleted: r.invoices_deleted ?? 0, daysDeleted: r.days_deleted ?? 0 };
   },
 
   // ─── AUDIT LOG ───

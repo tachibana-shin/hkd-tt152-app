@@ -708,6 +708,14 @@ export interface HddtSyncImport {
   results: HddtSyncImportResult[];
 }
 
+/** Kết quả xoá cache đồng bộ. */
+export interface HddtSyncClearCache {
+  /** Số hóa đơn chưa nhập kho đã bị xoá. */
+  invoicesDeleted: number;
+  /** Số dấu ngày đã quét đã bị xoá. */
+  daysDeleted: number;
+}
+
 // ─── Chi tiết chứng từ (in PNK 01-VT / PXK 02-VT) ───
 
 export interface VoucherRow {

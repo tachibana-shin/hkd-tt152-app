@@ -225,7 +225,15 @@ pub(crate) struct HddtClient {
     base: String,
     username: String,
     password: String,
+    /// Mốc thời gian request tra cứu gần nhất — dùng để giãn nhịp (xem `throttle`).
+    last_call: std::sync::Mutex<Option<std::time::Instant>>,
 }
+
+/// Giãn nhịp giữa 2 request liên tiếp: cổng trả 429 "Too Many Requests" khi quét
+/// liên tiếp nhiều hóa đơn (bắt lỗi thật 25/09/2026 khi lấy chi tiết 14 HĐ liền).
+const MIN_CALL_GAP: Duration = Duration::from_millis(700);
+/// Khi bị 429, chờ rồi thử lại (giây) theo từng lần.
+const RETRY_429_DELAYS: [u64; 3] = [3, 8, 20];
 
 /// 3 anti-bot headers required for EVERY portal API call (copied from the
 /// portal's own axios interceptor — verified 09/2026: without `request-id` → 403
@@ -277,7 +285,76 @@ impl HddtClient {
             base,
             username: username.to_string(),
             password: password.to_string(),
+            last_call: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Chờ đủ khoảng cách giữa 2 request tra cứu (chống 429 của cổng).
+    async fn throttle(&self) {
+        let wait = {
+            let mut last = self.last_call.lock().unwrap_or_else(|e| e.into_inner());
+            let now = std::time::Instant::now();
+            let gap = match *last {
+                Some(prev) => MIN_CALL_GAP.saturating_sub(now.duration_since(prev)),
+                None => Duration::ZERO,
+            };
+            *last = Some(now + gap);
+            gap
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    /// GET có giãn nhịp + tự thử lại khi cổng trả 429.
+    async fn get_throttled(
+        &self,
+        url: reqwest::Url,
+        token: &str,
+        referer: &str,
+    ) -> Result<reqwest::Response, String> {
+        self.get_throttled_with(url, token, referer, String::new())
+            .await
+    }
+
+    /// Như [`Self::get_throttled`], thêm header `Action` (bắt buộc cho endpoint
+    /// tra cứu danh sách — header này chọn đúng hành động của tab trên cổng).
+    async fn get_throttled_with(
+        &self,
+        url: reqwest::Url,
+        token: &str,
+        referer: &str,
+        action: String,
+    ) -> Result<reqwest::Response, String> {
+        let mut attempt = 0;
+        loop {
+            self.throttle().await;
+            let mut h = anti_bot_headers();
+            if !action.is_empty() {
+                if let Ok(v) = HeaderValue::from_str(&action) {
+                    h.insert("Action", v);
+                }
+            }
+            h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
+            let resp = self
+                .http
+                .get(url.clone())
+                .headers(h)
+                .bearer_auth(token)
+                .header(reqwest::header::REFERER, referer.to_string())
+                .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
+                .send()
+                .await
+                .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+            if resp.status() != reqwest::StatusCode::TOO_MANY_REQUESTS
+                || attempt >= RETRY_429_DELAYS.len()
+            {
+                return Ok(resp);
+            }
+            let secs = RETRY_429_DELAYS[attempt];
+            attempt += 1;
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+        }
     }
 
     #[allow(dead_code)]
@@ -383,18 +460,7 @@ impl HddtClient {
         let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
             .map_err(|e| format!("URL chi tiết hóa đơn không hợp lệ: {e}"))?;
         let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
-        let mut h = anti_bot_headers();
-        h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
-        let resp = self
-            .http
-            .get(url)
-            .headers(h)
-            .bearer_auth(token)
-            .header(reqwest::header::REFERER, page)
-            .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
-            .send()
-            .await
-            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+        let resp = self.get_throttled(url, token, &page).await?;
         let status = resp.status();
         let v = read_json_body(resp).await?;
         if !status.is_success() {
@@ -435,21 +501,8 @@ impl HddtClient {
             .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
         let action = encode_uri_component(&q.direction.action(q.kind));
         let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
-        let mut h = anti_bot_headers();
-        if let Ok(v) = HeaderValue::from_str(&action) {
-            h.insert("Action", v);
-        }
-        h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
-        let resp = self
-            .http
-            .get(url)
-            .headers(h)
-            .bearer_auth(token)
-            .header(reqwest::header::REFERER, page)
-            .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
-            .send()
-            .await
-            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+        // `Action` phải set trước khi gửi; `get_throttled` dựng phần header còn lại.
+        let resp = self.get_throttled_with(url, token, &page, action).await?;
         let status = resp.status();
         let v = read_json_body(resp).await?;
         if !status.is_success() {

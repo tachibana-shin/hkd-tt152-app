@@ -511,6 +511,7 @@ pub async fn api_invoke(
             to: Option<String>,
             retry_failed: Option<bool>
         ),
+        "hddt_sync_clear_cache" => mx!(commands::hddt::hddt_sync_clear_cache, body),
         "hddt_sync_import" => mx!(
             commands::hddt::hddt_sync_import,
             body,

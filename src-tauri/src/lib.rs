@@ -142,6 +142,7 @@ pub fn run() {
             commands::hddt::hddt_sync_scan,
             commands::hddt::hddt_sync_preview,
             commands::hddt::hddt_sync_import,
+            commands::hddt::hddt_sync_clear_cache,
             commands::import::import_nhap_lieu,
             commands::inventory::get_inventory_counts,
             commands::inventory::get_inventory_count_detail,

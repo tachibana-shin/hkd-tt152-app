@@ -133,6 +133,8 @@ pub(crate) struct CachedInvoice {
     pub(crate) posting_date: String,
     pub(crate) nbmst: String,
     pub(crate) nbten: String,
+    /// Mã mẫu số dạng số (1..9) — endpoint chi tiết BẮT BUỘC đúng field này.
+    pub(crate) khmshdon: i64,
     pub(crate) khhdon: String,
     pub(crate) shdon: String,
     pub(crate) status: String,
@@ -181,11 +183,43 @@ pub(crate) async fn scan(
         ));
     }
 
-    // Chia cửa sổ ≤ 30 ngày như cổng yêu cầu.
-    let mut win_start = start_date;
-    while win_start <= end_date {
-        let win_end = std::cmp::min(win_start + Duration::days(MAX_WINDOW_DAYS - 1), end_date);
-        for kind in kinds {
+    // Chỉ quét những ngày CHƯA có cache cho loại HĐ đó: hóa đơn ngày đã qua không
+    // đổi nên không cần gọi lại cổng. Ngày hôm nay không bao giờ quét/cache.
+    for kind in kinds {
+        let cached = cached_days(pool, *kind).await?;
+        // `NaiveDate` không có `Iterator::filter` thuận tiện → dựng list ngày trước.
+        let mut all_days: Vec<NaiveDate> = Vec::new();
+        let mut d = start_date;
+        while d <= end_date {
+            all_days.push(d);
+            d += Duration::days(1);
+        }
+        let missing: Vec<NaiveDate> = all_days
+            .iter()
+            .copied()
+            .filter(|d| !cached.contains(&d.format("%Y-%m-%d").to_string()))
+            .collect();
+        sum.days_cached += all_days.len() - missing.len();
+        if missing.is_empty() {
+            continue;
+        }
+
+        // Gom ngày còn thiếu thành cửa sổ liên tiếp ≤ 30 ngày (cổng chặn > 1 tháng).
+        let mut i = 0;
+        while i < missing.len() {
+            let win_start = missing[i];
+            let mut j = i;
+            // Mở rộng cửa sổ chừng nên các ngày liên tiếp (cache rời rạc vẫn gộp
+            // được) và không vượt quá giới hạn cổng.
+            while j + 1 < missing.len()
+                && (missing[j + 1] - missing[j]).num_days() == 1
+                && (missing[j + 1] - win_start).num_days() < MAX_WINDOW_DAYS
+            {
+                j += 1;
+            }
+            let win_end = missing[j];
+            let days = (win_end - win_start).num_days() + 1;
+
             let mut state: Option<String> = None;
             loop {
                 let q = InvoiceQuery {
@@ -224,21 +258,32 @@ pub(crate) async fn scan(
                 }
             }
             // Đánh dấu ngày đã quét cho loại này (kể cả 0 hóa đơn).
-            let days = (win_end - win_start).num_days() + 1;
             sum.days_scanned += days as usize;
             mark_days_scanned(pool, win_start, win_end, *kind).await?;
+            i = j + 1;
         }
-        win_start = win_end + Duration::days(1);
     }
 
     // Lấy chi tiết cho các hóa đơn chưa có (đủ dòng hàng mới tạo được phiếu).
     let pending = pending_without_detail(pool).await?;
     for inv in pending {
+        if inv.khmshdon <= 0 {
+            // Endpoint chi tiết bắt buộc khmshdon dạng số; thiếu thì không đoán.
+            let msg = "Thiếu mã mẫu số (khmshdon) — cần quét lại từ cổng";
+            sqlx::query("UPDATE hddt_purchase_invoice SET detail_error = ? WHERE id = ?")
+                .bind(msg)
+                .bind(inv.id)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            sum.details_failed += 1;
+            continue;
+        }
         match client
             .invoice_detail(
                 token,
                 &inv.nbmst,
-                &inv.khhdon,
+                &inv.khmshdon.to_string(),
                 &inv.khhdon,
                 &inv.shdon,
                 &inv.portal_id,
@@ -407,7 +452,7 @@ async fn mark_days_scanned(
 /// Hóa đơn chờ xử lý mà chưa có chi tiết (và lần gọi trước không lỗi).
 async fn pending_without_detail(pool: &SqlitePool) -> Result<Vec<CachedInvoice>, String> {
     let rows: Vec<CachedInvoice> = sqlx::query_as(
-        "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khhdon, shdon,
+        "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
                 status, detail_json
          FROM hddt_purchase_invoice
          WHERE status = 'pending' AND detail_json = '' AND detail_error = ''",
@@ -418,14 +463,66 @@ async fn pending_without_detail(pool: &SqlitePool) -> Result<Vec<CachedInvoice>,
     Ok(rows)
 }
 
-/// Hóa đơn không lấy được chi tiết (cần thử lại, không tạo phiếu).
+/// Ngày đã quét theo loại HĐ (yyyy-mm-dd) — dùng để bỏ qua khi quét lại.
+async fn cached_days(
+    pool: &SqlitePool,
+    kind: InvoiceKind,
+) -> Result<std::collections::HashSet<String>, String> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT day FROM hddt_sync_day WHERE kind = ?")
+        .bind(kind_str(kind))
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(|(d,)| d).collect())
+}
+
+/// Xoá cache đồng bộ: chỉ xoá hóa đơn CHƯA nhập kho + các dấu ngày đã quét.
+///
+/// Hóa đơn đã nhập kho giữ nguyên để không mất liên kết hóa đơn ↔ phiếu nhập
+/// (`portal_id` UNIQUE nên quét lại cũng không tạo trùng).
+pub(crate) async fn clear_cache(pool: &SqlitePool) -> Result<ClearCacheOutcome, String> {
+    let deleted = sqlx::query("DELETE FROM hddt_purchase_invoice WHERE status <> 'imported'")
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected();
+    let days = sqlx::query("DELETE FROM hddt_sync_day")
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected();
+    Ok(ClearCacheOutcome {
+        invoices_deleted: deleted as usize,
+        days_deleted: days as usize,
+    })
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub(crate) struct ClearCacheOutcome {
+    pub(crate) invoices_deleted: usize,
+    pub(crate) days_deleted: usize,
+}
+
+/// Đưa hóa đơn lỗi chi tiết về lại 'pending' để lần quét sau thử tải lại.
+///
+/// Hóa đơn bị đánh 'manual' vì `tthai != 1` thì giữ nguyên (không tự tạo phiếu).
 pub(crate) async fn retry_failed_details(pool: &SqlitePool) -> Result<usize, String> {
-    let r =
+    let r = sqlx::query(
+        "UPDATE hddt_purchase_invoice
+            SET detail_error = '',
+                status = 'pending',
+                skip_reason = ''
+          WHERE detail_error <> '' AND status = 'manual'",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let r2 =
         sqlx::query("UPDATE hddt_purchase_invoice SET detail_error = '' WHERE detail_error <> ''")
             .execute(pool)
             .await
             .map_err(|e| e.to_string())?;
-    Ok(r.rows_affected() as usize)
+    Ok((r.rows_affected() + r2.rows_affected()) as usize)
 }
 
 /// Đánh dấu các hóa đơn cần người xử lý: không lấy được dòng hàng, hoặc
@@ -876,7 +973,7 @@ mod tests {
 
     async fn load(pool: &SqlitePool, id: i64) -> CachedInvoice {
         sqlx::query_as(
-            "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon,
+            "SELECT id, portal_id, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
                     status, detail_json
              FROM hddt_purchase_invoice WHERE id = ?",
         )
@@ -1040,6 +1137,91 @@ mod tests {
         .unwrap();
         let b = next_inbound_voucher_no(&pool).await.unwrap();
         assert_ne!(a, b, "số phiếu phải tăng, không trùng");
+    }
+
+    #[tokio::test]
+    async fn cached_days_are_known_per_kind() {
+        let pool = test_pool().await;
+        mark_days_scanned(
+            &pool,
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 3).unwrap(),
+            InvoiceKind::Regular,
+        )
+        .await
+        .unwrap();
+        let reg = cached_days(&pool, InvoiceKind::Regular).await.unwrap();
+        let cash = cached_days(&pool, InvoiceKind::CashRegister).await.unwrap();
+        assert_eq!(reg.len(), 3, "3 ngày đã đánh dấu cho HĐ điện tử");
+        assert!(reg.contains("2026-09-02"));
+        assert!(cash.is_empty(), "không đánh dấu nhầm sang máy tính tiền");
+    }
+
+    #[tokio::test]
+    async fn retry_failed_details_returns_invoice_to_pending() {
+        // Lỗi chi tiết phải hồi phục được: trước đây xoá detail_error nhưng
+        // status vẫn 'manual' → không bao giờ thử tải lại, không có nút Nhập kho.
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-retry", 1, "{}").await;
+        sqlx::query(
+            "UPDATE hddt_purchase_invoice
+                SET status = 'manual', detail_error = 'Too Many Requests', skip_reason = 'x'
+              WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let n = retry_failed_details(&pool).await.unwrap();
+        assert_eq!(n, 1);
+        let row: (String, String) =
+            sqlx::query_as("SELECT status, detail_error FROM hddt_purchase_invoice WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, "pending");
+        assert_eq!(row.1, "");
+    }
+
+    #[tokio::test]
+    async fn clear_cache_keeps_imported_invoices() {
+        // Xoá cache để quét lại: hóa đơn đã nhập kho phải giữ để không mất liên kết.
+        let pool = test_pool().await;
+        let imported = seed_invoice(&pool, "uuid-keep", 1, "{}").await;
+        let pending = seed_invoice(&pool, "uuid-drop", 1, "{}").await;
+        sqlx::query("UPDATE hddt_purchase_invoice SET status = 'imported' WHERE id = ?")
+            .bind(imported)
+            .execute(&pool)
+            .await
+            .unwrap();
+        mark_days_scanned(
+            &pool,
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            InvoiceKind::Regular,
+        )
+        .await
+        .unwrap();
+
+        let out = clear_cache(&pool).await.unwrap();
+        assert_eq!(out.invoices_deleted, 1, "chỉ xoá hóa đơn chưa nhập kho");
+        assert_eq!(out.days_deleted, 1);
+        let left: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
+                .bind(imported)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(left.0, 1, "hóa đơn đã nhập kho phải còn lại");
+        let gone: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
+                .bind(pending)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(gone.0, 0);
     }
 
     #[tokio::test]

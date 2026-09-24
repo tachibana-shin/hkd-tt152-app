@@ -12,6 +12,7 @@ import { usePortalSession } from "@/composables/usePortalSession";
 import type { HddtSyncPreview, HddtSyncRow } from "@/types";
 
 const toast = useToast();
+const confirm = useConfirm();
 const business = useBusinessStore();
 
 // Phiên cổng: chỉ biết đã đăng nhập chưa + nút đăng nhập (captcha tay thuộc màn HĐĐT).
@@ -99,9 +100,12 @@ async function onSyncScan() {
       to: syncIsoDate(syncTo.value),
       kinds: syncKindList.value,
     });
+    // Ngày đã có cache bị bỏ qua (không gọi lại cổng) — nói rõ để không tưởng quét thiếu.
     syncScanMsg.value =
-      `Đã quét ${s.days_scanned} ngày · hóa đơn mới ${s.invoices_new} · ` +
-      `có dòng hàng ${s.details_ok} · lỗi ${s.details_failed} · cần xử lý ${s.need_manual}`;
+      `Đã quét ${s.days_scanned} ngày` +
+      (s.days_cached > 0 ? ` (bỏ qua ${s.days_cached} ngày đã có cache)` : "") +
+      ` · hóa đơn mới ${s.invoices_new} · có dòng hàng ${s.details_ok} · lỗi ${s.details_failed}` +
+      ` · cần xử lý ${s.need_manual}`;
     await loadSyncPreview(s.details_failed > 0);
   } catch (e) {
     toastError("Lỗi quét cổng HĐĐT", e);
@@ -134,6 +138,38 @@ async function onSyncImport(ids?: number[]) {
   } finally {
     syncImporting.value = false;
   }
+}
+
+/** Xoá cache đồng bộ để quét lại từ đầu (hóa đơn đã nhập kho giữ nguyên). */
+function onSyncClearCache() {
+  confirm.require({
+    header: "Xoá cache đồng bộ",
+    message:
+      "Xoá toàn bộ hóa đơn chưa nhập kho và các dấu ngày đã quét, để lần sau " +
+      'bấm "Quét cổng" tải lại từ cổng. Hóa đơn đã nhập kho (có phiếu) không bị xoá.',
+    icon: "pi pi-exclamation-triangle",
+    acceptLabel: "Xoá cache",
+    rejectLabel: "Huỷ",
+    acceptProps: { severity: "danger" },
+    accept: async () => {
+      syncScanning.value = true;
+      try {
+        const out = await api.hddtSyncClearCache();
+        toast.add({
+          severity: "success",
+          summary: "Đã xoá cache đồng bộ",
+          detail: `Xoá ${out.invoicesDeleted} hóa đơn chưa nhập · ${out.daysDeleted} ngày đã quét`,
+          life: 4000,
+        });
+        syncScanMsg.value = "";
+        await loadSyncPreview();
+      } catch (e) {
+        toastError("Không xoá được cache", e);
+      } finally {
+        syncScanning.value = false;
+      }
+    },
+  });
 }
 
 function syncStatusSeverity(s: string) {
@@ -216,11 +252,11 @@ void portal.loadPortalStatus();
         </div>
         <Button label="Quét cổng" icon="pi pi-sync" :loading="syncScanning" @click="onSyncScan" />
         <Button
-          label="Xem lại cache"
-          icon="pi pi-refresh"
+          label="Xoá cache"
+          icon="pi pi-trash"
           severity="secondary"
-          :loading="syncScanning"
-          @click="loadSyncPreview()"
+          :disabled="syncScanning || !syncSummary || syncSummary.total === 0"
+          @click="onSyncClearCache"
         />
         <Button
           v-if="syncSummary && syncSummary.pending > 0"

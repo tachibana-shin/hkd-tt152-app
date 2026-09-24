@@ -651,7 +651,7 @@ pub(crate) async fn hddt_sync_import(
         let mut out = Vec::new();
         for id in list {
             let row: Option<CachedInvoice> = sqlx::query_as(
-                "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khhdon, shdon,
+                "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
                         status, detail_json
                    FROM hddt_purchase_invoice WHERE id = ?",
             )
@@ -666,7 +666,7 @@ pub(crate) async fn hddt_sync_import(
         out
     } else {
         sqlx::query_as(
-            "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khhdon, shdon,
+            "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
                     status, detail_json
                FROM hddt_purchase_invoice
               WHERE status = 'pending' AND detail_json <> '' AND detail_error = ''
@@ -719,4 +719,25 @@ pub(crate) async fn hddt_sync_import(
     )
     .await;
     Ok(v.to_string())
+}
+
+/// Xoá cache đồng bộ (hóa đơn chưa nhập kho + dấu ngày đã quét) để quét lại từ
+/// đầu. Hóa đơn đã nhập kho giữ nguyên — liên kết hóa đơn ↔ phiếu không được mất.
+#[tauri::command]
+pub(crate) async fn hddt_sync_clear_cache(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let out = sync::clear_cache(&pool).await?;
+    drop(pool);
+    audit(
+        &state,
+        "hddt_sync_clear_cache",
+        "hddt",
+        &format!(
+            "xóa {} hóa đơn chưa nhập, {} ngày cache",
+            out.invoices_deleted, out.days_deleted
+        ),
+    )
+    .await;
+    Ok(serde_json::to_string(&out).unwrap_or_default())
 }
