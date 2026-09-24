@@ -1216,7 +1216,9 @@ onUnmounted(() => {
             Quét hóa đơn mua từ cổng HĐĐT và tạo phiếu nhập kho tự động. Ngày đã quét được lưu lại
             (hóa đơn ngày đã qua không đổi) — lần sau app không gọi lại cổng cho những ngày đó. Hôm
             nay không quét (hóa đơn hôm nay còn đang phát sinh). Mặt hàng khớp theo
-            <b>tên + đơn vị tính</b>; chưa có thì app tự tạo.
+            <b>tên + đơn vị tính</b>; chưa có thì app tự tạo. Tên dòng dịch vụ (phí) giữ nguyên — vì
+            tên có kẹp kỳ/tháng nên mỗi kỳ là một mặt hàng riêng; số mặt hàng sẽ tạo mới luôn hiện ở
+            cột "Dòng / HH mới" để bạn xem trước khi nhập kho.
           </p>
           <p v-if="!status?.logged_in" class="mb-3 text-sm text-orange-600">
             <i class="pi pi-exclamation-triangle mr-1" />Cần đăng nhập cổng HĐĐT ở phần trên trước

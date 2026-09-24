@@ -517,7 +517,10 @@ pub(crate) async fn import_invoice(
     for line in &lines {
         let name = f(line, "ten");
         // Dịch vụ (phí, phí dịch vụ…) không có đơn vị tính → cổng trả null.
-        // Gộp về nhóm chung "Dịch vụ" để các dòng phí không sinh mặt hàng rác.
+        // Đơn vị gộp về "Dịch vụ", nhưng TÊN giữ nguyên verbatim (phương án B —
+        // người dùng chọn giữ chi tiết đầy đủ): dòng phí có tên kèm kỳ/tháng
+        // ("…PPS 08/2026…") nên mỗi kỳ là một mặt hàng riêng. Số mặt hàng mới
+        // luôn hiển thị ở cột "HH mới" của bảng xem trước trước khi nhập kho.
         let raw_unit = f(line, "dvtinh");
         let unit = if raw_unit.trim().is_empty() {
             "Dịch vụ"
@@ -1039,39 +1042,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn service_line_without_unit_is_grouped_and_marked() {
-        // Dữ liệu thật lấy từ cổng 24/09/2026 (hóa đơn phí Shopee):
-        // dòng dịch vụ có dvtinh = null, mhhdvu = null.
+    async fn service_line_keeps_full_name_verbatim() {
+        // Phương án B (người dùng chọn): tên dòng dịch vụ giữ nguyên, dù dài và
+        // có kỳ/tháng → mỗi kỳ là một mặt hàng riêng. Tên lấy thật từ cổng.
         let pool = test_pool().await;
-        let lines = r#"{"ten":"Phí dịch vụ PPS 08/2026","dvtinh":null,"mhhdvu":null,
-                        "sluong":1.0,"dgia":27811.0,"stckhau":null,"tlckhau":null,"tsuat":0.08}"#;
-        let id = seed_invoice(&pool, "uuid-svc", 1, lines).await;
+        let long_name = "Phí dịch vụ tiếp thị liên kết PPS 08/2026 bachhoatonghop.phuongvi \
+                         (AMS PPS Commission Fee 08/2026 bachhoatonghop.phuongvi)";
+        let lines = format!(
+            r#"{{"ten":"{long_name}","dvtinh":null,"mhhdvu":null,"sluong":1.0,
+                 "dgia":27811.0,"stckhau":null,"tlckhau":null,"tsuat":0.08}}"#
+        );
+        let id = seed_invoice(&pool, "uuid-svc", 1, &lines).await;
         let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
             .await
             .unwrap();
         assert_eq!(out.products_created, 1);
-        let p: (String, i64) = sqlx::query_as("SELECT unit, is_service FROM product")
+        // Tên lưu đúng verbatim; đơn vị tính gộp về "Dịch vụ" + đánh dấu dịch vụ.
+        let p: (String, String, i64) = sqlx::query_as("SELECT name, unit, is_service FROM product")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(
-            p.0, "Dịch vụ",
-            "dòng không đơn vị tính phải gộp nhóm Dịch vụ"
+        assert_eq!(p.0, long_name, "tên dòng dịch vụ phải giữ nguyên");
+        assert_eq!(p.1, "Dịch vụ");
+        assert_eq!(p.2, 1, "đánh dấu dịch vụ để không tính tồn kho");
+
+        // Kỳ khác → mặt hàng mới (đúng nghĩa phương án B).
+        let next_month = long_name.replace("08/2026", "09/2026");
+        let lines2 = format!(
+            r#"{{"ten":"{next_month}","dvtinh":null,"mhhdvu":null,"sluong":1.0,
+                 "dgia":27811.0,"stckhau":null,"tsuat":0.08}}"#
         );
-        assert_eq!(p.1, 1, "phải đánh dấu là dịch vụ để không tính tồn kho");
-        // 2 hóa đơn cùng tên dịch vụ → vẫn chỉ 1 mặt hàng.
-        let lines2 = r#"{"ten":"Phí dịch vụ PPS 08/2026","dvtinh":null,"mhhdvu":null,
-                         "sluong":2.0,"dgia":27811.0,"stckhau":null,"tsuat":0.08}"#;
-        let id2 = seed_invoice(&pool, "uuid-svc2", 1, lines2).await;
+        let id2 = seed_invoice(&pool, "uuid-svc2", 1, &lines2).await;
         let out2 = import_invoice(&pool, &load(&pool, id2).await, "", "HKD", "", "")
             .await
             .unwrap();
-        assert_eq!(out2.products_created, 0);
+        assert_eq!(out2.products_created, 1, "kỳ khác → mặt hàng khác");
         let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM product")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(n.0, 1);
+        assert_eq!(n.0, 2);
+
+        // Cùng tên + cùng đơn vị → khớp mặt hàng đã có.
+        let id3 = seed_invoice(&pool, "uuid-svc3", 1, &lines2).await;
+        let out3 = import_invoice(&pool, &load(&pool, id3).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        assert_eq!(out3.products_created, 0, "trùng tên + đơn vị → dùng lại");
     }
 
     #[tokio::test]
