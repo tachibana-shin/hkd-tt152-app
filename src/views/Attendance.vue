@@ -250,9 +250,7 @@ async function save() {
   }
 }
 
-onMounted(() => {
-  void reload();
-});
+void reload();
 </script>
 
 <template>

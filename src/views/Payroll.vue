@@ -222,10 +222,8 @@ async function useAttendanceWorkDays() {
   }
 }
 
-onMounted(() => {
-  loadEmployees();
-  loadPeriods();
-});
+loadEmployees();
+loadPeriods();
 </script>
 
 <template>

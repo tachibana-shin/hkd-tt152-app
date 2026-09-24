@@ -242,10 +242,10 @@ async function save() {
   }
 }
 
-onMounted(async () => {
+void (async () => {
   await Promise.all([catalog.loadAll(), stock.loadEntries("PN"), settings.load()]);
   accounts.value = await api.getAccounts();
-});
+})();
 </script>
 
 <template>

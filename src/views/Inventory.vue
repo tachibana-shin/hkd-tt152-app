@@ -96,14 +96,14 @@ async function showDetail(id: number) {
   await invoice.loadCountDetail(id);
 }
 
-onMounted(async () => {
+void (async () => {
   await Promise.all([
     catalog.loadAll(),
     stock.loadSummary(),
     stock.loadLots(""),
     invoice.loadCounts(),
   ]);
-});
+})();
 </script>
 
 <template>

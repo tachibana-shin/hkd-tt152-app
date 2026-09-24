@@ -243,9 +243,9 @@ async function save() {
   }
 }
 
-onMounted(async () => {
+void (async () => {
   await Promise.all([catalog.loadAll(), stock.loadEntries("PX")]);
-});
+})();
 </script>
 
 <template>

@@ -29,8 +29,6 @@ async function load() {
   }
 }
 
-onMounted(load);
-
 // Lọc text client-side theo action/entity/detail
 const filteredEntries = computed(() => {
   const q = filterText.value.trim().toLowerCase();
@@ -98,6 +96,8 @@ function fmtTs(ts: string): string {
   if (!m) return ts;
   return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
 }
+
+void load();
 </script>
 
 <template>

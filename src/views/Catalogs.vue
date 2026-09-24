@@ -166,7 +166,7 @@ async function reload() {
 
 // Sửa qua dialog: chọn 1 dòng (tap) rồi bấm Sửa trên header tab.
 
-onMounted(() => catalog.loadAll());
+void catalog.loadAll();
 </script>
 
 <template>

@@ -124,10 +124,8 @@ async function onWebToggle() {
   }
 }
 
-onMounted(() => {
-  load();
-  loadWebStatus();
-});
+load();
+loadWebStatus();
 </script>
 
 <template>

@@ -20,21 +20,6 @@ const browserUrl = ref("");
 
 // Tên đăng nhập nhập lần trước của hồ sơ này được ghi nhớ (lưu ở profile_prefs.json);
 // nếu đã bật tự động đăng nhập thì tích sẵn ô "Tự động đăng nhập".
-onMounted(async () => {
-  await profile.loadPrefs(); // đảm bảo đã nạp (App cũng nạp khi khởi động)
-  const key = profile.active?.key;
-  if (!key) return;
-  const pref = profile.prefsOf(key);
-  username.value = pref.last_username ?? "";
-  autoLogin.value = !!pref.auto_login && !!pref.username && !!pref.password;
-  if (inTauri) {
-    try {
-      browserUrl.value = await api.webUrl();
-    } catch {
-      /* web server không khả dụng — bỏ qua */
-    }
-  }
-});
 
 async function doLogin() {
   const user = username.value.trim();
@@ -85,6 +70,22 @@ const roleHint = computed(() => {
       return "Xem — chỉ đọc";
   }
 });
+
+void (async () => {
+  await profile.loadPrefs(); // đảm bảo đã nạp (App cũng nạp khi khởi động)
+  const key = profile.active?.key;
+  if (!key) return;
+  const pref = profile.prefsOf(key);
+  username.value = pref.last_username ?? "";
+  autoLogin.value = !!pref.auto_login && !!pref.username && !!pref.password;
+  if (inTauri) {
+    try {
+      browserUrl.value = await api.webUrl();
+    } catch {
+      /* web server không khả dụng — bỏ qua */
+    }
+  }
+})();
 </script>
 
 <template>

@@ -129,7 +129,7 @@ function remove(a: Account) {
   });
 }
 
-onMounted(load);
+void load();
 </script>
 
 <template>

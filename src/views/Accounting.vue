@@ -226,25 +226,6 @@ function exportDeclarationExcel() {
   exportXlsx(`to-khai-thue-ky-${declYear.value}-${periodLabel}`, cols, rows);
 }
 
-onMounted(async () => {
-  await business.load();
-  // Kỳ báo cáo không còn lưu — mặc định theo năm hiện tại của hệ thống.
-  const settings = await api.getAppSettings().catch(() => null);
-  if (settings) {
-    taxPeriod.value = settings.tax_period;
-    taxMethod.value = settings.tax_method;
-    // Mặc định xem theo đúng kỳ khai của hộ (per_occurrence xem theo năm).
-    if (taxPeriod.value === "month") declPeriod.value = "month";
-    else if (taxPeriod.value === "year" || taxPeriod.value === "per_occurrence")
-      declPeriod.value = "year";
-    else declPeriod.value = "quarter";
-    const now = new Date();
-    if (declPeriod.value === "quarter") declPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
-    else if (declPeriod.value === "month") declPeriodNo.value = now.getMonth() + 1;
-  }
-  await Promise.all([loadReports(), loadDeclaration()]);
-});
-
 function openTaxConfig() {
   taxDialog.value = true;
 }
@@ -275,6 +256,25 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
   }
   await loadDeclaration();
 }
+
+void (async () => {
+  await business.load();
+  // Kỳ báo cáo không còn lưu — mặc định theo năm hiện tại của hệ thống.
+  const settings = await api.getAppSettings().catch(() => null);
+  if (settings) {
+    taxPeriod.value = settings.tax_period;
+    taxMethod.value = settings.tax_method;
+    // Mặc định xem theo đúng kỳ khai của hộ (per_occurrence xem theo năm).
+    if (taxPeriod.value === "month") declPeriod.value = "month";
+    else if (taxPeriod.value === "year" || taxPeriod.value === "per_occurrence")
+      declPeriod.value = "year";
+    else declPeriod.value = "quarter";
+    const now = new Date();
+    if (declPeriod.value === "quarter") declPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
+    else if (declPeriod.value === "month") declPeriodNo.value = now.getMonth() + 1;
+  }
+  await Promise.all([loadReports(), loadDeclaration()]);
+})();
 </script>
 
 <template>

@@ -3,7 +3,6 @@
 // Dropdown mỗi option hiện: Tên — [ĐVT] + "Còn X" (tồn đúng kho xuất trên dòng;
 // warehouseCode rỗng → tổng mọi kho; dịch vụ/nhân công → chỉ ĐVT, không tồn).
 // Tồn nạp lazy 1 lần qua catalog.loadOnhand() (guard trong store).
-import { onMounted } from "vue";
 import { useCatalogStore } from "@/stores/catalog";
 import { fmtInt as fmt } from "@/utils/format";
 
@@ -31,14 +30,14 @@ const emit = defineEmits<{
 
 const catalog = useCatalogStore();
 
-onMounted(() => catalog.loadOnhand());
-
 /** Tồn còn lại đúng kho xuất trên dòng; 0 cho dịch vụ/nhân công (không cần tồn). */
 function onhandOf(code: string): number {
   const p = catalog.productByCode(code);
   if (!p || p.is_service) return 0;
   return catalog.onhandAt(code, props.warehouseCode ?? "");
 }
+
+void catalog.loadOnhand();
 </script>
 
 <template>

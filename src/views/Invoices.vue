@@ -184,9 +184,9 @@ async function saveLink() {
   }
 }
 
-onMounted(async () => {
+void (async () => {
   await Promise.all([catalog.loadAll(), invoiceStore.loadInvoices()]);
-});
+})();
 </script>
 
 <template>

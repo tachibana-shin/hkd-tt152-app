@@ -96,11 +96,6 @@ function resetFilters() {
   Object.values(filters.value).forEach((f) => (f.value = null));
 }
 
-onMounted(() => {
-  loadLazyData();
-  catalog.loadIndustryGroups(); // nhóm ngành cho cột + dialog (màn này không loadAll)
-});
-
 // ─── SELECTION (checkbox, giữ lựa chọn qua các trang bằng id) ───
 const selectedIds = ref<Set<number>>(new Set());
 const selection = computed<Product[]>({
@@ -186,6 +181,9 @@ function onProductSaved() {
     loadLazyData();
   }
 }
+
+loadLazyData();
+catalog.loadIndustryGroups(); // nhóm ngành cho cột + dialog (màn này không loadAll)
 </script>
 
 <template>

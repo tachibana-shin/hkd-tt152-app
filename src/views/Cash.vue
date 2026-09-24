@@ -193,13 +193,13 @@ async function save() {
   }
 }
 
-onMounted(async () => {
+void (async () => {
   await Promise.all([
     catalog.loadAll(),
     loadEntries(),
     api.getAccounts().then((a) => (accounts.value = a)),
   ]);
-});
+})();
 </script>
 
 <template>

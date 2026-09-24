@@ -57,10 +57,10 @@ function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
   }
 }
 
-onMounted(async () => {
+void (async () => {
   if (!config.value) await business.load();
   await loadLedger();
-});
+})();
 </script>
 
 <template>
