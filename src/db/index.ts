@@ -79,6 +79,9 @@ import type {
   HddtLoginResult,
   HddtInvoiceList,
   HddtInvoiceFilter,
+  HddtSyncScanSummary,
+  HddtSyncPreview,
+  HddtSyncImport,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -557,6 +560,56 @@ export const api = {
       }),
     );
     return r as HddtInvoiceList;
+  },
+
+  /** Đồng bộ HĐ nhập: quét cổng + cache theo ngày. `kinds` = "regular,cash-register". */
+  hddtSyncScan: async (args: { from?: string; to?: string; kinds?: string[] }) => {
+    const r = JSON.parse(
+      await call<string>("hddt_sync_scan", {
+        from: args.from ?? null,
+        to: args.to ?? null,
+        kinds: (args.kinds ?? ["regular", "cash-register"]).join(","),
+      }),
+    );
+    return r as HddtSyncScanSummary;
+  },
+
+  /** Xem trước — đọc cache, không gọi cổng. `retryFailed` cho phép thử lại
+   *  các hóa đơn lần trước chưa lấy được dòng hàng. */
+  hddtSyncPreview: async (args: {
+    from?: string;
+    to?: string;
+    retryFailed?: boolean;
+  }): Promise<HddtSyncPreview> => {
+    const r = JSON.parse(
+      await call<string>("hddt_sync_preview", {
+        from: args.from ?? null,
+        to: args.to ?? null,
+        retry_failed: args.retryFailed ?? false,
+      }),
+    );
+    return { rows: r.rows ?? [], summary: r.summary };
+  },
+
+  /** Nhập kho hóa đơn đã cache (ids rỗng = tất cả đang chờ). Tạo mặt hàng/NCC
+   *  còn thiếu, tạo phiếu nhập và liên kết hóa đơn chính thức với phiếu. */
+  hddtSyncImport: async (args: {
+    ids?: number[];
+    warehouseCode?: string;
+    unitCode?: string;
+    debitAccount?: string;
+    creditAccount?: string;
+  }): Promise<HddtSyncImport> => {
+    const r = JSON.parse(
+      await call<string>("hddt_sync_import", {
+        ids: args.ids ?? [],
+        warehouse_code: args.warehouseCode ?? "",
+        unit_code: args.unitCode ?? "HKD",
+        debit_account: args.debitAccount ?? "",
+        credit_account: args.creditAccount ?? "",
+      }),
+    );
+    return { imported: r.imported, failed: r.failed, results: r.results ?? [] };
   },
 
   // ─── AUDIT LOG ───

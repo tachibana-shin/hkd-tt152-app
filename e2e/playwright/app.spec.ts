@@ -168,6 +168,114 @@ test("Cấu hình HKD: ngày bắt đầu HĐĐT là bắt buộc và được l
   expect(cfg.hddt_start_date).toBe("2026-03-15");
 });
 
+test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu + mặt hàng", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
+  await expect(page.getByText("Đồng bộ hóa đơn mua vào", { exact: true })).toBeVisible();
+
+  // Cache rỗng ngay từ đầu → bảng không có dòng, nút nhập tất cả ẩn.
+  const table = page.locator(".p-datatable").last();
+  await expect(table).toBeVisible();
+  await expect(page.getByText("Nhập tất cả", { exact: false })).toBeHidden();
+
+  // Chèn 1 hóa đơn mua đã cache (giả lập kết quả quét cổng) rồi tải lại cache.
+  const detail = {
+    hdhhdvu: [
+      {
+        ten: "Bình NN Rossi E2E",
+        dvtinh: "Cái",
+        mhhdvu: "puro30",
+        sluong: 2,
+        dgia: 1000000,
+        stckhau: 0,
+        tsuat: 0.08,
+      },
+      {
+        ten: "Bộ lọc E2E",
+        dvtinh: "Bộ",
+        mhhdvu: "filter",
+        sluong: 1,
+        dgia: 500000,
+        stckhau: 0,
+        tsuat: 0.08,
+      },
+    ],
+  };
+  const seed = await request.post("/api/hddt_sync_test_seed", {
+    data: { portal_id: "e2e-uuid-1", detail },
+  });
+  expect(seed.ok(), `seed hddt_sync_test_seed failed ${seed.status()}`).toBe(true);
+
+  await page.getByRole("button", { name: "Xem lại cache" }).click();
+  await expect(page.getByText("Có 1 hóa đơn trong cache", { exact: false })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(table.getByText("C26E2E", { exact: false })).toBeVisible();
+  await expect(page.getByText("Chờ nhập kho", { exact: true })).toBeVisible();
+
+  // Nhập kho → tạo phiếu, tạo 2 mặt hàng mới, gắn số phiếu vào hóa đơn.
+  await table.getByRole("button", { name: "Nhập kho" }).first().click();
+  await expect(page.getByText("Đã tạo 1 phiếu nhập", { exact: false })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("Đã nhập kho", { exact: true })).toBeVisible();
+
+  // Mặt hàng mới tồn tại trong DB, liên kết chặt hóa đơn ↔ phiếu nhập.
+  const inv = await (
+    await request.post("/api/hddt_sync_preview", {
+      data: { from: null, to: null, retry_failed: false },
+    })
+  ).json();
+  const row = (inv.rows as Array<Record<string, unknown>>)[0];
+  expect(row.status).toBe("imported");
+  expect(String(row.voucher_no)).toMatch(/^PN\d+$/);
+  const products = await (await request.post("/api/get_products", { data: {} })).json();
+  const names = (products as Array<{ name: string }>).map((p) => p.name);
+  expect(names).toContain("Bình NN Rossi E2E");
+  expect(names).toContain("Bộ lọc E2E");
+});
+
+test("Đồng bộ HĐ mua: chạy lần 2 không tạo trùng", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  // Dùng lại hóa đơn đã nhập ở test trước (đã 'imported').
+  const before = await (
+    await request.post("/api/hddt_sync_preview", {
+      data: { from: null, to: null, retry_failed: false },
+    })
+  ).json();
+  const importedBefore = (before.rows as Array<{ status: string }>).filter(
+    (r) => r.status === "imported",
+  ).length;
+
+  const res = await (
+    await request.post("/api/hddt_sync_import", {
+      data: {
+        ids: [],
+        warehouse_code: null,
+        unit_code: null,
+        debit_account: null,
+        credit_account: null,
+      },
+    })
+  ).json();
+  expect(res.imported).toBe(0);
+  expect(res.failed).toBe(0);
+
+  const after = await (
+    await request.post("/api/hddt_sync_preview", {
+      data: { from: null, to: null, retry_failed: false },
+    })
+  ).json();
+  const importedAfter = (after.rows as Array<{ status: string }>).filter(
+    (r) => r.status === "imported",
+  ).length;
+  expect(importedAfter).toBe(importedBefore);
+});
+
 // ─── HĐĐT: tra cứu hóa đơn thật (cần credentials cổng + IP VN) ───
 
 /**
@@ -233,7 +341,7 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
 
   // Tìm kiếm thật: dải ngày mặc định = 30 ngày gần nhất.
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
-  const table = page.locator(".p-datatable");
+  const table = page.locator(".p-card", { hasText: "Tra cứu hóa đơn" }).locator(".p-datatable");
   await expect(table).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
   // Dữ liệu thật: các cột định danh của hóa đơn đều có giá trị.
@@ -271,7 +379,7 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await page.getByRole("tab", { name: "Hóa đơn điện tử" }).click();
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
-  const table = page.locator(".p-datatable");
+  const table = page.locator(".p-card", { hasText: "Tra cứu hóa đơn" }).locator(".p-datatable");
   await expect(table.getByRole("columnheader", { name: "Thông tin người bán" })).toBeVisible();
   const firstRow = table.locator("tbody tr").first();
   await expect(firstRow.getByText("MST người bán:").first()).toBeVisible();

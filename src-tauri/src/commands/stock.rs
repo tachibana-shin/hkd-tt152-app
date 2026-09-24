@@ -84,6 +84,35 @@ pub(crate) async fn save_inbound_core(
 ) -> Result<InboundResult, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
+    // Đầu phiếu nhập (inbound_voucher) — id này là điểm neo để hóa đơn chính
+    // thức liên kết chặt với phiếu nhập. Tạo TRƯỚC các dòng bút toán để
+    // gắn inbound_voucher_id ngay khi ghi.
+    sqlx::query(
+        "INSERT INTO inbound_voucher
+            (voucher_no, posting_date, supplier_code, description, reference_no,
+             inbound_type, warehouse_code, unit_code, vat_rate, source, note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '', datetime('now'))
+         ON CONFLICT(voucher_no) DO NOTHING",
+    )
+    .bind(voucher_no)
+    .bind(posting_date)
+    .bind(supplier_code)
+    .bind(description)
+    .bind(reference_no)
+    .bind(inbound_type)
+    .bind(warehouse_code)
+    .bind(unit_code)
+    .bind(vat_rate)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let inbound_header_id: (i64,) =
+        sqlx::query_as("SELECT id FROM inbound_voucher WHERE voucher_no = ?")
+            .bind(voucher_no)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+
     // TK mặc định theo loại nhập (rỗng → mặc định):
     //   purchase  → Nợ 152 (hàng hóa) / Có 331 (phải trả người bán)
     //   production→ Nợ 155 (thành phẩm) / Có 154 (chi phí SXKD dở dang)
@@ -334,6 +363,34 @@ pub(crate) async fn save_inbound_core(
             .await?;
         }
     }
+
+    // Gắn id đầu phiếu vào các dòng bút toán của chính phiếu này + chốt tổng.
+    // (Lọc theo voucher_no + entry_type để không đụng phiếu khác trùng số.)
+    sqlx::query(
+        "UPDATE journal_entry SET inbound_voucher_id = ?
+          WHERE voucher_no = ? AND entry_type = 'PN'",
+    )
+    .bind(inbound_header_id.0)
+    .bind(voucher_no)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query(
+        "UPDATE inbound_voucher SET total = ?, vat_amount = ?, reference_no = ?,
+                posting_date = ?, supplier_code = ?, description = ?, unit_code = ?
+          WHERE id = ?",
+    )
+    .bind(total)
+    .bind(vat_total)
+    .bind(reference_no)
+    .bind(posting_date)
+    .bind(supplier_code)
+    .bind(description)
+    .bind(unit_code)
+    .bind(inbound_header_id.0)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
 
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(InboundResult {

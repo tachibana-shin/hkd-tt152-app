@@ -15,6 +15,7 @@ pub(crate) mod glyph;
 pub(crate) mod password;
 pub(crate) mod session;
 pub(crate) mod solver;
+pub(crate) mod sync;
 
 pub(crate) use captcha::{Captcha, CaptchaSolver};
 pub(crate) use client::{
@@ -23,6 +24,7 @@ pub(crate) use client::{
 pub(crate) use password::generate_password;
 pub(crate) use session::{days_left_until, now_unix, rfc3339_to_unix, PortalSession};
 pub(crate) use solver::{classify_svg, GlyphTemplateSolver, CHARSET};
+pub(crate) use sync::CachedInvoice;
 
 #[cfg(test)]
 mod live;

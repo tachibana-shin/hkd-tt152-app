@@ -490,6 +490,36 @@ pub async fn api_invoke(
             unhiem: Option<bool>,
             size: Option<u32>
         ),
+        // CHỈ DÙNG CHO E2E (không đăng ký trong invoke_handler của Tauri).
+        "hddt_sync_test_seed" => mx!(
+            commands::hddt::hddt_sync_test_seed,
+            body,
+            portal_id: String,
+            detail: serde_json::Value
+        ),
+        "hddt_sync_scan" => mx!(
+            commands::hddt::hddt_sync_scan,
+            body,
+            from: Option<String>,
+            to: Option<String>,
+            kinds: Option<String>
+        ),
+        "hddt_sync_preview" => mx!(
+            commands::hddt::hddt_sync_preview,
+            body,
+            from: Option<String>,
+            to: Option<String>,
+            retry_failed: Option<bool>
+        ),
+        "hddt_sync_import" => mx!(
+            commands::hddt::hddt_sync_import,
+            body,
+            ids: Option<Vec<i64>>,
+            warehouse_code: Option<String>,
+            unit_code: Option<String>,
+            debit_account: Option<String>,
+            credit_account: Option<String>
+        ),
         "hddt_send_simulated" => mx!(
             commands::hddt::hddt_send_simulated,
             body,

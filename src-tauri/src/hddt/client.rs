@@ -320,6 +320,62 @@ impl HddtClient {
         Ok(v)
     }
 
+    /// Chi tiết 1 hóa đơn (dòng hàng `hdhhdvu[]`) — dùng để tạo phiếu nhập kho.
+    ///
+    /// Kiểm chứng live 24/09/2026: endpoint chi tiết **luôn** dùng tiền tố
+    /// `sco-query` cho cả hóa đơn thường lẫn máy tính tiền; gọi `query` trả
+    /// 403 "Không có quyền xem hóa đơn này".
+    ///
+    /// `GET {base}/api/sco-query/invoices/detail?nbmst&khmshdon&khhdon&shdon[&id]`
+    pub(crate) async fn invoice_detail(
+        &self,
+        token: &str,
+        nbmst: &str,
+        khmshdon: &str,
+        khhdon: &str,
+        shdon: &str,
+        portal_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        let mut params: Vec<(&str, String)> = vec![
+            ("nbmst", nbmst.to_string()),
+            ("khmshdon", khmshdon.to_string()),
+            ("khhdon", khhdon.to_string()),
+            ("shdon", shdon.to_string()),
+        ];
+        if !portal_id.is_empty() {
+            params.push(("id", portal_id.to_string()));
+        }
+        let path = "/api/sco-query/invoices/detail";
+        let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
+            .map_err(|e| format!("URL chi tiết hóa đơn không hợp lệ: {e}"))?;
+        let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
+        let mut h = anti_bot_headers();
+        h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
+        let resp = self
+            .http
+            .get(url)
+            .headers(h)
+            .bearer_auth(token)
+            .header(reqwest::header::REFERER, page)
+            .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
+            .send()
+            .await
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+        let status = resp.status();
+        let v: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Phản hồi chi tiết hóa đơn sai định dạng: {e}"))?;
+        if !status.is_success() {
+            let msg = v
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("không rõ nguyên nhân");
+            return Err(format!("Lỗi lấy chi tiết hóa đơn (HTTP {status}): {msg}"));
+        }
+        Ok(v)
+    }
+
     /// Tra cứu hóa đơn theo tab đang chọn (2×2: bán ra/mua vào × thường/máy tính tiền).
     ///
     /// `GET {base}/api/{query|sco-query}/invoices/{sold|purchase}` với

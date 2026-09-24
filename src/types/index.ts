@@ -639,6 +639,75 @@ export interface HddtInvoiceFilter {
   size?: number;
 }
 
+// ─── Đồng bộ hóa đơn mua (tab trong HĐĐT) ───
+
+/** Kết quả quét cổng: gọi cổng + cache theo ngày. */
+export interface HddtSyncScanSummary {
+  /** Số ngày thực sự gọi cổng (không tính ngày đã cache). */
+  days_scanned: number;
+  days_cached: number;
+  /** Hóa đơn mới ghi vào cache. */
+  invoices_new: number;
+  invoices_existing: number;
+  /** Hóa đơn lấy được dòng hàng. */
+  details_ok: number;
+  /** Không lấy được dòng hàng → KHÔNG tạo phiếu, cần thử lại. */
+  details_failed: number;
+  /** Hóa đơn cần người xử lý (thay thế/điều chỉnh/hủy). */
+  need_manual: number;
+}
+
+/** 1 dòng hóa đơn mua trong bảng xem trước (đọc từ cache, không gọi cổng). */
+export interface HddtSyncRow {
+  id: number;
+  portal_id: string;
+  posting_date: string;
+  nbmst: string;
+  nbten: string;
+  khhdon: string;
+  shdon: string;
+  /** regular = hóa đơn điện tử, cash-register = máy tính tiền. */
+  portal_kind: string;
+  /** pending = chờ nhập kho · imported = đã có phiếu · manual = cần xử lý. */
+  status: "pending" | "imported" | "manual";
+  skip_reason: string;
+  line_count: number;
+  new_product_count: number;
+  tgtcthue: number;
+  tgtthue: number;
+  tgtttbso: number;
+  voucher_no: string;
+  detail_error: string;
+}
+
+export interface HddtSyncPreview {
+  rows: HddtSyncRow[];
+  summary: {
+    total: number;
+    pending: number;
+    imported: number;
+    manual: number;
+    new_products: number;
+    total_value: number;
+    days_cached: number;
+  };
+}
+
+/** Kết quả 1 hóa đơn sau khi nhập kho. */
+export interface HddtSyncImportResult {
+  portal_id: string;
+  ok: boolean;
+  message: string;
+  voucher_no: string;
+  products_created: number;
+}
+
+export interface HddtSyncImport {
+  imported: number;
+  failed: number;
+  results: HddtSyncImportResult[];
+}
+
 // ─── Chi tiết chứng từ (in PNK 01-VT / PXK 02-VT) ───
 
 export interface VoucherRow {

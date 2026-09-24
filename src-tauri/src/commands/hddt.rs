@@ -12,8 +12,9 @@
 // `hddt_status` / `hddt_send_simulated` used to be mocks; `hddt_status` now returns
 // the real connection state, `hddt_send_simulated` is kept as the local fallback.
 
+use crate::hddt::sync::CachedInvoice;
 use crate::hddt::{
-    days_left_until, generate_password, rfc3339_to_unix, GlyphTemplateSolver, HddtClient,
+    days_left_until, generate_password, rfc3339_to_unix, sync, GlyphTemplateSolver, HddtClient,
     InvoiceDirection, InvoiceKind, InvoiceQuery, LoginError, PortalSession,
 };
 use crate::helpers::{audit, require_role};
@@ -509,5 +510,213 @@ pub(crate) async fn hddt_list_invoices(
         "time": list.time,
     });
     audit(&state, "hddt_list_invoices", "hddt", "list").await;
+    Ok(v.to_string())
+}
+
+// ─── Đồng bộ hóa đơn mua vào ───
+
+/// CHỈ DÙNG CHO E2E: chèn 1 hóa đơn mua đã cache (giả lập kết quả quét cổng)
+/// để kiểm thử luồng nhập kho mà không cần gọi cổng HĐĐT. Không có trong
+/// invoke_handler của Tauri; chỉ expose qua web server khi build test.
+#[tauri::command]
+pub(crate) async fn hddt_sync_test_seed(
+    state: State<'_, AppState>,
+    portal_id: String,
+    detail: serde_json::Value,
+) -> Result<String, String> {
+    let pool = state.pool.read().await;
+    let lines = detail
+        .get("hdhhdvu")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    sqlx::query(
+        "INSERT INTO hddt_purchase_invoice
+            (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
+             khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue, ttcktmai,
+             tgtttbso, status, line_count, raw_json, detail_json, created_at)
+         VALUES (?, 'regular', '2026-09-01T17:00:00Z', '2026-09-02', '0106773786',
+                 'Cty TNHH ABC', '001170019085', 1, 'C26E2E', '001', 1, 1,
+                 2000000, 160000, 0, 2160000, 'pending', ?, '{}', ?, datetime('now'))
+         ON CONFLICT(portal_id) DO NOTHING",
+    )
+    .bind(&portal_id)
+    .bind(lines as i64)
+    .bind(detail.to_string())
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok("ok".into())
+}
+
+/// Lấy token phiên cổng (đã bắt buộc đăng nhập) + config, dùng cho các lệnh sync.
+async fn portal_client(state: &State<'_, AppState>) -> Result<(HddtClient, String), String> {
+    let session = state
+        .portal
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
+    if session.seconds_left() <= 0 {
+        return Err("Phiên cổng HĐĐT đã hết hạn — bấm Đăng nhập lại.".into());
+    }
+    let cfg = read_config(state).await?;
+    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
+    Ok((client, session.token))
+}
+
+fn parse_kinds(kinds: Option<String>) -> Vec<InvoiceKind> {
+    let raw = kinds.unwrap_or_default();
+    let list: Vec<InvoiceKind> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| match s {
+            "cash-register" => InvoiceKind::CashRegister,
+            _ => InvoiceKind::Regular,
+        })
+        .collect();
+    if list.is_empty() {
+        vec![InvoiceKind::Regular, InvoiceKind::CashRegister]
+    } else {
+        list
+    }
+}
+
+/// Quét cổng theo khoảng ngày và cache hóa đơn mua kèm chi tiết dòng hàng.
+/// Mốc bắt đầu lấy từ `hddt_start_date` (khai trong popup cấu hình HKD);
+/// mốc cuối là hôm qua. Ngày đã quét được cache nên lần sau không gọi lại.
+#[tauri::command]
+pub(crate) async fn hddt_sync_scan(
+    state: State<'_, AppState>,
+    from: Option<String>,
+    to: Option<String>,
+    kinds: Option<String>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let (client, token) = portal_client(&state).await?;
+    let pool = state.pool.read().await;
+    let summary = sync::scan(
+        &pool,
+        &client,
+        &token,
+        from.as_deref().unwrap_or(""),
+        to.as_deref().unwrap_or(""),
+        &parse_kinds(kinds),
+    )
+    .await?;
+    drop(pool);
+    audit(&state, "hddt_sync_scan", "hddt", "sync scan").await;
+    Ok(serde_json::to_string(&summary).unwrap_or_default())
+}
+
+/// Xem trước kết quả trong cache (không gọi cổng) + cho phép thử lại các
+/// hóa đơn lần trước chưa lấy được chi tiết.
+#[tauri::command]
+pub(crate) async fn hddt_sync_preview(
+    state: State<'_, AppState>,
+    from: Option<String>,
+    to: Option<String>,
+    retry_failed: Option<bool>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    if retry_failed.unwrap_or(false) {
+        sync::retry_failed_details(&pool).await?;
+    }
+    let (rows, summary) = sync::preview(
+        &pool,
+        from.as_deref().unwrap_or(""),
+        to.as_deref().unwrap_or(""),
+    )
+    .await?;
+    Ok(serde_json::json!({ "rows": rows, "summary": summary }).to_string())
+}
+
+/// Nhập kho các hóa đơn đã cache: tạo mặt hàng/NCC còn thiếu, tạo phiếu nhập
+/// (1 hóa đơn = 1 phiếu) và liên kết hóa đơn chính thức với phiếu.
+/// `ids` rỗng = nhập tất cả hóa đơn đang chờ.
+#[tauri::command]
+pub(crate) async fn hddt_sync_import(
+    state: State<'_, AppState>,
+    ids: Option<Vec<i64>>,
+    warehouse_code: Option<String>,
+    unit_code: Option<String>,
+    debit_account: Option<String>,
+    credit_account: Option<String>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let targets: Vec<CachedInvoice> = if let Some(list) = ids.filter(|l| !l.is_empty()) {
+        let mut out = Vec::new();
+        for id in list {
+            let row: Option<CachedInvoice> = sqlx::query_as(
+                "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khhdon, shdon,
+                        status, detail_json
+                   FROM hddt_purchase_invoice WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            if let Some(r) = row {
+                out.push(r);
+            }
+        }
+        out
+    } else {
+        sqlx::query_as(
+            "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khhdon, shdon,
+                    status, detail_json
+               FROM hddt_purchase_invoice
+              WHERE status = 'pending' AND detail_json <> '' AND detail_error = ''
+              ORDER BY posting_date, khhdon, shdon",
+        )
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for inv in &targets {
+        if inv.status != "pending" {
+            results.push(serde_json::json!({
+                "portal_id": inv.portal_id, "ok": false, "voucher_no": "",
+                "products_created": 0,
+                "message": format!("Bỏ qua — trạng thái '{}'", inv.status),
+            }));
+            continue;
+        }
+        match sync::import_invoice(
+            &pool,
+            inv,
+            warehouse_code.as_deref().unwrap_or(""),
+            unit_code.as_deref().unwrap_or("HKD"),
+            debit_account.as_deref().unwrap_or(""),
+            credit_account.as_deref().unwrap_or(""),
+        )
+        .await
+        {
+            Ok(o) => results.push(serde_json::to_value(o).unwrap_or_default()),
+            Err(e) => results.push(serde_json::json!({
+                "portal_id": inv.portal_id, "ok": false, "voucher_no": "",
+                "products_created": 0, "message": e,
+            })),
+        }
+    }
+    let ok_count = results.iter().filter(|r| r["ok"] == true).count();
+    let v = serde_json::json!({
+        "imported": ok_count,
+        "failed": results.len() - ok_count,
+        "results": results,
+    });
+    drop(pool);
+    audit(
+        &state,
+        "hddt_sync_import",
+        "hddt",
+        &format!("imported {ok_count}"),
+    )
+    .await;
     Ok(v.to_string())
 }
