@@ -149,6 +149,12 @@ const menuItems: MenuItem[] = [
   },
   { label: "Hóa đơn", icon: "pi pi-file", to: "/invoices", roles: ["admin", "ketoan"] },
   { label: "HĐĐT", icon: "pi pi-cloud", to: "/hddt", roles: ["admin", "ketoan"] },
+  {
+    label: "Đồng bộ HĐĐT",
+    icon: "pi pi-cloud-download",
+    to: "/hddt-sync",
+    roles: ["admin", "ketoan"],
+  },
   { label: "Nhật ký HĐ", icon: "pi pi-history", to: "/audit", roles: ["admin", "ketoan", "xem"] },
   { label: "Kế toán HKD", icon: "pi pi-calculator", to: "/accounting", roles: ["admin", "ketoan"] },
   { label: "Người dùng", icon: "pi pi-user-edit", to: "/users", roles: ["admin"] },

@@ -99,6 +99,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "Hóa đơn điện tử" },
   },
   {
+    path: "/hddt-sync",
+    name: "hddt-sync",
+    component: () => import("@/views/HddtSync.vue"),
+    meta: { title: "Đồng bộ hóa đơn mua" },
+  },
+  {
     path: "/accounting",
     name: "accounting",
     component: () => import("@/views/Accounting.vue"),

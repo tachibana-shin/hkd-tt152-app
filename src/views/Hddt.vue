@@ -1,18 +1,9 @@
 <script setup lang="ts">
 import { api } from "@/db";
-import { useBusinessStore } from "@/stores/business";
-import type {
-  HddtInvoiceDirection,
-  HddtInvoiceKind,
-  HddtInvoiceRow,
-  HddtStatus,
-  HddtSyncPreview,
-  HddtSyncRow,
-} from "@/types";
+import type { HddtInvoiceDirection, HddtInvoiceKind, HddtInvoiceRow, HddtStatus } from "@/types";
 import { HDDT_KHMSHDON, HDDT_TTHAI, HDDT_TTXLY, HDDT_TTXLY_ALL } from "@/types";
 
 const toast = useToast();
-const business = useBusinessStore();
 
 const loading = ref(false);
 const saving = ref(false);
@@ -282,135 +273,6 @@ const canNextPage = computed(() => {
   return !!lastState;
 });
 const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
-
-// ─── Tab chính của trang HĐĐT ───
-// Tách "Tra cứu hóa đơn" và "Đồng bộ hóa đơn mua" thành 2 tab: cả hai danh sách
-// đều dài, để chồng nhau thì phải cuộn rất sâu mới tới phần thứ hai.
-const mainTab = ref<"lookup" | "sync">("lookup");
-
-function onMainTabChange(value: string | number) {
-  mainTab.value = value as "lookup" | "sync";
-}
-
-// ─── Đồng bộ hóa đơn mua (tab 2) ───
-// Quét cổng 1 lần → cache theo ngày; xem trước (đọc cache, không mạng) →
-// nhập kho (tạo mặt hàng/NCC/phiếu). Ngày hôm nay bị bỏ qua: hóa đơn hôm nay
-// còn đang phát sinh. Mốc bắt đầu = hddt_start_date khai trong popup cấu hình HKD.
-const syncFrom = ref<Date | null>(null);
-const syncTo = ref<Date | null>(null);
-const syncKinds = ref<{ regular: boolean; cashRegister: boolean }>({
-  regular: true,
-  cashRegister: true,
-});
-const syncRows = ref<HddtSyncRow[]>([]);
-const syncSummary = ref<HddtSyncPreview["summary"] | null>(null);
-const syncScanning = ref(false);
-const syncImporting = ref(false);
-const syncScanMsg = ref("");
-const syncLoaded = ref(false);
-
-function syncIsoDate(d: Date | null) {
-  if (!d) return undefined;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Mốc bắt đầu = hddt_start_date của hộ; mốc cuối = hôm qua. */
-function syncDefaultRange() {
-  const to = new Date();
-  to.setDate(to.getDate() - 1);
-  const start = business.config?.hddt_start_date
-    ? new Date(`${business.config.hddt_start_date}T00:00:00`)
-    : null;
-  return { from: start && !Number.isNaN(start.getTime()) ? start : to, to };
-}
-
-const syncKindList = computed(() => {
-  const out: string[] = [];
-  if (syncKinds.value.regular) out.push("regular");
-  if (syncKinds.value.cashRegister) out.push("cash-register");
-  return out;
-});
-
-async function loadSyncPreview(retryFailed = false) {
-  syncScanning.value = true;
-  syncScanMsg.value = "";
-  try {
-    const res = await api.hddtSyncPreview({
-      from: syncIsoDate(syncFrom.value),
-      to: syncIsoDate(syncTo.value),
-      retryFailed,
-    });
-    syncRows.value = res.rows;
-    syncSummary.value = res.summary;
-    syncLoaded.value = true;
-  } catch (e) {
-    toastError("Lỗi tải danh sách hóa đơn", e);
-  } finally {
-    syncScanning.value = false;
-  }
-}
-
-async function onSyncScan() {
-  if (!syncKindList.value.length) {
-    toastError("Chưa chọn loại hóa đơn", "Chọn ít nhất một loại để quét cổng.");
-    return;
-  }
-  syncScanning.value = true;
-  syncScanMsg.value = "";
-  try {
-    const s = await api.hddtSyncScan({
-      from: syncIsoDate(syncFrom.value),
-      to: syncIsoDate(syncTo.value),
-      kinds: syncKindList.value,
-    });
-    syncScanMsg.value =
-      `Đã quét ${s.days_scanned} ngày · hóa đơn mới ${s.invoices_new} · ` +
-      `có dòng hàng ${s.details_ok} · lỗi ${s.details_failed} · cần xử lý ${s.need_manual}`;
-    await loadSyncPreview(s.details_failed > 0);
-  } catch (e) {
-    toastError("Lỗi quét cổng HĐĐT", e);
-  } finally {
-    syncScanning.value = false;
-  }
-}
-
-async function onSyncImport(ids?: number[]) {
-  syncImporting.value = true;
-  try {
-    const res = await api.hddtSyncImport({ ids: ids ?? [] });
-    const bad = res.results.filter((r) => !r.ok);
-    if (res.imported > 0) {
-      toast.add({
-        severity: "success",
-        summary: `Đã tạo ${res.imported} phiếu nhập`,
-        detail: bad.length
-          ? `${res.failed} hóa đơn lỗi: ${bad[0].message}`
-          : "Tất cả hóa đơn đã được liên kết với phiếu nhập.",
-      });
-    } else if (res.failed > 0) {
-      toastError("Không tạo được phiếu nhập", bad[0]?.message ?? "Không rõ nguyên nhân");
-    } else {
-      toast.add({ severity: "info", summary: "Không có hóa đơn nào chờ nhập kho" });
-    }
-    await loadSyncPreview();
-  } catch (e) {
-    toastError("Lỗi nhập kho hóa đơn", e);
-  } finally {
-    syncImporting.value = false;
-  }
-}
-
-function syncStatusSeverity(s: string) {
-  return s === "imported" ? "success" : s === "manual" ? "warn" : "info";
-}
-
-function syncStatusLabel(s: string) {
-  return s === "imported" ? "Đã nhập kho" : s === "manual" ? "Cần xử lý" : "Chờ nhập kho";
-}
-
-function syncKindLabel(k: string) {
-  return k === "cash-register" ? "Máy tính tiền" : "HĐ điện tử";
-}
 
 // ─── Captcha nhập tay (khi tự giải thất bại) ───
 const manualVisible = ref(false);
@@ -736,13 +598,6 @@ onMounted(async () => {
   const { from, to } = defaultRange();
   searchFrom.value = from;
   searchTo.value = to;
-  // Đồng bộ HĐ mua: mốc bắt đầu = hddt_start_date, mốc cuối = hôm qua.
-  const syncRange = syncDefaultRange();
-  syncFrom.value = syncRange.from;
-  syncTo.value = syncRange.to;
-  void business.load();
-  // Cache đồng bộ là dữ liệu cục bộ → tải luôn để thấy trạng thái trước khi quét.
-  void loadSyncPreview();
   try {
     await loadConfig();
     await tick();
@@ -1008,360 +863,212 @@ onUnmounted(() => {
         </template>
       </Card>
 
-      <!-- 2 tab: tra cứu / đồng bộ — tránh phải cuộn sâu xuống dưới trang -->
-      <Tabs :value="mainTab" @update:value="onMainTabChange">
-        <TabList>
-          <Tab value="lookup"><i class="pi pi-search mr-2" />Tra cứu hóa đơn</Tab>
-          <Tab value="sync"><i class="pi pi-sync mr-2" />Đồng bộ hóa đơn mua</Tab>
-        </TabList>
-        <TabPanels>
-          <TabPanel value="lookup">
-            <p v-if="!status?.logged_in" class="mb-3 text-sm text-orange-600">
-              <i class="pi pi-exclamation-triangle mr-1" />Cần đăng nhập cổng HĐĐT ở phần trên trước
-              khi tra cứu.
-            </p>
+      <Card v-if="status?.logged_in">
+        <template #title>Tra cứu hóa đơn</template>
+        <template #content>
+          <!-- Tầng 1: hóa đơn ra (bán ra) / hóa đơn vào (mua vào) — như cổng -->
+          <Tabs :value="searchDirection" class="mb-3" @update:value="onDirectionChange">
+            <TabList>
+              <Tab v-for="d in directionOptions" :key="d.value" :value="d.value" class="text-sm">
+                {{ d.label }}
+              </Tab>
+            </TabList>
+          </Tabs>
+          <!-- Tầng 2: hóa đơn điện tử (thường) / hóa đơn máy tính tiền -->
+          <Tabs :value="searchKind" class="mb-3" @update:value="onKindChange">
+            <TabList>
+              <Tab v-for="k in kindOptions" :key="k.value" :value="k.value" class="text-sm">
+                {{ k.label }}
+              </Tab>
+            </TabList>
+          </Tabs>
 
-            <!-- Tầng 1: hóa đơn ra (bán ra) / hóa đơn vào (mua vào) — như cổng -->
-            <Tabs :value="searchDirection" class="mb-3" @update:value="onDirectionChange">
-              <TabList>
-                <Tab v-for="d in directionOptions" :key="d.value" :value="d.value" class="text-sm">
-                  {{ d.label }}
-                </Tab>
-              </TabList>
-            </Tabs>
-            <!-- Tầng 2: hóa đơn điện tử (thường) / hóa đơn máy tính tiền -->
-            <Tabs :value="searchKind" class="mb-3" @update:value="onKindChange">
-              <TabList>
-                <Tab v-for="k in kindOptions" :key="k.value" :value="k.value" class="text-sm">
-                  {{ k.label }}
-                </Tab>
-              </TabList>
-            </Tabs>
-
-            <div class="mb-3 flex flex-wrap items-end gap-3">
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Từ ngày lập</label>
-                <DatePicker v-model="searchFrom" dateFormat="dd/mm/yy" class="w-40" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Đến ngày lập</label>
-                <DatePicker v-model="searchTo" dateFormat="dd/mm/yy" class="w-40" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">{{ nbmstLabel }}</label>
-                <InputText v-model="searchNbmst" class="w-40" placeholder="MST" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">CCCD người mua</label>
-                <InputText v-model="searchNmcmnd" class="w-36" placeholder="Số CCCD" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Trạng thái hóa đơn</label>
-                <Select
-                  v-model="searchTthai"
-                  :options="tthaiOptions"
-                  option-label="label"
-                  option-value="value"
-                  class="w-44"
-                />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Kết quả kiểm tra</label>
-                <Select
-                  v-model="searchTtxly"
-                  :options="ttxlyOptions"
-                  option-label="label"
-                  option-value="value"
-                  class="w-48"
-                />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Ký hiệu mẫu số HĐ</label>
-                <Select
-                  v-model="searchKhmshdon"
-                  :options="khmshdonOptions"
-                  option-label="label"
-                  option-value="value"
-                  class="w-56"
-                  showClear
-                  placeholder="Chọn"
-                />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Số hóa đơn</label>
-                <InputText v-model="searchShdon" class="w-32" placeholder="VD: 821" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Ký hiệu hóa đơn</label>
-                <InputText v-model="searchKhhdon" class="w-40" placeholder="VD: C26THN" />
-              </div>
-              <div class="pb-1">
-                <label class="mb-1 flex items-center gap-2 text-xs text-gray-500">
-                  <Checkbox v-model="searchUnhiem" binary />
-                  Hóa đơn ủy nhiệm
-                </label>
-              </div>
-              <Button
-                label="Tìm kiếm"
-                icon="pi pi-search"
-                :loading="searchLoading"
-                @click="onSearchSubmit"
-              />
-              <Button
-                label="Bỏ tìm kiếm"
-                icon="pi pi-times"
-                severity="secondary"
-                text
-                @click="onResetSearch"
+          <div class="mb-3 flex flex-wrap items-end gap-3">
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Từ ngày lập</label>
+              <DatePicker v-model="searchFrom" dateFormat="dd/mm/yy" class="w-40" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Đến ngày lập</label>
+              <DatePicker v-model="searchTo" dateFormat="dd/mm/yy" class="w-40" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">{{ nbmstLabel }}</label>
+              <InputText v-model="searchNbmst" class="w-40" placeholder="MST" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">CCCD người mua</label>
+              <InputText v-model="searchNmcmnd" class="w-36" placeholder="Số CCCD" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Trạng thái hóa đơn</label>
+              <Select
+                v-model="searchTthai"
+                :options="tthaiOptions"
+                option-label="label"
+                option-value="value"
+                class="w-44"
               />
             </div>
-
-            <div class="mb-2 flex flex-wrap items-center gap-3 text-sm">
-              <span v-if="dateRangeTooLong" class="text-orange-600">
-                <i class="pi pi-exclamation-triangle mr-1" />Cổng HĐĐT chỉ cho tra cứu tối đa 1
-                tháng — vui lòng thu hẹp khoảng từ ngày.
-              </span>
-              <span v-else-if="searchMsg" class="text-gray-600">
-                <i class="pi pi-info-circle mr-1" />{{ searchMsg }}
-              </span>
-              <span v-else class="text-gray-400">
-                Chọn loại hóa đơn rồi bấm "Tìm kiếm" để tra trên cổng HĐĐT (khoảng ngày mặc định:
-                tháng trước → hôm nay).
-              </span>
-              <div class="ml-auto flex items-center gap-2">
-                <Button
-                  icon="pi pi-chevron-left"
-                  size="small"
-                  severity="secondary"
-                  :disabled="!canPrevPage"
-                  @click="onPrevPage"
-                />
-                <span class="text-xs text-gray-500">
-                  Trang {{ pageIdx + 1 }} / {{ Math.max(1, Math.ceil(searchTotal / pageSize)) }}
-                </span>
-                <Button
-                  icon="pi pi-chevron-right"
-                  size="small"
-                  severity="secondary"
-                  :disabled="!canNextPage"
-                  @click="onNextPage"
-                />
-              </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Kết quả kiểm tra</label>
+              <Select
+                v-model="searchTtxly"
+                :options="ttxlyOptions"
+                option-label="label"
+                option-value="value"
+                class="w-48"
+              />
             </div>
-
-            <AppDataTable
-              :value="searchRows"
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Ký hiệu mẫu số HĐ</label>
+              <Select
+                v-model="searchKhmshdon"
+                :options="khmshdonOptions"
+                option-label="label"
+                option-value="value"
+                class="w-56"
+                showClear
+                placeholder="Chọn"
+              />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Số hóa đơn</label>
+              <InputText v-model="searchShdon" class="w-32" placeholder="VD: 821" />
+            </div>
+            <div>
+              <label class="mb-1 block text-xs text-gray-500">Ký hiệu hóa đơn</label>
+              <InputText v-model="searchKhhdon" class="w-40" placeholder="VD: C26THN" />
+            </div>
+            <div class="pb-1">
+              <label class="mb-1 flex items-center gap-2 text-xs text-gray-500">
+                <Checkbox v-model="searchUnhiem" binary />
+                Hóa đơn ủy nhiệm
+              </label>
+            </div>
+            <Button
+              label="Tìm kiếm"
+              icon="pi pi-search"
               :loading="searchLoading"
-              stripedRows
-              scrollable
-              scrollHeight="480px"
-              size="small"
-              class="mt-1"
-            >
-              <Column header="STT" :style="{ width: '3rem' }">
-                <template #body="{ index }">{{
-                  searchRows.length === 0 ? "" : pageIdx * pageSize + index + 1
-                }}</template>
-              </Column>
-              <Column field="nbmst" header="Mã số thuế">
-                <template #body="{ data }">{{ mstColumn(data) }}</template>
-              </Column>
-              <Column header="Mẫu số">
-                <template #body="{ data }">{{ khmshdonLabel(data) }}</template>
-              </Column>
-              <Column field="khhdon" header="Ký hiệu HĐ">
-                <template #body="{ data }">{{ data.khhdon || "—" }}</template>
-              </Column>
-              <Column field="shdon" header="Số HĐ">
-                <template #body="{ data }">{{ data.shdon ?? "—" }}</template>
-              </Column>
-              <Column header="Ngày lập" :style="{ width: '7rem' }">
-                <template #body="{ data }">{{ fmtTdlap(data.tdlap) }}</template>
-              </Column>
-              <Column :header="partyHeader">
-                <template #body="{ data }">
-                  <div class="text-xs leading-5">
-                    <div>
-                      <b>{{ partyMstLabel }}:</b> {{ partyMst(data) }}
-                    </div>
-                    <div>
-                      <b>{{ partyNameLabel }}:</b> {{ partyName(data) }}
-                    </div>
-                    <div v-if="data.nmcccd"><b>CCCD:</b> {{ data.nmcccd }}</div>
-                  </div>
-                </template>
-              </Column>
-              <Column header="Tổng tiền chưa thuế" align="right">
-                <template #body="{ data }">{{ fmtMoney(data.tgtcthue) }}</template>
-              </Column>
-              <Column header="Tổng thuế" align="right">
-                <template #body="{ data }">{{ fmtMoney(data.tgtthue) }}</template>
-              </Column>
-              <Column header="Tổng thanh toán" align="right">
-                <template #body="{ data }">
-                  {{ fmtMoney(data.tgtttbso)
-                  }}<span v-if="data.dvtte" class="text-xs text-gray-500"> {{ data.dvtte }}</span>
-                </template>
-              </Column>
-              <Column header="Trạng thái HĐ">
-                <template #body="{ data }">{{ tthaiLabel(data) }}</template>
-              </Column>
-              <Column header="Kết quả xử lý">
-                <template #body="{ data }">
-                  <Tag
-                    v-if="data.ttxly == 3"
-                    :value="ttxlyLabel(data)"
-                    severity="danger"
-                    :title="String(data.ldo ?? '')"
-                  />
-                  <Tag v-else-if="data.ttxly == 5" :value="ttxlyLabel(data)" severity="success" />
-                  <Tag v-else :value="ttxlyLabel(data)" severity="secondary" />
-                </template>
-              </Column>
-            </AppDataTable>
-            <p v-if="searchTime" class="mt-2 text-xs text-gray-400">
-              <i class="pi pi-clock mr-1" />Thời gian truy vấn cổng: {{ searchTime }} ms
-            </p>
-          </TabPanel>
+              @click="onSearchSubmit"
+            />
+            <Button
+              label="Bỏ tìm kiếm"
+              icon="pi pi-times"
+              severity="secondary"
+              text
+              @click="onResetSearch"
+            />
+          </div>
 
-          <TabPanel value="sync">
-            <p v-if="!status?.logged_in" class="mb-3 text-sm text-orange-600">
-              <i class="pi pi-exclamation-triangle mr-1" />Cần đăng nhập cổng HĐĐT ở phần trên trước
-              khi quét. Bạn vẫn xem lại được các hóa đơn đã lưu cache.
-            </p>
-
-            <p class="mb-3 text-xs text-gray-500">
-              Quét hóa đơn mua từ cổng HĐĐT và tạo phiếu nhập kho tự động. Ngày đã quét được lưu lại
-              (hóa đơn ngày đã qua không đổi) — lần sau app không gọi lại cổng cho những ngày đó.
-              Hôm nay không quét (hóa đơn hôm nay còn đang phát sinh). Mặt hàng khớp theo
-              <b>tên + đơn vị tính</b>; chưa có thì app tự tạo. Tên dòng dịch vụ (phí) giữ nguyên —
-              vì tên có kẹp kỳ/tháng nên mỗi kỳ là một mặt hàng riêng; số mặt hàng sẽ tạo mới luôn
-              hiện ở cột "Dòng / HH mới" để bạn xem trước khi nhập kho.
-            </p>
-            <p v-if="!status?.logged_in" class="mb-3 text-sm text-orange-600">
-              <i class="pi pi-exclamation-triangle mr-1" />Cần đăng nhập cổng HĐĐT ở phần trên trước
-              khi quét. Bạn vẫn xem lại được các hóa đơn đã lưu cache.
-            </p>
-            <div class="mb-3 flex flex-wrap items-end gap-3">
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Từ ngày lập</label>
-                <DatePicker v-model="syncFrom" dateFormat="dd/mm/yy" class="w-40" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">Đến ngày lập</label>
-                <DatePicker v-model="syncTo" dateFormat="dd/mm/yy" class="w-40" />
-              </div>
-              <div class="flex items-center gap-3 pb-1">
-                <label class="flex items-center gap-2 text-xs text-gray-600">
-                  <Checkbox v-model="syncKinds.regular" binary />
-                  HĐ điện tử
-                </label>
-                <label class="flex items-center gap-2 text-xs text-gray-600">
-                  <Checkbox v-model="syncKinds.cashRegister" binary />
-                  Máy tính tiền
-                </label>
-              </div>
+          <div class="mb-2 flex flex-wrap items-center gap-3 text-sm">
+            <span v-if="dateRangeTooLong" class="text-orange-600">
+              <i class="pi pi-exclamation-triangle mr-1" />Cổng HĐĐT chỉ cho tra cứu tối đa 1 tháng
+              — vui lòng thu hẹp khoảng từ ngày.
+            </span>
+            <span v-else-if="searchMsg" class="text-gray-600">
+              <i class="pi pi-info-circle mr-1" />{{ searchMsg }}
+            </span>
+            <span v-else class="text-gray-400">
+              Chọn loại hóa đơn rồi bấm "Tìm kiếm" để tra trên cổng HĐĐT (khoảng ngày mặc định:
+              tháng trước → hôm nay).
+            </span>
+            <div class="ml-auto flex items-center gap-2">
               <Button
-                label="Quét cổng"
-                icon="pi pi-sync"
-                :loading="syncScanning"
-                @click="onSyncScan"
-              />
-              <Button
-                label="Xem lại cache"
-                icon="pi pi-refresh"
+                icon="pi pi-chevron-left"
+                size="small"
                 severity="secondary"
-                :loading="syncScanning"
-                @click="loadSyncPreview()"
+                :disabled="!canPrevPage"
+                @click="onPrevPage"
               />
+              <span class="text-xs text-gray-500">
+                Trang {{ pageIdx + 1 }} / {{ Math.max(1, Math.ceil(searchTotal / pageSize)) }}
+              </span>
               <Button
-                v-if="syncSummary && syncSummary.pending > 0"
-                :label="`Nhập tất cả (${syncSummary.pending})`"
-                icon="pi pi-download"
-                :loading="syncImporting"
-                @click="onSyncImport()"
+                icon="pi pi-chevron-right"
+                size="small"
+                severity="secondary"
+                :disabled="!canNextPage"
+                @click="onNextPage"
               />
             </div>
+          </div>
 
-            <div class="mb-2 flex flex-wrap items-center gap-3 text-sm">
-              <span v-if="syncScanMsg" class="text-gray-600">
-                <i class="pi pi-info-circle mr-1" />{{ syncScanMsg }}
-              </span>
-              <span v-else-if="syncSummary" class="text-gray-500">
-                Có {{ syncSummary.total }} hóa đơn trong cache · chờ nhập
-                {{ syncSummary.pending }} · đã nhập {{ syncSummary.imported }} · cần xử lý
-                {{ syncSummary.manual }} · sẽ tạo mới {{ syncSummary.new_products }} mặt hàng
-              </span>
-              <span v-else class="text-gray-400">
-                Bấm "Quét cổng" để lấy hóa đơn mua về. Xem trước trước khi nhập kho.
-              </span>
-            </div>
-
-            <AppDataTable
-              :value="syncRows"
-              :loading="syncScanning"
-              stripedRows
-              scrollable
-              scrollHeight="420px"
-              size="small"
-            >
-              <Column header="Ngày lập" :style="{ width: '7rem' }">
-                <template #body="{ data }">{{ data.posting_date || "—" }}</template>
-              </Column>
-              <Column header="Loại" :style="{ width: '8rem' }">
-                <template #body="{ data }">{{ syncKindLabel(data.portal_kind) }}</template>
-              </Column>
-              <Column header="Số HĐ" :style="{ width: '9rem' }">
-                <template #body="{ data }">{{ data.khhdon }} {{ data.shdon }}</template>
-              </Column>
-              <Column header="Người bán">
-                <template #body="{ data }">
-                  <div class="text-xs leading-5">
-                    <div>{{ data.nbten || "—" }}</div>
-                    <div class="text-gray-500">MST {{ data.nbmst || "—" }}</div>
+          <AppDataTable
+            :value="searchRows"
+            :loading="searchLoading"
+            stripedRows
+            scrollable
+            scrollHeight="480px"
+            size="small"
+            class="mt-1"
+          >
+            <Column header="STT" :style="{ width: '3rem' }">
+              <template #body="{ index }">{{
+                searchRows.length === 0 ? "" : pageIdx * pageSize + index + 1
+              }}</template>
+            </Column>
+            <Column field="nbmst" header="Mã số thuế">
+              <template #body="{ data }">{{ mstColumn(data) }}</template>
+            </Column>
+            <Column header="Mẫu số">
+              <template #body="{ data }">{{ khmshdonLabel(data) }}</template>
+            </Column>
+            <Column field="khhdon" header="Ký hiệu HĐ">
+              <template #body="{ data }">{{ data.khhdon || "—" }}</template>
+            </Column>
+            <Column field="shdon" header="Số HĐ">
+              <template #body="{ data }">{{ data.shdon ?? "—" }}</template>
+            </Column>
+            <Column header="Ngày lập" :style="{ width: '7rem' }">
+              <template #body="{ data }">{{ fmtTdlap(data.tdlap) }}</template>
+            </Column>
+            <Column :header="partyHeader">
+              <template #body="{ data }">
+                <div class="text-xs leading-5">
+                  <div>
+                    <b>{{ partyMstLabel }}:</b> {{ partyMst(data) }}
                   </div>
-                </template>
-              </Column>
-              <Column header="Tổng TT" align="right">
-                <template #body="{ data }">{{ fmtMoney(data.tgtttbso) }}</template>
-              </Column>
-              <Column header="Dòng / HH mới" :style="{ width: '8rem' }">
-                <template #body="{ data }"
-                  >{{ data.line_count }} / {{ data.new_product_count }}</template
-                >
-              </Column>
-              <Column header="Trạng thái" :style="{ width: '9rem' }">
-                <template #body="{ data }">
-                  <Tag
-                    :value="syncStatusLabel(data.status)"
-                    :severity="syncStatusSeverity(data.status)"
-                    :title="data.skip_reason || data.detail_error"
-                  />
-                </template>
-              </Column>
-              <Column header="Phiếu nhập" :style="{ width: '8rem' }">
-                <template #body="{ data }">
-                  <span v-if="data.voucher_no" class="text-xs text-green-700">{{
-                    data.voucher_no
-                  }}</span>
-                  <span v-else class="text-xs text-gray-400">—</span>
-                </template>
-              </Column>
-              <Column v-if="!syncImporting" header="" :style="{ width: '7rem' }">
-                <template #body="{ data }">
-                  <Button
-                    v-if="data.status === 'pending'"
-                    label="Nhập kho"
-                    size="small"
-                    severity="secondary"
-                    @click="onSyncImport([data.id])"
-                  />
-                </template>
-              </Column>
-            </AppDataTable>
-          </TabPanel>
-        </TabPanels>
-      </Tabs>
+                  <div>
+                    <b>{{ partyNameLabel }}:</b> {{ partyName(data) }}
+                  </div>
+                  <div v-if="data.nmcccd"><b>CCCD:</b> {{ data.nmcccd }}</div>
+                </div>
+              </template>
+            </Column>
+            <Column header="Tổng tiền chưa thuế" align="right">
+              <template #body="{ data }">{{ fmtMoney(data.tgtcthue) }}</template>
+            </Column>
+            <Column header="Tổng thuế" align="right">
+              <template #body="{ data }">{{ fmtMoney(data.tgtthue) }}</template>
+            </Column>
+            <Column header="Tổng thanh toán" align="right">
+              <template #body="{ data }">
+                {{ fmtMoney(data.tgtttbso)
+                }}<span v-if="data.dvtte" class="text-xs text-gray-500"> {{ data.dvtte }}</span>
+              </template>
+            </Column>
+            <Column header="Trạng thái HĐ">
+              <template #body="{ data }">{{ tthaiLabel(data) }}</template>
+            </Column>
+            <Column header="Kết quả xử lý">
+              <template #body="{ data }">
+                <Tag
+                  v-if="data.ttxly == 3"
+                  :value="ttxlyLabel(data)"
+                  severity="danger"
+                  :title="String(data.ldo ?? '')"
+                />
+                <Tag v-else-if="data.ttxly == 5" :value="ttxlyLabel(data)" severity="success" />
+                <Tag v-else :value="ttxlyLabel(data)" severity="secondary" />
+              </template>
+            </Column>
+          </AppDataTable>
+          <p v-if="searchTime" class="mt-2 text-xs text-gray-400">
+            <i class="pi pi-clock mr-1" />Thời gian truy vấn cổng: {{ searchTime }} ms
+          </p>
+        </template>
+      </Card>
     </template>
 
     <!-- Nhập captcha thủ công -->

@@ -11,9 +11,13 @@ test.beforeAll(async () => {
   await seedApp(BASE_URL);
 });
 
-/** Sidebar navigation button (scoped to <nav> to avoid matching same-named buttons inside pages). */
+/**
+ * Sidebar navigation button (scoped to <nav> to avoid matching same-named buttons inside pages).
+ * Match on the label text exactly: the accessible name also contains the icon glyph, and
+ * substring matching would make "HĐĐT" collide with "Đồng bộ HĐĐT".
+ */
 const sidebarButton = (page: Page, label: string) =>
-  page.locator("nav").getByRole("button", { name: label });
+  page.locator("nav button", { has: page.getByText(label, { exact: true }) });
 
 /** Ensure we are logged in via the UI: fill the login form if shown, then wait for the Dashboard. */
 async function ensureLoggedIn(page: Page) {
@@ -71,6 +75,8 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
     ["Xuất kho", "Xuất kho / Bán hàng"],
     ["Tồn kho", "Tồn kho"],
     ["Hóa đơn", "Hóa đơn"],
+    ["HĐĐT", "Hóa đơn điện tử"],
+    ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua"],
     ["Nhật ký HĐ", "Nhật ký hoạt động"],
     ["Kế toán HKD", "Kế toán HKD"],
     ["Người dùng", "Người dùng & phân quyền"],
@@ -173,19 +179,14 @@ test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu
   request,
 }) => {
   await ensureLoggedIn(page);
+  // Đồng bộ là mục menu cùng cấp HĐĐT, không nằm cuộn trong trang tra cứu.
   await sidebarButton(page, "HĐĐT").click();
   await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
-  // 2 tab: tra cứu (mặc định) và đồng bộ — không phải cuộn dài.
-  await expect(page.getByRole("tab", { name: /Tra cứu hóa đơn/ })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await expect(page.getByRole("tab", { name: /Đồng bộ hóa đơn mua/ })).toBeVisible();
-  await page.getByRole("tab", { name: /Đồng bộ hóa đơn mua/ }).click();
-  await expect(page.getByRole("tab", { name: /Đồng bộ hóa đơn mua/ })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(page.getByRole("button", { name: "Quét cổng" })).toBeHidden();
+
+  await sidebarButton(page, "Đồng bộ HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+  await expect(page.getByRole("button", { name: "Quét cổng" })).toBeVisible();
 
   // Cache rỗng ngay từ đầu → bảng không có dòng, nút nhập tất cả ẩn.
   const table = page.locator(".p-datatable").last();
@@ -351,7 +352,7 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
 
   // Tìm kiếm thật: dải ngày mặc định = 30 ngày gần nhất.
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
-  const table = page.locator('[role="tabpanel"]:visible').first().locator(".p-datatable");
+  const table = page.locator(".p-card", { hasText: "Tra cứu hóa đơn" }).locator(".p-datatable");
   await expect(table).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
   // Dữ liệu thật: các cột định danh của hóa đơn đều có giá trị.
@@ -389,7 +390,7 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await page.getByRole("tab", { name: "Hóa đơn điện tử" }).click();
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
-  const table = page.locator('[role="tabpanel"]:visible').first().locator(".p-datatable");
+  const table = page.locator(".p-card", { hasText: "Tra cứu hóa đơn" }).locator(".p-datatable");
   await expect(table.getByRole("columnheader", { name: "Thông tin người bán" })).toBeVisible();
   const firstRow = table.locator("tbody tr").first();
   await expect(firstRow.getByText("MST người bán:").first()).toBeVisible();
