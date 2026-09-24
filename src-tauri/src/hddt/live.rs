@@ -79,12 +79,13 @@ mod live_tests {
         eprintln!("✅ Login bằng mật cũ (restore) OK → tài khoản còn nguyên");
     }
 
-    /// Probe the invoice list endpoint (`hdons/temp`) and dump the raw schema.
-    /// Run with: cd src-tauri && cargo test live_probe_invoices -- --ignored --nocapture
+    /// Probe 4 endpoint tra cứu hóa đơn (bán ra/mua vào × thường/máy tính tiền)
+    /// và dump schema. Run with:
+    ///   cd src-tauri && cargo test live_probe_invoices -- --ignored --nocapture
     #[tokio::test]
     #[ignore = "cần ../info.txt + portal live"]
     async fn live_probe_invoices() {
-        use crate::hddt::InvoiceQuery;
+        use crate::hddt::{InvoiceDirection, InvoiceKind, InvoiceQuery};
         use std::fs;
 
         if !fs::metadata("../info.txt").is_ok() {
@@ -137,52 +138,61 @@ mod live_tests {
             }
         };
 
-        // 1) Không filter — chỉ size nhỏ (mặc định sẽ tự thêm hthdon==3 + ttxly=in=(0..6))
-        let all = client
-            .query_invoices(
-                token,
-                &InvoiceQuery {
-                    size: 3,
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("all (no filter) thất bại");
-        show(&all, "ALL (no filter)");
+        // Cổng giới hạn khoảng ngày ≤ 1 tháng (HTTP 400 "Khoảng thời gian tìm kiếm
+        // không được lớn hơn 1 tháng") → dùng đúng cửa sổ mặc định của trang:
+        // hôm nay - 1 tháng + 1 ngày … hôm nay.
+        let to = chrono::Local::now();
+        let from = to - chrono::Duration::days(30);
+        let fmt = |d: chrono::DateTime<chrono::Local>| d.format("%d/%m/%Y").to_string();
+        let (from_s, to_s) = (fmt(from), fmt(to));
+        eprintln!("📅 khoảng ngày lập: {from_s} → {to_s}");
 
-        // 2) Theo khoảng ngày tạo 2026 (đúng format T00:00:00/T23:59:59)
-        let by_date = client
-            .query_invoices(
-                token,
-                &InvoiceQuery {
-                    size: 3,
-                    from: Some("01/01/2026".into()),
-                    to: Some("31/12/2026".into()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("by date thất bại");
-        show(&by_date, "ALL (ntao 2026)");
-
-        // 3) Lọc theo số hóa đơn (shdon==) — tương đương ó lọc của trang
-        let by_shdon = client
-            .query_invoices(
-                token,
-                &InvoiceQuery {
-                    size: 3,
-                    shdon: Some("1".into()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("by shdon thất bại");
-        show(&by_shdon, "ALL (shdon==1)");
-
-        // 4) Dump full JSON của 1 row
-        if let Some(row) = all.datas.first() {
-            eprintln!("ALL row[0]: {row}");
+        // Duyệt cả 4 tab: {bán ra, mua vào} × {HĐĐT thường, máy tính tiền}.
+        // "Kết quả kiểm tra" để Tất cả (-1) để so kết quả thuần với tab mặc định.
+        for (dir, kind) in [
+            (InvoiceDirection::Sold, InvoiceKind::Regular),
+            (InvoiceDirection::Sold, InvoiceKind::CashRegister),
+            (InvoiceDirection::Purchase, InvoiceKind::Regular),
+            (InvoiceDirection::Purchase, InvoiceKind::CashRegister),
+        ] {
+            let list = client
+                .query_invoices(
+                    token,
+                    &InvoiceQuery {
+                        direction: dir,
+                        kind,
+                        size: 3,
+                        from: Some(from_s.clone()),
+                        to: Some(to_s.clone()),
+                        ttxly: Some("-1".into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap_or_else(|e| panic!("{dir:?}/{kind:?} thất bại: {e}"));
+            show(&list, &format!("{dir:?} × {kind:?}"));
         }
+
+        // Tab "hóa đơn vào" mặc định của cổng gửi kèm ttxly==5 (Đã cấp mã hóa đơn).
+        let purchase_default = client
+            .query_invoices(
+                token,
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 3,
+                    from: Some(from_s.clone()),
+                    to: Some(to_s.clone()),
+                    ttxly: Some("5".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("mua vào (mặc định ttxly==5) thất bại");
+        show(
+            &purchase_default,
+            "Purchase × Regular (mặc định cổng: ttxly==5)",
+        );
     }
 
     /// Fetch một captcha tươi và solve — dùng để điền vào form đăng nhập của

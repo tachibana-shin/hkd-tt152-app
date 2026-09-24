@@ -38,49 +38,112 @@ pub(crate) const PATH_AUTHENTICATE: &str = "/api/security-taxpayer/authenticate"
 pub(crate) const PATH_PROFILE: &str = "/api/security-taxpayer/profile";
 pub(crate) const PATH_CHANGE_PASSWORD: &str = "/api/system-taxpayer/users/change-password";
 
-// Invoice list — verified LIVE (09/2026) from the portal's own "Tra cứu hóa đơn"
-// page for Hộ kinh doanh (`/quan-ly-hoa-don-phat-sinh/tra-cuu`):
-//   GET /api/invoice/hdons/temp?sort=ntao:desc&size=…&state=…&search=…
-// (single slash — the guard `api//…` blocks curl/browser-fetch without the F5
-// cookie; the real page fires the single-slash form, 200).
-// Response envelope: `{datas: [...], state, total, time}` where `state` is an
-// opaque pagination cursor (pass it back as `state=` for the next page).
-pub(crate) const PATH_HDONS_TEMP: &str = "/api/invoice/hdons/temp";
+// ─── Tra cứu hóa đơn (trang `/tra-cuu/tra-cuu-hoa-don`) ───
+// Trang này có 2 tab lớn × 2 tab nhỏ, mỗi ô gọi một endpoint riêng — bắt live
+// 24/09/2026 (mỗi request đều 200 kể cả khi không có hóa đơn):
+//
+//   | Tab lớn         | Tab nhỏ (loại)             | Endpoint                            |
+//   |-----------------|----------------------------|-------------------------------------|
+//   | Hóa đơn ra      | Hóa đơn điện tử           | `/api/query/invoices/sold`          |
+//   | Hóa đơn ra      | Máy tính tiền (có mã CQT)  | `/api/sco-query/invoices/sold`      |
+//   | Hóa đơn vào     | Hóa đơn điện tử           | `/api/query/invoices/purchase`      |
+//   | Hóa đơn vào     | Máy tính tiền (có mã CQT)  | `/api/sco-query/invoices/purchase`  |
+//
+// Query: `?sort=tdlap:desc&size=…&state=…&search=…` (ngày lập HĐ = `tdlap`).
+// `search` dùng đúng operator của trang: `field==v`, `field=ge=X;field=le=Y`,
+// `unhiem==1` (chỉ khi tick), các mục nối bằng `;`.
+// Response envelope: `{datas: [...], state, total, time}` — `state` là cursor
+// phân trang (truyền lại làm `state=`).
+const ENDPOINT_LOOKUP: &str = "/tra-cuu/tra-cuu-hoa-don";
 
-/// Filters for the invoice list. Field names follow the portal's real search
-/// format (from `generateSearch`/`generateSearchString` in the portal bundle,
-/// verified against the live request `search=hthdon==3;ntao=ge=21/08/2026T00:00:00;
-/// ntao=le=20/09/2026T23:59:59;ttxly=in=(0,1,2,3,4,5,6)`):
-///   - equal  → `field==v`
-///   - range  → `field=ge=X;field=le=Y`
-///   - in     → `field=in=(a,b)`
+/// Tab lớn của trang tra cứu: hóa đơn ra (bán ra) hay hóa đơn vào (mua vào).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InvoiceDirection {
+    /// "Tra cứu hóa đơn điện tử bán ra" → `…/invoices/sold`.
+    #[default]
+    Sold,
+    /// "Tra cứu hóa đơn điện tử mua vào" → `…/invoices/purchase`.
+    Purchase,
+}
+
+impl InvoiceDirection {
+    fn segment(self) -> &'static str {
+        match self {
+            Self::Sold => "sold",
+            Self::Purchase => "purchase",
+        }
+    }
+
+    /// Nhãn tiếng Việt dùng cho header `Action` (portal `encodeURIComponent` nó).
+    fn action(self, kind: InvoiceKind) -> String {
+        let base = match self {
+            Self::Sold => "Tìm kiếm (hóa đơn bán ra)",
+            Self::Purchase => "Tìm kiếm (hóa đơn mua vào)",
+        };
+        match kind {
+            InvoiceKind::Regular => base.to_string(),
+            InvoiceKind::CashRegister => base.replace("hóa đơn ", "hóa đơn máy tính tiền "),
+        }
+    }
+}
+
+/// Tab nhỏ (loại hóa đơn) — quyết định tiền tố API, không phải filter.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InvoiceKind {
+    /// "Hóa đơn điện tử" (có mã của NNT) → tiền tố `query`.
+    #[default]
+    Regular,
+    /// "Hóa đơn có mã khởi tạo từ máy tính tiền" → tiền tố `sco-query`.
+    CashRegister,
+}
+
+impl InvoiceKind {
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Regular => "query",
+            Self::CashRegister => "sco-query",
+        }
+    }
+}
+
+/// Bộ lọc tra cứu hóa đơn (khớp form trang `/tra-cuu/tra-cuu-hoa-don`).
 ///
-/// joined by `;`.
+/// Tên field và operator lấy đúng từ `onSubmit` của trang (đã đối chiếu với
+/// request thật):
+/// `search=tdlap=ge=dd/MM/yyyyT00:00:00;tdlap=le=dd/MM/yyyyT23:59:59;nbmst==…;
+///  nmmst==…;tthai==…;ttxly==…;khmshdon==…;khhdon==…;shdon==…;nmcmnd==…;unhiem==1`
 #[derive(Debug, Default, Clone)]
 pub(crate) struct InvoiceQuery {
+    /// Tab lớn (bán ra / mua vào) → chọn endpoint.
+    pub direction: InvoiceDirection,
+    /// Tab nhỏ (hóa đơn điện tử / máy tính tiền) → tiền tố endpoint.
+    pub kind: InvoiceKind,
     /// Page size (`size=`).
     pub size: u32,
-    /// Opaque pagination cursor from a previous response (`state=`).
+    /// Opaque pagination cursor từ response trước (`state=`).
     pub state: Option<String>,
-    /// Ngày tạo từ ngày (`ntao=ge=dd/MM/yyyyT00:00:00`).
+    /// Ngày lập từ ngày (`tdlap=ge=dd/MM/yyyyT00:00:00`).
     pub from: Option<String>,
-    /// Ngày tạo đến ngày (`ntao=le=dd/MM/yyyyT23:59:59`).
+    /// Ngày lập đến ngày (`tdlap=le=dd/MM/yyyyT23:59:59`).
     pub to: Option<String>,
-    /// Loại hóa đơn (`hdon`, mã từ danh mục `dmhdons`).
-    pub hdon: Option<String>,
-    /// Ký hiệu hóa đơn (`khhdon`).
+    /// Mã số thuế (`nmmst`) — select "Mã số thuế" của trang.
+    pub nmmst: Option<String>,
+    /// MST đối tác (`nbmst`) — "MST người mua" (bán ra) / "MST người bán" (mua vào).
+    pub nbmst: Option<String>,
+    /// CCCD người mua (`nmcmnd`; form gọi là `nmcccd` rồi map sang `nmcmnd`).
+    pub nmcmnd: Option<String>,
+    /// Trạng thái hóa đơn (`tthai`): 1 mới … 6 đã bị hủy; `0` = Tất cả (bỏ qua).
+    pub tthai: Option<String>,
+    /// Kết quả kiểm tra (`ttxly`): `-1` = Tất cả (bỏ qua), `5` = Đã cấp mã HĐ.
+    pub ttxly: Option<String>,
+    /// Ký hiệu mẫu số hóa đơn (`khmshdon`, 1..9 theo danh mục `dmhdons`).
+    pub khmshdon: Option<String>,
+    /// Ký hiệu hóa đơn (`khhdon`, portal tự upper-case).
     pub khhdon: Option<String>,
     /// Số hóa đơn (`shdon`).
     pub shdon: Option<String>,
-    /// Mã hồ sơ (`mhso`).
-    pub mhso: Option<String>,
-    /// Trạng thái hóa đơn (`tthai`): 1 Hóa đơn mới … 5 Bị điều chỉnh.
-    pub tthai: Option<String>,
-    /// Trạng thái xử lý (`ttxly`): single value → `ttxly==v`; `None` →
-    /// `ttxly=in=(0,1,2,3,4,5,6)` (trang thật luôn gửi dải này khi "Tất cả").
-    pub ttxly: Option<String>,
-    /// Mã số thuế lọc (`nbmst=in=(…)`, một giá trị).
-    pub nbmst: Option<String>,
+    /// Hóa đơn ủy nhiệm (`unhiem==1`, chỉ gửi khi true).
+    pub unhiem: bool,
 }
 
 /// Paginated invoice list returned by the portal.
@@ -257,18 +320,25 @@ impl HddtClient {
         Ok(v)
     }
 
-    /// List invoices from the portal (`GET {base}/api/invoice/hdons/temp`).
+    /// Tra cứu hóa đơn theo tab đang chọn (2×2: bán ra/mua vào × thường/máy tính tiền).
     ///
-    /// Query params mirror the portal's own "Tra cứu hóa đơn" page (verified
-    /// live 09/2026): `sort=ntao:desc`, `size`, optional `state` (cursor) and a
-    /// `search` string built with the portal's own field operators. Response:
-    /// `{datas, state, total, time}`.
+    /// `GET {base}/api/{query|sco-query}/invoices/{sold|purchase}` với
+    /// `sort=tdlap:desc`, `size`, `state` (cursor) và `search` dựng theo đúng
+    /// operator của trang. Headers bắt chước request thật (24/09/2026):
+    /// `Action` = tên hành động đã URL-encode, `End-Point` = `/tra-cuu/tra-cuu-hoa-don`,
+    /// `Referer` = trang tra cứu, `Authorization: Bearer …`.
+    /// Response: `{datas, state, total, time}`.
     pub(crate) async fn query_invoices(
         &self,
         token: &str,
         q: &InvoiceQuery,
     ) -> Result<InvoiceList, String> {
-        let mut params: Vec<(&str, String)> = vec![("sort", "ntao:desc".to_string())];
+        let path = format!(
+            "/api/{}/invoices/{}",
+            q.kind.prefix(),
+            q.direction.segment()
+        );
+        let mut params: Vec<(&str, String)> = vec![("sort", "tdlap:desc".to_string())];
         params.push(("size", q.size.clamp(1, 500).to_string()));
         if let Some(state) = q.state.as_deref().filter(|s| !s.is_empty()) {
             params.push(("state", state.to_string()));
@@ -277,29 +347,21 @@ impl HddtClient {
         if !search.is_empty() {
             params.push(("search", search));
         }
-        let url =
-            reqwest::Url::parse_with_params(&format!("{}{}", self.base, PATH_HDONS_TEMP), &params)
-                .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
-        // Headers giống hệt request thật từ trang tra cứu (đã bắt 09/2026):
-        // `action: Tìm kiếm`, `end-point` = path trang, referer trang + Bearer.
+        let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
+            .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
+        let action = encode_uri_component(&q.direction.action(q.kind));
+        let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
         let mut h = anti_bot_headers();
-        h.insert(
-            "Action",
-            HeaderValue::from_static("T%C3%ACm%20ki%E1%BA%BFm"),
-        );
-        h.insert(
-            "End-Point",
-            HeaderValue::from_static("/quan-ly-hoa-don-phat-sinh/tra-cuu"),
-        );
+        if let Ok(v) = HeaderValue::from_str(&action) {
+            h.insert("Action", v);
+        }
+        h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
         let resp = self
             .http
             .get(url)
             .headers(h)
             .bearer_auth(token)
-            .header(
-                reqwest::header::REFERER,
-                format!("{}/quan-ly-hoa-don-phat-sinh/tra-cuu", self.base),
-            )
+            .header(reqwest::header::REFERER, page)
             .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
             .send()
             .await
@@ -310,7 +372,11 @@ impl HddtClient {
             .await
             .map_err(|e| format!("Phản hồi danh sách HĐĐT sai định dạng: {e}"))?;
         if !status.is_success() {
-            return Err(format!("Lỗi lấy danh sách HĐĐT (HTTP {status}): {v}"));
+            let msg = v
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("không rõ nguyên nhân");
+            return Err(format!("Lỗi lấy danh sách HĐĐT (HTTP {status}): {msg}"));
         }
         serde_json::from_value(v).map_err(|e| format!("Dữ liệu danh sách HĐĐT sai định dạng: {e}"))
     }
@@ -395,56 +461,71 @@ impl HddtClient {
     }
 }
 
-/// Build the `search` query string for `hdons/temp` using the portal's own
-/// operator format (from `generateSearch` + `generateSearchString` in the portal
-/// bundle, cross-checked against the live request 09/2026):
+/// `encodeURIComponent` (portal dùng để build header `Action`): mọi ký tự ngoài
+/// `A-Z a-z 0-9 - _ . ! ~ * ' ( )` đều percent-encode theo byte UTF-8.
+fn encode_uri_component(input: &str) -> String {
+    const UNRESERVED: &[u8] = b"-_.!~*'()";
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        if b.is_ascii_alphanumeric() || UNRESERVED.contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Build chuỗi `search` cho trang tra cứu hóa đơn.
 ///
-///   - equal op → `field==value`
-///   - range → `field=ge=X;field=le=Y`
-///   - in → `field=in=(a,b)`
+/// Thứ tự mục giống hệt trang portal (bắt live 24/09/2026):
+/// khoảng ngày lập trước, rồi `nmmst`, `nbmst`, `tthai`, `ttxly`, `khmshdon`,
+/// `shdon`, `khhdon`, `unhiem`, cuối cùng `nmcmnd` (portal map `nmcccd`→`nmcmnd`
+/// sau khi dựng object nên nó nằm cuối chuỗi).
 ///
-/// fields joined by `;`. Dates use `dd/MM/yyyyTHH:mm:ss` (the portal appends the
-/// time — `T00:00:00` từ ngày, `T23:59:59` đến ngày). `hthdon==3` ("Hóa đơn điện
-/// tử") luôn được thêm trước; `ttxly` rỗng → `in=(0,1,2,3,4,5,6)` (giống trang
-/// thật khi chọn "Tất cả").
+/// - `tthai == "0"` và `ttxly == "-1"` là giá trị "Tất cả" → bỏ qua.
+/// - `unhiem` chỉ gửi khi true (portal hard-code `;unhiem==1`).
 fn build_search_string(q: &InvoiceQuery) -> String {
-    let mut parts: Vec<String> = vec!["hthdon==3".to_string()];
-    fn push_eq(parts: &mut Vec<String>, field: &str, val: &str) {
-        if !val.is_empty() {
-            parts.push(format!("{field}=={val}"));
-        }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(v) = q.from.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("tdlap=ge={v}T00:00:00"));
     }
-    if let Some(v) = q.nbmst.as_deref() {
-        let v = v.trim();
-        if !v.is_empty() {
-            parts.push(format!("nbmst=in=({v})"));
-        }
+    if let Some(v) = q.to.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(format!("tdlap=le={v}T23:59:59"));
     }
-    if let Some(v) = q.hdon.as_deref() {
-        push_eq(&mut parts, "hdon", v.trim());
+    fn push_eq(parts: &mut Vec<String>, field: &str, val: Option<&str>, upper: bool) {
+        let Some(v) = val.map(str::trim).filter(|s| !s.is_empty()) else {
+            return;
+        };
+        let v = if upper {
+            v.to_uppercase()
+        } else {
+            v.to_string()
+        };
+        parts.push(format!("{field}=={v}"));
     }
-    if let Some(v) = q.khhdon.as_deref() {
-        push_eq(&mut parts, "khhdon", v.trim().to_uppercase().as_str());
+    push_eq(&mut parts, "nmmst", q.nmmst.as_deref(), false);
+    push_eq(&mut parts, "nbmst", q.nbmst.as_deref(), false);
+    // "Tất cả" của trạng thái HĐ (0) và kết quả kiểm tra (-1) không được gửi.
+    push_eq(
+        &mut parts,
+        "tthai",
+        q.tthai.as_deref().filter(|v| v.trim() != "0"),
+        false,
+    );
+    push_eq(
+        &mut parts,
+        "ttxly",
+        q.ttxly.as_deref().filter(|v| v.trim() != "-1"),
+        false,
+    );
+    push_eq(&mut parts, "khmshdon", q.khmshdon.as_deref(), false);
+    push_eq(&mut parts, "shdon", q.shdon.as_deref(), false);
+    push_eq(&mut parts, "khhdon", q.khhdon.as_deref(), true);
+    if q.unhiem {
+        parts.push("unhiem==1".to_string());
     }
-    if let Some(v) = q.shdon.as_deref() {
-        push_eq(&mut parts, "shdon", v.trim());
-    }
-    if let Some(v) = q.mhso.as_deref() {
-        push_eq(&mut parts, "mhso", v.trim());
-    }
-    if let Some(v) = q.tthai.as_deref() {
-        push_eq(&mut parts, "tthai", v.trim());
-    }
-    if let Some(v) = q.from.as_deref().filter(|s| !s.is_empty()) {
-        parts.push(format!("ntao=ge={v}T00:00:00"));
-    }
-    if let Some(v) = q.to.as_deref().filter(|s| !s.is_empty()) {
-        parts.push(format!("ntao=le={v}T23:59:59"));
-    }
-    match q.ttxly.as_deref().filter(|s| !s.is_empty()) {
-        Some(v) => parts.push(format!("ttxly=={v}")),
-        None => parts.push("ttxly=in=(0,1,2,3,4,5,6)".to_string()),
-    }
+    push_eq(&mut parts, "nmcmnd", q.nmcmnd.as_deref(), false);
     parts.join(";")
 }
 
@@ -490,36 +571,122 @@ mod tests {
 
     #[test]
     fn search_string_matches_live_request() {
-        // Request thật từ trang tra cứu (chụp 09/2026):
-        //   search=hthdon==3;ntao=ge=21/08/2026T00:00:00;ntao=le=20/09/2026T23:59:59;ttxly=in=(0,1,2,3,4,5,6)
+        // Request thật bắt 24/09/2026 — tab "mua vào" × "Hóa đơn điện tử":
+        //   search=tdlap=ge=25/08/2026T00:00:00;tdlap=le=24/09/2026T23:59:59;ttxly==5
         let q = InvoiceQuery {
+            direction: InvoiceDirection::Purchase,
+            kind: InvoiceKind::Regular,
             size: 15,
-            from: Some("21/08/2026".into()),
-            to: Some("20/09/2026".into()),
+            from: Some("25/08/2026".into()),
+            to: Some("24/09/2026".into()),
+            ttxly: Some("5".into()),
             ..Default::default()
         };
         assert_eq!(
             build_search_string(&q),
-            "hthdon==3;ntao=ge=21/08/2026T00:00:00;ntao=le=20/09/2026T23:59:59;ttxly=in=(0,1,2,3,4,5,6)"
+            "tdlap=ge=25/08/2026T00:00:00;tdlap=le=24/09/2026T23:59:59;ttxly==5"
         );
     }
 
     #[test]
-    fn search_string_equal_and_in_operators() {
+    fn search_string_sold_regular_has_no_ttxly_when_all() {
+        // Tab "bán ra" × "Hóa đơn điện tử", "Kết quả kiểm tra" = Tất cả (-1).
         let q = InvoiceQuery {
-            size: 50,
-            hdon: Some("01GTKT0".into()),
-            khhdon: Some("01GTKT0/001".into()),
-            shdon: Some(" 12 ".into()),
-            mhso: Some("HOSO-1".into()),
-            tthai: Some("3".into()),
-            ttxly: Some("5".into()),
-            nbmst: Some("0108537801".into()),
+            direction: InvoiceDirection::Sold,
+            kind: InvoiceKind::Regular,
+            size: 15,
+            from: Some("25/08/2026".into()),
+            to: Some("24/09/2026".into()),
+            ttxly: Some("-1".into()),
             ..Default::default()
         };
         assert_eq!(
             build_search_string(&q),
-            "hthdon==3;nbmst=in=(0108537801);hdon==01GTKT0;khhdon==01GTKT0/001;shdon==12;mhso==HOSO-1;tthai==3;ttxly==5"
+            "tdlap=ge=25/08/2026T00:00:00;tdlap=le=24/09/2026T23:59:59"
         );
+    }
+
+    #[test]
+    fn search_string_all_fields_order_matches_live_request() {
+        // Hình dạng request thật khi điền MST đối tác + CCCD + số HĐ + ký hiệu + ủy nhiệm.
+        // MST/CCCD dùng số giả (không nhúng dữ liệu đối tác thật vào repo).
+        let q = InvoiceQuery {
+            direction: InvoiceDirection::Purchase,
+            kind: InvoiceKind::Regular,
+            size: 15,
+            from: Some("25/08/2026".into()),
+            to: Some("24/09/2026".into()),
+            nbmst: Some("0100888888".into()),
+            nmcmnd: Some("001088888888".into()),
+            ttxly: Some("5".into()),
+            shdon: Some("821".into()),
+            khhdon: Some("c26thn".into()),
+            unhiem: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            build_search_string(&q),
+            "tdlap=ge=25/08/2026T00:00:00;tdlap=le=24/09/2026T23:59:59;\
+             nbmst==0100888888;ttxly==5;shdon==821;khhdon==C26THN;unhiem==1;\
+             nmcmnd==001088888888"
+        );
+    }
+
+    #[test]
+    fn search_string_skips_blank_and_all_values() {
+        let q = InvoiceQuery {
+            nmmst: Some("  ".into()),
+            nbmst: Some("0100999999".into()),
+            tthai: Some("0".into()),
+            ttxly: Some("-1".into()),
+            khmshdon: Some("1".into()),
+            ..Default::default()
+        };
+        assert_eq!(build_search_string(&q), "nbmst==0100999999;khmshdon==1");
+    }
+
+    #[test]
+    fn endpoints_and_actions_match_portal() {
+        let cases = [
+            (
+                InvoiceDirection::Sold,
+                InvoiceKind::Regular,
+                "/api/query/invoices/sold",
+                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20b%C3%A1n%20ra)",
+            ),
+            (
+                InvoiceDirection::Sold,
+                InvoiceKind::CashRegister,
+                "/api/sco-query/invoices/sold",
+                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20\
+                 ti%E1%BB%81n%20b%C3%A1n%20ra)",
+            ),
+            (
+                InvoiceDirection::Purchase,
+                InvoiceKind::Regular,
+                "/api/query/invoices/purchase",
+                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20mua%20v%C3%A0o)",
+            ),
+            (
+                InvoiceDirection::Purchase,
+                InvoiceKind::CashRegister,
+                "/api/sco-query/invoices/purchase",
+                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20\
+                 ti%E1%BB%81n%20mua%20v%C3%A0o)",
+            ),
+        ];
+        for (dir, kind, path, action) in cases {
+            assert_eq!(
+                format!("/api/{}/invoices/{}", kind.prefix(), dir.segment()),
+                path
+            );
+            assert_eq!(encode_uri_component(&dir.action(kind)), action);
+        }
+    }
+
+    #[test]
+    fn unhiem_omitted_when_unchecked() {
+        let q = InvoiceQuery::default();
+        assert_eq!(build_search_string(&q), "");
     }
 }

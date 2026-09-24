@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { BASE_URL } from "./constants";
 import { ADMIN, seedApp } from "./helpers";
 
@@ -126,4 +128,102 @@ test("logging out returns to the login screen", async ({ page }) => {
   await ensureLoggedIn(page);
   await page.getByRole("button", { name: "Đăng xuất" }).click();
   await expect(page.getByTestId("login-username")).toBeVisible();
+});
+
+// ─── HĐĐT: tra cứu hóa đơn thật (cần credentials cổng + IP VN) ───
+
+/**
+ * Credentials cổng HĐĐT từ `info.txt` ở gốc repo (đã gitignore). Ưu tiên biến môi
+ * trường E2E_HDDT_USERNAME / E2E_HDDT_PASSWORD; thiếu cả hai → test bị skip
+ * (suite vẫn xanh trên máy không có tài khoản cổng).
+ */
+function portalCredentials(): { username: string; password: string } | null {
+  const envU = process.env.E2E_HDDT_USERNAME;
+  const envP = process.env.E2E_HDDT_PASSWORD;
+  if (envU && envP) return { username: envU, password: envP };
+  try {
+    const txt = readFileSync(fileURLToPath(new URL("../../info.txt", import.meta.url)), "utf8");
+    const pick = (key: string) =>
+      txt
+        .split("\n")
+        .map((l) => l.split("="))
+        .find(([k]) => k.trim() === key)?.[1]
+        ?.trim();
+    const username = pick("USERNAME");
+    const password = pick("PASSWORD");
+    return username && password ? { username, password } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Cấu hình + đăng nhập cổng HĐĐT qua API (captcha solver chạy offline trong Rust). */
+async function loginPortal(api: APIRequestContext) {
+  const creds = portalCredentials();
+  if (!creds) return null;
+  const base = process.env.E2E_HDDT_BASE_URL ?? "https://hoadondientu.gdt.gov.vn";
+  const cfg = await api.post("/api/hddt_save_config", {
+    data: { username: creds.username, password: creds.password, baseUrl: base },
+  });
+  expect(cfg.ok(), `hddt_save_config failed ${cfg.status()}`).toBe(true);
+  const login = await api.post("/api/hddt_login", { data: {} });
+  expect(login.ok(), `hddt_login failed ${login.status()}`).toBe(true);
+  const body = await login.json();
+  expect(body.need_manual, "portal yêu cầu captcha thủ công — solver chưa pass").toBeFalsy();
+  return body;
+}
+
+test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả về hóa đơn thật", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  const login = await loginPortal(request);
+  test.skip(login === null, "Thiếu credentials cổng HĐĐT (info.txt / E2E_HDDT_*) — bỏ qua");
+
+  await sidebarButton(page, "HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
+  await expect(page.getByText("Tra cứu hóa đơn", { exact: true })).toBeVisible();
+
+  // Tab lớn mặc định = hóa đơn ra; tab nhỏ mặc định = máy tính tiền (sco-query).
+  const kindTabs = page.getByRole("tab");
+  await expect(kindTabs.filter({ hasText: "Hóa đơn ra" })).toHaveAttribute("aria-selected", "true");
+  await expect(kindTabs.filter({ hasText: "Hóa đơn máy tính tiền" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  // Tìm kiếm thật: dải ngày mặc định = 30 ngày gần nhất.
+  await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
+  const table = page.locator(".p-datatable");
+  await expect(table).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
+  // Dữ liệu thật: các cột định danh của hóa đơn đều có giá trị.
+  await expect(table.getByText("Ký hiệu HĐ")).toBeVisible();
+  await expect(table.locator("tbody tr").first()).toBeVisible();
+  const firstRow = table.locator("tbody tr").first();
+  await expect(firstRow.locator("td").nth(1)).not.toHaveText("—");
+  await expect(firstRow.locator("td").nth(4)).not.toHaveText("—");
+});
+
+test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc định kết quả kiểm tra", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  const login = await loginPortal(request);
+  test.skip(login === null, "Thiếu credentials cổng HĐĐT (info.txt / E2E_HDDT_*) — bỏ qua");
+
+  await sidebarButton(page, "HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
+  await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
+  await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
+
+  // Sang tab "hóa đơn vào": kết quả cũ phải bị xóa (không lẫn endpoint khác).
+  await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
+  await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeHidden();
+  // Nhãn đối tác đổi theo hướng tra cứu.
+  await expect(page.getByText("MST người bán", { exact: true })).toBeVisible();
+  // Mặc định của cổng: "Kết quả kiểm tra" = Đã cấp mã hóa đơn (ttxly==5).
+  await expect(page.getByText("Đã cấp mã hóa đơn", { exact: true })).toBeVisible();
 });

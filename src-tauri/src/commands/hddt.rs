@@ -14,7 +14,7 @@
 
 use crate::hddt::{
     days_left_until, generate_password, rfc3339_to_unix, GlyphTemplateSolver, HddtClient,
-    InvoiceQuery, LoginError, PortalSession,
+    InvoiceDirection, InvoiceKind, InvoiceQuery, LoginError, PortalSession,
 };
 use crate::helpers::{audit, require_role};
 use crate::models::AppState;
@@ -433,28 +433,37 @@ pub(crate) async fn hddt_send_simulated(
     send_invoice_simulated(&invoice_no, &symbol, total)
 }
 
-/// Fetch the invoice list from the portal — "Tra cứu hóa đơn" của NNT.
-/// Endpoint (reverse-engineered từ trang thật, xác nhận live 09/2026 —
-/// cùng cách như captcha/login):
-///   GET /api/invoice/hdons/temp?sort=ntao:desc&size=…&state=…&search=…
+/// Tra cứu hóa đơn trên cổng — bản "Tra cứu hóa đơn" của portal
+/// (`/tra-cuu/tra-cuu-hoa-don`), gồm 2 tab lớn × 2 tab nhỏ:
 ///
-/// `search` được build theo format thật của trang:
-///   hthdon==3;ntao=ge=dd/MM/yyyyT00:00:00;ntao=le=dd/MM/yyyyT23:59:59;ttxly=in=(0,1,2,3,4,5,6)
-/// Trả về `{datas, state, total, time}` (state = cursor phân trang).
+///   | Hóa đơn    | Loại               | Endpoint                           |
+///   |------------|---------------------|------------------------------------|
+///   | ra (bán ra)| HĐĐT thường         | `/api/query/invoices/sold`         |
+///   | ra (bán ra)| máy tính tiền       | `/api/sco-query/invoices/sold`     |
+///   | vào (mua vào)| HĐĐT thường       | `/api/query/invoices/purchase`     |
+///   | vào (mua vào)| máy tính tiền     | `/api/sco-query/invoices/purchase` |
+///
+/// (bắt live 24/09/2026). `search` dựng đúng format của trang:
+/// `tdlap=ge=…;tdlap=le=…;<field>==<value>…`. Trả về `{datas, state, total, time}`
+/// (`state` = cursor phân trang).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn hddt_list_invoices(
     state: State<'_, AppState>,
+    direction: Option<String>,
+    kind: Option<String>,
     from: Option<String>,
     to: Option<String>,
     state_filter: Option<String>,
-    hdon: Option<String>,
-    khhdon: Option<String>,
-    shdon: Option<String>,
-    mhso: Option<String>,
+    nmmst: Option<String>,
+    nbmst: Option<String>,
+    nmcmnd: Option<String>,
     tthai: Option<String>,
     ttxly: Option<String>,
-    nbmst: Option<String>,
+    khmshdon: Option<String>,
+    khhdon: Option<String>,
+    shdon: Option<String>,
+    unhiem: Option<bool>,
     size: Option<u32>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
@@ -466,18 +475,31 @@ pub(crate) async fn hddt_list_invoices(
         .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
     let cfg = read_config(&state).await?;
     let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
+    fn clean(v: Option<String>) -> Option<String> {
+        v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    }
     let q = InvoiceQuery {
-        size: size.unwrap_or(50),
-        state: state_filter.filter(|s| !s.is_empty()),
-        from: from.filter(|s| !s.is_empty()),
-        to: to.filter(|s| !s.is_empty()),
-        hdon: hdon.filter(|s| !s.is_empty()),
-        khhdon: khhdon.filter(|s| !s.is_empty()),
-        shdon: shdon.filter(|s| !s.is_empty()),
-        mhso: mhso.filter(|s| !s.is_empty()),
-        tthai: tthai.filter(|s| !s.is_empty()),
-        ttxly: ttxly.filter(|s| !s.is_empty()),
-        nbmst: nbmst.filter(|s| !s.is_empty()),
+        direction: match direction.as_deref() {
+            Some("purchase") => InvoiceDirection::Purchase,
+            _ => InvoiceDirection::Sold,
+        },
+        kind: match kind.as_deref() {
+            Some("cash-register") => InvoiceKind::CashRegister,
+            _ => InvoiceKind::Regular,
+        },
+        size: size.unwrap_or(15),
+        state: clean(state_filter),
+        from: clean(from),
+        to: clean(to),
+        nmmst: clean(nmmst),
+        nbmst: clean(nbmst),
+        nmcmnd: clean(nmcmnd),
+        tthai: clean(tthai),
+        ttxly: clean(ttxly),
+        khmshdon: clean(khmshdon),
+        khhdon: clean(khhdon),
+        shdon: clean(shdon),
+        unhiem: unhiem.unwrap_or(false),
     };
     let list = client.query_invoices(&session.token, &q).await?;
     let v = serde_json::json!({

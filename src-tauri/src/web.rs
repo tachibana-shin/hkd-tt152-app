@@ -470,6 +470,25 @@ pub async fn api_invoke(
             enabled: bool
         ),
         "hddt_change_password" => mx!(commands::hddt::hddt_change_password, body),
+        "hddt_list_invoices" => mx!(
+            commands::hddt::hddt_list_invoices,
+            body,
+            direction: Option<String>,
+            kind: Option<String>,
+            from: Option<String>,
+            to: Option<String>,
+            state_filter: Option<String>,
+            nmmst: Option<String>,
+            nbmst: Option<String>,
+            nmcmnd: Option<String>,
+            tthai: Option<String>,
+            ttxly: Option<String>,
+            khmshdon: Option<String>,
+            khhdon: Option<String>,
+            shdon: Option<String>,
+            unhiem: Option<bool>,
+            size: Option<u32>
+        ),
         "hddt_send_simulated" => mx!(
             commands::hddt::hddt_send_simulated,
             body,

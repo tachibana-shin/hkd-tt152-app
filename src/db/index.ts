@@ -531,22 +531,27 @@ export const api = {
   hddtSendSimulated: (invoiceNo: string, symbol: string, total: number) =>
     call<string>("hddt_send_simulated", { invoiceNo, symbol, total }),
 
-  /** Tra cứu hóa đơn trên cổng HĐĐT (trang `tra-cuu` — `/api/invoice/hdons/temp`).
-   *  `from`/`to` theo `dd/MM/yyyy`; `state` = cursor phân trang trả về từ response
-   *  trước (null = trang đầu). Trả `{datas, state, total, time}`. */
+  /** Tra cứu hóa đơn trên cổng HĐĐT (trang `/tra-cuu/tra-cuu-hoa-don`).
+   *  `direction` = "sold" | "purchase", `kind` = "regular" | "cash-register" quyết
+   *  định endpoint; `from`/`to` theo `dd/MM/yyyy`; `state` = cursor phân trang từ
+   *  response trước (null = trang đầu). Trả `{datas, state, total, time}`. */
   hddtListInvoices: async (f: HddtInvoiceFilter = {}) => {
     const r = JSON.parse(
       await call<string>("hddt_list_invoices", {
+        direction: f.direction ?? "sold",
+        kind: f.kind ?? "regular",
         from: f.from ?? null,
         to: f.to ?? null,
         state_filter: f.state ?? null,
-        hdon: f.hdon ?? null,
-        khhdon: f.khhdon ?? null,
-        shdon: f.shdon ?? null,
-        mhso: f.mhso ?? null,
+        nmmst: f.nmmst ?? null,
+        nbmst: f.nbmst ?? null,
+        nmcmnd: f.nmcmnd ?? null,
         tthai: f.tthai ?? null,
         ttxly: f.ttxly ?? null,
-        nbmst: f.nbmst ?? null,
+        khmshdon: f.khmshdon ?? null,
+        khhdon: f.khhdon ?? null,
+        shdon: f.shdon ?? null,
+        unhiem: f.unhiem ?? false,
         size: f.size ?? 15,
       }),
     );

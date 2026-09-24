@@ -496,59 +496,96 @@ export interface HddtLoginResult {
   new_password?: string;
 }
 
-/** Trạng thái hóa đơn (`tthai`) — schema từ trang tra cứu cổng HĐĐT. */
+/** Trạng thái hóa đơn (`tthai`) — select "Trạng thái hóa đơn" của trang tra cứu. */
 export const HDDT_TTHAI: Record<number, string> = {
+  0: "Tất cả",
   1: "Hóa đơn mới",
   2: "Hóa đơn thay thế",
   3: "Hóa đơn điều chỉnh",
   4: "Hóa đơn đã bị thay thế",
   5: "Hóa đơn đã bị điều chỉnh",
+  6: "Hóa đơn đã bị hủy",
 };
 
-/** Trạng thái xử lý (`ttxly`) — schema từ trang tra cứu cổng HĐĐT. */
+/** Kết quả kiểm tra / trạng thái xử lý (`ttxly`) của trang tra cứu HĐĐT. */
 export const HDDT_TTXLY: Record<number, string> = {
   0: "Lưu tạm",
   1: "Chờ phê duyệt",
   2: "Đã phê duyệt",
   3: "Từ chối phê duyệt",
   4: "Đã gửi ký remote",
-  5: "Ký remote thành công",
+  5: "Đã cấp mã hóa đơn",
   6: "Ký remote không thành công",
 };
 
-/** Một dòng hóa đơn từ `GET /api/invoice/hdons/temp` (trang tra cứu cổng). */
+/** Giá trị "Tất cả" của select "Kết quả kiểm tra" (portal không gửi lên). */
+export const HDDT_TTXLY_ALL = "-1";
+
+/** Mẫu số hóa đơn (`khmshdon`) — lấy từ `GET /api/category/dmhdons` (24/09/2026). */
+export const HDDT_KHMSHDON: Record<number, string> = {
+  1: "Hóa đơn giá trị gia tăng",
+  2: "Hóa đơn bán hàng",
+  3: "Hóa đơn bán tài sản công",
+  4: "Hóa đơn bán hàng dự trữ quốc gia",
+  5: "Hóa đơn khác",
+  6: "Phiếu xuất kho kiêm vận chuyển nội bộ",
+  7: "Hóa đơn thương mại điện tử",
+  8: "HĐ giá trị gia tăng tích hợp biên lai thuế, phí, lệ phí",
+  9: "HĐ bán hàng tích hợp biên lai thuế, phí, lệ phí",
+};
+
+/** Tab lớn của trang "Tra cứu hóa đơn": hóa đơn ra (bán ra) / hóa đơn vào (mua vào). */
+export type HddtInvoiceDirection = "sold" | "purchase";
+
+/**
+ * Tab nhỏ (loại hóa đơn) — quyết định tiền tố endpoint:
+ * `query` = "Hóa đơn điện tử", `sco-query` = "Hóa đơn có mã khởi tạo từ máy tính tiền".
+ */
+export type HddtInvoiceKind = "regular" | "cash-register";
+
+/** Một dòng hóa đơn từ `GET /api/{query|sco-query}/invoices/{sold|purchase}`. */
 export interface HddtInvoiceRow {
   id?: string | number;
-  /** Mã số thuế (người bán hóa đơn). */
+  /** Mã số thuế người bán hóa đơn. */
   nbmst?: string;
-  /** Ký hiệu mẫu số. */
-  khmshdon?: string;
+  /** Ký hiệu mẫu số (1..9 — xem {@link HDDT_KHMSHDON}). */
+  khmshdon?: number;
   /** Ký hiệu hóa đơn. */
   khhdon?: string;
-  /** Loại hóa đơn. */
-  lhdon?: string;
   /** Số hóa đơn. */
-  shdon?: string;
-  /** Ngày tạo hóa đơn (định dạng `DD/MM/YYYY` từ cổng). */
-  ntao?: string;
-  /** MST người mua (thông tin hóa đơn). */
+  shdon?: string | number;
+  /** Ngày lập hóa đơn (`tdlap`, định dạng ISO từ cổng). */
+  tdlap?: string;
+  /** MST người mua/nhận hàng. */
   nmmst?: string;
-  /** Tên NNT (thông tin hóa đơn). */
+  /** Tên NNT đối tác (người mua với HĐ ra, người bán với HĐ vào). */
   nmten?: string;
+  /** Tên người mua (HĐ ra) / người nhận hàng (HĐ vào). */
+  nmtnmua?: string;
+  /** CCCD người mua. */
+  nmcccd?: string;
+  /** Tổng tiền chưa thuế. */
+  tgtcthue?: number | string;
+  /** Tổng tiền thuế. */
+  tgtthue?: number | string;
+  /** Tổng tiền chiết khấu thương mại. */
+  ttcktmai?: number | string;
+  /** Tổng tiền phí. */
+  tgtphi?: number | string;
   /** Tổng tiền thanh toán. */
   tgtttbso?: number | string;
-  /** Đơn vị tiền tệ (VD: đồng). */
+  /** Đơn vị tiền tệ (VD: VND). */
   dvtte?: string;
-  /** Tính chất hóa đơn (dùng màu số tiền: 3 = điều chỉnh). */
+  /** Tính chất hóa đơn (3 = điều chỉnh — cổng tô đỏ số tiền). */
   tchat?: number;
-  /** Mã hồ sơ. */
-  mhso?: string;
-  /** Trạng thái hóa đơn (1..5 — xem HDDT_TTHAI). */
+  /** Mã loại hóa đơn trong danh mục (`hdon`: "01", "02", …). */
+  hdon?: string;
+  /** Hồ sơ gốc liên quan (hóa đơn thay thế/điều chỉnh). */
+  hsgoc?: string | null;
+  /** Trạng thái hóa đơn (0..6 — xem {@link HDDT_TTHAI}). */
   tthai?: number;
-  /** Trạng thái xử lý (0..6 — xem HDDT_TTXLY). */
+  /** Kết quả kiểm tra (0..6 — xem {@link HDDT_TTXLY}). */
   ttxly?: number;
-  /** Người tạo hóa đơn. */
-  ngtao?: string;
   [k: string]: unknown;
 }
 
@@ -561,28 +598,36 @@ export interface HddtInvoiceList {
   time: number;
 }
 
-/** Bộ lọc tra cứu hóa đơn (khớp form trang `tra-cuu` của cổng). */
+/** Bộ lọc tra cứu hóa đơn (khớp form trang `/tra-cuu/tra-cuu-hoa-don` của cổng). */
 export interface HddtInvoiceFilter {
-  /** Ngày tạo từ (dd/MM/yyyy). */
+  /** Tab lớn: hóa đơn ra (bán ra) hay hóa đơn vào (mua vào). */
+  direction?: HddtInvoiceDirection;
+  /** Tab nhỏ: hóa đơn điện tử hay máy tính tiền. */
+  kind?: HddtInvoiceKind;
+  /** Ngày lập từ ngày (dd/MM/yyyy) → `tdlap=ge=`. */
   from?: string;
-  /** Ngày tạo đến (dd/MM/yyyy). */
+  /** Ngày lập đến ngày (dd/MM/yyyy) → `tdlap=le=`. */
   to?: string;
   /** Cursor phân trang từ `HddtInvoiceList.state`. */
   state?: string | null;
-  /** Loại hóa đơn (`hdon`). */
-  hdon?: string;
+  /** Mã số thuế (`nmmst`). */
+  nmmst?: string;
+  /** MST đối tác (`nbmst`) — người mua (HĐ ra) / người bán (HĐ vào). */
+  nbmst?: string;
+  /** CCCD người mua (`nmcmnd`). */
+  nmcmnd?: string;
+  /** Trạng thái hóa đơn (`tthai`, 0 = Tất cả → không gửi). */
+  tthai?: string;
+  /** Kết quả kiểm tra (`ttxly`, "-1" = Tất cả → không gửi). */
+  ttxly?: string;
+  /** Ký hiệu mẫu số hóa đơn (`khmshdon`, 1..9). */
+  khmshdon?: string;
   /** Ký hiệu hóa đơn (`khhdon`). */
   khhdon?: string;
   /** Số hóa đơn (`shdon`). */
   shdon?: string;
-  /** Mã hồ sơ (`mhso`). */
-  mhso?: string;
-  /** Trạng thái hóa đơn (`tthai`, 1..5). */
-  tthai?: string;
-  /** Trạng thái xử lý (`ttxly`, 0..6; rỗng = Tất cả → in=(0..6)). */
-  ttxly?: string;
-  /** Mã số thuế lọc (`nbmst`). */
-  nbmst?: string;
+  /** Hóa đơn ủy nhiệm (`unhiem==1`). */
+  unhiem?: boolean;
   /** Số dòng mỗi trang. */
   size?: number;
 }
