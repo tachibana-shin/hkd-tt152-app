@@ -12,6 +12,7 @@
 pub(crate) mod captcha;
 pub(crate) mod client;
 pub(crate) mod glyph;
+pub(crate) mod mock_portal;
 pub(crate) mod password;
 pub(crate) mod session;
 pub(crate) mod solver;

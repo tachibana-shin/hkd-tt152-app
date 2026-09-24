@@ -46,10 +46,9 @@ pub(crate) const MAX_PAGE_SIZE: u32 = 50;
 /// Đọc body cổng thành `serde_json::Value`, **luôn decode UTF-8 từ byte thô**.
 ///
 /// `Response::json()` của reqwest đi qua `text()` → tôn trọng `charset` trong
-/// `Content-Type`. Một số response lỗi của cổng khai báo charset kiểu ISO-8859-1
-/// trong khi byte thực là UTF-8, nên message tiếng Việt ra mojibake
-/// ("pháº§i nhá»�" thay vì "phải nhỏ" — báo lỗi size 50 lúc quét cổng 25/09/2026).
-/// Ưu tiên UTF-8; byte nào không hợp lệ thì thay bằng U+FFFD thay vì lỗi.
+/// `Content-Type`, còn một số response lỗi của cổng khai charset 1-byte dù byte
+/// thực là UTF-8 nên message tiếng Việt ra mojibake. Ưu tiên UTF-8; byte không
+/// hợp lệ thì thay bằng U+FFFD.
 fn decode_body(bytes: &[u8]) -> Result<serde_json::Value, String> {
     let text = match std::str::from_utf8(bytes) {
         Ok(s) => s.to_string(),
@@ -227,12 +226,16 @@ pub(crate) struct HddtClient {
     password: String,
     /// Mốc thời gian request tra cứu gần nhất — dùng để giãn nhịp (xem `throttle`).
     last_call: std::sync::Mutex<Option<std::time::Instant>>,
+    /// Khoảng nghỉ tối thiểu giữa 2 request (chống 429 của cổng).
+    min_call_gap: Duration,
+    /// Chờ rồi thử lại (giây) khi bị 429.
+    retry_429_delays: Vec<u64>,
 }
 
 /// Giãn nhịp giữa 2 request liên tiếp: cổng trả 429 "Too Many Requests" khi quét
 /// liên tiếp nhiều hóa đơn (bắt lỗi thật 25/09/2026 khi lấy chi tiết 14 HĐ liền).
 const MIN_CALL_GAP: Duration = Duration::from_millis(700);
-/// Khi bị 429, chờ rồi thử lại (giây) theo từng lần.
+/// Khi bị 429, chờ rồi thử lại theo từng lần.
 const RETRY_429_DELAYS: [u64; 3] = [3, 8, 20];
 
 /// 3 anti-bot headers required for EVERY portal API call (copied from the
@@ -286,7 +289,19 @@ impl HddtClient {
             username: username.to_string(),
             password: password.to_string(),
             last_call: std::sync::Mutex::new(None),
+            min_call_gap: MIN_CALL_GAP,
+            retry_429_delays: RETRY_429_DELAYS.to_vec(),
         })
+    }
+
+    /// Client cho test offline: không giãn nhịp, retry 429 tức thì (xem
+    /// `mock_portal`). Giữ nguyên mọi logic khác.
+    #[cfg(test)]
+    pub(crate) fn for_test(base: &str) -> Self {
+        let mut c = Self::new("u", "p", Some(base)).expect("client test");
+        c.min_call_gap = Duration::ZERO;
+        c.retry_429_delays = vec![0, 0, 0];
+        c
     }
 
     /// Chờ đủ khoảng cách giữa 2 request tra cứu (chống 429 của cổng).
@@ -295,7 +310,7 @@ impl HddtClient {
             let mut last = self.last_call.lock().unwrap_or_else(|e| e.into_inner());
             let now = std::time::Instant::now();
             let gap = match *last {
-                Some(prev) => MIN_CALL_GAP.saturating_sub(now.duration_since(prev)),
+                Some(prev) => self.min_call_gap.saturating_sub(now.duration_since(prev)),
                 None => Duration::ZERO,
             };
             *last = Some(now + gap);
@@ -347,13 +362,15 @@ impl HddtClient {
                 .await
                 .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
             if resp.status() != reqwest::StatusCode::TOO_MANY_REQUESTS
-                || attempt >= RETRY_429_DELAYS.len()
+                || attempt >= self.retry_429_delays.len()
             {
                 return Ok(resp);
             }
-            let secs = RETRY_429_DELAYS[attempt];
+            let secs = self.retry_429_delays[attempt];
             attempt += 1;
-            tokio::time::sleep(Duration::from_secs(secs)).await;
+            if secs > 0 {
+                tokio::time::sleep(Duration::from_secs(secs)).await;
+            }
         }
     }
 
@@ -692,6 +709,159 @@ mod tests {
         assert_eq!(c.base(), "https://hoadondientu.gdt.gov.vn");
     }
 
+    // ─── Test offline với mock portal (không cần mạng/credentials) ───
+
+    #[tokio::test]
+    async fn query_invoices_against_mock_uses_right_endpoint_and_headers() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+        let list = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 100,
+                    from: Some("01/09/2026".into()),
+                    to: Some("24/09/2026".into()),
+                    ttxly: Some("-1".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("tra cứu mock thất bại");
+
+        assert_eq!(list.total, 1);
+        let reqs = portal.requests();
+        let r = &reqs[0];
+        assert_eq!(r.path, "/api/query/invoices/purchase");
+        assert_eq!(
+            r.param("size").as_deref(),
+            Some("50"),
+            "size phải clamp ≤ 50"
+        );
+        assert_eq!(
+            r.headers.get("authorization").map(String::as_str),
+            Some("Bearer mock-token")
+        );
+        assert_eq!(
+            r.headers.get("end-point").map(String::as_str),
+            Some(ENDPOINT_LOOKUP)
+        );
+        assert!(
+            r.headers.contains_key("action"),
+            "endpoint tra cứu cần header Action"
+        );
+        assert!(
+            r.headers.contains_key("request-id"),
+            "thiếu anti-bot request-id"
+        );
+    }
+
+    #[tokio::test]
+    async fn cash_register_uses_sco_query_prefix() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+        c.query_invoices(
+            "mock-token",
+            &InvoiceQuery {
+                direction: InvoiceDirection::Sold,
+                kind: InvoiceKind::CashRegister,
+                size: 15,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("tra cứu mock thất bại");
+        assert_eq!(portal.requests()[0].path, "/api/sco-query/invoices/sold");
+    }
+
+    #[tokio::test]
+    async fn invoice_detail_needs_numeric_form_code() {
+        // Cổng thật trả 500 khi khmshdon không phải số (lỗi đã gặp 25/09/2026:
+        // gửi nhầm ký hiệu hóa đơn "C26THN"). Mock giữ nguyên hành vi này.
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+
+        let err = c
+            .invoice_detail("mock-token", "0100000000", "C26THN", "C26MOCK", "0001", "")
+            .await
+            .expect_err("khmshdon chữ phải bị từ chối");
+        assert!(err.contains("NumberFormatException"), "lỗi sai: {err}");
+
+        let ok = c
+            .invoice_detail("mock-token", "0100000000", "1", "C26MOCK", "0001", "")
+            .await
+            .expect("khmshdon số phải lấy được chi tiết");
+        let lines = ok
+            .get("hdhhdvu")
+            .and_then(|v| v.as_array())
+            .expect("có dòng hàng");
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_is_retried() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        *portal.rate_limit_first.lock().unwrap() = 2;
+        let c = HddtClient::for_test(&portal.base);
+        let list = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("phải thử lại sau 429 rồi thành công");
+        assert_eq!(list.total, 1);
+        assert_eq!(
+            portal.count("/invoices/purchase"),
+            3,
+            "2 lần 429 + 1 lần thành công"
+        );
+    }
+
+    #[tokio::test]
+    async fn detail_returns_every_line_of_the_invoice() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        portal.set_detail_lines(
+            r#"[{"ten":"A","dvtinh":"Cái","mhhdvu":"a","sluong":1,"dgia":10,"stckhau":0,"tsuat":0.08},
+                {"ten":"B","dvtinh":"Bộ","mhhdvu":"b","sluong":2,"dgia":20,"stckhau":0,"tsuat":0.08}]"#,
+        );
+        let c = HddtClient::for_test(&portal.base);
+        let detail = c
+            .invoice_detail("mock-token", "0100000000", "1", "C26MOCK", "0001", "")
+            .await
+            .unwrap();
+        let lines = detail.get("hdhhdvu").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(
+            lines.len(),
+            2,
+            "mọi dòng hàng phải được lấy về để tạo phiếu nhập"
+        );
+    }
+
+    #[tokio::test]
+    async fn login_flow_against_mock() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+        let cap = c.fetch_captcha().await.expect("captcha mock");
+        let token = c
+            .authenticate(&cap.key, "ABCDEF")
+            .await
+            .expect("đăng nhập mock");
+        assert_eq!(token, "mock-token");
+        let profile = c.profile(&token).await.expect("hồ sơ mock");
+        assert_eq!(
+            profile.get("username").and_then(|v| v.as_str()),
+            Some("0100000000")
+        );
+    }
+
     #[test]
     fn page_size_never_exceeds_portal_limit() {
         // Cổng trả HTTP 500 "findInvoicePurchase.size: phải nhỏ hơn hoặc bằng 50"
@@ -717,8 +887,7 @@ mod tests {
 
     #[test]
     fn latin1_mojibake_would_fail_without_utf8_decode() {
-        // Nếu decode byte UTF-8 theo charset ISO-8859-1 thì ra chuỗi khác hẳn —
-        // đây đúng là dạng người dùng thấy trước đây ("pháº§i nhá»�").
+        // Decode byte UTF-8 theo charset ISO-8859-1 sẽ ra chuỗi khác hẳn.
         let utf8 = "phải nhỏ hơn hoặc bằng 50";
         let mojibake: String = utf8.as_bytes().iter().map(|&b| b as char).collect();
         assert_ne!(mojibake, utf8, "bộ mojibake không được khớp chuỗi gốc");

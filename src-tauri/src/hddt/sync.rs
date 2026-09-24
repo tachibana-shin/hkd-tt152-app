@@ -178,8 +178,9 @@ pub(crate) async fn scan(
     let end_date = resolve_end(to).await?;
     if start_date > end_date {
         return Err(format!(
-            "Khoảng ngày không hợp lệ: {} → {} (mốc bắt đầu HĐĐT của hộ là {})",
-            start_date, end_date, start_date
+            "Khoảng quét rỗng sau khi bỏ hôm nay (mốc cuối là {}). Hóa đơn hôm nay còn \
+             đang phát sinh nên không quét — hãy chọn đến ngày hôm qua.",
+            end_date
         ));
     }
 
@@ -237,14 +238,10 @@ pub(crate) async fn scan(
                 let list = client.query_invoices(token, &q).await?;
                 let rows = list.datas.len();
                 for row in &list.datas {
-                    upsert_invoice(pool, row, *kind, sum.need_manual).await?;
-                    let portal_id = f(row, "id");
-                    if portal_id.is_empty() {
-                        continue;
-                    }
-                    match cache_invoice(pool, &portal_id).await? {
-                        CacheState::New => sum.invoices_new += 1,
-                        CacheState::Existing => sum.invoices_existing += 1,
+                    if upsert_invoice(pool, row, *kind).await? {
+                        sum.invoices_new += 1;
+                    } else {
+                        sum.invoices_existing += 1;
                     }
                 }
                 state = list
@@ -324,23 +321,22 @@ pub(crate) async fn scan(
     Ok(sum)
 }
 
-#[derive(PartialEq)]
-enum CacheState {
-    New,
-    Existing,
-}
-
 /// Ghi 1 hóa đơn vào cache (ON CONFLICT portal_id DO NOTHING — không đè dữ liệu
-/// đã nhập kho).
-async fn upsert_invoice(
-    pool: &SqlitePool,
-    row: &Value,
-    kind: InvoiceKind,
-    _need_manual: usize,
-) -> Result<(), String> {
+/// đã có). Trả `true` nếu là dòng mới.
+async fn upsert_invoice(pool: &SqlitePool, row: &Value, kind: InvoiceKind) -> Result<bool, String> {
     let portal_id = f(row, "id");
     if portal_id.is_empty() {
-        return Ok(());
+        return Ok(false);
+    }
+    // Đã nhập kho rồi (bảng hóa đơn chính thức) → không đưa lại vào cache.
+    let done: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM hddt_imported_invoice WHERE portal_id = ?")
+            .bind(&portal_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if done.0 > 0 {
+        return Ok(false);
     }
     let tdlap = f(row, "tdlap");
     // tdlap của cổng là ISO UTC (vd 2026-09-23T17:00:00Z = 24/09 giờ Việt).
@@ -358,7 +354,7 @@ async fn upsert_invoice(
             int(row, "tthai")
         )
     };
-    sqlx::query(
+    let res = sqlx::query(
         "INSERT INTO hddt_purchase_invoice
             (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
              khmshdon, khhdon, shdon, hthdon, tchat,
@@ -389,7 +385,7 @@ async fn upsert_invoice(
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(res.rows_affected() > 0)
 }
 
 fn kind_str(kind: InvoiceKind) -> &'static str {
@@ -411,20 +407,6 @@ fn parse_tdlap(tdlap: &str) -> String {
         return d.format("%Y-%m-%d").to_string();
     }
     String::new()
-}
-
-async fn cache_invoice(pool: &SqlitePool, portal_id: &str) -> Result<CacheState, String> {
-    let n: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE portal_id = ?")
-            .bind(portal_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    Ok(if n.0 > 0 {
-        CacheState::Existing
-    } else {
-        CacheState::New
-    })
 }
 
 async fn mark_days_scanned(
@@ -476,12 +458,12 @@ async fn cached_days(
     Ok(rows.into_iter().map(|(d,)| d).collect())
 }
 
-/// Xoá cache đồng bộ: chỉ xoá hóa đơn CHƯA nhập kho + các dấu ngày đã quét.
+/// Xoá cache đồng bộ: toàn bộ dòng cache (chưa nhập kho) + các dấu ngày đã quét.
 ///
-/// Hóa đơn đã nhập kho giữ nguyên để không mất liên kết hóa đơn ↔ phiếu nhập
-/// (`portal_id` UNIQUE nên quét lại cũng không tạo trùng).
+/// Hóa đơn đã nhập kho nằm ở `hddt_imported_invoice` nên không bị đụng tới —
+/// liên kết hóa đơn ↔ phiếu nhập luôn giữ nguyên.
 pub(crate) async fn clear_cache(pool: &SqlitePool) -> Result<ClearCacheOutcome, String> {
-    let deleted = sqlx::query("DELETE FROM hddt_purchase_invoice WHERE status <> 'imported'")
+    let deleted = sqlx::query("DELETE FROM hddt_purchase_invoice")
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?
@@ -596,6 +578,27 @@ pub(crate) async fn import_invoice(
     debit_account: &str,
     credit_account: &str,
 ) -> Result<ImportOutcome, String> {
+    // Đã có trong bảng hóa đơn chính thức → không tạo phiếu lần nữa (cache có
+    // thể bị xoá rồi quét lại cùng ngày đó).
+    if let Some((voucher_no,)) = sqlx::query_as::<_, (String,)>(
+        "SELECT iv.voucher_no FROM hddt_imported_invoice hi
+           JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
+          WHERE hi.portal_id = ?",
+    )
+    .bind(&inv.portal_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    {
+        return Ok(ImportOutcome {
+            portal_id: inv.portal_id.clone(),
+            ok: true,
+            message: format!("Đã nhập kho trước đó — phiếu {voucher_no}"),
+            voucher_no,
+            products_created: 0,
+        });
+    }
+
     let detail: Value = serde_json::from_str(&inv.detail_json)
         .map_err(|e| format!("Dữ liệu chi tiết hóa đơn hỏng: {e}"))?;
     let lines = detail
@@ -614,11 +617,9 @@ pub(crate) async fn import_invoice(
     let mut created = 0usize;
     for line in &lines {
         let name = f(line, "ten");
-        // Dịch vụ (phí, phí dịch vụ…) không có đơn vị tính → cổng trả null.
-        // Đơn vị gộp về "Dịch vụ", nhưng TÊN giữ nguyên verbatim (phương án B —
-        // người dùng chọn giữ chi tiết đầy đủ): dòng phí có tên kèm kỳ/tháng
-        // ("…PPS 08/2026…") nên mỗi kỳ là một mặt hàng riêng. Số mặt hàng mới
-        // luôn hiển thị ở cột "HH mới" của bảng xem trước trước khi nhập kho.
+        // Dịch vụ (phí, phí dịch vụ…) không có đơn vị tính → cổng trả null: đơn vị
+        // gộp về "Dịch vụ". Tên giữ nguyên verbatim vì có kèm kỳ/tháng
+        // ("…PPS 08/2026…") nên mỗi kỳ là một mặt hàng riêng.
         let raw_unit = f(line, "dvtinh");
         let unit = if raw_unit.trim().is_empty() {
             "Dịch vụ"
@@ -720,7 +721,8 @@ pub(crate) async fn import_invoice(
     )
     .await?;
 
-    // 5) Ghi đầu phiếu + liên kết hóa đơn chính thức (FK thật).
+    // 5) Hóa đơn chính thức + liên kết chặt với phiếu nhập (FK thật). Dữ liệu
+    // này nằm ở bảng riêng `hddt_imported_invoice`, sau đó dòng cache bị xoá.
     let header_id: (i64,) = sqlx::query_as("SELECT id FROM inbound_voucher WHERE voucher_no = ?")
         .bind(&voucher_no)
         .fetch_one(pool)
@@ -732,19 +734,28 @@ pub(crate) async fn import_invoice(
         .await
         .map_err(|e| e.to_string())?;
     sqlx::query(
-        "UPDATE hddt_purchase_invoice
-            SET status = 'imported', voucher_no = ?, inbound_voucher_id = ?,
-                supplier_id = ?, new_product_count = ?, imported_at = datetime('now')
-          WHERE id = ?",
+        "INSERT INTO hddt_imported_invoice
+            (portal_id, portal_kind, posting_date, nbmst, nbten, nmmst, khmshdon, khhdon, shdon,
+             tgtcthue, tgtthue, ttcktmai, tgtttbso, line_count, new_product_count,
+             supplier_id, inbound_voucher_id, raw_json, detail_json)
+         SELECT portal_id, portal_kind, posting_date, nbmst, nbten, nmmst, khmshdon, khhdon, shdon,
+                tgtcthue, tgtthue, ttcktmai, tgtttbso, line_count, ?, ?, ?,
+                raw_json, detail_json
+           FROM hddt_purchase_invoice WHERE id = ?",
     )
-    .bind(&voucher_no)
-    .bind(header_id.0)
-    .bind(supplier_id.map(|(i,)| i))
     .bind(created as i64)
+    .bind(supplier_id.map(|(i,)| i))
+    .bind(header_id.0)
     .bind(inv.id)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
+    // Cache đã "tiêu" rồi → xoá khỏi cache, dữ liệu chính thức nằm ở bảng trên.
+    sqlx::query("DELETE FROM hddt_purchase_invoice WHERE id = ?")
+        .bind(inv.id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(ImportOutcome {
         portal_id: inv.portal_id.clone(),
@@ -893,14 +904,28 @@ pub(crate) async fn preview(
 ) -> Result<(Vec<PreviewRow>, PreviewSummary), String> {
     let from = from.trim().to_string();
     let to = to.trim().to_string();
+    // Cache (chờ nhập / cần xử lý) + hóa đơn đã nhập kho (bảng riêng) — cùng
+    // một danh sách để người dùng thấy trạng thái đầy đủ. Dòng đã nhập kho có
+    // `id = 0` (không có hành động) để không lẫn id với dòng cache.
     let rows: Vec<PreviewRow> = sqlx::query_as(
         "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon, portal_kind,
                 status, skip_reason, line_count, new_product_count,
                 tgtcthue, tgtthue, tgtttbso, voucher_no, detail_error
-         FROM hddt_purchase_invoice
-         WHERE (? = '' OR posting_date >= ?) AND (? = '' OR posting_date <= ?)
+           FROM hddt_purchase_invoice
+          WHERE (? = '' OR posting_date >= ?) AND (? = '' OR posting_date <= ?)
+         UNION ALL
+         SELECT 0, hi.portal_id, hi.posting_date, hi.nbmst, hi.nbten, hi.khhdon, hi.shdon,
+                hi.portal_kind, 'imported', '', hi.line_count, hi.new_product_count,
+                hi.tgtcthue, hi.tgtthue, hi.tgtttbso, COALESCE(iv.voucher_no, ''), ''
+           FROM hddt_imported_invoice hi
+           LEFT JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
+          WHERE (? = '' OR hi.posting_date >= ?) AND (? = '' OR hi.posting_date <= ?)
          ORDER BY posting_date DESC, khhdon DESC, shdon DESC",
     )
+    .bind(&from)
+    .bind(&from)
+    .bind(&to)
+    .bind(&to)
     .bind(&from)
     .bind(&from)
     .bind(&to)
@@ -1016,18 +1041,24 @@ mod tests {
                 .unwrap();
         assert!(linked.0 > 0, "phải có bút toán gắn với đầu phiếu");
 
-        // Hóa đơn liên kết chặt với phiếu nhập.
-        let inv: (String, i64, i64) = sqlx::query_as(
-            "SELECT status, inbound_voucher_id, new_product_count
-               FROM hddt_purchase_invoice WHERE id = ?",
+        // Hóa đơn chính thức nằm ở bảng riêng, liên kết chặt với phiếu nhập;
+        // dòng cache tương ứng bị xoá.
+        let inv: (i64, i64) = sqlx::query_as(
+            "SELECT inbound_voucher_id, new_product_count
+               FROM hddt_imported_invoice WHERE portal_id = 'uuid-1'",
         )
-        .bind(id)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(inv.0, "imported");
-        assert_eq!(inv.1, header.0, "FK hóa đơn → phiếu nhập phải khớp");
-        assert_eq!(inv.2, 1);
+        assert_eq!(inv.0, header.0, "FK hóa đơn → phiếu nhập phải khớp");
+        assert_eq!(inv.1, 1);
+        let cache_left: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cache_left.0, 0, "hóa đơn đã nhập không nằm lại trong cache");
 
         // NCC tự tạo theo MST.
         let ncc: (String,) = sqlx::query_as("SELECT code FROM supplier WHERE code = ?")
@@ -1107,16 +1138,19 @@ mod tests {
         let lines = r#"{"ten":"Hàng A","dvtinh":"Cái","mhhdvu":"a","sluong":1.0,
                         "dgia":100.0,"stckhau":0.0,"tsuat":0.08}"#;
         let id = seed_invoice(&pool, "uuid-5", 1, lines).await;
-        import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+        let inv = load(&pool, id).await;
+        let first = import_invoice(&pool, &inv, "", "HKD", "", "")
             .await
             .unwrap();
-        // Lần 2: hóa đơn đã 'imported' → caller bỏ qua, không tạo phiếu mới.
-        let st: (String,) = sqlx::query_as("SELECT status FROM hddt_purchase_invoice WHERE id = ?")
-            .bind(id)
-            .fetch_one(&pool)
+        assert!(first.voucher_no.starts_with("PN"));
+
+        // Lần 2 (ví dụ cache bị xoá rồi quét lại đúng ngày đó): hóa đơn đã có
+        // trong bảng chính thức → báo đã nhập, không tạo phiếu thứ hai.
+        let again = import_invoice(&pool, &inv, "", "HKD", "", "")
             .await
             .unwrap();
-        assert_eq!(st.0, "imported");
+        assert_eq!(again.voucher_no, first.voucher_no);
+        assert!(again.message.contains("Đã nhập kho trước đó"));
         let vouchers: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM inbound_voucher")
             .fetch_one(&pool)
             .await
@@ -1137,6 +1171,144 @@ mod tests {
         .unwrap();
         let b = next_inbound_voucher_no(&pool).await.unwrap();
         assert_ne!(a, b, "số phiếu phải tăng, không trùng");
+    }
+
+    // ─── Test offline với mock portal ───
+
+    #[tokio::test]
+    async fn scan_then_import_round_trip_against_mock_portal() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        // Hôm nay là 25/09/2026 trong test dữ liệu → quét 01/09 → 24/09.
+        let from = "2026-09-01";
+        let to = "2026-09-24";
+
+        let sum = scan(
+            &pool,
+            &client,
+            "mock-token",
+            from,
+            to,
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect("quét mock thất bại");
+        assert_eq!(sum.days_scanned, 24, "phải quét hết 24 ngày chưa cache");
+        assert_eq!(sum.days_cached, 0);
+        assert_eq!(sum.invoices_new, 1);
+        assert_eq!(
+            sum.details_ok, 1,
+            "mock trả khmshdon số → lấy chi tiết được"
+        );
+        assert_eq!(sum.details_failed, 0);
+
+        // Lần 2: mọi ngày đã cache → không gọi lại endpoint danh sách.
+        portal.reset();
+        let sum2 = scan(
+            &pool,
+            &client,
+            "mock-token",
+            from,
+            to,
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect("quét lại thất bại");
+        assert_eq!(sum2.days_scanned, 0);
+        assert_eq!(sum2.days_cached, 24);
+        assert_eq!(
+            portal.count("/invoices/purchase"),
+            0,
+            "không được gọi lại cổng cho ngày đã cache"
+        );
+
+        // Nhập kho → tạo phiếu + hóa đơn chính thức, dòng cache biến mất.
+        let cached = pending_without_detail(&pool).await.unwrap();
+        assert!(
+            cached.is_empty(),
+            "đã lấy chi tiết nên không còn chờ lấy nữa"
+        );
+        let row: CachedInvoice = sqlx::query_as(
+            "SELECT id, portal_id, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
+                    status, detail_json
+               FROM hddt_purchase_invoice LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let out = import_invoice(&pool, &row, "", "HKD", "", "")
+            .await
+            .unwrap();
+        assert!(out.ok);
+        let imported: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_imported_invoice")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(imported.0, 1);
+        let cache_left: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cache_left.0, 0, "cache phải sạch sau khi nhập kho");
+
+        // Quét lại cùng khoảng ngày (xoá dấu ngày) → hóa đơn đã nhập không quay
+        // lại cache nữa, nên không thể tạo phiếu lần hai.
+        sqlx::query("DELETE FROM hddt_sync_day")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let sum3 = scan(
+            &pool,
+            &client,
+            "mock-token",
+            from,
+            to,
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            sum3.invoices_new, 0,
+            "hóa đơn đã nhập không được ghi lại cache"
+        );
+        let again: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(again.0, 0);
+        let vouchers: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM inbound_voucher")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(vouchers.0, 1, "vẫn chỉ 1 phiếu nhập");
+    }
+
+    #[tokio::test]
+    async fn scan_today_is_never_cached() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let err = scan(
+            &pool,
+            &client,
+            "mock-token",
+            &today,
+            &today,
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect_err("hôm nay không được quét");
+        assert!(err.contains("hôm nay"), "thông báo phải nói rõ: {err}");
+        let cached: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_sync_day")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cached.0, 0, "hôm nay không được đánh dấu cache");
+        assert_eq!(portal.count("/invoices/"), 0, "không gọi cổng cho hôm nay");
     }
 
     #[tokio::test]
@@ -1187,15 +1359,16 @@ mod tests {
 
     #[tokio::test]
     async fn clear_cache_keeps_imported_invoices() {
-        // Xoá cache để quét lại: hóa đơn đã nhập kho phải giữ để không mất liên kết.
+        // Xoá cache để quét lại: chỉ dòng cache bị xoá; hóa đơn đã nhập kho nằm
+        // ở bảng riêng nên giữ nguyên liên kết với phiếu.
         let pool = test_pool().await;
-        let imported = seed_invoice(&pool, "uuid-keep", 1, "{}").await;
-        let pending = seed_invoice(&pool, "uuid-drop", 1, "{}").await;
-        sqlx::query("UPDATE hddt_purchase_invoice SET status = 'imported' WHERE id = ?")
-            .bind(imported)
-            .execute(&pool)
+        let lines = r#"{"ten":"Hàng A","dvtinh":"Cái","mhhdvu":"a","sluong":1.0,
+                        "dgia":100.0,"stckhau":0.0,"tsuat":0.08}"#;
+        let done = seed_invoice(&pool, "uuid-keep", 1, lines).await;
+        import_invoice(&pool, &load(&pool, done).await, "", "HKD", "", "")
             .await
             .unwrap();
+        let pending = seed_invoice(&pool, "uuid-drop", 1, "{}").await;
         mark_days_scanned(
             &pool,
             NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
@@ -1206,15 +1379,24 @@ mod tests {
         .unwrap();
 
         let out = clear_cache(&pool).await.unwrap();
-        assert_eq!(out.invoices_deleted, 1, "chỉ xoá hóa đơn chưa nhập kho");
+        assert_eq!(out.invoices_deleted, 1, "chỉ xoá dòng cache");
         assert_eq!(out.days_deleted, 1);
-        let left: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
-                .bind(imported)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let left: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM hddt_imported_invoice WHERE portal_id = 'uuid-keep'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(left.0, 1, "hóa đơn đã nhập kho phải còn lại");
+        let linked: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM hddt_imported_invoice hi
+               JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
+              WHERE hi.portal_id = 'uuid-keep'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(linked.0, 1, "liên kết hóa đơn ↔ phiếu phải nguyên vẹn");
         let gone: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
                 .bind(pending)
@@ -1226,8 +1408,7 @@ mod tests {
 
     #[tokio::test]
     async fn service_line_keeps_full_name_verbatim() {
-        // Phương án B (người dùng chọn): tên dòng dịch vụ giữ nguyên, dù dài và
-        // có kỳ/tháng → mỗi kỳ là một mặt hàng riêng. Tên lấy thật từ cổng.
+        // Tên dòng dịch vụ giữ nguyên (kể cả kỳ/tháng) → mỗi kỳ là một mặt hàng riêng.
         let pool = test_pool().await;
         let long_name = "Phí dịch vụ tiếp thị liên kết PPS 08/2026 bachhoatonghop.phuongvi \
                          (AMS PPS Commission Fee 08/2026 bachhoatonghop.phuongvi)";
@@ -1249,7 +1430,7 @@ mod tests {
         assert_eq!(p.1, "Dịch vụ");
         assert_eq!(p.2, 1, "đánh dấu dịch vụ để không tính tồn kho");
 
-        // Kỳ khác → mặt hàng mới (đúng nghĩa phương án B).
+        // Kỳ khác → mặt hàng mới.
         let next_month = long_name.replace("08/2026", "09/2026");
         let lines2 = format!(
             r#"{{"ten":"{next_month}","dvtinh":null,"mhhdvu":null,"sluong":1.0,

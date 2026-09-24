@@ -11,7 +11,7 @@ Hai tầng kiểm thử:
 
 ```bash
 cd src-tauri
-cargo test            # 21 test
+cargo test            # unit + integration, chạy offline hoàn toàn
 ```
 
 Lõi nghiệp vụ nằm ở các hàm `*_core(pool, …)` (không phụ thuộc Tauri `State`);
@@ -21,9 +21,34 @@ command chỉ là vỏ mỏng `require_role` + audit rồi gọi lõi. Test dùn
 Phủ: `helpers` (băm mật khẩu, làm tròn), `test_support` (migration + seed admin),
 `stock` (FIFO 1 lô/nhiều lô/thiếu hàng, nhập–xuất ghi sổ), `payroll` (công thức
 khớp Excel, giảm trừ TNCN, idempotent theo kỳ), `accounting` (tờ khai, giảm 80%
-GTGT, trừ doanh thu điều chỉnh).
+GTGT, trừ doanh thu điều chỉnh), `hddt` (client + đồng bộ).
 
-## 2. Test E2E UI
+**Mock cổng HĐĐT cho test offline** (`hddt/mock_portal.rs`): HTTP server tự dựng
+trên cổng ngẫu nhiên, trả payload đúng tên field của cổng thật (kể cả 500 kiểu
+Spring khi `khmshdon` không phải số, 429 để test retry). Test đồng bộ chạy trọn
+vòng quét → nhập kho → chống trùng mà **không cần mạng hay credentials**.
+
+```bash
+cd src-tauri
+cargo test --lib live_probe_invoices -- --ignored   # test live (cần ../info.txt + IP VN)
+cargo test --lib live_probe_page_size -- --ignored  # kiểm tra giới hạn size của cổng
+```
+
+## 2. Test E2E UI (Playwright)
+
+```bash
+bun run test:e2e            # offline: HĐĐT chạy với mock portal
+E2E_HDDT_LIVE=1 bun run test:e2e   # HĐĐT chạy với cổng thật (cần info.txt + IP VN)
+```
+
+App thật (`bun run tauri dev` do Playwright tự khởi động, data dir riêng), trình
+duyệt Chrome, Vite ở cổng riêng. Test HĐĐT **mặc định offline**: `mock-portal.ts`
+đứng trên cổng 45733, app trỏ `base_url` vào đó qua `hddt_save_config` (nên không
+cần sửa code app) — captcha dùng fixture `e2e/fixtures/captcha.svg` (ảnh thật của
+cổng) để solver glyph giải được, đúng đường đăng nhập ngoài đời. Đặt
+`E2E_HDDT_LIVE=1` để dùng cổng thật.
+
+## 3. Test E2E app thật (WebKit inspector)
 
 Chạy app **thật** (Tauri/webview), thao tác DOM qua WebKit remote inspector, và
 **kiểm chứng kết quả bằng chính file SQLite của app** — không tin UI.

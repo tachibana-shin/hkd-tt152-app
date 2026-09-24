@@ -3,3 +3,5 @@
 export const WEB_PORT = 45821; // the app's embedded web server
 export const VITE_PORT = 1421; // Vite dev server (tauri dev)
 export const BASE_URL = `http://localhost:${VITE_PORT}`;
+export const MOCK_PORTAL_PORT = 45733; // mock HDDT portal cho E2E offline
+export const MOCK_PORTAL_URL = `http://127.0.0.1:${MOCK_PORTAL_PORT}`;

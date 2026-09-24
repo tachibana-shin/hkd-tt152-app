@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { BASE_URL } from "./constants";
+import { BASE_URL, MOCK_PORTAL_URL } from "./constants";
 import { ADMIN, seedApp } from "./helpers";
 
 // A single worker runs these serially (workers: 1); all 7 tests share one app instance
@@ -252,6 +252,7 @@ test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu
   ).json();
   const row = (inv.rows as Array<Record<string, unknown>>)[0];
   expect(row.status).toBe("imported");
+  expect(row.id).toBe(0); // dòng đã nhập đến từ bảng hóa đơn chính thức (không hành động)
   expect(String(row.voucher_no)).toMatch(/^PN\d+$/);
   const products = await (await request.post("/api/get_products", { data: {} })).json();
   const names = (products as Array<{ name: string }>).map((p) => p.name);
@@ -296,13 +297,46 @@ test("Đồng bộ HĐ mua: chạy lần 2 không tạo trùng", async ({ page, 
   expect(importedAfter).toBe(importedBefore);
 });
 
-// ─── HĐĐT: tra cứu hóa đơn thật (cần credentials cổng + IP VN) ───
+test("Đồng bộ HĐ mua: xoá cache giữ nguyên hóa đơn đã nhập kho", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Đồng bộ HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+
+  // Cache trống, hóa đơn đã nhập ở test trước vẫn còn → nút xoá cache bật.
+  await expect(page.getByText(/Có \d+ hóa đơn trong cache/)).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Xoá cache" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Xoá cache" }).click();
+  await expect(page.getByText("Đã xoá cache đồng bộ", { exact: false })).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // Hóa đơn đã nhập kho không nằm trong cache nên phải còn nguyên + còn số phiếu.
+  const after = await (
+    await request.post("/api/hddt_sync_preview", {
+      data: { from: null, to: null, retry_failed: false },
+    })
+  ).json();
+  const rows = after.rows as Array<{ status: string; voucher_no: string }>;
+  expect(rows).toHaveLength(1);
+  expect(rows[0].status).toBe("imported");
+  expect(String(rows[0].voucher_no)).toMatch(/^PN\d+$/);
+});
+
+// ─── HĐĐT: tra cứu hóa đơn (mock portal offline, E2E_HDDT_LIVE=1 để dùng cổng thật) ───
 
 /**
- * Credentials cổng HĐĐT từ `info.txt` ở gốc repo (đã gitignore). Ưu tiên biến môi
- * trường E2E_HDDT_USERNAME / E2E_HDDT_PASSWORD; thiếu cả hai → test bị skip
- * (suite vẫn xanh trên máy không có tài khoản cổng).
+ * Nguồn cổng cho test HĐĐT.
+ *
+ *   E2E_HDDT_LIVE=1  → cổng thật, credentials từ `info.txt` (gitignore) hoặc
+ *                      E2E_HDDT_USERNAME / E2E_HDDT_PASSWORD.
+ *   mặc định         → mock portal của E2E (e2e/playwright/mock-portal.ts):
+ *                      offline, không cần mạng/credentials, payload giống cổng.
  */
+const LIVE_PORTAL = process.env.E2E_HDDT_LIVE === "1";
+
+/** Credentials cổng thật (chỉ dùng khi E2E_HDDT_LIVE=1). */
 function portalCredentials(): { username: string; password: string } | null {
   const envU = process.env.E2E_HDDT_USERNAME;
   const envP = process.env.E2E_HDDT_PASSWORD;
@@ -325,13 +359,21 @@ function portalCredentials(): { username: string; password: string } | null {
 
 /** Cấu hình + đăng nhập cổng HĐĐT qua API (captcha solver chạy offline trong Rust). */
 async function loginPortal(api: APIRequestContext) {
-  const creds = portalCredentials();
-  if (!creds) return null;
-  const base = process.env.E2E_HDDT_BASE_URL ?? "https://hoadondientu.gdt.gov.vn";
-  const cfg = await api.post("/api/hddt_save_config", {
-    data: { username: creds.username, password: creds.password, baseUrl: base },
-  });
-  expect(cfg.ok(), `hddt_save_config failed ${cfg.status()}`).toBe(true);
+  if (!LIVE_PORTAL) {
+    // Mock: cấu hình trỏ base_url về mock portal rồi đăng nhập (token trả về sẵn).
+    const cfg = await api.post("/api/hddt_save_config", {
+      data: { username: "0100000000", password: "mock", baseUrl: MOCK_PORTAL_URL },
+    });
+    expect(cfg.ok(), `hddt_save_config (mock) failed ${cfg.status()}`).toBe(true);
+  } else {
+    const creds = portalCredentials();
+    if (!creds) return null;
+    const base = process.env.E2E_HDDT_BASE_URL ?? "https://hoadondientu.gdt.gov.vn";
+    const cfg = await api.post("/api/hddt_save_config", {
+      data: { username: creds.username, password: creds.password, baseUrl: base },
+    });
+    expect(cfg.ok(), `hddt_save_config failed ${cfg.status()}`).toBe(true);
+  }
   // Cổng giới hạn tần suất (429) → chỉ đăng nhập khi chưa có phiên, tái dùng
   // phiên của test trước thay vì đăng nhập lại liên tục.
   const status = await (await api.post("/api/hddt_status", { data: {} })).json();
@@ -340,7 +382,7 @@ async function loginPortal(api: APIRequestContext) {
   expect(login.ok(), `hddt_login failed ${login.status()}`).toBe(true);
   const body = await login.json();
   if (body.need_manual) {
-    // Cổng đôi lúc bắt captcha tay (solver 2 lần thất bại) → bỏ qua thay vì
+    // Cổng thật đôi lúc bắt captcha tay (solver 2 lần thất bại) → bỏ qua thay vì
     // đánh dấu fail, vì đây là hạn chế môi trường chứ không phải lỗi app.
     console.log("ℹ️ portal yêu cầu captcha thủ công — bỏ qua test tra cứu portal");
     return null;
@@ -348,7 +390,7 @@ async function loginPortal(api: APIRequestContext) {
   return body;
 }
 
-test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả về hóa đơn thật", async ({
+test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả về hóa đơn", async ({
   page,
   request,
 }) => {
@@ -370,12 +412,12 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
     "true",
   );
 
-  // Tìm kiếm thật: dải ngày mặc định = 30 ngày gần nhất.
+  // Tìm kiếm: dải ngày mặc định = 30 ngày gần nhất.
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
   const table = page.locator(".p-datatable");
   await expect(table).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
-  // Dữ liệu thật: các cột định danh của hóa đơn đều có giá trị.
+  // Các cột định danh của hóa đơn đều có giá trị.
   await expect(table.getByText("Ký hiệu HĐ")).toBeVisible();
   await expect(table.locator("tbody tr").first()).toBeVisible();
   const firstRow = table.locator("tbody tr").first();
@@ -384,6 +426,12 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
   // Cột "Mã số thuế" và "Mẫu số" đã bỏ khỏi UI (dữ liệu vẫn còn trong API).
   await expect(table.getByRole("columnheader", { name: "Mã số thuế" })).toBeHidden();
   await expect(table.getByRole("columnheader", { name: "Mẫu số" })).toBeHidden();
+  if (LIVE_PORTAL) {
+    // Chỉ khi chạy cổng thật: dữ liệu phải là hóa đơn thật, MST đối tác là số.
+    await expect(firstRow.getByText(/MST người mua:\s*\d{10,13}/).first()).toBeVisible();
+  } else {
+    await expect(firstRow.getByText("C26MOC", { exact: false })).toBeVisible();
+  }
 });
 
 test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đổi menu (KeepAlive)", async ({
@@ -487,8 +535,6 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
 
   // Tra "hóa đơn vào" → cột đối tác phải là NGƯỜI BÁN (người mua là chính mình).
-  // Ô "hóa đơn vào × máy tính tiền" rỗng với tài khoản này (0 kết quả với ttxly==5
-  // mặc định của cổng) → chuyển sang "Hóa đơn điện tử" để có dữ liệu thật.
   await page.getByRole("tab", { name: "Hóa đơn điện tử" }).click();
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
@@ -498,5 +544,8 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await expect(firstRow.getByText("MST người bán:").first()).toBeVisible();
   await expect(firstRow.getByText("Tên người bán:").first()).toBeVisible();
   // MST người bán nằm trong ô đối tác (cột "Mã số thuế" đã bỏ) → phải là MST thật.
-  await expect(firstRow.getByText(/MST người bán:\s*\d{10,13}/).first()).toBeVisible();
+  const mstRe = LIVE_PORTAL ? /\d{10,13}/ : /0100000000/;
+  await expect(
+    firstRow.getByText(new RegExp(`MST người bán:\\s*${mstRe.source}`)).first(),
+  ).toBeVisible();
 });
