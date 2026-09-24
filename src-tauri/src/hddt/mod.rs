@@ -20,6 +20,7 @@ pub(crate) mod sync;
 pub(crate) use captcha::{Captcha, CaptchaSolver};
 pub(crate) use client::{
     HddtClient, InvoiceDirection, InvoiceKind, InvoiceList, InvoiceQuery, LoginError, LoginSession,
+    MAX_PAGE_SIZE,
 };
 pub(crate) use password::generate_password;
 pub(crate) use session::{days_left_until, now_unix, rfc3339_to_unix, PortalSession};

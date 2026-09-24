@@ -191,7 +191,8 @@ pub(crate) async fn scan(
                 let q = InvoiceQuery {
                     direction: crate::hddt::InvoiceDirection::Purchase,
                     kind: *kind,
-                    size: 100,
+                    // Cổng từ chối size > 50 (HTTP 500) → lấy tối đa 50/lần.
+                    size: crate::hddt::MAX_PAGE_SIZE,
                     state: state.clone(),
                     from: Some(iso_to_portal_day(&win_start.to_string())),
                     to: Some(iso_to_portal_day(&win_end.to_string())),

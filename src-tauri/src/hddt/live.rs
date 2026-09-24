@@ -195,6 +195,63 @@ mod live_tests {
         );
     }
 
+    /// Probe giới hạn `size` của cổng: size=100 bị từ chối (HTTP 500), size=50
+    /// chạy được. In ra message thô để kiểm tra encoding của cổng.
+    /// Run with: cd src-tauri && cargo test live_probe_page_size -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "cần ../info.txt + portal live"]
+    async fn live_probe_page_size() {
+        use crate::hddt::{InvoiceDirection, InvoiceKind, InvoiceQuery};
+        use std::fs;
+
+        if !fs::metadata("../info.txt").is_ok() {
+            eprintln!("⚠️ skipped — ../info.txt không có");
+            return;
+        }
+        let txt = fs::read_to_string("../info.txt").expect("không đọc được info.txt");
+        let pick = |k: &str| {
+            txt.lines()
+                .filter_map(|l| l.split_once('='))
+                .find(|(a, _)| a.trim() == k)
+                .map(|(_, v)| v.trim().to_string())
+        };
+        let client = HddtClient::new(
+            &pick("USERNAME").expect("thiếu USERNAME"),
+            &pick("PASSWORD").expect("thiếu PASSWORD"),
+            None,
+        )
+        .expect("tạo client thất bại");
+        let login = client
+            .login_with_solver(&GlyphTemplateSolver, 2)
+            .await
+            .expect("login thất bại");
+
+        let to = chrono::Local::now();
+        let from = to - chrono::Duration::days(30);
+        let fmt = |d: chrono::DateTime<chrono::Local>| d.format("%d/%m/%Y").to_string();
+        let (from_s, to_s) = (fmt(from), fmt(to));
+
+        for size in [100_u32, 50, crate::hddt::MAX_PAGE_SIZE + 1] {
+            let q = InvoiceQuery {
+                direction: InvoiceDirection::Purchase,
+                kind: InvoiceKind::CashRegister,
+                size,
+                from: Some(from_s.clone()),
+                to: Some(to_s.clone()),
+                ttxly: Some("-1".into()),
+                ..Default::default()
+            };
+            match client.query_invoices(&login.token, &q).await {
+                Ok(list) => eprintln!(
+                    "size={size} → OK total={} (client đã clamp còn {})",
+                    list.total,
+                    crate::hddt::MAX_PAGE_SIZE
+                ),
+                Err(e) => eprintln!("size={size} → ERR {e}"),
+            }
+        }
+    }
+
     /// Fetch một captcha tươi và solve — dùng để điền vào form đăng nhập của
     /// Chrome (browser-side login để bắt request thật). In ra `KEY<TAB>ANSWER`.
     /// Run with: cd src-tauri && cargo test captcha_for_browser -- --ignored --nocapture

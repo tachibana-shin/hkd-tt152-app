@@ -38,6 +38,49 @@ pub(crate) const PATH_AUTHENTICATE: &str = "/api/security-taxpayer/authenticate"
 pub(crate) const PATH_PROFILE: &str = "/api/security-taxpayer/profile";
 pub(crate) const PATH_CHANGE_PASSWORD: &str = "/api/system-taxpayer/users/change-password";
 
+/// Cổng tự validate `size`: vượt 50 là HTTP 500 kèm message
+/// `findInvoicePurchase.size: phải nhỏ hơn hoặc bằng 50` (bắt live 25/09/2026).
+/// Client clamp theo đúng giới hạn này để không gửi giá trị bị cổng từ chối.
+pub(crate) const MAX_PAGE_SIZE: u32 = 50;
+
+/// Đọc body cổng thành `serde_json::Value`, **luôn decode UTF-8 từ byte thô**.
+///
+/// `Response::json()` của reqwest đi qua `text()` → tôn trọng `charset` trong
+/// `Content-Type`. Một số response lỗi của cổng khai báo charset kiểu ISO-8859-1
+/// trong khi byte thực là UTF-8, nên message tiếng Việt ra mojibake
+/// ("pháº§i nhá»�" thay vì "phải nhỏ" — báo lỗi size 50 lúc quét cổng 25/09/2026).
+/// Ưu tiên UTF-8; byte nào không hợp lệ thì thay bằng U+FFFD thay vì lỗi.
+fn decode_body(bytes: &[u8]) -> Result<serde_json::Value, String> {
+    let text = match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
+    };
+    serde_json::from_str(&text)
+        .map_err(|e| format!("Phản hồi cổng HĐĐT sai định dạng: {e} (thân: {text})"))
+}
+
+async fn read_json_body(resp: reqwest::Response) -> Result<serde_json::Value, String> {
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Đọc phản hồi cổng HĐĐT lỗi: {e}"))?;
+    decode_body(&bytes)
+}
+
+/// Nội dung `message` trong body lỗi của cổng (Spring Boot: `{"message": …}`).
+fn portal_message(v: &serde_json::Value, fallback: &str) -> String {
+    v.get("message")
+        .and_then(|m| m.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Giá trị `size=` gửi lên cổng — luôn trong `[1, MAX_PAGE_SIZE]` vì cổng tự
+/// validate (vượt 50 → HTTP 500, quét cổng bị chặn cả lô).
+fn page_size_param(size: u32) -> String {
+    size.clamp(1, MAX_PAGE_SIZE).to_string()
+}
+
 // ─── Tra cứu hóa đơn (trang `/tra-cuu/tra-cuu-hoa-don`) ───
 // Trang này có 2 tab lớn × 2 tab nhỏ, mỗi ô gọi một endpoint riêng — bắt live
 // 24/09/2026 (mỗi request đều 200 kể cả khi không có hóa đơn):
@@ -281,15 +324,9 @@ impl HddtClient {
             .await
             .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
         let status = resp.status();
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Phản hồi đăng nhập HĐĐT sai định dạng: {e}"))?;
+        let v = read_json_body(resp).await?;
         if !status.is_success() {
-            let msg = v
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Đăng nhập cổng HĐĐT thất bại.");
+            let msg = portal_message(&v, "Đăng nhập cổng HĐĐT thất bại.");
             return Err(format!("HĐĐT: {msg}"));
         }
         v.get("token")
@@ -310,10 +347,7 @@ impl HddtClient {
             .await
             .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
         let status = resp.status();
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Phản hồi hồ sơ HĐĐT sai định dạng: {e}"))?;
+        let v = read_json_body(resp).await?;
         if !status.is_success() {
             return Err(format!("Lỗi lấy hồ sơ HĐĐT (HTTP {status})."));
         }
@@ -362,15 +396,9 @@ impl HddtClient {
             .await
             .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
         let status = resp.status();
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Phản hồi chi tiết hóa đơn sai định dạng: {e}"))?;
+        let v = read_json_body(resp).await?;
         if !status.is_success() {
-            let msg = v
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("không rõ nguyên nhân");
+            let msg = portal_message(&v, "không rõ nguyên nhân");
             return Err(format!("Lỗi lấy chi tiết hóa đơn (HTTP {status}): {msg}"));
         }
         Ok(v)
@@ -395,7 +423,7 @@ impl HddtClient {
             q.direction.segment()
         );
         let mut params: Vec<(&str, String)> = vec![("sort", "tdlap:desc".to_string())];
-        params.push(("size", q.size.clamp(1, 500).to_string()));
+        params.push(("size", page_size_param(q.size)));
         if let Some(state) = q.state.as_deref().filter(|s| !s.is_empty()) {
             params.push(("state", state.to_string()));
         }
@@ -423,15 +451,9 @@ impl HddtClient {
             .await
             .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
         let status = resp.status();
-        let v: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Phản hồi danh sách HĐĐT sai định dạng: {e}"))?;
+        let v = read_json_body(resp).await?;
         if !status.is_success() {
-            let msg = v
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("không rõ nguyên nhân");
+            let msg = portal_message(&v, "không rõ nguyên nhân");
             return Err(format!("Lỗi lấy danh sách HĐĐT (HTTP {status}): {msg}"));
         }
         serde_json::from_value(v).map_err(|e| format!("Dữ liệu danh sách HĐĐT sai định dạng: {e}"))
@@ -464,16 +486,16 @@ impl HddtClient {
             .await
             .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
         let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let bytes = resp.bytes().await.unwrap_or_default();
+        // Xem read_json_body: decode UTF-8 từ byte thô, không theo charset khai báo.
+        let text = match std::str::from_utf8(&bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
+        };
         if !status.is_success() {
             let msg = serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|v| {
-                    v.get("message")
-                        .and_then(|m| m.as_str())
-                        .map(str::to_string)
-                })
-                .unwrap_or_else(|| {
+                .map(|v| portal_message(&v, "không rõ nguyên nhân"))
+                .unwrap_or_else(|_| {
                     let t = text.trim();
                     if t.is_empty() {
                         format!("HTTP {status}")
@@ -615,6 +637,43 @@ mod tests {
     fn base_url_normalized() {
         let c = HddtClient::new("u", "p", Some("https://hoadondientu.gdt.gov.vn/")).unwrap();
         assert_eq!(c.base(), "https://hoadondientu.gdt.gov.vn");
+    }
+
+    #[test]
+    fn page_size_never_exceeds_portal_limit() {
+        // Cổng trả HTTP 500 "findInvoicePurchase.size: phải nhỏ hơn hoặc bằng 50"
+        // khi size > 50 → client phải clamp trước khi gửi.
+        assert_eq!(page_size_param(100), "50");
+        assert_eq!(page_size_param(51), "50");
+        assert_eq!(page_size_param(50), "50");
+        assert_eq!(page_size_param(15), "15");
+        assert_eq!(page_size_param(0), "1");
+    }
+
+    #[test]
+    fn error_body_decoded_as_utf8() {
+        // Byte thô của body lỗi 500 bắt live 25/09/2026 (UTF-8, dù cổng có lúc
+        // khai Content-Type với charset khác) → message phải đúng dấu.
+        let raw = r#"{"timestamp":"25/09/2026 01:18:41","message":"findInvoicePurchase.size: phải nhỏ hơn hoặc bằng 50","details":"","path":"uri=/invoices/purchase"}"#;
+        let v = decode_body(raw.as_bytes()).expect("body phải parse được");
+        assert_eq!(
+            portal_message(&v, "không rõ"),
+            "findInvoicePurchase.size: phải nhỏ hơn hoặc bằng 50"
+        );
+    }
+
+    #[test]
+    fn latin1_mojibake_would_fail_without_utf8_decode() {
+        // Nếu decode byte UTF-8 theo charset ISO-8859-1 thì ra chuỗi khác hẳn —
+        // đây đúng là dạng người dùng thấy trước đây ("pháº§i nhá»�").
+        let utf8 = "phải nhỏ hơn hoặc bằng 50";
+        let mojibake: String = utf8.as_bytes().iter().map(|&b| b as char).collect();
+        assert_ne!(mojibake, utf8, "bộ mojibake không được khớp chuỗi gốc");
+        assert!(!utf8.contains(mojibake.as_str()));
+        // Byte UTF-8 thật vẫn phải ra đúng chuỗi có dấu.
+        let raw = format!(r#"{{"message":"{utf8}"}}"#);
+        let v = decode_body(raw.as_bytes()).expect("parse");
+        assert_eq!(portal_message(&v, ""), utf8);
     }
 
     #[test]
