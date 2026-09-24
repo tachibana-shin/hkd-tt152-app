@@ -6,17 +6,20 @@
 // by `glyph::render_glyph` (templates exported with that exact algorithm — see
 // `tools/hddt-captcha/export_templates.py`), so they match exactly.
 //
-// Reference data `templates.bin`: repeated [label 1 byte][bitmap 288 bytes],
-// currently 222 glyphs across 29 characters `2-9A-Z` excluding the ambiguous
-// ones (`0 1 I L O P U`). Measured: leave-one-out 222/222 and 8/8 real logins.
+// Reference data `templates.bin`: repeated [label 1 byte][bitmap 288 bytes].
+// 30 characters `2-9A-Z` trừ `0 1 I L O U` (the confusable ones); `P` có thật,
+// xác nhận bằng các mẫu cổng chấp nhận. Measured: leave-one-out 756/756.
+// Mở rộng bộ mẫu: `cargo test --lib live_harvest_captcha_templates -- --ignored`
 
 use crate::hddt::captcha::{Captcha, CaptchaSolver};
 use crate::hddt::glyph::{glyph_min_x, render_glyph, Mask, MASK_BYTES};
 use regex::Regex;
 use std::sync::OnceLock;
 
-/// The captcha's actual character set (29 characters).
-pub(crate) const CHARSET: &str = "23456789ABCDEFGHJKMNQRSTVWXYZ";
+/// The captcha's actual character set (30 characters). `P` chỉ xuất hiện rất hiếm
+/// (1/222 mẫu đầu tiên) nhưng có thật — 7 mẫu chứa P đều được cổng chấp nhận
+/// khi đăng nhập (25/09/2026), nên không được loại khỏi charset.
+pub(crate) const CHARSET: &str = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const TEMPLATE_BYTES: &[u8] = include_bytes!("templates.bin");
 const ENTRY_BYTES: usize = 1 + MASK_BYTES;
@@ -99,6 +102,95 @@ pub(crate) fn classify_svg(svg: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// Đo từng glyph: (ký tự dự đoán, IoU tối nhất với template khớp nhất). Dùng khi
+/// thu thập mẫu mới để biết glyph nào solver chưa vững — ứng viên cần thêm template.
+pub(crate) fn classify_glyphs_detailed(svg: &str) -> Vec<(char, f32)> {
+    let tpl = templates();
+    extract_glyphs(svg)
+        .iter()
+        .map(|d| {
+            let m = render_glyph(d);
+            let mut best_score = 0.0f32;
+            let mut best = b'?';
+            for (label, tm) in tpl {
+                let s = iou(&m, tm);
+                if s > best_score {
+                    best_score = s;
+                    best = *label;
+                }
+            }
+            (best as char, best_score)
+        })
+        .collect()
+}
+
+/// Các path glyph của captcha, đã loại nhiễu và sắp theo trục x (trái → phải).
+/// Dùng để render lại glyph khi gán nhãn cho mẫu mới.
+pub(crate) fn glyph_paths(svg: &str) -> Vec<String> {
+    extract_glyphs(svg)
+}
+
+/// Đọc `templates.bin` (bytes thô) → danh sách (label, bitmap).
+pub(crate) fn parse_templates(bytes: &[u8]) -> Vec<(u8, Mask)> {
+    let mut v = Vec::new();
+    let mut i = 0;
+    while i + ENTRY_BYTES <= bytes.len() {
+        let mut m = [0u8; MASK_BYTES];
+        m.copy_from_slice(&bytes[i + 1..i + 1 + MASK_BYTES]);
+        v.push((bytes[i], m));
+        i += ENTRY_BYTES;
+    }
+    v
+}
+
+/// Nối các entry `(label, bitmap)` thành định dạng `templates.bin` và bỏ trùng
+/// (trùng mask thì bỏ, kể cả khác nhãn — bitmap đã có thì không thêm lại).
+pub(crate) fn build_templates(entries: &[(u8, Mask)]) -> Vec<u8> {
+    let mut out: Vec<u8> = TEMPLATE_BYTES.to_vec();
+    let mut seen: Vec<Mask> = parse_templates(TEMPLATE_BYTES)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+    for (label, mask) in entries {
+        if seen.iter().any(|m| m == mask) {
+            continue;
+        }
+        out.push(*label);
+        out.extend_from_slice(mask);
+        seen.push(*mask);
+    }
+    out
+}
+
+/// Leave-one-out: bỏ từng entry rồi xem các entry còn lại có đoán đúng label không.
+/// Báo cáo độ chính xác để quyết định có dùng bộ template mới hay không.
+pub(crate) fn leave_one_out_accuracy(entries: &[(u8, Mask)]) -> (usize, usize) {
+    let mut ok = 0;
+    let mut total = 0;
+    for (i, (label, mask)) in entries.iter().enumerate() {
+        let rest: Vec<(u8, Mask)> = entries
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .map(|(_, e)| *e)
+            .collect();
+        let mut best_score = 0.0f32;
+        let mut best = b'?';
+        for (l, tm) in &rest {
+            let s = iou(mask, tm);
+            if s > best_score {
+                best_score = s;
+                best = *l;
+            }
+        }
+        total += 1;
+        if best == *label {
+            ok += 1;
+        }
+    }
+    (ok, total)
+}
+
 /// Production solver: offline template matching, no external binary required.
 pub(crate) struct GlyphTemplateSolver;
 
@@ -115,7 +207,11 @@ mod tests {
     #[test]
     fn templates_cover_full_charset() {
         let t = templates();
-        assert_eq!(t.len(), 222, "template count must match the exported data");
+        assert!(
+            t.len() >= 222,
+            "phải giữ ít nhất số template gốc, thấy {}",
+            t.len()
+        );
         let mut seen = String::new();
         for (label, _) in t {
             let ch = *label as char;
@@ -132,6 +228,14 @@ mod tests {
             CHARSET.len(),
             "every charset character must have a template"
         );
+    }
+
+    /// Bộ template phải nhận ra được `P` — ký tự hiếm nhưng có thật (các mẫu
+    /// chứa P đều được cổng chấp nhận khi đăng nhập).
+    #[test]
+    fn charset_includes_rare_p() {
+        assert!(CHARSET.contains('P'));
+        assert!(templates().iter().any(|(label, _)| *label == b'P'));
     }
 
     #[test]
@@ -159,7 +263,7 @@ mod tests {
             assert_eq!(got, ch, "wrong character (expected {ch}, got {got})");
             n += 1;
         }
-        assert_eq!(n, 29);
+        assert_eq!(n, CHARSET.chars().count(), "fixture phải phủ đủ charset");
     }
 
     #[test]

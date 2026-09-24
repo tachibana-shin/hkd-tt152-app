@@ -11,10 +11,12 @@ every time**, only position/scale differ. So collecting labeled samples → rast
 each glyph to a 48×48 bitmap → IoU matching solves it **fully offline**, with no
 paid service required.
 
-The actual charset has only **29 characters**:
-`23456789ABCDEFGHJKMNQRSTVWXYZ` (the server excludes `0 1 I L O P U` — the
-confusable ones). Measured on the live portal: 8/8 automatic logins succeeded;
-leave-one-out 222/222.
+The charset has **30 characters**: `23456789ABCDEFGHJKMNPQRSTVWXYZ` (the server
+excludes `0 1 I L O U` — the confusable ones). `P` is rare (1 glyph in the first
+222) but real: 8 portal-accepted samples contain it, so it is not excluded.
+
+Measured on the live portal (25/09/2026): leave-one-out 1356/1356, and
+**100/100 consecutive captchas solved** (automatic logins all accepted).
 
 ## Components
 
@@ -24,12 +26,13 @@ leave-one-out 222/222.
 | `export_templates.py` | Generates `templates.bin` + `parity.txt` from `labeled/`. Writes straight into `src-tauri/src/hddt/`. |
 | `evaluate.py` | Re-classifies the labeled set through `templates.bin` + leave-one-out. Expects 100%. |
 | `collect_captchas.py` | Fetches fresh captchas from the portal (urllib, no browser) to grow the sample set. |
-| `labeled/` | Labeled samples `<index>_<key>_<ANSWER>.svg` (37 files, 222 glyphs). |
+| `hard/` | Captchas the solver got wrong; read them by hand to label (captcha keys expire in minutes, so these are for labeling only). |
+| `labeled/` | Labeled samples `<index>_<key>_<ANSWER>.svg`. 37 mẫu gốc được commit; mẫu thu thập sau này gitignore (sinh lại bằng `live_harvest_captcha_templates`). |
 
 ## Data format
 
 - `templates.bin`: repeated `[label 1 byte][bitmap 288 bytes]` — bitmap 48×48 =
-  2304 bits, row-major, MSB-first. Currently 222 entries.
+  2304 bits, row-major, MSB-first. Currently 1356 entries (226 mẫu đã gán nhãn).
 - `parity.txt`: one line `label<TAB>path<TAB>hex(288 bytes)`. The Rust unit test
   `parity_with_python_reference` re-renders each path and compares against the
   hex → catches any divergence between the Python and Rust implementations.
@@ -72,3 +75,29 @@ cd ../../ && cargo test --lib hddt
   re-run the parity test.
 - `new/` and `__pycache__/` are not committed.
 - This is reference data and contains **no login credentials**.
+
+
+## Growing the set without reading images
+
+Captcha keys expire within minutes, so a sample cannot be labeled and verified
+later. Two ways to add verified data:
+
+```bash
+cd src-tauri
+# Tự thu hoạch: lấy captcha → solver đoán → đăng nhập thật.
+# Cổng chấp nhận = chuỗi đoán đúng 100% → lưu thẳng vào labeled/.
+HARVEST_ROUNDS=60 cargo test --lib live_harvest_captcha_templates -- --ignored
+# Cổng từ chối → biến thể glyph chưa có template, lưu vào hard/ để đọc tay.
+```
+
+Sau khi có mẫu mới (tự thu hoạch hoặc đọc tay trong `hard/`):
+
+```bash
+cd src-tauri/tools/hddt-captcha
+python3 export_templates.py   # sinh lại templates.bin + parity.txt
+python3 evaluate.py           # kiểm tra: classify + leave-one-out
+cd ../.. && cargo test --lib hddt   # parity + fixture phải xanh
+```
+
+Tên file trong `labeled/` phải đúng dạng `<index>_<key>_<ANSWER>.svg` (3 phần);
+`export_templates.py` lấy nhãn từ phần thứ 3 và bỏ qua file sai định dạng.

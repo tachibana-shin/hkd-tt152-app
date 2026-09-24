@@ -46,3 +46,11 @@ __pycache__/
 
 #HDDT captcha: unlabeled captchas (staging)
 /src-tauri/tools/hddt-captcha/new/
+captcha-samples
+
+#HDDT captcha: mẫu thu thập (sinh lại bằng live_harvest_captcha_templates).
+#Chỉ commit dữ liệu đã dẫn xuất: templates.bin + parity.txt.
+/src-tauri/tools/hddt-captcha/hard/
+/src-tauri/tools/hddt-captcha/labeled/[0-9][0-9][0-9][0-9]_*
+/src-tauri/tools/hddt-captcha/labeled/[0-9][0-9][0-9][0-9][0-9]_*
+/src-tauri/tools/hddt-captcha/labeled/[0-9][0-9][0-9][0-9][0-9][0-9]_*

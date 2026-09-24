@@ -268,7 +268,11 @@ mod tests {
             );
             n += 1;
         }
-        assert_eq!(n, 29, "fixture must cover all 29 characters");
+        assert_eq!(
+            n,
+            crate::hddt::CHARSET.chars().count(),
+            "fixture phải phủ đủ charset"
+        );
     }
 
     #[test]
