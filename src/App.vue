@@ -318,9 +318,17 @@ onMounted(() => {
         </div>
       </header>
 
-      <!-- Page content -->
+      <!-- Page content: KeepAlive giữ state mọi màn (bộ lọc, tab, phân trang, dữ
+           liệu đã nạp) khi chuyển menu. Phải bọc qua slot của router-view —
+           đặt router-view thẳng trong keep-alive sẽ không cache (vue-router báo
+           VUE_ROUTER_R0060). Màn in phiếu loại trừ: nó nạp dữ liệu theo
+           route.params trong setup nên cache lại sẽ in nhầm chứng từ cũ. -->
       <div class="flex-1 overflow-auto p-6">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <KeepAlive :exclude="['PrintVoucher']">
+            <component :is="Component" />
+          </KeepAlive>
+        </router-view>
       </div>
     </main>
   </div>

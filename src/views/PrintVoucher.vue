@@ -4,6 +4,10 @@ import { api } from "@/db";
 import type { BusinessConfig, VoucherRow } from "@/types";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 
+// Tên component phải khớp `exclude` của KeepAlive trong App.vue: màn này nạp
+// dữ liệu theo route.params trong setup, cache lại sẽ giữ chứng từ cũ.
+defineOptions({ name: "PrintVoucher" });
+
 const route = useRoute();
 const router = useRouter();
 const toast = useToast();

@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { api } from "@/db";
-import type { HddtStatus } from "@/types";
+import { usePortalSession } from "@/composables/usePortalSession";
 
 const toast = useToast();
 const router = useRouter();
+// `status` dùng chung với màn Tra cứu / Đồng bộ (xem usePortalSession) → đăng nhập
+// ở đây thì 2 màn kia cập nhật ngay, không cần nạp lại.
+const portal = usePortalSession();
+const { status } = portal;
 
 const loading = ref(false);
 const saving = ref(false);
@@ -16,7 +20,6 @@ const showPassword = ref(false);
 const savedPassword = ref("");
 const showSavedPassword = ref(false);
 
-const status = ref<HddtStatus | null>(null);
 const lastError = ref("");
 
 // ─── Captcha nhập tay (khi tự giải thất bại) ───
@@ -139,7 +142,7 @@ async function reloadSavedPassword() {
 }
 
 async function refreshStatus() {
-  status.value = await api.hddtStatus();
+  await portal.loadPortalStatus();
 }
 
 /** Đăng nhập (tự giải captcha). `interactive` = do người dùng bấm → có toast. */
@@ -351,12 +354,22 @@ void (async () => {
   }
 })();
 
-// Hẹn giờ tự đăng nhập lại → đây là việc duy nhất cần vòng đời: dọn khi rời trang.
-timer = setInterval(tick, 60_000);
+// Hẹn giờ tự đăng nhập lại. Màn này được KeepAlive giữ lại nên rời trang chỉ
+// "deactivate" chứ không unmount → dừng hẹn giờ khi ẩn, chạy lại khi quay lại.
+function startTimer() {
+  if (!timer) timer = setInterval(tick, 60_000);
+}
 
-onUnmounted(() => {
-  if (timer) clearInterval(timer);
-});
+function stopTimer() {
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+onActivated(startTimer);
+onDeactivated(stopTimer);
+onUnmounted(stopTimer);
 </script>
 
 <template>

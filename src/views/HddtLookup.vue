@@ -29,25 +29,67 @@ const searchRows = ref<HddtInvoiceRow[]>([]);
 const searchTotal = ref(0);
 const searchTime = ref(0);
 const searchMsg = ref("");
-/** Ngày lập từ → dd/MM/yyyy (mặc định: tháng trước + 1 ngày, như cổng). */
-const searchFrom = ref<Date | null>(null);
-/** Ngày lập đến → dd/MM/yyyy (mặc định: hôm nay, như cổng). */
-const searchTo = ref<Date | null>(null);
 const searchDirection = ref<HddtInvoiceDirection>("sold");
 /** Mặc định "máy tính tiền" (sco-query) — đây là loại HĐ phổ biến của HKD. */
 const searchKind = ref<HddtInvoiceKind>("cash-register");
-const searchTthai = ref("0");
-const searchTtxly = ref(HDDT_TTXLY_ALL);
-const searchKhmshdon = ref("");
-const searchKhhdon = ref("");
-const searchShdon = ref("");
-const searchNbmst = ref("");
-const searchNmcmnd = ref("");
-const searchUnhiem = ref(false);
 /** Cursor phân trang (keySet) — stack các state đã đi qua. */
 const pageStates = ref<(string | null)[]>([null]);
 const pageIdx = ref(0);
 const pageSize = ref(15);
+
+// ─── Bộ lọc nhớ theo từng ô tab ───
+// 2 tầng chọn = 4 ô (ra/vào × điện tử/máy tính tiền), mỗi ô gọi một endpoint
+// riêng. Ô nào cũng giữ bộ lọc của riêng nó, nên quay lại tab "bán ra" sau khi
+// sang "mua vào" không bị kế thừa "Kết quả kiểm tra = Đã cấp mã" của tab kia.
+interface TabFilters {
+  from: Date | null;
+  to: Date | null;
+  tthai: string;
+  ttxly: string;
+  khmshdon: string;
+  khhdon: string;
+  shdon: string;
+  nbmst: string;
+  nmcmnd: string;
+  unhiem: boolean;
+}
+
+const filters = ref<TabFilters>(defaultFilters("sold"));
+/** Bộ lọc đã dùng của từng ô, khóa `${hướng}:${loại}`. */
+const filtersByCell = new Map<string, TabFilters>();
+
+function cellKey(direction: HddtInvoiceDirection, kind: HddtInvoiceKind) {
+  return `${direction}:${kind}`;
+}
+
+/** Bộ lọc mặc định của một ô: mặc định "Kết quả kiểm tra" theo hướng của cổng —
+ *  hóa đơn vào = "Đã cấp mã hóa đơn" (5), hóa đơn ra = "Tất cả". */
+function defaultFilters(direction: HddtInvoiceDirection): TabFilters {
+  const { from, to } = defaultRange();
+  return {
+    from,
+    to,
+    tthai: "0",
+    ttxly: direction === "purchase" ? "5" : HDDT_TTXLY_ALL,
+    khmshdon: "",
+    khhdon: "",
+    shdon: "",
+    nbmst: "",
+    nmcmnd: "",
+    unhiem: false,
+  };
+}
+
+/** Đổi ô tab → lưu bộ lọc ô cũ, nạp lại bộ lọc ô mới (chưa có thì dùng mặc định). */
+function switchCell(next: { direction?: HddtInvoiceDirection; kind?: HddtInvoiceKind }) {
+  filtersByCell.set(cellKey(searchDirection.value, searchKind.value), filters.value);
+  if (next.direction) searchDirection.value = next.direction;
+  if (next.kind) searchKind.value = next.kind;
+  const key = cellKey(searchDirection.value, searchKind.value);
+  filters.value = filtersByCell.get(key) ?? defaultFilters(searchDirection.value);
+  // Kết quả cũ thuộc endpoint khác → xoá để không lẫn kết quả.
+  resetSearchResults();
+}
 
 const tthaiOptions = Object.entries(HDDT_TTHAI).map(([value, label]) => ({
   label,
@@ -143,16 +185,16 @@ async function runSearch(state: string | null) {
     const res = await api.hddtListInvoices({
       direction: searchDirection.value,
       kind: searchKind.value,
-      from: fmtDateVN(searchFrom.value),
-      to: fmtDateVN(searchTo.value),
-      tthai: searchTthai.value || undefined,
-      ttxly: searchTtxly.value || undefined,
-      khmshdon: searchKhmshdon.value || undefined,
-      khhdon: searchKhhdon.value.trim() || undefined,
-      shdon: searchShdon.value.trim() || undefined,
-      nbmst: searchNbmst.value.trim() || undefined,
-      nmcmnd: searchNmcmnd.value.trim() || undefined,
-      unhiem: searchUnhiem.value,
+      from: fmtDateVN(filters.value.from),
+      to: fmtDateVN(filters.value.to),
+      tthai: filters.value.tthai || undefined,
+      ttxly: filters.value.ttxly || undefined,
+      khmshdon: filters.value.khmshdon || undefined,
+      khhdon: filters.value.khhdon.trim() || undefined,
+      shdon: filters.value.shdon.trim() || undefined,
+      nbmst: filters.value.nbmst.trim() || undefined,
+      nmcmnd: filters.value.nmcmnd.trim() || undefined,
+      unhiem: filters.value.unhiem,
       size: pageSize.value,
       state,
     });
@@ -173,8 +215,8 @@ async function runSearch(state: string | null) {
 
 /** Cổng chỉ nhận khoảng ngày ≤ 1 tháng (HTTP 400 nếu vượt) — chặn sớm ở UI. */
 const dateRangeTooLong = computed(() => {
-  const from = searchFrom.value;
-  const to = searchTo.value;
+  const from = filters.value.from;
+  const to = filters.value.to;
   if (!from || !to) return false;
   return (to.getTime() - from.getTime()) / 86_400_000 > 31;
 });
@@ -205,17 +247,11 @@ function resetSearchResults() {
 
 /** PrimeVue Tabs phát `update:value` (string | number) — ép về union của ta. */
 function onDirectionChange(value: string | number) {
-  searchDirection.value = value as HddtInvoiceDirection;
-  resetSearchResults();
-  // Cổng mặc định "Kết quả kiểm tra" = "Đã cấp mã hóa đơn" (5) ở tab hóa đơn vào.
-  if (searchDirection.value === "purchase") {
-    searchTtxly.value = "5";
-  }
+  switchCell({ direction: value as HddtInvoiceDirection });
 }
 
 function onKindChange(value: string | number) {
-  searchKind.value = value as HddtInvoiceKind;
-  resetSearchResults();
+  switchCell({ kind: value as HddtInvoiceKind });
 }
 
 /** Trang sau — dùng cursor `state` của trang hiện tại (keySet như cổng). */
@@ -241,18 +277,9 @@ async function onPrevPage() {
   await runSearch(pageStates.value[pageIdx.value]);
 }
 
+/** Bấm "Bỏ tìm kiếm" → về bộ lọc mặc định của ô tab đang chọn. */
 function onResetSearch() {
-  const { from, to } = defaultRange();
-  searchFrom.value = from;
-  searchTo.value = to;
-  searchTthai.value = "0";
-  searchTtxly.value = HDDT_TTXLY_ALL;
-  searchKhmshdon.value = "";
-  searchKhhdon.value = "";
-  searchShdon.value = "";
-  searchNbmst.value = "";
-  searchNmcmnd.value = "";
-  searchUnhiem.value = false;
+  filters.value = defaultFilters(searchDirection.value);
 }
 
 /** Có trang sau không: pageIdx chưa tới cuối stack, hoặc chưa lấy hết. */
@@ -265,11 +292,8 @@ const canNextPage = computed(() => {
 });
 const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
 
-// Khởi tạo khi component được tạo (không cần onMounted — không đụng DOM):
-// range mặc định như cổng (tháng trước → hôm nay) + đọc trạng thái phiên cổng.
-const initialRange = defaultRange();
-searchFrom.value = initialRange.from;
-searchTo.value = initialRange.to;
+// Bộ lọc khởi tạo ở trên (ô mặc định "bán ra × máy tính tiền"); chỉ cần đọc
+// trạng thái phiên cổng — không có thao tác ref/DOM nên gọi thẳng ở root.
 void portal.loadPortalStatus();
 </script>
 
@@ -321,24 +345,24 @@ void portal.loadPortalStatus();
       <div class="mb-3 flex flex-wrap items-end gap-3">
         <div>
           <label class="mb-1 block text-xs text-gray-500">Từ ngày lập</label>
-          <DatePicker v-model="searchFrom" dateFormat="dd/mm/yy" class="w-40" />
+          <DatePicker v-model="filters.from" dateFormat="dd/mm/yy" class="w-40" />
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-500">Đến ngày lập</label>
-          <DatePicker v-model="searchTo" dateFormat="dd/mm/yy" class="w-40" />
+          <DatePicker v-model="filters.to" dateFormat="dd/mm/yy" class="w-40" />
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-500">{{ nbmstLabel }}</label>
-          <InputText v-model="searchNbmst" class="w-40" placeholder="MST" />
+          <InputText v-model="filters.nbmst" class="w-40" placeholder="MST" />
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-500">CCCD người mua</label>
-          <InputText v-model="searchNmcmnd" class="w-36" placeholder="Số CCCD" />
+          <InputText v-model="filters.nmcmnd" class="w-36" placeholder="Số CCCD" />
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-500">Trạng thái hóa đơn</label>
           <Select
-            v-model="searchTthai"
+            v-model="filters.tthai"
             :options="tthaiOptions"
             option-label="label"
             option-value="value"
@@ -348,7 +372,7 @@ void portal.loadPortalStatus();
         <div>
           <label class="mb-1 block text-xs text-gray-500">Kết quả kiểm tra</label>
           <Select
-            v-model="searchTtxly"
+            v-model="filters.ttxly"
             :options="ttxlyOptions"
             option-label="label"
             option-value="value"
@@ -358,7 +382,7 @@ void portal.loadPortalStatus();
         <div>
           <label class="mb-1 block text-xs text-gray-500">Ký hiệu mẫu số HĐ</label>
           <Select
-            v-model="searchKhmshdon"
+            v-model="filters.khmshdon"
             :options="khmshdonOptions"
             option-label="label"
             option-value="value"
@@ -369,15 +393,15 @@ void portal.loadPortalStatus();
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-500">Số hóa đơn</label>
-          <InputText v-model="searchShdon" class="w-32" placeholder="VD: 821" />
+          <InputText v-model="filters.shdon" class="w-32" placeholder="VD: 821" />
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-500">Ký hiệu hóa đơn</label>
-          <InputText v-model="searchKhhdon" class="w-40" placeholder="VD: C26THN" />
+          <InputText v-model="filters.khhdon" class="w-40" placeholder="VD: C26THN" />
         </div>
         <div class="pb-1">
           <label class="mb-1 flex items-center gap-2 text-xs text-gray-500">
-            <Checkbox v-model="searchUnhiem" binary />
+            <Checkbox v-model="filters.unhiem" binary />
             Hóa đơn ủy nhiệm
           </label>
         </div>

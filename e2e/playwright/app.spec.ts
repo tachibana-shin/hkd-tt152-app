@@ -19,6 +19,9 @@ test.beforeAll(async () => {
 const sidebarButton = (page: Page, label: string) =>
   page.locator("nav button", { has: page.getByText(label, { exact: true }) });
 
+/** Ô select "Kết quả kiểm tra" của form tra cứu (label → select ngay dưới). */
+const ttxlySelect = (page: Page) => page.locator('label:text-is("Kết quả kiểm tra") + .p-select');
+
 /** Ensure we are logged in via the UI: fill the login form if shown, then wait for the Dashboard. */
 async function ensureLoggedIn(page: Page) {
   await page.goto("/");
@@ -367,6 +370,75 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
   await expect(table.getByRole("columnheader", { name: "Mẫu số" })).toBeHidden();
 });
 
+test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đổi menu (KeepAlive)", async ({
+  page,
+}) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Tra cứu HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Tra cứu HĐĐT");
+
+  // Ô "bán ra × máy tính tiền" (mặc định): đặt Số hóa đơn + đổi Kết quả kiểm tra.
+  const soHoaDon = page.locator('label:text-is("Số hóa đơn") + input');
+  await soHoaDon.fill("821");
+  await ttxlySelect(page).click();
+  await page.getByRole("option", { name: "Đã phê duyệt", exact: true }).click();
+
+  // Sang "mua vào": bộ lọc phải là bộ mặc định của ô đó, không kế thừa ô trước.
+  await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
+  await expect(soHoaDon).toHaveValue("");
+  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
+
+  // Quay lại "bán ra" → nhớ đúng giá trị đã đặt.
+  await page.getByRole("tab", { name: /Hóa đơn ra/ }).click();
+  await expect(soHoaDon).toHaveValue("821");
+  await expect(ttxlySelect(page)).toContainText("Đã phê duyệt");
+
+  // Rời màn rồi vào lại (KeepAlive) → tab + bộ lọc vẫn nguyên, không nạp lại.
+  await sidebarButton(page, "Tổng quan").click();
+  await expect(page.locator("header h2")).toHaveText("Tổng quan");
+  await sidebarButton(page, "Tra cứu HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Tra cứu HĐĐT");
+  await expect(page.getByRole("tab", { name: /Hóa đơn ra/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(soHoaDon).toHaveValue("821");
+});
+
+test("Màn in phiếu không bị KeepAlive giữ (nạp lại theo route.params)", async ({ page }) => {
+  await ensureLoggedIn(page);
+  // Chặn API để mỗi lần mở trả một phiếu khác nhau: nếu component bị cache,
+  // lần thứ hai vẫn hiện dữ liệu của lần đầu.
+  let calls = 0;
+  await page.route("**/api/get_voucher", async (route) => {
+    calls += 1;
+    const no = calls === 1 ? "PN-CACHE-1" : "PN-CACHE-2";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          entry_type: "PN",
+          voucher_no: no,
+          posting_date: "2026-09-25",
+          product_code: "SP001",
+          product_name: `Phiếu ${calls}`,
+          unit: "Cái",
+          quantity: 1,
+          unit_price: 1000,
+          amount: 1000,
+        },
+      ]),
+    });
+  });
+
+  await page.goto("/print/PN-1");
+  await expect(page.getByText("Phiếu 1", { exact: false })).toBeVisible({ timeout: 15_000 });
+  await page.goto("/print/PN-2");
+  await expect(page.getByText("Phiếu 2", { exact: false })).toBeVisible({ timeout: 15_000 });
+  expect(calls).toBe(2);
+});
+
 test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc định kết quả kiểm tra", async ({
   page,
   request,
@@ -386,7 +458,14 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   // Nhãn đối tác đổi theo hướng tra cứu.
   await expect(page.getByText("MST người bán", { exact: true })).toBeVisible();
   // Mặc định của cổng: "Kết quả kiểm tra" = Đã cấp mã hóa đơn (ttxly==5).
-  await expect(page.getByText("Đã cấp mã hóa đơn", { exact: true })).toBeVisible();
+  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
+
+  // Mỗi ô tab giữ bộ lọc riêng: quay lại "bán ra" phải là "Tất cả", không phải
+  // "Đã cấp mã hóa đơn" của ô vừa rời; sang lại "mua vào" thì vẫn "Đã cấp mã".
+  await page.getByRole("tab", { name: /Hóa đơn ra/ }).click();
+  await expect(ttxlySelect(page)).toContainText("Tất cả");
+  await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
+  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
 
   // Tra "hóa đơn vào" → cột đối tác phải là NGƯỜI BÁN (người mua là chính mình).
   // Ô "hóa đơn vào × máy tính tiền" rỗng với tài khoản này (0 kết quả với ttxly==5
