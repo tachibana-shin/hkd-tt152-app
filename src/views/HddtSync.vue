@@ -148,16 +148,17 @@ function syncKindLabel(k: string) {
   return k === "cash-register" ? "Máy tính tiền" : "HĐ điện tử";
 }
 
-onMounted(async () => {
-  // Mốc bắt đầu = hddt_start_date của hộ; mốc cuối = hôm qua.
+// Mốc bắt đầu = hddt_start_date của hộ → phải nạp config trước rồi mới tính;
+// mốc cuối = hôm qua. Không dùng onMounted vì không có thao tác ref/DOM ở đây.
+void (async () => {
+  await business.load();
   const range = syncDefaultRange();
   syncFrom.value = range.from;
   syncTo.value = range.to;
-  void business.load();
-  void portal.loadPortalStatus();
   // Cache đồng bộ là dữ liệu cục bộ → tải luôn để thấy trạng thái trước khi quét.
-  void loadSyncPreview();
-});
+  await loadSyncPreview();
+})();
+void portal.loadPortalStatus();
 </script>
 
 <template>

@@ -103,32 +103,22 @@ function ttxlyLabel(row: HddtInvoiceRow) {
   return row.ttxly != null ? (HDDT_TTXLY[Number(row.ttxly)] ?? String(row.ttxly)) : "—";
 }
 
-/** Mẫu số hóa đơn → nhãn (dùng khi API không kèm tên loại). */
-function khmshdonLabel(row: HddtInvoiceRow) {
-  if (row.khmshdon == null) return "—";
-  return HDDT_KHMSHDON[Number(row.khmshdon)] ?? String(row.khmshdon);
-}
-
-// Cổng hiển thị cột "đối tác" khác nhau theo hướng tra cứu:
-//   HĐ ra  → cột "Mã số thuế" = bên bán (nbmst), "Thông tin hóa đơn" = người mua.
-//   HĐ vào → cột "Mã số thuế" = bên mua (nmmst), "Thông tin người bán" = người bán.
+// Cột "đối tác" hiển thị khác nhau theo hướng tra cứu:
+//   HĐ ra  → "Thông tin hóa đơn" = người mua (bên mua).
+//   HĐ vào → "Thông tin người bán" = người bán (bên bán).
 const isPurchase = computed(() => searchDirection.value === "purchase");
 const partyHeader = computed(() =>
   isPurchase.value ? "Thông tin người bán" : "Thông tin hóa đơn",
 );
 const partyMstLabel = computed(() => (isPurchase.value ? "MST người bán" : "MST người mua"));
 const partyNameLabel = computed(() => (isPurchase.value ? "Tên người bán" : "Tên người mua"));
-/** MST hiển thị ở cột thứ hai: người mua (ra) / người bán (vào). */
+/** MST hiển thị trong ô đối tác: người mua (ra) / người bán (vào). */
 function partyMst(row: HddtInvoiceRow) {
   return (isPurchase.value ? row.nbmst : row.nmmst) || "—";
 }
 function partyName(row: HddtInvoiceRow) {
   if (isPurchase.value) return row.nbten || "—";
   return row.nmten || row.nmtnmua || "—";
-}
-/** Cột "Mã số thuế": HĐ ra hiện bên bán, HĐ vào hiện bên mua. */
-function mstColumn(row: HddtInvoiceRow) {
-  return (isPurchase.value ? row.nmmst : row.nbmst) || "—";
 }
 
 /** Ngày lập (`tdlap`, ISO) → dd/MM/yyyy. */
@@ -275,13 +265,12 @@ const canNextPage = computed(() => {
 });
 const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
 
-onMounted(() => {
-  // Range mặc định như cổng: tháng trước → hôm nay.
-  const { from, to } = defaultRange();
-  searchFrom.value = from;
-  searchTo.value = to;
-  void portal.loadPortalStatus();
-});
+// Khởi tạo khi component được tạo (không cần onMounted — không đụng DOM):
+// range mặc định như cổng (tháng trước → hôm nay) + đọc trạng thái phiên cổng.
+const initialRange = defaultRange();
+searchFrom.value = initialRange.from;
+searchTo.value = initialRange.to;
+void portal.loadPortalStatus();
 </script>
 
 <template>
@@ -453,12 +442,6 @@ onMounted(() => {
           <template #body="{ index }">{{
             searchRows.length === 0 ? "" : pageIdx * pageSize + index + 1
           }}</template>
-        </Column>
-        <Column field="nbmst" header="Mã số thuế">
-          <template #body="{ data }">{{ mstColumn(data) }}</template>
-        </Column>
-        <Column header="Mẫu số">
-          <template #body="{ data }">{{ khmshdonLabel(data) }}</template>
         </Column>
         <Column field="khhdon" header="Ký hiệu HĐ">
           <template #body="{ data }">{{ data.khhdon || "—" }}</template>

@@ -360,8 +360,11 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
   await expect(table.getByText("Ký hiệu HĐ")).toBeVisible();
   await expect(table.locator("tbody tr").first()).toBeVisible();
   const firstRow = table.locator("tbody tr").first();
-  await expect(firstRow.locator("td").nth(1)).not.toHaveText("—");
-  await expect(firstRow.locator("td").nth(4)).not.toHaveText("—");
+  await expect(firstRow.locator("td").nth(1)).not.toHaveText("—"); // ký hiệu HĐ
+  await expect(firstRow.locator("td").nth(2)).not.toHaveText("—"); // số HĐ
+  // Cột "Mã số thuế" và "Mẫu số" đã bỏ khỏi UI (dữ liệu vẫn còn trong API).
+  await expect(table.getByRole("columnheader", { name: "Mã số thuế" })).toBeHidden();
+  await expect(table.getByRole("columnheader", { name: "Mẫu số" })).toBeHidden();
 });
 
 test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc định kết quả kiểm tra", async ({
@@ -396,6 +399,6 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   const firstRow = table.locator("tbody tr").first();
   await expect(firstRow.getByText("MST người bán:").first()).toBeVisible();
   await expect(firstRow.getByText("Tên người bán:").first()).toBeVisible();
-  // Cột "Mã số thuế" ở tab vào hiện bên mua (chính NNT), khác tab ra (bên bán).
-  await expect(firstRow.locator("td").nth(1)).toHaveText(/^\d{10,13}$/);
+  // MST người bán nằm trong ô đối tác (cột "Mã số thuế" đã bỏ) → phải là MST thật.
+  await expect(firstRow.getByText(/MST người bán:\s*\d{10,13}/).first()).toBeVisible();
 });

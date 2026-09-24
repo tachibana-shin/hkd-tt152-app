@@ -337,7 +337,9 @@ async function tick() {
   }
 }
 
-onMounted(async () => {
+// Nạp cấu hình + đăng nhập ngay khi component được tạo (không đụng DOM nên không
+// cần onMounted). `loading` giữ spinner cho tới khi xong.
+void (async () => {
   loading.value = true;
   try {
     await loadConfig();
@@ -347,8 +349,10 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
-  timer = setInterval(tick, 60_000);
-});
+})();
+
+// Hẹn giờ tự đăng nhập lại → đây là việc duy nhất cần vòng đời: dọn khi rời trang.
+timer = setInterval(tick, 60_000);
 
 onUnmounted(() => {
   if (timer) clearInterval(timer);
