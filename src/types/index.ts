@@ -558,6 +558,8 @@ export interface HddtInvoiceRow {
   tdlap?: string;
   /** MST người mua/nhận hàng. */
   nmmst?: string;
+  /** Tên người bán hóa đơn (chỉ có ý nghĩa ở danh sách hóa đơn vào). */
+  nbten?: string;
   /** Tên NNT đối tác (người mua với HĐ ra, người bán với HĐ vào). */
   nmten?: string;
   /** Tên người mua (HĐ ra) / người nhận hàng (HĐ vào). */

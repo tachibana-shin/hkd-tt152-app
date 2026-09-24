@@ -108,6 +108,28 @@ function khmshdonLabel(row: HddtInvoiceRow) {
   return HDDT_KHMSHDON[Number(row.khmshdon)] ?? String(row.khmshdon);
 }
 
+// Cổng hiển thị cột "đối tác" khác nhau theo hướng tra cứu:
+//   HĐ ra  → cột "Mã số thuế" = bên bán (nbmst), "Thông tin hóa đơn" = người mua.
+//   HĐ vào → cột "Mã số thuế" = bên mua (nmmst), "Thông tin người bán" = người bán.
+const isPurchase = computed(() => searchDirection.value === "purchase");
+const partyHeader = computed(() =>
+  isPurchase.value ? "Thông tin người bán" : "Thông tin hóa đơn",
+);
+const partyMstLabel = computed(() => (isPurchase.value ? "MST người bán" : "MST người mua"));
+const partyNameLabel = computed(() => (isPurchase.value ? "Tên người bán" : "Tên người mua"));
+/** MST hiển thị ở cột thứ hai: người mua (ra) / người bán (vào). */
+function partyMst(row: HddtInvoiceRow) {
+  return (isPurchase.value ? row.nbmst : row.nmmst) || "—";
+}
+function partyName(row: HddtInvoiceRow) {
+  if (isPurchase.value) return row.nbten || "—";
+  return row.nmten || row.nmtnmua || "—";
+}
+/** Cột "Mã số thuế": HĐ ra hiện bên bán, HĐ vào hiện bên mua. */
+function mstColumn(row: HddtInvoiceRow) {
+  return (isPurchase.value ? row.nmmst : row.nbmst) || "—";
+}
+
 /** Ngày lập (`tdlap`, ISO) → dd/MM/yyyy. */
 function fmtTdlap(v: unknown) {
   if (v == null || v === "") return "—";
@@ -988,7 +1010,7 @@ onUnmounted(() => {
               }}</template>
             </Column>
             <Column field="nbmst" header="Mã số thuế">
-              <template #body="{ data }">{{ data.nbmst || "—" }}</template>
+              <template #body="{ data }">{{ mstColumn(data) }}</template>
             </Column>
             <Column header="Mẫu số">
               <template #body="{ data }">{{ khmshdonLabel(data) }}</template>
@@ -1002,14 +1024,16 @@ onUnmounted(() => {
             <Column header="Ngày lập" :style="{ width: '7rem' }">
               <template #body="{ data }">{{ fmtTdlap(data.tdlap) }}</template>
             </Column>
-            <Column header="Thông tin hóa đơn">
+            <Column :header="partyHeader">
               <template #body="{ data }">
                 <div class="text-xs leading-5">
                   <div>
-                    <b>MST:</b> {{ data.nmmst || "—" }}
-                    <template v-if="data.nmcccd"> · <b>CCCD:</b> {{ data.nmcccd }} </template>
+                    <b>{{ partyMstLabel }}:</b> {{ partyMst(data) }}
                   </div>
-                  <div><b>Tên:</b> {{ data.nmten || data.nmtnmua || "—" }}</div>
+                  <div>
+                    <b>{{ partyNameLabel }}:</b> {{ partyName(data) }}
+                  </div>
+                  <div v-if="data.nmcccd"><b>CCCD:</b> {{ data.nmcccd }}</div>
                 </div>
               </template>
             </Column>

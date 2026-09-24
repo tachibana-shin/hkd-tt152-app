@@ -226,4 +226,18 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await expect(page.getByText("MST người bán", { exact: true })).toBeVisible();
   // Mặc định của cổng: "Kết quả kiểm tra" = Đã cấp mã hóa đơn (ttxly==5).
   await expect(page.getByText("Đã cấp mã hóa đơn", { exact: true })).toBeVisible();
+
+  // Tra "hóa đơn vào" → cột đối tác phải là NGƯỜI BÁN (người mua là chính mình).
+  // Ô "hóa đơn vào × máy tính tiền" rỗng với tài khoản này (0 kết quả với ttxly==5
+  // mặc định của cổng) → chuyển sang "Hóa đơn điện tử" để có dữ liệu thật.
+  await page.getByRole("tab", { name: "Hóa đơn điện tử" }).click();
+  await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
+  await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
+  const table = page.locator(".p-datatable");
+  await expect(table.getByRole("columnheader", { name: "Thông tin người bán" })).toBeVisible();
+  const firstRow = table.locator("tbody tr").first();
+  await expect(firstRow.getByText("MST người bán:").first()).toBeVisible();
+  await expect(firstRow.getByText("Tên người bán:").first()).toBeVisible();
+  // Cột "Mã số thuế" ở tab vào hiện bên mua (chính NNT), khác tab ra (bên bán).
+  await expect(firstRow.locator("td").nth(1)).toHaveText(/^\d{10,13}$/);
 });
