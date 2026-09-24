@@ -76,6 +76,7 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
     ["Tồn kho", "Tồn kho"],
     ["Hóa đơn", "Hóa đơn"],
     ["HĐĐT", "Hóa đơn điện tử"],
+    ["Tra cứu HĐĐT", "Tra cứu HĐĐT"],
     ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua"],
     ["Nhật ký HĐ", "Nhật ký hoạt động"],
     ["Kế toán HKD", "Kế toán HKD"],
@@ -179,9 +180,10 @@ test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu
   request,
 }) => {
   await ensureLoggedIn(page);
-  // Đồng bộ là mục menu cùng cấp HĐĐT, không nằm cuộn trong trang tra cứu.
+  // Tra cứu và đồng bộ là 2 mục menu cùng cấp HĐĐT, không nằm cuộn trong màn HĐĐT.
   await sidebarButton(page, "HĐĐT").click();
   await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
+  await expect(page.getByRole("button", { name: "Tìm kiếm", exact: true })).toBeHidden();
   await expect(page.getByRole("button", { name: "Quét cổng" })).toBeHidden();
 
   await sidebarButton(page, "Đồng bộ HĐĐT").click();
@@ -338,9 +340,8 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
   const login = await loginPortal(request);
   test.skip(login === null, "Thiếu credentials cổng HĐĐT (info.txt / E2E_HDDT_*) — bỏ qua");
 
-  await sidebarButton(page, "HĐĐT").click();
-  await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
-  await expect(page.getByText("Tra cứu hóa đơn", { exact: true })).toBeVisible();
+  await sidebarButton(page, "Tra cứu HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Tra cứu HĐĐT");
 
   // Tab lớn mặc định = hóa đơn ra; tab nhỏ mặc định = máy tính tiền (sco-query).
   const kindTabs = page.getByRole("tab");
@@ -352,7 +353,7 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
 
   // Tìm kiếm thật: dải ngày mặc định = 30 ngày gần nhất.
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
-  const table = page.locator(".p-card", { hasText: "Tra cứu hóa đơn" }).locator(".p-datatable");
+  const table = page.locator(".p-datatable");
   await expect(table).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
   // Dữ liệu thật: các cột định danh của hóa đơn đều có giá trị.
@@ -371,8 +372,8 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   const login = await loginPortal(request);
   test.skip(login === null, "Thiếu credentials cổng HĐĐT (info.txt / E2E_HDDT_*) — bỏ qua");
 
-  await sidebarButton(page, "HĐĐT").click();
-  await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
+  await sidebarButton(page, "Tra cứu HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Tra cứu HĐĐT");
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
 
@@ -390,7 +391,7 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await page.getByRole("tab", { name: "Hóa đơn điện tử" }).click();
   await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
-  const table = page.locator(".p-card", { hasText: "Tra cứu hóa đơn" }).locator(".p-datatable");
+  const table = page.locator(".p-datatable");
   await expect(table.getByRole("columnheader", { name: "Thông tin người bán" })).toBeVisible();
   const firstRow = table.locator("tbody tr").first();
   await expect(firstRow.getByText("MST người bán:").first()).toBeVisible();

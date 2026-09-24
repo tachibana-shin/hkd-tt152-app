@@ -2,55 +2,21 @@
 /**
  * Đồng bộ hóa đơn mua từ cổng HĐĐT → hóa đơn chính thức + phiếu nhập kho.
  *
- * Màn này đứng cùng cấp với "HĐĐT" trong menu bên trái. Phần cấu hình tài
- * khoản cổng và tra cứu hóa đơn nằm ở Hddt.vue; phần lấp hóa đơn mua nằm ở
- * đây để không phải cuộn qua danh sách dài.
+ * Màn này đứng cùng cấp với "HĐĐT" trong menu bên trái. Cấu hình tài khoản cổng
+ * nằm ở Hddt.vue, tra cứu hóa đơn nằm ở HddtLookup.vue; phần lấp hóa đơn mua nằm
+ * ở đây để không phải cuộn qua danh sách dài.
  */
 import { api } from "@/db";
 import { useBusinessStore } from "@/stores/business";
-import type { HddtStatus, HddtSyncPreview, HddtSyncRow } from "@/types";
+import { usePortalSession } from "@/composables/usePortalSession";
+import type { HddtSyncPreview, HddtSyncRow } from "@/types";
 
 const toast = useToast();
 const business = useBusinessStore();
 
-// ─── Phiên cổng: chỉ cần biết đã đăng nhập chưa + nút đăng nhập.
-// Captcha thủ công thuộc về màn HĐĐT — ở đây chỉ báo người dùng sang màn đó.
-const status = ref<HddtStatus | null>(null);
-const statusLoaded = ref(false);
-const loggingIn = ref(false);
-const loggedIn = computed(() => !!status.value?.logged_in);
-
-async function loadPortalStatus() {
-  try {
-    status.value = await api.hddtStatus();
-  } catch {
-    status.value = null;
-  } finally {
-    statusLoaded.value = true;
-  }
-}
-
-async function loginPortal() {
-  loggingIn.value = true;
-  try {
-    const res = await api.hddtLogin();
-    if (res.status) status.value = res.status;
-    if (res.ok) {
-      toast.add({ severity: "success", summary: "Đã đăng nhập cổng HĐĐT", life: 2500 });
-    } else if (res.need_manual) {
-      toastError(
-        "Cần nhập captcha",
-        "Mở màn HĐĐT để nhập captcha thủ công, rồi quay lại đây đồng bộ.",
-      );
-    } else {
-      toastError("Đăng nhập HĐĐT thất bại", res.reason ?? "");
-    }
-  } catch (e) {
-    toastError("Đăng nhập HĐĐT thất bại", e);
-  } finally {
-    loggingIn.value = false;
-  }
-}
+// Phiên cổng: chỉ biết đã đăng nhập chưa + nút đăng nhập (captcha tay thuộc màn HĐĐT).
+const portal = usePortalSession();
+const { statusLoaded, loggingIn, loggedIn } = portal;
 
 // ─── Hiển thị ───
 function toastError(summary: string, e: unknown) {
@@ -188,7 +154,7 @@ onMounted(async () => {
   syncFrom.value = range.from;
   syncTo.value = range.to;
   void business.load();
-  void loadPortalStatus();
+  void portal.loadPortalStatus();
   // Cache đồng bộ là dữ liệu cục bộ → tải luôn để thấy trạng thái trước khi quét.
   void loadSyncPreview();
 });
@@ -208,7 +174,7 @@ onMounted(async () => {
           icon="pi pi-sign-in"
           size="small"
           :loading="loggingIn"
-          @click="loginPortal"
+          @click="portal.loginPortal"
         />
       </template>
     </Toolbar>

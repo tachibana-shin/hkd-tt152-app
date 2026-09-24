@@ -150,6 +150,12 @@ const menuItems: MenuItem[] = [
   { label: "Hóa đơn", icon: "pi pi-file", to: "/invoices", roles: ["admin", "ketoan"] },
   { label: "HĐĐT", icon: "pi pi-cloud", to: "/hddt", roles: ["admin", "ketoan"] },
   {
+    label: "Tra cứu HĐĐT",
+    icon: "pi pi-search",
+    to: "/hddt-lookup",
+    roles: ["admin", "ketoan"],
+  },
+  {
     label: "Đồng bộ HĐĐT",
     icon: "pi pi-cloud-download",
     to: "/hddt-sync",
