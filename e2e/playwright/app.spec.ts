@@ -130,6 +130,44 @@ test("logging out returns to the login screen", async ({ page }) => {
   await expect(page.getByTestId("login-username")).toBeVisible();
 });
 
+test("Cấu hình HKD: ngày bắt đầu HĐĐT là bắt buộc và được lưu lại", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hồ sơ HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Hồ sơ HKD");
+  await page.getByRole("button", { name: "Cài đặt thông tin HKD" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Cấu hình hộ kinh doanh" });
+  const field = dialog.getByLabel("Ngày bắt đầu dùng HĐĐT");
+  await expect(field).toBeVisible();
+
+  // Bỏ trống → chặn lưu, báo thiếu ngày bắt đầu HĐĐT.
+  // DatePicker của PrimeVue chỉ cập nhật model qua input + blur, nên phải xóa
+  // bằng bàn phím (fill/clear chỉ đổi DOM, model vẫn giữ ngày cũ).
+  await field.click();
+  await field.press("ControlOrMeta+a");
+  await field.press("Backspace");
+  await field.press("Tab");
+  await expect(field).toHaveValue("");
+  await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(page.getByText("Thiếu ngày bắt đầu HĐĐT", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+  // Chưa lưu được thì dialog vẫn mở (không đóng được khi chế độ bắt buộc).
+  await expect(dialog).toBeVisible();
+
+  // Nhập ngày → lưu được, API trả về giá trị đã lưu.
+  await field.click();
+  await field.pressSequentially("15/03/2026");
+  await field.press("Tab");
+  await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(page.getByText("Đã lưu thông tin hộ kinh doanh", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+
+  const cfg = await (await request.post("/api/get_business_config")).json();
+  expect(cfg.hddt_start_date).toBe("2026-03-15");
+});
+
 // ─── HĐĐT: tra cứu hóa đơn thật (cần credentials cổng + IP VN) ───
 
 /**

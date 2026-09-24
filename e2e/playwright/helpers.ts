@@ -30,6 +30,8 @@ export async function seedApp(baseURL: string) {
         taxCodeIssuedOn: "2024-01-01",
         phone: "0123456789",
         email: "e2e@test.local",
+        // Bắt buộc — mốc lấp hóa đơn mua vào từ cổng HĐĐT.
+        hddtStartDate: "2026-01-01",
       },
     });
     if (!biz.ok()) {

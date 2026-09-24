@@ -59,6 +59,8 @@ pub(crate) struct BusinessConfigRow {
     pub(crate) tax_code_issued_on: String,
     pub(crate) phone: String,
     pub(crate) email: String,
+    /// Ngày bắt đầu sử dụng HĐĐT — mốc lấp hóa đơn mua vào.
+    pub(crate) hddt_start_date: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

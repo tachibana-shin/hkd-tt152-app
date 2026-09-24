@@ -157,6 +157,7 @@ export const api = {
       taxCodeIssuedOn: cfg.tax_code_issued_on ?? "",
       phone: cfg.phone ?? "",
       email: cfg.email ?? "",
+      hddtStartDate: cfg.hddt_start_date ?? "",
     }),
 
   // ─── CÀI ĐẶT MẶC ĐỊNH ───

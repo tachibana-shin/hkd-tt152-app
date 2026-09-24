@@ -246,7 +246,8 @@ pub async fn api_invoke(
             province: String,
             tax_code_issued_on: String,
             phone: String,
-            email: String
+            email: String,
+            hddt_start_date: String
         ),
         "get_app_settings" => mx!(commands::settings::get_app_settings, body),
         "save_app_settings" => mx!(

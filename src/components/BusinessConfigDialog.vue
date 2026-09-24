@@ -35,9 +35,27 @@ const form = reactive({
   tax_code_issued_on: "",
   phone: "",
   email: "",
+  // Ngày bắt đầu sử dụng HĐĐT — mốc lấp hóa đơn mua vào (bắt buộc nhập).
+  hddt_start_date: null as Date | null,
   // Công tắc khấu trừ GTGT đầu vào — mặc định TẮT (hộ nộp thuế theo doanh thu).
   vat_deduct: false,
 });
+
+/** yyyy-mm-dd — DatePicker trả Date, DB lưu chuỗi ngày ISO. */
+function isoDate(d: Date | null): string {
+  if (!d) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Chuỗi ngày trong DB → Date để nạp vào DatePicker. */
+function parseDate(s: string): Date | null {
+  if (!s?.trim()) return null;
+  const d = new Date(`${s.trim()}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 // Nhóm hộ theo NĐ 68/2026 + NĐ 141/2026 — app tự xếp nhóm từ tổng doanh thu cả năm.
 const taxGroup = ref<number | null>(null);
@@ -86,6 +104,7 @@ watch(
       tax_code_issued_on: c.tax_code_issued_on,
       phone: c.phone,
       email: c.email,
+      hddt_start_date: parseDate(c.hddt_start_date),
     });
     lookupLoading.value = false;
     lookupResults.value = [];
@@ -170,7 +189,7 @@ async function applyLookupResult(url: string) {
 }
 
 async function save() {
-  // Tên và MST là bắt buộc (nhất là chế độ bắt buộc sau đăng nhập).
+  // Tên, MST và ngày bắt đầu HĐĐT là bắt buộc (nhất là chế độ bắt buộc sau đăng nhập).
   if (!form.name.trim() || !form.tax_code.trim()) {
     toast.add({
       severity: "warn",
@@ -180,11 +199,21 @@ async function save() {
     });
     return;
   }
+  if (!form.hddt_start_date) {
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu ngày bắt đầu HĐĐT",
+      detail:
+        "Cần nhập ngày bắt đầu sử dụng hóa đơn điện tử — app dùng mốc này để tìm hóa đơn mua vào từ cổng HĐĐT.",
+      life: 4000,
+    });
+    return;
+  }
   saving.value = true;
   try {
-    const { vat_deduct, ...rest } = form;
+    const { vat_deduct, hddt_start_date, ...rest } = form;
     await Promise.all([
-      business.save({ ...rest }),
+      business.save({ ...rest, hddt_start_date: isoDate(hddt_start_date) }),
       api.saveAppSettings({ vat_deduct: vat_deduct ? "1" : "0" }),
     ]);
     toast.add({ severity: "success", summary: "Đã lưu thông tin hộ kinh doanh" });
@@ -255,6 +284,23 @@ async function save() {
       </FormField>
       <FormField label="Nơi cấp MST">
         <InputText v-model="form.tax_code_issued_on" />
+      </FormField>
+      <FormField label="Ngày bắt đầu dùng HĐĐT" required input-id="hddt-start-date">
+        <template #default="{ inputId }">
+          <DatePicker
+            v-model="form.hddt_start_date"
+            :input-id="inputId"
+            dateFormat="dd/mm/yy"
+            :maxDate="new Date()"
+            showIcon
+            showClear
+            class="w-full"
+            placeholder="Ngày bắt đầu phát hành hóa đơn điện tử"
+          />
+          <p class="mt-1 text-xs text-gray-500">
+            App dùng ngày này làm mốc bắt đầu khi lấp hóa đơn mua vào từ cổng HĐĐT.
+          </p>
+        </template>
       </FormField>
       <FormField label="Số điện thoại">
         <InputText v-model="form.phone" />

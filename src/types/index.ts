@@ -373,6 +373,11 @@ export interface BusinessConfig {
   tax_code_issued_on: string;
   phone: string;
   email: string;
+  /**
+   * Ngày bắt đầu sử dụng hóa đơn điện tử (bắt buộc trong popup cấu hình HKD).
+   * Mốc dùng để lấp hóa đơn mua vào từ cổng HĐĐT — nhập "Tất cả" nếu không nhớ.
+   */
+  hddt_start_date: string;
 }
 
 // ─── Cài đặt mặc định (bảng app_setting) ───
