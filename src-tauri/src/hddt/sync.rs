@@ -516,11 +516,18 @@ pub(crate) async fn import_invoice(
     let mut created = 0usize;
     for line in &lines {
         let name = f(line, "ten");
-        let unit = f(line, "dvtinh");
+        // Dịch vụ (phí, phí dịch vụ…) không có đơn vị tính → cổng trả null.
+        // Gộp về nhóm chung "Dịch vụ" để các dòng phí không sinh mặt hàng rác.
+        let raw_unit = f(line, "dvtinh");
+        let unit = if raw_unit.trim().is_empty() {
+            "Dịch vụ"
+        } else {
+            raw_unit.as_str()
+        };
         if name.trim().is_empty() {
             continue;
         }
-        let key = identity_key(&name, &unit);
+        let key = identity_key(&name, unit);
         let existing: Option<(String,)> =
             sqlx::query_as("SELECT code FROM product WHERE identity_key = ?")
                 .bind(&key)
@@ -532,17 +539,21 @@ pub(crate) async fn import_invoice(
             None => {
                 let code = next_product_code_core(pool).await?;
                 let cost = num(line, "dgia");
+                // Dòng không có đơn vị tính = dịch vụ (cổng trả dvtinh = null):
+                // đánh dấu is_service để không tính tồn kho cho nó.
+                let is_service = i64::from(raw_unit.trim().is_empty());
                 sqlx::query(
                     "INSERT INTO product (code, name, unit, sale_price, cost_price,
                                           min_stock, vat_rate, import_tax_rate, is_service,
                                           industry_code, identity_key, portal_code)
-                     VALUES (?, ?, ?, 0, ?, 0, ?, 0, 0, '', ?, ?)",
+                     VALUES (?, ?, ?, 0, ?, 0, ?, 0, ?, '', ?, ?)",
                 )
                 .bind(&code)
                 .bind(&name)
-                .bind(&unit)
+                .bind(unit)
                 .bind(cost)
                 .bind(num(line, "tsuat"))
+                .bind(is_service)
                 .bind(&key)
                 .bind(f(line, "mhhdvu"))
                 .execute(pool)
@@ -556,7 +567,9 @@ pub(crate) async fn import_invoice(
             product_code: code,
             quantity: num(line, "sluong"),
             unit_price: num(line, "dgia"),
-            // Chiết khấu thương mại: stckhau = chiết khấu theo dòng.
+            // Chiết khấu: `stckhau` là SỐ TIỀN CK trên dòng (đã kiểm chứng
+            // live 24/09/2026: tlckhau = 50.0 là TỶ LỆ %, stckhau = 2.860.000
+            // là tiền CK, dùng cho dòng 2 × 2.860.000). Sổ của app cần số tiền.
             discount: num(line, "stckhau"),
         });
     }
@@ -1025,8 +1038,69 @@ mod tests {
         assert_ne!(a, b, "số phiếu phải tăng, không trùng");
     }
 
-    #[test]
-    fn identity_key_normalizes_case_and_whitespace() {
+    #[tokio::test]
+    async fn service_line_without_unit_is_grouped_and_marked() {
+        // Dữ liệu thật lấy từ cổng 24/09/2026 (hóa đơn phí Shopee):
+        // dòng dịch vụ có dvtinh = null, mhhdvu = null.
+        let pool = test_pool().await;
+        let lines = r#"{"ten":"Phí dịch vụ PPS 08/2026","dvtinh":null,"mhhdvu":null,
+                        "sluong":1.0,"dgia":27811.0,"stckhau":null,"tlckhau":null,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-svc", 1, lines).await;
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        assert_eq!(out.products_created, 1);
+        let p: (String, i64) = sqlx::query_as("SELECT unit, is_service FROM product")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            p.0, "Dịch vụ",
+            "dòng không đơn vị tính phải gộp nhóm Dịch vụ"
+        );
+        assert_eq!(p.1, 1, "phải đánh dấu là dịch vụ để không tính tồn kho");
+        // 2 hóa đơn cùng tên dịch vụ → vẫn chỉ 1 mặt hàng.
+        let lines2 = r#"{"ten":"Phí dịch vụ PPS 08/2026","dvtinh":null,"mhhdvu":null,
+                         "sluong":2.0,"dgia":27811.0,"stckhau":null,"tsuat":0.08}"#;
+        let id2 = seed_invoice(&pool, "uuid-svc2", 1, lines2).await;
+        let out2 = import_invoice(&pool, &load(&pool, id2).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        assert_eq!(out2.products_created, 0);
+        let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM product")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n.0, 1);
+    }
+
+    #[tokio::test]
+    async fn discount_uses_amount_field_not_percentage() {
+        // Dữ liệu thật: tlckhau = 50.0 (%), stckhau = 2.860.000 (tiền CK)
+        // trên dòng 2 × 2.860.000. Sổ nhập kho phải trừ đúng SỐ TIỀN.
+        let pool = test_pool().await;
+        let lines = r#"{"ten":"Aptomat ABN203c","dvtinh":"Cái","mhhdvu":null,"sluong":2.0,
+                        "dgia":2860000.0,"stckhau":2860000.0,"tlckhau":50.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-ck", 1, lines).await;
+        import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        let amount: (f64,) = sqlx::query_as(
+            "SELECT amount FROM journal_entry WHERE entry_type = 'PN' AND product_code <> ''",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // 2 × 2.860.000 − 2.860.000 CK = 2.860.000
+        assert!(
+            (amount.0 - 2_860_000.0).abs() < 1.0,
+            "giá trị nhập = thành tiền − tiền CK, thấy {}",
+            amount.0
+        );
+    }
+
+    #[tokio::test]
+    async fn identity_key_normalizes_case_and_whitespace() {
         // Khác đơn vị → khác danh tính.
         assert_ne!(
             identity_key("Bình NN", "Cái"),
