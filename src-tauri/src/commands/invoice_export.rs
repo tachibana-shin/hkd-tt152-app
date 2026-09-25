@@ -1,10 +1,12 @@
 //! Quy trình xuất hóa đơn ra bên dịch vụ HĐĐT khác.
 //!
 //! Hộ không có API phát hành (dùng bên thứ ba) nên phải chép tay. Module này
-//! gom phần "chuẩn bị chép": `preflight` kiểm tra trước khi chép (MST, tổng
-//! tiền, nhóm ngành, độ dài tên dòng — bên kia chắc chắn từ chối hóa đơn thiếu
-//! những thứ này), `build_pack` dựng sẵn đúng nội dung cần nhập (text thuần để
-//! dán vào ô tự do, TSV để dán vào bảng — Excel tự tách cột, và JSON).
+//! gom phần "chuẩn bị chép": `preflight` kiểm tra trước khi chép (MST người
+//! mua, tổng tiền khớp tổng dòng, nhóm ngành — bên kia chắc chắn từ chối hóa
+//! đơn thiếu những thứ này), `build_pack` dựng sẵn đúng nội dung cần nhập
+//! (text thuần để dán vào ô tự do, TSV để dán vào bảng — Excel tự tách cột,
+//! và JSON). Tên hàng giữ nguyên vẹn (chỉ gộp khoảng trắng thừa) vì dịch vụ
+//! bên kia không giới hạn số ký tự.
 //!
 //! Bấm "Chép để xuất" gọi `mark_exported`: lưu bản chốt vào `invoice_export` và
 //! chuyển `draft` → `exported`. Từ đó nếu sửa hóa đơn thì `build_pack` báo
@@ -19,10 +21,6 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::SqlitePool;
 use tauri::State;
-
-/// Số ký tự tên dòng hàng mà nhiều dịch vụ HĐĐT chỉ nhận tối đa (sau khi bỏ khoảng
-/// trắng thừa). Vượt quá thường bị cắt cụt hoặc từ chối → app cảnh báo trước.
-const NAME_LIMIT: usize = 50;
 
 /// Chuẩn hoá chuỗi để so khớp/tìm kiếm: bỏ dấu tiếng Việt, hạ chữ thường,
 /// gộp mọi khoảng trắng thành 1. Dùng chung cho gợi ý ánh xạ mặt hàng.
@@ -112,28 +110,10 @@ fn fmt_date_vn(s: &str) -> String {
     }
 }
 
-/// Rút gọn tên dòng về `NAME_LIMIT` ký tự, cắt ở ranh giới từ.
-pub(crate) fn shorten_name(name: &str) -> String {
-    let clean = name.split_whitespace().collect::<Vec<_>>().join(" ");
-    if clean.chars().count() <= NAME_LIMIT {
-        return clean;
-    }
-    let mut out = String::new();
-    for w in clean.split(' ') {
-        let next_len = out.chars().count() + if out.is_empty() { 0 } else { 1 } + w.chars().count();
-        if next_len > NAME_LIMIT {
-            break;
-        }
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        out.push_str(w);
-    }
-    if out.is_empty() {
-        clean.chars().take(NAME_LIMIT).collect()
-    } else {
-        out
-    }
+/// Tên dòng để dán sang bên kia: giữ nguyên vẹn, chỉ gộp khoảng trắng/dấu xuống
+/// dòng thừa (dịch vụ bên kia không giới hạn số ký tự tên hàng).
+pub(crate) fn clean_name(name: &str) -> String {
+    name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// 1 dòng hàng trong gói xuất.
@@ -141,9 +121,8 @@ pub(crate) fn shorten_name(name: &str) -> String {
 pub(crate) struct ExportLine {
     pub(crate) stt: i64,
     pub(crate) product_code: String,
+    /// Tên hàng để dán sang bên kia (giữ nguyên, chỉ gộp khoảng trắng thừa).
     pub(crate) product_name: String,
-    /// Tên đã rút gọn để dán (bên kia giới hạn ký tự).
-    pub(crate) export_name: String,
     pub(crate) unit: String,
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
@@ -260,16 +239,7 @@ async fn load_header_and_lines(
 
     let mut lines = Vec::with_capacity(items.len());
     for (idx, it) in items.iter().enumerate() {
-        let clean = it.name.split_whitespace().collect::<Vec<_>>().join(" ");
-        let export_name = shorten_name(&it.name);
         let mut warnings = Vec::new();
-        if clean.chars().count() > NAME_LIMIT {
-            warnings.push(format!(
-                "Tên dài {} ký tự — đã rút gọn còn {} ký tự để dán",
-                clean.chars().count(),
-                export_name.chars().count()
-            ));
-        }
         let remote_ok = !it.remote_code.trim().is_empty() || !it.remote_name.trim().is_empty();
         if !remote_ok {
             warnings.push("Chưa có mặt hàng tương ứng ở bên kia — xem màn Khớp mặt hàng".into());
@@ -285,8 +255,7 @@ async fn load_header_and_lines(
         lines.push(ExportLine {
             stt: idx as i64 + 1,
             product_code: it.code.clone(),
-            product_name: it.name.clone(),
-            export_name,
+            product_name: clean_name(&it.name),
             unit: it.unit.clone(),
             quantity: it.quantity,
             unit_price: it.unit_price,
@@ -440,7 +409,7 @@ fn render_text(header: &ExportHeader, lines: &[ExportLine], computed_vat: f64) -
         s.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             l.stt,
-            l.export_name,
+            l.product_name,
             l.unit,
             fmt_qty(l.quantity),
             fmt_money(l.unit_price),
@@ -463,7 +432,7 @@ fn render_tsv(lines: &[ExportLine]) -> String {
     for l in lines {
         s.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-            l.export_name,
+            l.product_name,
             l.unit,
             fmt_qty(l.quantity),
             fmt_money(l.unit_price),
@@ -914,17 +883,11 @@ mod tests {
     }
 
     #[test]
-    fn shorten_name_cuts_at_word_boundary() {
+    fn clean_name_keeps_full_text_and_only_squeezes_spaces() {
+        // Không cắt bớt chữ: dịch vụ bên kia không giới hạn ký tự tên hàng.
         let long = "Bình nước lọc trà oolong tươi đóng chai 500ml nhập khẩu chính hãng";
-        let out = shorten_name(long);
-        assert!(
-            out.chars().count() <= NAME_LIMIT,
-            "còn {} ký tự",
-            out.chars().count()
-        );
-        // Không cắt giữa từ: chuỗi kết quả vẫn là tiền tố của chuỗi gốc đã gộp space.
-        let clean = long.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(clean.starts_with(&out), "phải cắt ở ranh giới từ: {out}");
+        assert_eq!(clean_name(long), long);
+        assert_eq!(clean_name("  Bình\n nước  lọc "), "Bình nước lọc");
     }
 
     #[tokio::test]

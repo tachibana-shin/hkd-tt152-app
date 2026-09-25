@@ -288,9 +288,8 @@ export interface Invoice {
 export interface InvoiceExportLine {
   stt: number;
   product_code: string;
+  /** Tên hàng để dán sang bên kia (giữ nguyên, chỉ gộp khoảng trắng thừa). */
   product_name: string;
-  /** Tên đã rút gọn theo giới hạn ký tự của dịch vụ bên kia. */
-  export_name: string;
   unit: string;
   quantity: number;
   unit_price: number;

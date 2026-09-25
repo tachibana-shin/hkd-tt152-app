@@ -188,7 +188,7 @@ async function markExported() {
           <thead class="bg-gray-50 text-xs text-gray-500">
             <tr>
               <th class="w-8 px-2 py-1 text-right">#</th>
-              <th class="px-2 py-1 text-left">Tên (đã rút gọn để dán)</th>
+              <th class="px-2 py-1 text-left">Tên hàng</th>
               <th class="w-14 px-2 py-1 text-left">ĐVT</th>
               <th class="w-20 px-2 py-1 text-right">SL</th>
               <th class="w-28 px-2 py-1 text-right">Đơn giá</th>
@@ -201,7 +201,7 @@ async function markExported() {
             <tr v-for="l in pack.lines" :key="l.stt" class="border-t border-gray-100 align-top">
               <td class="px-2 py-1 text-right text-gray-400">{{ l.stt }}</td>
               <td class="px-2 py-1">
-                {{ l.export_name }}
+                {{ l.product_name }}
                 <div v-for="w in l.warnings" :key="w" class="text-xs text-amber-700" :title="w">
                   ⚠ {{ w }}
                 </div>
