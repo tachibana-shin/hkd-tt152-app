@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT day FROM hddt_sync_day WHERE kind = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "day",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "38274b5647cac31725153ffbcf8c926a434a0b741d21c5fbbb99ad9b6ae6b72b"
+}

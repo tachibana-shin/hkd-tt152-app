@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_imported_invoice\n            (portal_id, portal_kind, posting_date, nbmst, nbten, nmmst, khmshdon, khhdon, shdon,\n             tgtcthue, tgtthue, ttcktmai, tgtttbso, line_count, new_product_count,\n             supplier_id, inbound_voucher_id, raw_json, detail_json)\n         SELECT portal_id, portal_kind, posting_date, nbmst, nbten, nmmst, khmshdon, khhdon, shdon,\n                tgtcthue, tgtthue, ttcktmai, tgtttbso, line_count, ?, ?, ?,\n                raw_json, detail_json\n           FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8537b18f3ccba016fb907cd357a03c231352edfd279b2bcfc4f1e9a010d9b81e"
+}

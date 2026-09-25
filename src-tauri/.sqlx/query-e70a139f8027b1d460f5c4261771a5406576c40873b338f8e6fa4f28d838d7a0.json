@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice\n            SET status = 'manual',\n                skip_reason = CASE\n                    WHEN detail_error <> '' THEN 'Không lấy được chi tiết: ' || detail_error\n                    WHEN status = 'manual' AND skip_reason <> '' THEN skip_reason\n                    ELSE 'Cần xử lý thủ công' END\n          WHERE status = 'pending' AND detail_error <> ''",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "e70a139f8027b1d460f5c4261771a5406576c40873b338f8e6fa4f28d838d7a0"
+}

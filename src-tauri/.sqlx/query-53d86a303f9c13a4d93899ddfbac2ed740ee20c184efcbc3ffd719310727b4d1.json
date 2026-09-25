@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT iv.voucher_no FROM hddt_imported_invoice hi\n           JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id\n          WHERE hi.portal_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53d86a303f9c13a4d93899ddfbac2ed740ee20c184efcbc3ffd719310727b4d1"
+}

@@ -28,17 +28,17 @@ pub(crate) async fn save_account(
     opening_credit: f64,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO account (code, name, opening_debit, opening_credit) VALUES (?, ?, ?, ?)
          ON CONFLICT(code) DO UPDATE SET
             name = excluded.name,
             opening_debit = excluded.opening_debit,
             opening_credit = excluded.opening_credit",
+        code,
+        name,
+        opening_debit,
+        opening_credit
     )
-    .bind(&code)
-    .bind(&name)
-    .bind(opening_debit)
-    .bind(opening_credit)
     .execute(&*state.pool.read().await)
     .await
     .map_err(|e| e.to_string())?;
@@ -51,16 +51,14 @@ pub(crate) async fn save_account(
 #[tauri::command]
 pub(crate) async fn delete_account(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
-    let row: Option<(String,)> = sqlx::query_as("SELECT code FROM account WHERE id = ?")
-        .bind(id)
+    let row: Option<String> = sqlx::query_scalar!("SELECT code FROM account WHERE id = ?", id)
         .fetch_optional(&*state.pool.read().await)
         .await
         .map_err(|e| e.to_string())?;
-    let Some((code,)) = row else {
+    let Some(code) = row else {
         return Err("Không tìm thấy tài khoản".into());
     };
-    sqlx::query("DELETE FROM account WHERE id = ?")
-        .bind(id)
+    sqlx::query!("DELETE FROM account WHERE id = ?", id)
         .execute(&*state.pool.read().await)
         .await
         .map_err(|e| e.to_string())?;
@@ -70,9 +68,11 @@ pub(crate) async fn delete_account(state: State<'_, AppState>, id: i64) -> Resul
 
 #[tauri::command]
 pub(crate) async fn get_products(state: State<'_, AppState>) -> Result<String, String> {
-    let rows: Vec<ProductRow> = sqlx::query_as::<_, ProductRow>(
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code
-         FROM product ORDER BY code",
+    // `is_service` lưu INTEGER; ép kiểu bool để khớp ProductRow (macro check).
+    let rows: Vec<ProductRow> = sqlx::query_as!(
+        ProductRow,
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service as \"is_service: bool\", industry_code
+         FROM product ORDER BY code"
     )
     .fetch_all(&*state.pool.read().await)
     .await
@@ -112,15 +112,15 @@ pub(crate) async fn save_industry_group(
         return Err("Tỷ lệ thuế phải nằm trong khoảng 0 – 100%".into());
     }
     let pool = state.pool.read().await;
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO industry_group (code, name, vat_rate, pit_rate) VALUES (?, ?, ?, ?)
          ON CONFLICT(code) DO UPDATE SET
             name = excluded.name, vat_rate = excluded.vat_rate, pit_rate = excluded.pit_rate",
+        code,
+        name,
+        vat_rate,
+        pit_rate
     )
-    .bind(&code)
-    .bind(&name)
-    .bind(vat_rate)
-    .bind(pit_rate)
     .execute(&*pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -137,26 +137,25 @@ pub(crate) async fn delete_industry_group(
     require_role(&state, &["admin", "ketoan"]).await?;
     let code = code.trim().to_string();
     let pool = state.pool.read().await;
-    let used: (i64,) = sqlx::query_as(
+    let used: i64 = sqlx::query_scalar!(
         "SELECT
             (SELECT COUNT(*) FROM product WHERE industry_code = ?) +
             (SELECT COUNT(*) FROM journal_entry WHERE industry_code = ?) +
             (SELECT COUNT(*) FROM invoice_item WHERE industry_code = ?)",
+        code,
+        code,
+        code
     )
-    .bind(&code)
-    .bind(&code)
-    .bind(&code)
     .fetch_one(&*pool)
     .await
     .map_err(|e| e.to_string())?;
-    if used.0 > 0 {
+    if used > 0 {
         return Err(format!(
             "Không xóa được nhóm ngành '{}' — đang được dùng cho sản phẩm / bút toán / hóa đơn",
             code
         ));
     }
-    sqlx::query("DELETE FROM industry_group WHERE code = ?")
-        .bind(&code)
+    sqlx::query!("DELETE FROM industry_group WHERE code = ?", code)
         .execute(&*pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -296,12 +295,12 @@ pub(crate) async fn save_product(
     // thì xóa (nếu chưa dùng) và tạo sản phẩm mới.
     {
         let pool = state.pool.read().await;
-        let existing: Option<(String,)> = sqlx::query_as("SELECT name FROM product WHERE code = ?")
-            .bind(&code)
-            .fetch_optional(&*pool)
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Some((old_name,)) = existing {
+        let existing: Option<String> =
+            sqlx::query_scalar!("SELECT name FROM product WHERE code = ?", code)
+                .fetch_optional(&*pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        if let Some(old_name) = existing {
             if old_name != name {
                 return Err(format!(
                     "Không được đổi tên sản phẩm '{}' — tên gốc đã ghi trong sổ: '{}'",
@@ -310,7 +309,7 @@ pub(crate) async fn save_product(
             }
         }
     }
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(code) DO UPDATE SET
@@ -319,17 +318,17 @@ pub(crate) async fn save_product(
             min_stock = excluded.min_stock, vat_rate = excluded.vat_rate,
             import_tax_rate = excluded.import_tax_rate, is_service = excluded.is_service,
             industry_code = excluded.industry_code",
+        code,
+        name,
+        unit,
+        sale_price,
+        cost_price,
+        min_stock,
+        vat_rate,
+        import_tax_rate,
+        is_service,
+        industry_code
     )
-    .bind(&code)
-    .bind(&name)
-    .bind(&unit)
-    .bind(sale_price)
-    .bind(cost_price)
-    .bind(min_stock)
-    .bind(vat_rate)
-    .bind(import_tax_rate)
-    .bind(is_service)
-    .bind(&industry_code)
     .execute(&*state.pool.read().await)
     .await
     .map_err(|e| e.to_string())?;
@@ -345,20 +344,22 @@ async fn find_product_usage(
     id: i64,
     code: &str,
 ) -> Result<Option<String>, String> {
-    let (lots, invoices, counts, entries): (i64, i64, i64, i64) = sqlx::query_as(
+    let usage = sqlx::query!(
         "SELECT
-             (SELECT COUNT(*) FROM stock_lot WHERE product_id = ?),
-             (SELECT COUNT(*) FROM invoice_item WHERE product_id = ?),
-             (SELECT COUNT(*) FROM inventory_count_item WHERE product_id = ?),
-             (SELECT COUNT(*) FROM journal_entry WHERE product_code = ?)",
+             (SELECT COUNT(*) FROM stock_lot WHERE product_id = ?) AS lots,
+             (SELECT COUNT(*) FROM invoice_item WHERE product_id = ?) AS invoices,
+             (SELECT COUNT(*) FROM inventory_count_item WHERE product_id = ?) AS counts,
+             (SELECT COUNT(*) FROM journal_entry WHERE product_code = ?) AS entries",
+        id,
+        id,
+        id,
+        code
     )
-    .bind(id)
-    .bind(id)
-    .bind(id)
-    .bind(code)
     .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
+    let (lots, invoices, counts, entries) =
+        (usage.lots, usage.invoices, usage.counts, usage.entries);
 
     let mut parts: Vec<String> = Vec::new();
     if lots > 0 {
@@ -386,23 +387,21 @@ async fn find_product_usage(
 pub(crate) async fn delete_product(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     let pool = state.pool.read().await;
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT code, name FROM product WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&*pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let Some((code, name)) = row else {
+    let row = sqlx::query!("SELECT code, name FROM product WHERE id = ?", id)
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(row) = row else {
         return Err("Không tìm thấy sản phẩm".into());
     };
+    let (code, name) = (row.code, row.name);
     if let Some(used) = find_product_usage(&pool, id, &code).await? {
         return Err(format!(
             "Không xóa được sản phẩm '{}' ({}) — đang được dùng: {}",
             name, code, used
         ));
     }
-    sqlx::query("DELETE FROM product WHERE id = ?")
-        .bind(id)
+    sqlx::query!("DELETE FROM product WHERE id = ?", id)
         .execute(&*pool)
         .await
         .map_err(|e| format!("Không thể xóa sản phẩm '{}': {}", code, e))?;
@@ -424,13 +423,12 @@ pub(crate) async fn delete_products(
     let mut blocked: Vec<String> = Vec::new();
     let mut delete_targets: Vec<(i64, String)> = Vec::new();
     for id in &ids {
-        let row: Option<(String, String)> =
-            sqlx::query_as("SELECT code, name FROM product WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&*pool)
-                .await
-                .map_err(|e| e.to_string())?;
-        let Some((code, name)) = row else { continue };
+        let row = sqlx::query!("SELECT code, name FROM product WHERE id = ?", id)
+            .fetch_optional(&*pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(row) = row else { continue };
+        let (code, name) = (row.code, row.name);
         match find_product_usage(&pool, *id, &code).await? {
             Some(used) => blocked.push(format!("'{}' ({}) — {}", name, code, used)),
             None => delete_targets.push((*id, code)),
@@ -455,8 +453,7 @@ pub(crate) async fn delete_products(
     // Không sản phẩm nào bị chặn → xóa hết trong 1 transaction.
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     for (id, _) in &delete_targets {
-        sqlx::query("DELETE FROM product WHERE id = ?")
-            .bind(id)
+        sqlx::query!("DELETE FROM product WHERE id = ?", id)
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("Không thể xóa sản phẩm: {}", e))?;
@@ -467,6 +464,75 @@ pub(crate) async fn delete_products(
         audit(&state, "delete", "product", code).await;
     }
     Ok("ok".into())
+}
+
+/// Nhóm ngành mặc định cho hàng hóa (có sẵn từ migration khởi tạo). Mặt hàng tạo
+/// từ hóa đơn HĐĐT cũng dùng mã này — xem `hddt::sync`.
+pub(crate) const GOODS_INDUSTRY_CODE: &str = "PPHH";
+
+/// Gán nhóm ngành "Phân phối, cung cấp hàng hóa" (PPHH) cho MỌI sản phẩm loại
+/// "Hàng hóa" (`is_service = 0`) đang chưa có nhóm ngành — dùng để vá dữ liệu
+/// cũ sau khi đồng bộ hóa đơn tạo mặt hàng trước khi nhóm ngành có mặc định.
+///
+/// Không đụng: sản phẩm dịch vụ (tỷ lệ thuế theo ngành thực tế) và sản phẩm đã
+/// được gán nhóm khác (ý của người dùng). Trả về (số đã gán, số hàng hóa đã có
+/// nhóm khác, tên nhóm) để UI báo rõ; lỗi nếu danh mục không còn nhóm PPHH.
+pub(crate) async fn assign_goods_industry_core(
+    pool: &SqlitePool,
+) -> Result<(i64, i64, String), String> {
+    let group = sqlx::query!(
+        "SELECT code, name FROM industry_group WHERE code = ?",
+        GOODS_INDUSTRY_CODE
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(group) = group else {
+        return Err(format!(
+            "Nhóm ngành '{}' không có trong danh mục — hãy tạo lại ở màn Đối tác & Kho trước khi gán hàng loạt",
+            GOODS_INDUSTRY_CODE
+        ));
+    };
+    let group_name = group.name;
+
+    // Hàng hóa đã có nhóm khác → bỏ qua, đếm TRƯỚC khi gán để báo đúng số bị
+    // bỏ qua (không tính những dòng vừa được gán PPHH).
+    let kept: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM product WHERE is_service = 0 AND industry_code <> ''"
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let res = sqlx::query!(
+        "UPDATE product SET industry_code = ?
+          WHERE is_service = 0 AND (industry_code IS NULL OR industry_code = '')",
+        GOODS_INDUSTRY_CODE
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let updated = res.rows_affected() as i64;
+    Ok((updated, kept, group_name))
+}
+
+#[tauri::command]
+pub(crate) async fn assign_goods_industry(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let (updated, kept, name) = {
+        let pool = state.pool.read().await;
+        assign_goods_industry_core(&pool).await?
+    };
+    if updated > 0 {
+        audit(&state, "update", "product", "industry").await;
+    }
+    Ok(serde_json::json!({
+        "updated": updated,
+        "kept": kept,
+        "code": GOODS_INDUSTRY_CODE,
+        "name": name,
+    })
+    .to_string())
 }
 
 /// Đọc một giá trị cấu hình từ bảng app_setting (trả về rỗng nếu chưa có).

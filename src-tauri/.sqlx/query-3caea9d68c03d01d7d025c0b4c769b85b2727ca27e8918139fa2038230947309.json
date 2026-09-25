@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO supplier (code, name, address, tax_code, phone)\n         VALUES (?, ?, '', ?, '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "3caea9d68c03d01d7d025c0b4c769b85b2727ca27e8918139fa2038230947309"
+}

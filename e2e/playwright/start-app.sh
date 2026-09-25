@@ -10,7 +10,14 @@ set -u
 # Clean up stale E2E instances from a previous run (in case they were killed hard).
 # Only touches the two dedicated test ports — never the user's dev server (1420).
 command -v fuser >/dev/null && { fuser -k 45821/tcp 2>/dev/null; fuser -k 1421/tcp 2>/dev/null; }
-sleep 0.5
+# Chờ port thật sự trống: nếu tiến trình cũ còn giữ port, app mới không bind được
+# và test sẽ chạy nhầm vào instance cũ (phiên đăng nhập còn sống → test login fail).
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if ! (exec 3<>/dev/tcp/127.0.0.1/45821) 2>/dev/null && ! (exec 3<>/dev/tcp/127.0.0.1/1421) 2>/dev/null; then
+    break
+  fi
+  sleep 0.5
+done
 
 TESTDIR=$(mktemp -d /tmp/hkd-e2e-XXXXXX)
 echo "$TESTDIR" > /tmp/hkd-e2e-dir

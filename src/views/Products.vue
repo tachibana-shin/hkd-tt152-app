@@ -144,6 +144,49 @@ function removeSelected() {
   });
 }
 
+// ─── GÁN NHÓM NGÀNH HÀNG HÓA (vá dữ liệu cũ tạo trước khi có mặc định) ───
+const assigningIndustry = ref(false);
+
+/** Tên nhóm ngành mặc định của hàng hóa (PPHH — Phân phối, cung cấp hàng hóa). */
+const goodsGroupName = computed(
+  () => industryGroups.value.find((g) => g.code === "PPHH")?.name ?? "Phân phối, cung cấp hàng hóa",
+);
+const goodsGroupTooltip = computed(
+  () => `Gán nhóm "${goodsGroupName.value}" cho hàng hóa chưa có nhóm ngành`,
+);
+
+function assignGoodsIndustry() {
+  confirm.require({
+    header: "Gán nhóm ngành hàng hóa",
+    message: `Gán nhóm "${goodsGroupName.value}" cho mọi sản phẩm loại "Hàng hóa" đang chưa có nhóm ngành? Sản phẩm dịch vụ và sản phẩm đã có nhóm khác được giữ nguyên.`,
+    icon: "pi pi-tags",
+    acceptLabel: "Gán nhóm ngành",
+    rejectLabel: "Hủy",
+    accept: async () => {
+      assigningIndustry.value = true;
+      try {
+        const r = await catalog.assignGoodsIndustry();
+        toast.add({
+          severity: r.updated > 0 ? "success" : "info",
+          summary:
+            r.updated > 0
+              ? `Đã gán nhóm ngành cho ${r.updated} sản phẩm`
+              : "Không có sản phẩm nào cần gán",
+          detail:
+            r.kept > 0
+              ? `${r.kept} sản phẩm hàng hóa đã có nhóm ngành khác — giữ nguyên.`
+              : undefined,
+        });
+        loadLazyData();
+      } catch (e) {
+        toast.add({ severity: "error", summary: "Không gán được nhóm ngành", detail: String(e) });
+      } finally {
+        assigningIndustry.value = false;
+      }
+    },
+  });
+}
+
 // ─── DIALOG THÊM / SỬA SẢN PHẨM (dùng chung ProductDialog) ───
 const dialog = ref(false);
 const editingProduct = ref<Product | null>(null);
@@ -213,6 +256,16 @@ catalog.loadIndustryGroups(); // nhóm ngành cho cột + dialog (màn này khô
             icon="pi pi-trash"
             :label="`Xóa đã chọn (${selectedCount})`"
             @click="removeSelected"
+          />
+          <Button
+            v-if="auth.canStock"
+            label="Gán nhóm ngành hàng hóa"
+            icon="pi pi-tags"
+            severity="secondary"
+            outlined
+            :loading="assigningIndustry"
+            v-tooltip="goodsGroupTooltip"
+            @click="assignGoodsIndustry"
           />
           <Button
             v-if="auth.canStock"

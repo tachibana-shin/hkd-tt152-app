@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice\n            SET detail_error = '',\n                status = 'pending',\n                skip_reason = ''\n          WHERE detail_error <> '' AND status = 'manual'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "668df90a6cf7c8abe8339ce855f7ce5297250c7f1a2978b367730747f377535d"
+}

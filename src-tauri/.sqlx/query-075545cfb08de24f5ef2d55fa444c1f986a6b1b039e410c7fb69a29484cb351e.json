@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n            (SELECT COUNT(*) FROM product WHERE industry_code = ?) +\n            (SELECT COUNT(*) FROM journal_entry WHERE industry_code = ?) +\n            (SELECT COUNT(*) FROM invoice_item WHERE industry_code = ?)",
+  "describe": {
+    "columns": [
+      {
+        "name": "(SELECT COUNT(*) FROM product WHERE industry_code = ?) +\n            (SELECT COUNT(*) FROM journal_entry WHERE industry_code = ?) +\n            (SELECT COUNT(*) FROM invoice_item WHERE industry_code = ?)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "075545cfb08de24f5ef2d55fa444c1f986a6b1b039e410c7fb69a29484cb351e"
+}

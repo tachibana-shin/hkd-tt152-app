@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service as \"is_service: bool\", industry_code\n         FROM product ORDER BY code",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "sale_price",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "cost_price",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "min_stock",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_rate",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "import_tax_rate",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "is_service: bool",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "industry_code",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d168c4a5654e201616596bfd0eb5f75e3f80dbc13557993a32380f88e39a1864"
+}

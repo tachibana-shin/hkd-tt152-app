@@ -96,6 +96,14 @@ export const useCatalogStore = defineStore("catalog", () => {
     await api.deleteProducts(ids);
   }
 
+  /**
+   * Gán nhóm ngành PPHH cho hàng hóa chưa có nhóm (nút ở màn Sản phẩm).
+   * Trả về số đã gán + số hàng hóa giữ nguyên nhóm cũ để view báo toast.
+   */
+  async function assignGoodsIndustry() {
+    return api.assignGoodsIndustry();
+  }
+
   async function saveWarehouse(code: string, name: string) {
     await api.saveWarehouse(code, name);
     await loadAll();
@@ -148,6 +156,7 @@ export const useCatalogStore = defineStore("catalog", () => {
     saveProduct,
     deleteProduct,
     deleteProducts,
+    assignGoodsIndustry,
     saveWarehouse,
     saveSupplier,
     saveCustomer,

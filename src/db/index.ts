@@ -204,6 +204,14 @@ export const api = {
     }),
   deleteProduct: (id: number) => call<string>("delete_product", { id }),
   deleteProducts: (ids: number[]) => call<string>("delete_products", { ids }),
+  /**
+   * Gán nhóm ngành "Phân phối, cung cấp hàng hóa" cho mọi hàng hóa chưa có
+   * nhóm (dịch vụ và nhóm đã gán tay giữ nguyên).
+   */
+  assignGoodsIndustry: async () =>
+    parse<{ updated: number; kept: number; code: string; name: string }>(
+      await call<string>("assign_goods_industry", {}),
+    ),
 
   getIndustryGroups: async () => parse<IndustryGroup[]>(await call<string>("get_industry_groups")),
   saveIndustryGroup: (g: { code: string; name: string; vat_rate: number; pit_rate: number }) =>

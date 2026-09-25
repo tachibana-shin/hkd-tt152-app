@@ -305,12 +305,14 @@ pub(crate) async fn scan(
         if inv.khmshdon <= 0 {
             // Endpoint chi tiết bắt buộc khmshdon dạng số; thiếu thì không đoán.
             let msg = "Thiếu mã mẫu số (khmshdon) — cần quét lại từ cổng";
-            sqlx::query("UPDATE hddt_purchase_invoice SET detail_error = ? WHERE id = ?")
-                .bind(msg)
-                .bind(inv.id)
-                .execute(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+            sqlx::query!(
+                "UPDATE hddt_purchase_invoice SET detail_error = ? WHERE id = ?",
+                msg,
+                inv.id
+            )
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
             sum.details_failed += 1;
             continue;
         }
@@ -331,24 +333,31 @@ pub(crate) async fn scan(
                     .and_then(Value::as_array)
                     .map(|a| a.len())
                     .unwrap_or(0);
-                sqlx::query(
-                    "UPDATE hddt_purchase_invoice SET detail_json = ?, line_count = ?, detail_error = '' WHERE id = ?",
+                // Bind vào biến trước: macro giữ tham chiếu tới hết `.await`.
+                let detail_json = detail.to_string();
+                let line_count = lines as i64;
+                sqlx::query!(
+                    "UPDATE hddt_purchase_invoice
+                        SET detail_json = ?, line_count = ?, detail_error = ''
+                      WHERE id = ?",
+                    detail_json,
+                    line_count,
+                    inv.id
                 )
-                .bind(detail.to_string())
-                .bind(lines as i64)
-                .bind(inv.id)
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
                 sum.details_ok += 1;
             }
             Err(msg) => {
-                sqlx::query("UPDATE hddt_purchase_invoice SET detail_error = ? WHERE id = ?")
-                    .bind(&msg)
-                    .bind(inv.id)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                sqlx::query!(
+                    "UPDATE hddt_purchase_invoice SET detail_error = ? WHERE id = ?",
+                    msg,
+                    inv.id
+                )
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
                 sum.details_failed += 1;
             }
         }
@@ -367,13 +376,14 @@ async fn upsert_invoice(pool: &SqlitePool, row: &Value, kind: InvoiceKind) -> Re
         return Ok(false);
     }
     // Đã nhập kho rồi (bảng hóa đơn chính thức) → không đưa lại vào cache.
-    let done: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM hddt_imported_invoice WHERE portal_id = ?")
-            .bind(&portal_id)
-            .fetch_one(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    if done.0 > 0 {
+    let done: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM hddt_imported_invoice WHERE portal_id = ?",
+        portal_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if done > 0 {
         return Ok(false);
     }
     let tdlap = f(row, "tdlap");
@@ -392,7 +402,16 @@ async fn upsert_invoice(pool: &SqlitePool, row: &Value, kind: InvoiceKind) -> Re
             int(row, "tthai")
         )
     };
-    let res = sqlx::query(
+    let raw_json = row.to_string();
+    // Mọi giá trị bind vào biến trước: macro sqlx giữ tham chiếu tới hết `.await`
+    // nên truyền biểu thức tạm (f(...)/int(...)/kind_str(...)) sẽ báo E0716.
+    let (nbmst, nbten, nmmst) = (f(row, "nbmst"), f(row, "nbten"), f(row, "nmmst"));
+    let (khmshdon, hthdon, tchat) = (int(row, "khmshdon"), int(row, "hthdon"), int(row, "tchat"));
+    let (khhdon, shdon) = (f(row, "khhdon"), f(row, "shdon"));
+    let (tgtcthue, tgtthue) = (num(row, "tgtcthue"), num(row, "tgtthue"));
+    let (ttcktmai, tgtttbso) = (num(row, "ttcktmai"), num(row, "tgtttbso"));
+    let portal_kind = kind_str(kind);
+    let res = sqlx::query!(
         "INSERT INTO hddt_purchase_invoice
             (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
              khmshdon, khhdon, shdon, hthdon, tchat,
@@ -400,26 +419,26 @@ async fn upsert_invoice(pool: &SqlitePool, row: &Value, kind: InvoiceKind) -> Re
              raw_json, created_at)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
          ON CONFLICT(portal_id) DO NOTHING",
+        portal_id,
+        portal_kind,
+        tdlap,
+        posting_date,
+        nbmst,
+        nbten,
+        nmmst,
+        khmshdon,
+        khhdon,
+        shdon,
+        hthdon,
+        tchat,
+        tgtcthue,
+        tgtthue,
+        ttcktmai,
+        tgtttbso,
+        status,
+        reason,
+        raw_json,
     )
-    .bind(&portal_id)
-    .bind(kind_str(kind))
-    .bind(&tdlap)
-    .bind(&posting_date)
-    .bind(f(row, "nbmst"))
-    .bind(f(row, "nbten"))
-    .bind(f(row, "nmmst"))
-    .bind(int(row, "khmshdon"))
-    .bind(f(row, "khhdon"))
-    .bind(f(row, "shdon"))
-    .bind(int(row, "hthdon"))
-    .bind(int(row, "tchat"))
-    .bind(num(row, "tgtcthue"))
-    .bind(num(row, "tgtthue"))
-    .bind(num(row, "ttcktmai"))
-    .bind(num(row, "tgtttbso"))
-    .bind(status)
-    .bind(reason)
-    .bind(row.to_string())
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -455,12 +474,14 @@ async fn mark_days_scanned(
 ) -> Result<(), String> {
     let mut d = from;
     while d <= to {
-        sqlx::query(
+        let day = d.format("%Y-%m-%d").to_string();
+        let kind = kind_str(kind);
+        sqlx::query!(
             "INSERT INTO hddt_sync_day (day, kind, scanned_at) VALUES (?, ?, datetime('now'))
              ON CONFLICT(day, kind) DO NOTHING",
+            day,
+            kind,
         )
-        .bind(d.format("%Y-%m-%d").to_string())
-        .bind(kind_str(kind))
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -471,11 +492,12 @@ async fn mark_days_scanned(
 
 /// Hóa đơn chờ xử lý mà chưa có chi tiết (và lần gọi trước không lỗi).
 async fn pending_without_detail(pool: &SqlitePool) -> Result<Vec<CachedInvoice>, String> {
-    let rows: Vec<CachedInvoice> = sqlx::query_as(
-        "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
-                status, detail_json
-         FROM hddt_purchase_invoice
-         WHERE status = 'pending' AND detail_json = '' AND detail_error = ''",
+    let rows: Vec<CachedInvoice> = sqlx::query_as!(
+        CachedInvoice,
+        r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+                  khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+             FROM hddt_purchase_invoice
+            WHERE status = 'pending' AND detail_json = '' AND detail_error = ''"#
     )
     .fetch_all(pool)
     .await
@@ -488,12 +510,13 @@ async fn cached_days(
     pool: &SqlitePool,
     kind: InvoiceKind,
 ) -> Result<std::collections::HashSet<String>, String> {
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT day FROM hddt_sync_day WHERE kind = ?")
-        .bind(kind_str(kind))
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(rows.into_iter().map(|(d,)| d).collect())
+    let kind = kind_str(kind);
+    let rows: Vec<String> =
+        sqlx::query_scalar!("SELECT day FROM hddt_sync_day WHERE kind = ?", kind)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().collect())
 }
 
 /// Xoá cache đồng bộ: toàn bộ dòng cache (chưa nhập kho) + các dấu ngày đã quét.
@@ -501,12 +524,12 @@ async fn cached_days(
 /// Hóa đơn đã nhập kho nằm ở `hddt_imported_invoice` nên không bị đụng tới —
 /// liên kết hóa đơn ↔ phiếu nhập luôn giữ nguyên.
 pub(crate) async fn clear_cache(pool: &SqlitePool) -> Result<ClearCacheOutcome, String> {
-    let deleted = sqlx::query("DELETE FROM hddt_purchase_invoice")
+    let deleted = sqlx::query!("DELETE FROM hddt_purchase_invoice")
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?
         .rows_affected();
-    let days = sqlx::query("DELETE FROM hddt_sync_day")
+    let days = sqlx::query!("DELETE FROM hddt_sync_day")
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?
@@ -527,18 +550,18 @@ pub(crate) struct ClearCacheOutcome {
 ///
 /// Hóa đơn bị đánh 'manual' vì `tthai != 1` thì giữ nguyên (không tự tạo phiếu).
 pub(crate) async fn retry_failed_details(pool: &SqlitePool) -> Result<usize, String> {
-    let r = sqlx::query(
+    let r = sqlx::query!(
         "UPDATE hddt_purchase_invoice
             SET detail_error = '',
                 status = 'pending',
                 skip_reason = ''
-          WHERE detail_error <> '' AND status = 'manual'",
+          WHERE detail_error <> '' AND status = 'manual'"
     )
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
     let r2 =
-        sqlx::query("UPDATE hddt_purchase_invoice SET detail_error = '' WHERE detail_error <> ''")
+        sqlx::query!("UPDATE hddt_purchase_invoice SET detail_error = '' WHERE detail_error <> ''")
             .execute(pool)
             .await
             .map_err(|e| e.to_string())?;
@@ -548,14 +571,14 @@ pub(crate) async fn retry_failed_details(pool: &SqlitePool) -> Result<usize, Str
 /// Đánh dấu các hóa đơn cần người xử lý: không lấy được dòng hàng, hoặc
 /// thuộc loại hóa đơn không tạo phiếu tự động.
 async fn mark_manual_cases(pool: &SqlitePool) -> Result<usize, String> {
-    let r = sqlx::query(
+    let r = sqlx::query!(
         "UPDATE hddt_purchase_invoice
             SET status = 'manual',
                 skip_reason = CASE
                     WHEN detail_error <> '' THEN 'Không lấy được chi tiết: ' || detail_error
                     WHEN status = 'manual' AND skip_reason <> '' THEN skip_reason
                     ELSE 'Cần xử lý thủ công' END
-          WHERE status = 'pending' AND detail_error <> ''",
+          WHERE status = 'pending' AND detail_error <> ''"
     )
     .execute(pool)
     .await
@@ -565,13 +588,12 @@ async fn mark_manual_cases(pool: &SqlitePool) -> Result<usize, String> {
 
 /// Mốc bắt đầu: max(hddt_start_date của hộ, tham số `from`).
 async fn resolve_start(pool: &SqlitePool, from: &str) -> Result<NaiveDate, String> {
-    let configured: Option<(String,)> =
-        sqlx::query_as("SELECT hddt_start_date FROM business WHERE id = 1")
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let configured = configured
-        .map(|(s,)| s)
+    let row = sqlx::query!("SELECT hddt_start_date FROM business WHERE id = 1")
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let configured = row
+        .map(|r| r.hddt_start_date)
         .filter(|s| !s.trim().is_empty())
         .and_then(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok());
     let asked = NaiveDate::parse_from_str(from.trim(), "%Y-%m-%d").ok();
@@ -596,12 +618,14 @@ async fn resolve_end(to: &str) -> Result<NaiveDate, String> {
 /// `PPHH` không còn trong danh mục (người dùng đã xoá) — để màn Sản phẩm báo
 /// cần gán nhóm ngành thay vì ghi mã không tồn tại.
 async fn goods_industry_code(pool: &SqlitePool) -> Result<String, String> {
-    let found: Option<(String,)> = sqlx::query_as("SELECT code FROM industry_group WHERE code = ?")
-        .bind(GOODS_INDUSTRY_CODE)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(found.map(|(c,)| c).unwrap_or_default())
+    let found: Option<String> = sqlx::query_scalar!(
+        "SELECT code FROM industry_group WHERE code = ?",
+        GOODS_INDUSTRY_CODE
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(found.unwrap_or_default())
 }
 
 // ─── Import: tạo phiếu nhập kho từ hóa đơn đã cache ───
@@ -627,12 +651,12 @@ pub(crate) async fn import_invoice(
 ) -> Result<ImportOutcome, String> {
     // Đã có trong bảng hóa đơn chính thức → không tạo phiếu lần nữa (cache có
     // thể bị xoá rồi quét lại cùng ngày đó).
-    if let Some((voucher_no,)) = sqlx::query_as::<_, (String,)>(
+    if let Some(voucher_no) = sqlx::query_scalar!(
         "SELECT iv.voucher_no FROM hddt_imported_invoice hi
            JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
           WHERE hi.portal_id = ?",
+        inv.portal_id
     )
-    .bind(&inv.portal_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?
@@ -678,14 +702,13 @@ pub(crate) async fn import_invoice(
             continue;
         }
         let key = identity_key(&name, unit);
-        let existing: Option<(String,)> =
-            sqlx::query_as("SELECT code FROM product WHERE identity_key = ?")
-                .bind(&key)
+        let existing: Option<String> =
+            sqlx::query_scalar!("SELECT code FROM product WHERE identity_key = ?", key)
                 .fetch_optional(pool)
                 .await
                 .map_err(|e| e.to_string())?;
         let code = match existing {
-            Some((c,)) => c,
+            Some(c) => c,
             None => {
                 let code = next_product_code_core(pool).await?;
                 let cost = num(line, "dgia");
@@ -700,21 +723,24 @@ pub(crate) async fn import_invoice(
                 } else {
                     ""
                 };
-                sqlx::query(
+                // Biểu thức tạm phải bind trước (macro giữ tham chiếu tới hết await).
+                let vat_rate = num(line, "tsuat");
+                let portal_code = f(line, "mhhdvu");
+                sqlx::query!(
                     "INSERT INTO product (code, name, unit, sale_price, cost_price,
                                           min_stock, vat_rate, import_tax_rate, is_service,
                                           industry_code, identity_key, portal_code)
                      VALUES (?, ?, ?, 0, ?, 0, ?, 0, ?, ?, ?, ?)",
+                    code,
+                    name,
+                    unit,
+                    cost,
+                    vat_rate,
+                    is_service,
+                    industry,
+                    key,
+                    portal_code,
                 )
-                .bind(&code)
-                .bind(&name)
-                .bind(unit)
-                .bind(cost)
-                .bind(num(line, "tsuat"))
-                .bind(is_service)
-                .bind(industry)
-                .bind(&key)
-                .bind(f(line, "mhhdvu"))
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -780,17 +806,22 @@ pub(crate) async fn import_invoice(
 
     // 5) Hóa đơn chính thức + liên kết chặt với phiếu nhập (FK thật). Dữ liệu
     // này nằm ở bảng riêng `hddt_imported_invoice`, sau đó dòng cache bị xoá.
-    let header_id: (i64,) = sqlx::query_as("SELECT id FROM inbound_voucher WHERE voucher_no = ?")
-        .bind(&voucher_no)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    let supplier_id: Option<(i64,)> = sqlx::query_as("SELECT id FROM supplier WHERE code = ?")
-        .bind(&supplier_code)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    sqlx::query(
+    let header_id: i64 = sqlx::query_scalar!(
+        r#"SELECT id as "id!" FROM inbound_voucher WHERE voucher_no = ?"#,
+        voucher_no
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let supplier_id: Option<i64> = sqlx::query_scalar!(
+        r#"SELECT id as "id!" FROM supplier WHERE code = ?"#,
+        supplier_code
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let new_product_count = created as i64;
+    sqlx::query!(
         "INSERT INTO hddt_imported_invoice
             (portal_id, portal_kind, posting_date, nbmst, nbten, nmmst, khmshdon, khhdon, shdon,
              tgtcthue, tgtthue, ttcktmai, tgtttbso, line_count, new_product_count,
@@ -799,17 +830,16 @@ pub(crate) async fn import_invoice(
                 tgtcthue, tgtthue, ttcktmai, tgtttbso, line_count, ?, ?, ?,
                 raw_json, detail_json
            FROM hddt_purchase_invoice WHERE id = ?",
+        new_product_count,
+        supplier_id,
+        header_id,
+        inv.id
     )
-    .bind(created as i64)
-    .bind(supplier_id.map(|(i,)| i))
-    .bind(header_id.0)
-    .bind(inv.id)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
     // Cache đã "tiêu" rồi → xoá khỏi cache, dữ liệu chính thức nằm ở bảng trên.
-    sqlx::query("DELETE FROM hddt_purchase_invoice WHERE id = ?")
-        .bind(inv.id)
+    sqlx::query!("DELETE FROM hddt_purchase_invoice WHERE id = ?", inv.id)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -836,33 +866,41 @@ pub(crate) async fn ensure_supplier(
     if mst.is_empty() {
         return Err("Hóa đơn thiếu MST người bán".into());
     }
-    let existing: Option<(String,)> = sqlx::query_as("SELECT code FROM supplier WHERE code = ?")
-        .bind(mst)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    if let Some((c,)) = existing {
+    let existing: Option<String> =
+        sqlx::query_scalar!("SELECT code FROM supplier WHERE code = ?", mst)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if let Some(c) = existing {
         return Ok(c);
     }
-    sqlx::query("INSERT OR IGNORE INTO supplier (code, name, address, tax_code, phone) VALUES (?, ?, '', ?, '')")
-        .bind(mst)
-        .bind(if name.trim().is_empty() { mst } else { name.trim() })
-        .bind(mst)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    let tax_code = if name.trim().is_empty() {
+        mst
+    } else {
+        name.trim()
+    };
+    sqlx::query!(
+        "INSERT OR IGNORE INTO supplier (code, name, address, tax_code, phone)
+         VALUES (?, ?, '', ?, '')",
+        mst,
+        tax_code,
+        mst,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(mst.to_string())
 }
 
 /// Số phiếu nhập tiếp theo: PN0001… đánh số trên bảng inbound_voucher.
 pub(crate) async fn next_inbound_voucher_no(pool: &SqlitePool) -> Result<String, String> {
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT voucher_no FROM inbound_voucher")
+    let rows: Vec<String> = sqlx::query_scalar!("SELECT voucher_no FROM inbound_voucher")
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
     let max = rows
         .iter()
-        .filter_map(|(v,)| v.strip_prefix("PN").and_then(|n| n.parse::<i64>().ok()))
+        .filter_map(|v| v.strip_prefix("PN").and_then(|n| n.parse::<i64>().ok()))
         .max()
         .unwrap_or(0);
     Ok(format!("PN{:04}", max + 1))
@@ -888,12 +926,12 @@ pub(crate) async fn next_product_code_core(pool: &SqlitePool) -> Result<String, 
         .parse()
         .unwrap_or(4)
         .clamp(1, 12);
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT code FROM product")
+    let rows: Vec<String> = sqlx::query_scalar!("SELECT code FROM product")
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
     let mut max_num = start - 1;
-    for (code,) in &rows {
+    for code in &rows {
         if let Some(num) = code.strip_prefix(&prefix) {
             if let Ok(n) = num.trim_start_matches('0').trim().parse::<i64>() {
                 max_num = max_num.max(n);
@@ -909,12 +947,12 @@ pub(crate) async fn next_product_code_core(pool: &SqlitePool) -> Result<String, 
 }
 
 async fn setting(pool: &SqlitePool, key: &str) -> Result<String, String> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM app_setting WHERE key = ?")
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(row.map(|(v,)| v).unwrap_or_default())
+    let row: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM app_setting WHERE key = ?", key)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(row.unwrap_or_default())
 }
 
 // ─── Xem trước (đọc cache, không gọi cổng) ───
@@ -964,7 +1002,8 @@ pub(crate) async fn preview(
     // Cache (chờ nhập / cần xử lý) + hóa đơn đã nhập kho (bảng riêng) — cùng
     // một danh sách để người dùng thấy trạng thái đầy đủ. Dòng đã nhập kho có
     // `id = 0` (không có hành động) để không lẫn id với dòng cache.
-    let rows: Vec<PreviewRow> = sqlx::query_as(
+    let rows: Vec<PreviewRow> = sqlx::query_as!(
+        PreviewRow,
         "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon, portal_kind,
                 status, skip_reason, line_count, new_product_count,
                 tgtcthue, tgtthue, tgtttbso, voucher_no, detail_error
@@ -978,20 +1017,20 @@ pub(crate) async fn preview(
            LEFT JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
           WHERE (? = '' OR hi.posting_date >= ?) AND (? = '' OR hi.posting_date <= ?)
          ORDER BY posting_date DESC, khhdon DESC, shdon DESC",
+        from,
+        from,
+        to,
+        to,
+        from,
+        from,
+        to,
+        to,
     )
-    .bind(&from)
-    .bind(&from)
-    .bind(&to)
-    .bind(&to)
-    .bind(&from)
-    .bind(&from)
-    .bind(&to)
-    .bind(&to)
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-    let days: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_sync_day")
+    let days: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_sync_day")
         .fetch_one(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -1011,7 +1050,7 @@ pub(crate) async fn preview(
             .filter(|r| r.status == "pending")
             .map(|r| r.tgtttbso)
             .sum(),
-        days_cached: days.0 as usize,
+        days_cached: days as usize,
     };
     Ok((rows, summary))
 }

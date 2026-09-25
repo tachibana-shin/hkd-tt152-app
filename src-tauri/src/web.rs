@@ -293,6 +293,7 @@ pub async fn api_invoke(
         ),
         "delete_product" => mx!(commands::catalog::delete_product, body, id: i64),
         "delete_products" => mx!(commands::catalog::delete_products, body, ids: Vec<i64>),
+        "assign_goods_industry" => mx!(commands::catalog::assign_goods_industry, body),
         "next_product_code" => mx!(commands::catalog::next_product_code, body),
         "next_warehouse_code" => mx!(commands::catalog::next_warehouse_code, body),
         "next_customer_code" => mx!(commands::catalog::next_customer_code, body),

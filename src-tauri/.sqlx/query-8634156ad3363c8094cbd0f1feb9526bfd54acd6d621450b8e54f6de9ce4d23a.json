@@ -1,0 +1,116 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon, portal_kind,\n                status, skip_reason, line_count, new_product_count,\n                tgtcthue, tgtthue, tgtttbso, voucher_no, detail_error\n           FROM hddt_purchase_invoice\n          WHERE (? = '' OR posting_date >= ?) AND (? = '' OR posting_date <= ?)\n         UNION ALL\n         SELECT 0, hi.portal_id, hi.posting_date, hi.nbmst, hi.nbten, hi.khhdon, hi.shdon,\n                hi.portal_kind, 'imported', '', hi.line_count, hi.new_product_count,\n                hi.tgtcthue, hi.tgtthue, hi.tgtttbso, COALESCE(iv.voucher_no, ''), ''\n           FROM hddt_imported_invoice hi\n           LEFT JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id\n          WHERE (? = '' OR hi.posting_date >= ?) AND (? = '' OR hi.posting_date <= ?)\n         ORDER BY posting_date DESC, khhdon DESC, shdon DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "portal_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "nbmst",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "nbten",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "khhdon",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "shdon",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "portal_kind",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "skip_reason",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "line_count",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "new_product_count",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "tgtcthue",
+        "ordinal": 12,
+        "type_info": "Float"
+      },
+      {
+        "name": "tgtthue",
+        "ordinal": 13,
+        "type_info": "Float"
+      },
+      {
+        "name": "tgtttbso",
+        "ordinal": 14,
+        "type_info": "Float"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 15,
+        "type_info": "Text"
+      },
+      {
+        "name": "detail_error",
+        "ordinal": 16,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8634156ad3363c8094cbd0f1feb9526bfd54acd6d621450b8e54f6de9ce4d23a"
+}

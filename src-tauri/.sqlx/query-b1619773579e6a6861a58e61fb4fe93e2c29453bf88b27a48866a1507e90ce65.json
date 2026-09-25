@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_sync_day (day, kind, scanned_at) VALUES (?, ?, datetime('now'))\n             ON CONFLICT(day, kind) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b1619773579e6a6861a58e61fb4fe93e2c29453bf88b27a48866a1507e90ce65"
+}

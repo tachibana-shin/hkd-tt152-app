@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET industry_code = ?\n          WHERE is_service = 0 AND (industry_code IS NULL OR industry_code = '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "75e6bf6c9014d690b746b22943512e6fe5cb396d10dbe9dc9d163f54436a5edc"
+}

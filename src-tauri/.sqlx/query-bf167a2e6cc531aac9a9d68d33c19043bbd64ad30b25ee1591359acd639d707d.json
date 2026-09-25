@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice\n                        SET detail_json = ?, line_count = ?, detail_error = ''\n                      WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "bf167a2e6cc531aac9a9d68d33c19043bbd64ad30b25ee1591359acd639d707d"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice SET detail_error = '' WHERE detail_error <> ''",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "e49ca475c11472ddb4295d0d7e05636a67ed53c0d5e62d2ac14127079133608e"
+}

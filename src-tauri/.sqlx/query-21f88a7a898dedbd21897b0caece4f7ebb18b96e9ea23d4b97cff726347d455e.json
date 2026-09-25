@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM hddt_sync_day",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "21f88a7a898dedbd21897b0caece4f7ebb18b96e9ea23d4b97cff726347d455e"
+}

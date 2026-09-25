@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n             (SELECT COUNT(*) FROM stock_lot WHERE product_id = ?) AS lots,\n             (SELECT COUNT(*) FROM invoice_item WHERE product_id = ?) AS invoices,\n             (SELECT COUNT(*) FROM inventory_count_item WHERE product_id = ?) AS counts,\n             (SELECT COUNT(*) FROM journal_entry WHERE product_code = ?) AS entries",
+  "describe": {
+    "columns": [
+      {
+        "name": "lots",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "invoices",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "counts",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "entries",
+        "ordinal": 3,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5652703276032306c07a17d7862a0a8aa98f85fd87983ba7705abcafcc27f589"
+}

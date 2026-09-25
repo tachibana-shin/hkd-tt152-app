@@ -36,7 +36,12 @@ async function ensureLoggedIn(page: Page) {
 
 test("login with a wrong password shows an error toast and stays on the login screen", async ({
   page,
+  request,
 }) => {
+  // Phiên đăng nhập của app là trạng thái chung trong tiến trình server, không
+  // gắn cookie theo browser context → nếu instance cũ còn sống (hoặc test trước
+  // đã login) thì trang mở ra là Dashboard. Đảm bảo đã đăng xuất trước.
+  await request.post("/api/logout", { data: {} });
   await page.goto("/");
   await page.getByTestId("login-username").fill(ADMIN.username);
   await page.getByTestId("login-password").fill("wrong-password");

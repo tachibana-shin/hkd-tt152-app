@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO account (code, name, opening_debit, opening_credit) VALUES (?, ?, ?, ?)\n         ON CONFLICT(code) DO UPDATE SET\n            name = excluded.name,\n            opening_debit = excluded.opening_debit,\n            opening_credit = excluded.opening_credit",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8c7a76f42cbbdc1e818b62599f242948f9c4beca344e160eabd76e656f360fad"
+}

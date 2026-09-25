@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO industry_group (code, name, vat_rate, pit_rate) VALUES (?, ?, ?, ?)\n         ON CONFLICT(code) DO UPDATE SET\n            name = excluded.name, vat_rate = excluded.vat_rate, pit_rate = excluded.pit_rate",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "1df3cf6cf6a9eb85e074c02321e2e9196b92a9a41b54ef8633ae241eef4f5cc9"
+}
