@@ -261,13 +261,99 @@ export interface Invoice {
   customer_tax_code?: string;
   total: number;
   vat_amount: number;
-  status: "draft" | "pasted" | "official";
+  /**
+   * Vòng đời hóa đơn khi phát hành bằng tay qua dịch vụ khác:
+   * draft (nháp) → exported (đã chép sang bên kia, chờ phát hành) →
+   * official (đã có số HĐĐT); nhánh phụ cancelled (đã hủy) và
+   * adjusted (bị sửa bên kia, đã có HĐ thay thế).
+   */
+  status: "draft" | "exported" | "pasted" | "official" | "cancelled" | "adjusted";
   e_invoice_no?: string;
   e_invoice_symbol?: string;
   e_invoice_date?: string;
   /** Số phiếu xuất nguồn khi hóa đơn được lập kèm phiếu xuất (rỗng nếu lập tay). */
   voucher_no?: string;
+  /** Thời điểm bấm "Chép để xuất" sang dịch vụ khác. */
+  exported_at?: string;
+  cancel_reason?: string;
+  adjust_reason?: string;
+  /** Số HĐĐT bên kia liên quan (HĐ thay thế) khi bị hủy/sửa. */
+  ref_invoice?: string;
+  /** Phiếu xuất điều chỉnh đã lập để hủy hóa đơn đã phát hành. */
+  adjust_voucher_no?: string;
   items?: InvoiceItem[];
+}
+
+/** 1 dòng hàng trong gói chép sang dịch vụ HĐĐT khác. */
+export interface InvoiceExportLine {
+  stt: number;
+  product_code: string;
+  product_name: string;
+  /** Tên đã rút gọn theo giới hạn ký tự của dịch vụ bên kia. */
+  export_name: string;
+  unit: string;
+  quantity: number;
+  unit_price: number;
+  discount: number;
+  amount: number;
+  industry_code: string;
+  industry_name: string;
+  vat_rate: number;
+  /** Nhãn thuế sẵn để dán, vd "1% Phân phối, cung cấp hàng hóa". */
+  vat_label: string;
+  remote_code: string;
+  remote_name: string;
+  needs_remote_product: boolean;
+  warnings: string[];
+}
+
+/** Một lỗi/cảnh báo trước khi chép. */
+export interface InvoiceExportCheck {
+  level: "error" | "warn" | "ok";
+  message: string;
+}
+
+/** Gói dữ liệu chép sẵn (text thuần + TSV cho Excel + JSON). */
+export interface InvoiceExportPack {
+  header: {
+    id: number;
+    number: string;
+    date: string;
+    date_vn: string;
+    customer: string;
+    customer_tax_code: string;
+    status: Invoice["status"];
+    total: number;
+    vat_amount: number;
+    e_invoice_no: string;
+    e_invoice_symbol: string;
+    voucher_no: string;
+    biz_name: string;
+    biz_tax_code: string;
+    biz_address: string;
+    biz_phone: string;
+  };
+  lines: InvoiceExportLine[];
+  checks: InvoiceExportCheck[];
+  computed_total: number;
+  computed_vat: number;
+  text: string;
+  tsv: string;
+  json: unknown;
+  export_count: number;
+  /** Hóa đơn đã bị sửa sau lần chép gần nhất → cần sửa lại bên kia. */
+  edited_after_export: boolean;
+}
+
+/** Một bước trong lịch sử trạng thái hóa đơn (đối chiếu lại với bên kia). */
+export interface InvoiceEvent {
+  id: number;
+  at: string;
+  from_status: string;
+  to_status: string;
+  reason: string;
+  actor: string;
+  ref: string;
 }
 
 export interface InvoiceItem {

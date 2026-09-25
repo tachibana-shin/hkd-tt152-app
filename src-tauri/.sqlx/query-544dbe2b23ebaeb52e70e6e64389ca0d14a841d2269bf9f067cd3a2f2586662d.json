@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO product (code, name, unit, industry_code) VALUES (?, ?, 'Cái', 'PPHH')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "544dbe2b23ebaeb52e70e6e64389ca0d14a841d2269bf9f067cd3a2f2586662d"
+}

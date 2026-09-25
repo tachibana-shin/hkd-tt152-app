@@ -19,7 +19,7 @@ import { BASE_URL, MOCK_PORTAL_PORT, WEB_PORT } from "./e2e/playwright/constants
  */
 export default defineConfig({
   testDir: "./e2e/playwright",
-  timeout: 60_000,
+  timeout: 90_000, // app desktop lần chạy đầu (vừa build) chậm hơn 60s
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,

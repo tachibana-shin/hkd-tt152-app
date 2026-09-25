@@ -11,7 +11,8 @@ pub(crate) async fn get_invoices(state: State<'_, AppState>) -> Result<String, S
     let rows: Vec<InvoiceRow> = sqlx::query_as!(
         InvoiceRow,
         "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
-                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no
+                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
+                exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no
          FROM invoice ORDER BY date DESC, id DESC"
     )
     .fetch_all(&*state.pool.read().await)
@@ -28,7 +29,8 @@ pub(crate) async fn get_invoice_detail(
     let inv: InvoiceRow = sqlx::query_as!(
         InvoiceRow,
         "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
-                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no
+                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
+                exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no
          FROM invoice WHERE id = ?",
         id
     )

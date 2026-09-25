@@ -89,11 +89,50 @@ function removeRow(i: number) {
   form.items.splice(i, 1);
 }
 
-const statusBadge = {
-  draft: "secondary" as const,
-  pasted: "info" as const,
-  official: "success" as const,
+const statusBadge: Record<string, "secondary" | "info" | "success" | "danger" | "warn"> = {
+  draft: "secondary",
+  pasted: "info",
+  exported: "info",
+  official: "success",
+  cancelled: "danger",
+  adjusted: "warn",
 };
+const statusText: Record<string, string> = {
+  draft: "Nháp",
+  pasted: "Đã dán",
+  exported: "Đã chép — chờ phát hành",
+  official: "Đã phát hành",
+  cancelled: "Đã hủy",
+  adjusted: "Đã bị sửa bên kia",
+};
+
+// ─── Chép sang dịch vụ HĐĐT khác (kiểm tra trước + bản chốt) ───
+const exportVisible = ref(false);
+const exportTarget = ref<Invoice | null>(null);
+
+function openExport(inv: Invoice) {
+  exportTarget.value = inv;
+  exportVisible.value = true;
+}
+
+// ─── Ghi nhận hủy / bị sửa bên kia ───
+const statusVisible = ref(false);
+const statusMode = ref<"cancelled" | "adjusted">("cancelled");
+const statusTarget = ref<Invoice | null>(null);
+
+function openStatus(inv: Invoice, mode: "cancelled" | "adjusted") {
+  statusTarget.value = inv;
+  statusMode.value = mode;
+  statusVisible.value = true;
+}
+
+async function afterStatusChange() {
+  await invoiceStore.loadInvoices();
+  if (statusTarget.value) {
+    const fresh = invoices.value.find((i) => i.id === statusTarget.value?.id);
+    if (fresh) statusTarget.value = fresh;
+  }
+}
 
 async function save() {
   // Kiểu nhập liên tục (pre-input) luôn để lại dòng trống cuối → bỏ dòng chưa chọn hàng.
@@ -217,7 +256,7 @@ void (async () => {
           paginator
           :rows="10"
           actions-header="Hành động"
-          actions-width="170"
+          actions-width="190"
         >
           <Column field="number" header="Số HĐ">
             <template #body="{ data }">
@@ -238,16 +277,19 @@ void (async () => {
           </Column>
           <Column header="Trạng thái">
             <template #body="{ data }">
-              <Tag
-                :value="
-                  data.status === 'draft'
-                    ? 'Nháp'
-                    : data.status === 'pasted'
-                      ? 'Đã dán'
-                      : 'Đã liên kết HĐĐT'
-                "
-                :severity="statusBadge[data.status as keyof typeof statusBadge] ?? 'secondary'"
-              />
+              <div class="flex flex-col items-start gap-1">
+                <Tag
+                  :value="statusText[data.status] ?? data.status"
+                  :severity="statusBadge[data.status] ?? 'secondary'"
+                />
+                <span
+                  v-if="data.exported_at"
+                  class="text-xs text-gray-400"
+                  :title="`Đã chép sang bên kia lúc ${data.exported_at}`"
+                >
+                  đã chép {{ data.exported_at.slice(0, 16) }}
+                </span>
+              </div>
             </template>
           </Column>
           <Column header="Số HĐĐT">
@@ -260,22 +302,56 @@ void (async () => {
             <template #body="{ data }">{{ data.voucher_no || "—" }}</template>
           </Column>
           <template #actions="{ data }">
-            <Button
-              v-if="auth.canAccounting && data.status === 'draft'"
-              icon="pi pi-link"
-              label="Liên kết HĐĐT"
-              text
-              size="small"
-              severity="success"
-              @click="openLinkHddt(data)"
-            />
-            <Tag
-              v-else-if="data.status === 'official'"
-              value="Đã liên kết"
-              severity="success"
-              icon="pi pi-check"
-            />
-            <span v-else class="text-sm text-gray-400">—</span>
+            <div v-if="auth.canAccounting" class="flex items-center justify-center gap-1">
+              <!-- Hủy rồi thì không chép/liên kết được nữa -->
+              <template v-if="data.status !== 'cancelled'">
+                <Button
+                  icon="pi pi-copy"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Chép sang dịch vụ HĐĐT khác"
+                  v-tooltip="'Chép sang dịch vụ HĐĐT khác'"
+                  @click="openExport(data)"
+                />
+                <Button
+                  v-if="!data.e_invoice_no"
+                  icon="pi pi-link"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Nhập số HĐĐT đã phát hành"
+                  v-tooltip="'Nhập số HĐĐT đã phát hành'"
+                  severity="success"
+                  @click="openLinkHddt(data)"
+                />
+                <Button
+                  v-if="data.e_invoice_no || data.status === 'exported'"
+                  icon="pi pi-ban"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Ghi nhận HĐ đã hủy bên kia"
+                  v-tooltip="'Bên kia đã hủy hóa đơn này'"
+                  severity="danger"
+                  @click="openStatus(data, 'cancelled')"
+                />
+                <Button
+                  v-if="data.e_invoice_no"
+                  icon="pi pi-pencil"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Ghi nhận HĐ bị sửa bên kia"
+                  v-tooltip="'Bên kia đã sửa hóa đơn này'"
+                  severity="warn"
+                  @click="openStatus(data, 'adjusted')"
+                />
+              </template>
+              <span v-else class="text-xs text-gray-500" :title="data.cancel_reason">
+                {{ data.cancel_reason || "Đã hủy" }}
+              </span>
+            </div>
           </template>
           <template #empty
             ><EmptyState text="Chưa có hóa đơn nào." icon="pi pi-receipt"
@@ -457,15 +533,17 @@ void (async () => {
           Hóa đơn <b>{{ linkTarget.number }}</b> — {{ linkTarget.customer || "—" }}. Sau khi lưu,
           chuyển sang trạng thái <b>Đã liên kết HĐĐT</b>.
         </p>
-        <FormField label="Số HĐĐT" required>
+        <FormField label="Số HĐĐT" required input-id="link-hddt-no">
           <InputText
+            :id="'link-hddt-no'"
             v-model="linkForm.hddtNo"
             placeholder="Nhập số hóa đơn điện tử"
             class="w-full"
           />
         </FormField>
-        <FormField label="Ký hiệu HĐĐT">
+        <FormField label="Ký hiệu HĐĐT" input-id="link-hddt-symbol">
           <InputText
+            :id="'link-hddt-symbol'"
             v-model="linkForm.hddtSymbol"
             placeholder="Nhập ký hiệu (VD: 1C24TT152)"
             class="w-full"
@@ -483,6 +561,21 @@ void (async () => {
       kind="customer"
       :show-action="auth.canAccounting"
       @saved="onCustomerSaved"
+    />
+
+    <!-- Chép hóa đơn sang dịch vụ HĐĐT khác: kiểm tra trước + lưu bản chốt -->
+    <InvoiceExportDialog
+      v-model:visible="exportVisible"
+      :invoice="exportTarget"
+      @done="invoiceStore.loadInvoices()"
+    />
+
+    <!-- Ghi nhận hủy / bị sửa bên kia -->
+    <InvoiceStatusDialog
+      v-model:visible="statusVisible"
+      :invoice="statusTarget"
+      :mode="statusMode"
+      @done="afterStatusChange"
     />
   </div>
 </template>

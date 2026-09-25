@@ -11,6 +11,7 @@ pub(crate) mod hddt;
 pub(crate) mod import;
 pub(crate) mod inventory;
 pub(crate) mod invoice;
+pub(crate) mod invoice_export;
 pub(crate) mod payroll;
 pub(crate) mod profile;
 pub(crate) mod settings;

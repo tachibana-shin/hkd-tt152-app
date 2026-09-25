@@ -5,10 +5,18 @@ import { fileURLToPath } from "node:url";
 import { BASE_URL, MOCK_PORTAL_URL } from "./constants";
 import { ADMIN, seedApp } from "./helpers";
 
-// A single worker runs these serially (workers: 1); all 7 tests share one app instance
-// and one server-side login session. seedApp runs once before the whole file.
-test.beforeAll(async () => {
+// A single worker runs these serially (workers: 1); every test shares one app
+// instance and one server-side login session. seedApp runs once for the file.
+test.beforeAll(async ({ browser }) => {
   await seedApp(BASE_URL);
+  // Warm-up: lần chạy đầu tiên app vừa build xong (Rust + Vite) còn chậm, mở 1 lần
+  // để chờ sẵn để test đầu tiên không hết timeout vì thời gian khởi động.
+  const ctx = await browser.newContext();
+  const warmup = await ctx.newPage();
+  await warmup.goto("/", { waitUntil: "domcontentloaded" });
+  await warmup.locator("body").waitFor({ state: "visible", timeout: 60_000 });
+  await warmup.waitForTimeout(1_500);
+  await ctx.close();
 });
 
 /**
@@ -472,6 +480,127 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await dlg.getByRole("button", { name: "In phiếu" }).click();
   await expect(page).toHaveURL(/\/print\/PX9001$/);
   await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
+});
+
+test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản chốt + ghi nhận hủy", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  // 0) Nhập tồn cho SP001 — hóa đơn bán bắt buộc đủ tồn theo kho xuất trên dòng.
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-19",
+      voucher_no: "PN9000",
+      description: "Nhập tồn cho test xuất hóa đơn",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 10, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  // 1) Hóa đơn nháp có 1 dòng hàng (mã hàng phải có sẵn từ seed SP001).
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9001",
+      date: "2026-09-20",
+      customer: "Khách E2E",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 2,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed ${created.status()}: ${await created.text()}`).toBe(
+    true,
+  );
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await expect(page.getByText("HD9001", { exact: true })).toBeVisible();
+
+  // 2) Mở dialog chép: có kiểm tra trước, dòng hàng và khối TSV.
+  const row = page.locator("tr", { has: page.getByText("HD9001", { exact: true }) }).first();
+  await row.getByRole("button", { name: "Chép sang dịch vụ HĐĐT khác" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByText("Chép hóa đơn HD9001 sang dịch vụ khác")).toBeVisible();
+  await expect(dlg.getByText("Khách E2E", { exact: true })).toBeVisible();
+  const exportLine = dlg.locator("tbody tr", { hasText: "Bottled water" });
+  await expect(exportLine.getByRole("cell").nth(1)).toContainText("Bottled water");
+  await expect(exportLine.getByRole("cell").nth(3)).toHaveText("2");
+  await expect(exportLine.getByRole("cell").nth(4)).toHaveText("10.000 đ");
+  await expect(exportLine.getByRole("cell").nth(6)).toHaveText("20.000 đ");
+  await expect(exportLine.getByRole("cell").nth(7)).toHaveText("1% Phân phối, cung cấp hàng hóa");
+  // Cảnh báo mặt hàng chưa khớp ở bên kia (chưa có bảng ánh xạ) — mức warn, vẫn chép được.
+  await expect(
+    dlg.getByText("chưa có mặt hàng tương ứng ở bên kia", { exact: false }).first(),
+  ).toBeVisible();
+
+  // 3) Bấm "Đã chép sang bên kia" → lưu bản chốt, trạng thái chuyển sang đã chép.
+  await dlg.getByRole("button", { name: "Đã chép sang bên kia" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(row.getByText("Đã chép — chờ phát hành", { exact: true })).toBeVisible();
+
+  const afterExport = await (await request.post("/api/get_invoices", { data: {} })).json();
+  const inv = (afterExport as Array<{ number: string; status: string; exported_at: string }>).find(
+    (i) => i.number === "HD9001",
+  );
+  expect(inv?.status).toBe("exported");
+  expect(inv?.exported_at).toBeTruthy();
+
+  // 4) Nhập số HĐĐT đã phát hành → chính thức.
+  await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
+  const linkDlg = page.getByRole("dialog");
+  await linkDlg.getByLabel("Số HĐĐT").fill("00000901");
+  await linkDlg.getByLabel("Ký hiệu HĐĐT").fill("1C26TT152");
+  await linkDlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(row.getByText("Đã phát hành", { exact: true })).toBeVisible();
+
+  // 5) Hủy HĐ đã phát hành: bắt buộc có phiếu xuất điều chỉnh.
+  await row.getByRole("button", { name: "Ghi nhận HĐ đã hủy bên kia" }).click();
+  const cancelDlg = page.getByRole("dialog");
+  await expect(cancelDlg.getByText("đã phát hành", { exact: false }).first()).toBeVisible();
+  await cancelDlg.getByLabel("Lý do hủy").fill("Khách trả lại hàng");
+  await cancelDlg.getByRole("button", { name: "Ghi nhận" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Cần phiếu điều chỉnh", {
+    timeout: 10_000,
+  });
+  await cancelDlg.getByRole("button", { name: "Đóng" }).click();
+
+  // Có số phiếu điều chỉnh → hủa được, trạng thái thành "Đã hủy" + ghi lịch sử.
+  await row.getByRole("button", { name: "Ghi nhận HĐ đã hủy bên kia" }).click();
+  await cancelDlg.getByLabel("Lý do hủy").fill("Khách trả lại hàng");
+  await cancelDlg.getByLabel("Số phiếu xuất điều chỉnh").fill("PX9001");
+  await cancelDlg.getByRole("button", { name: "Ghi nhận" }).click();
+  await expect(row.getByText("Đã hủy", { exact: true })).toBeVisible();
+
+  const events = await (
+    await request.post("/api/invoice_events", { data: { invoiceId: (inv as { id: number }).id } })
+  ).json();
+  const steps = (events as Array<{ to_status: string }>).map((e) => e.to_status);
+  expect(steps).toContain("exported");
+  expect(steps).toContain("cancelled");
 });
 
 // ─── HĐĐT: tra cứu hóa đơn (mock portal offline, E2E_HDDT_LIVE=1 để dùng cổng thật) ───

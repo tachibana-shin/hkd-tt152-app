@@ -57,6 +57,8 @@ declare module 'vue' {
     InputIcon: typeof import('primevue/inputicon')['default']
     InputNumber: typeof import('primevue/inputnumber')['default']
     InputText: typeof import('primevue/inputtext')['default']
+    InvoiceExportDialog: typeof import('./components/InvoiceExportDialog.vue')['default']
+    InvoiceStatusDialog: typeof import('./components/InvoiceStatusDialog.vue')['default']
     LineItemsEditor: typeof import('./components/LineItemsEditor.vue')['default']
     PartnerDialog: typeof import('./components/PartnerDialog.vue')['default']
     PayrollTable: typeof import('./components/PayrollTable.vue')['default']

@@ -398,6 +398,27 @@ pub async fn api_invoke(
             create_invoice: bool,
             invoice: OutboundInvoiceInput
         ),
+        // ── Xuất hóa đơn sang dịch vụ HĐĐT khác (chép tay) ──
+        "invoice_export_pack" => mx!(
+            commands::invoice_export::invoice_export_pack,
+            body,
+            invoice_id: i64
+        ),
+        "invoice_mark_exported" => mx!(
+            commands::invoice_export::invoice_mark_exported,
+            body,
+            invoice_id: i64
+        ),
+        "invoice_events" => mx!(commands::invoice_export::invoice_events, body, invoice_id: i64),
+        "invoice_set_status" => mx!(
+            commands::invoice_export::invoice_set_status,
+            body,
+            invoice_id: i64,
+            to_status: String,
+            reason: String,
+            ref_invoice: String,
+            adjust_voucher_no: String
+        ),
         "get_journal_entries" => mx!(
             commands::stock::get_journal_entries,
             body,

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT from_status, to_status FROM invoice_event WHERE invoice_id = ? ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "name": "from_status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "to_status",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "89b39ed68c87b48a30791ddebd35d45f3d827c3ac96489ed001b62fd7f218843"
+}

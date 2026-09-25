@@ -83,6 +83,8 @@ import type {
   HddtSyncPreview,
   HddtSyncImport,
   HddtSyncClearCache,
+  InvoiceEvent,
+  InvoiceExportPack,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -500,6 +502,28 @@ export const api = {
   createBackup: () => call<string>("create_backup"),
   listBackups: async () => parse<string[]>(await call<string>("list_backups")),
   restoreBackup: (filename: string) => call<string>("restore_backup", { filename }),
+
+  // ─── Xuất hóa đơn sang dịch vụ HĐĐT khác (chép tay) ───
+  invoiceExportPack: async (invoiceId: number) =>
+    parse<InvoiceExportPack>(await call<string>("invoice_export_pack", { invoiceId })),
+  invoiceMarkExported: async (invoiceId: number) =>
+    parse<InvoiceExportPack>(await call<string>("invoice_mark_exported", { invoiceId })),
+  invoiceEvents: async (invoiceId: number) =>
+    parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
+  invoiceSetStatus: (args: {
+    invoiceId: number;
+    toStatus: "cancelled" | "adjusted";
+    reason: string;
+    refInvoice?: string;
+    adjustVoucherNo?: string;
+  }) =>
+    call<string>("invoice_set_status", {
+      invoiceId: args.invoiceId,
+      toStatus: args.toStatus,
+      reason: args.reason,
+      refInvoice: args.refInvoice ?? "",
+      adjustVoucherNo: args.adjustVoucherNo ?? "",
+    }),
 
   // ─── HĐĐT ───
   linkHddt: (args: { invoiceId: number; hddtNo: string; hddtSymbol: string; hddtDate: string }) =>

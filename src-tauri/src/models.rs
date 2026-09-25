@@ -281,6 +281,15 @@ pub(crate) struct InvoiceRow {
     /// Số phiếu xuất nguồn (PX) khi hóa đơn được lập kèm phiếu xuất (rỗng nếu
     /// lập tay từ tab Hóa đơn) — liên kết 1-1, truy vết khi cần.
     pub(crate) voucher_no: String,
+    /// Thời điểm bấm "Chép để xuất" (đã chép dữ liệu sang dịch vụ HĐĐT khác).
+    pub(crate) exported_at: String,
+    /// Lý do hủy / bị sửa bên kia (xem `invoice_event` cho lịch sử đầy đủ).
+    pub(crate) cancel_reason: String,
+    pub(crate) adjust_reason: String,
+    /// Số HĐĐT liên quan (HĐ thay thế) khi bị hủy/sửa.
+    pub(crate) ref_invoice: String,
+    /// Phiếu xuất điều chỉnh dùng để hủy HĐ đã phát hành.
+    pub(crate) adjust_voucher_no: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

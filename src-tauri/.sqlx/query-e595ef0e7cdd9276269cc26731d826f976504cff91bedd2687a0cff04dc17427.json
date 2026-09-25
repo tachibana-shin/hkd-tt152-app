@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice\n              SET status = ?,\n                  cancel_reason = CASE WHEN ? = 'cancelled' THEN ? ELSE cancel_reason END,\n                  adjust_reason = CASE WHEN ? = 'adjusted' THEN ? ELSE adjust_reason END,\n                  ref_invoice = CASE WHEN ? <> '' THEN ? ELSE ref_invoice END,\n                  adjust_voucher_no = CASE WHEN ? <> '' THEN ? ELSE adjust_voucher_no END\n            WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "e595ef0e7cdd9276269cc26731d826f976504cff91bedd2687a0cff04dc17427"
+}

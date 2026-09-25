@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO invoice_export (invoice_id, total, line_count, payload_json, payload_text, payload_tsv)\n           VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "b46919de4ce742d21e0cd2e13fb9ed39a6a7b74210418b747d106a732e3b671b"
+}

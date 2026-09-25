@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT total FROM invoice_export WHERE invoice_id = ? ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "total",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3871ae89f3a5bf8c62eae10d8937253d66d79a25d3a99d3c9f2660eb4d0a36fe"
+}

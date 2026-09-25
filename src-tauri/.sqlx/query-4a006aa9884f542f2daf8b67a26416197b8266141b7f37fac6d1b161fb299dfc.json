@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,\n                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no\n         FROM invoice ORDER BY date DESC, id DESC",
+  "query": "SELECT i.id, i.number, i.date, i.customer, i.customer_tax_code, i.status,\n                  i.total, i.vat_amount, i.e_invoice_no, i.e_invoice_symbol,\n                  i.voucher_no,\n                  COALESCE(b.name, '') AS biz_name, COALESCE(b.tax_code, '') AS biz_tax_code,\n                  COALESCE(b.address, '') AS biz_address, COALESCE(b.phone, '') AS biz_phone\n             FROM invoice i\n             LEFT JOIN business b ON b.id = 1\n            WHERE i.id = ?",
   "describe": {
     "columns": [
       {
@@ -29,19 +29,19 @@
         "type_info": "Text"
       },
       {
-        "name": "total",
+        "name": "status",
         "ordinal": 5,
-        "type_info": "Float"
+        "type_info": "Text"
       },
       {
-        "name": "vat_amount",
+        "name": "total",
         "ordinal": 6,
         "type_info": "Float"
       },
       {
-        "name": "status",
+        "name": "vat_amount",
         "ordinal": 7,
-        "type_info": "Text"
+        "type_info": "Float"
       },
       {
         "name": "e_invoice_no",
@@ -54,20 +54,38 @@
         "type_info": "Text"
       },
       {
-        "name": "e_invoice_date",
+        "name": "voucher_no",
         "ordinal": 10,
         "type_info": "Text"
       },
       {
-        "name": "voucher_no",
+        "name": "biz_name",
         "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "biz_tax_code",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "biz_address",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "biz_phone",
+        "ordinal": 14,
         "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
+      false,
+      false,
+      false,
       false,
       false,
       false,
@@ -82,5 +100,5 @@
       false
     ]
   },
-  "hash": "9b8f880d150308fd60ffb95aa233c244a79603d14cd7cd24bc9c022453c764e8"
+  "hash": "4a006aa9884f542f2daf8b67a26416197b8266141b7f37fac6d1b161fb299dfc"
 }

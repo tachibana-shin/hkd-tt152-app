@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice_item SET quantity = 3.0 WHERE invoice_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d392604741c2f7b37d5cd921e35b9c7e15012727f39c5fc5c2d425dfa69be295"
+}

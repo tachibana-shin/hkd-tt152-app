@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.code, ii.quantity, ii.unit_price\n             FROM invoice_item ii JOIN product p ON p.id = ii.product_id\n            WHERE ii.invoice_id = ? ORDER BY ii.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e54abb979f5af2604f92e5baebe6ddbcf52b9f0d90d54e86f8b621fd2b18afd1"
+}
