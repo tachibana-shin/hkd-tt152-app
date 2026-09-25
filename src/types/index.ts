@@ -332,7 +332,6 @@ export interface InvoiceExportPack {
   lines: InvoiceExportLine[];
   checks: InvoiceExportCheck[];
   computed_total: number;
-  computed_vat: number;
   /** Khối dán vào ô text tự do bên kia: mỗi dòng 1 dòng hàng, không kèm thuế suất. */
   paste: string;
   paste_layout: string;

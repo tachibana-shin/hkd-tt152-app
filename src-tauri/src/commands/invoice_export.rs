@@ -4,9 +4,12 @@
 //! gom phần "chuẩn bị chép": `preflight` kiểm tra trước khi chép (MST người
 //! mua, tổng tiền khớp tổng dòng, nhóm ngành — bên kia chắc chắn từ chối hóa
 //! đơn thiếu những thứ này), `build_pack` dựng sẵn đúng nội dung cần nhập
-//! (text thuần để dán vào ô tự do, TSV để dán vào bảng — Excel tự tách cột,
-//! và JSON). Tên hàng giữ nguyên vẹn (chỉ gộp khoảng trắng thừa) vì dịch vụ
-//! bên kia không giới hạn số ký tự.
+//! (khối dán cho ô text tự do, text đầy đủ và JSON). Tên hàng giữ nguyên vẹn
+//! (chỉ gộp khoảng trắng thừa) vì dịch vụ bên kia không giới hạn số ký tự.
+//!
+//! Hóa đơn bán của hộ KHÔNG tách thuế: `total` là số tiền khách trả, thuế tính
+//! cuối kỳ theo tỷ lệ % × doanh thu. Vì vậy khối dán không có cột thuế và
+//! không có "tổng thanh toán" — chỉ có tổng tiền.
 //!
 //! Bấm "Chép để xuất" gọi `mark_exported`: lưu bản chốt vào `invoice_export` và
 //! chuyển `draft` → `exported`. Từ đó nếu sửa hóa đơn thì `build_pack` báo
@@ -224,7 +227,6 @@ pub(crate) struct ExportPack {
     pub(crate) checks: Vec<ExportCheck>,
     /// Tổng tiền tính lại từ dòng (đối chiếu với `header.total`).
     pub(crate) computed_total: f64,
-    pub(crate) computed_vat: f64,
     /// Khối dán vào ô text tự do bên kia: mỗi dòng 1 dòng hàng, cột tách theo
     /// `paste_sep`, không chứa thuế suất (bên kia không nhập, tự áp tỷ lệ %).
     pub(crate) paste: String,
@@ -398,23 +400,6 @@ fn build_checks(header: &ExportHeader, lines: &[ExportLine]) -> Vec<ExportCheck>
         });
     }
 
-    // Bên kia không nhập thuế suất từng dòng, chỉ áp 1 tỷ lệ % đã khai cho cả
-    // hóa đơn. Hóa đơn trộn nhiều nhóm ngành sẽ ra số thuế khác với cách tính
-    // của app → nên tách hóa đơn theo nhóm ngành.
-    let mut rates: Vec<String> = lines.iter().map(|l| fmt_pct(l.vat_rate)).collect();
-    rates.sort();
-    rates.dedup();
-    if rates.len() > 1 {
-        checks.push(ExportCheck {
-            level: "warn".into(),
-            message: format!(
-                "Dòng có {} mức thuế suất ({}) nhưng bên kia chỉ áp 1 tỷ lệ cho cả hóa đơn — tách hóa đơn theo nhóm ngành để số thuế khớp",
-                rates.len(),
-                rates.join(", ")
-            ),
-        });
-    }
-
     if header.status == "cancelled" {
         checks.push(ExportCheck {
             level: "error".into(),
@@ -437,7 +422,7 @@ fn build_checks(header: &ExportHeader, lines: &[ExportLine]) -> Vec<ExportCheck>
     checks
 }
 
-fn render_text(header: &ExportHeader, lines: &[ExportLine], computed_vat: f64) -> String {
+fn render_text(header: &ExportHeader, lines: &[ExportLine]) -> String {
     let mut s = String::new();
     s.push_str("BỞI XUẤT HÓA ĐƠN (dữ liệu để nhập sang dịch vụ khác)\n");
     s.push_str(&format!("Hóa đơn nội bộ: {}\n", header.number));
@@ -453,26 +438,22 @@ fn render_text(header: &ExportHeader, lines: &[ExportLine], computed_vat: f64) -
     ));
     s.push_str("Phương thức thanh toán: Chuyển khoản\n\n");
     s.push_str("DÒNG HÀNG (cột cách nhau bằng TAB):\n");
-    s.push_str("STT\tTên hàng\tĐVT\tSL\tĐơn giá\tChiết khấu\tThành tiền\tThuế\n");
+    s.push_str("STT\tTên hàng\tĐVT\tSL\tĐơn giá\tChiết khấu\tThành tiền\n");
     for l in lines {
         s.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             l.stt,
             l.product_name,
             l.unit,
             fmt_qty(l.quantity),
             fmt_money(l.unit_price),
             fmt_money(l.discount),
-            fmt_money(l.amount),
-            l.vat_label
+            fmt_money(l.amount)
         ));
     }
-    s.push_str(&format!(
-        "\nTổng tiền trước thuế: {}\nThuế GTGT: {}\nTỔNG THANH TOÁN: {}\n",
-        fmt_money(header.total),
-        fmt_money(computed_vat),
-        fmt_money(header.total + computed_vat)
-    ));
+    // Không tách thuế trên hóa đơn (hộ kê theo doanh thu) — tổng là số tiền khách
+    // trả, không cộng thêm thuế tính cuối kỳ.
+    s.push_str(&format!("\nTổng tiền: {}\n", fmt_money(header.total)));
     s
 }
 
@@ -525,8 +506,7 @@ pub(crate) async fn build_pack(
     let (header, lines) = load_header_and_lines(pool, invoice_id).await?;
     let checks = build_checks(&header, &lines);
     let computed_total: f64 = lines.iter().map(|l| l.amount).sum();
-    let computed_vat: f64 = lines.iter().map(|l| l.amount * l.vat_rate).sum();
-    let text = render_text(&header, &lines, computed_vat);
+    let text = render_text(&header, &lines);
     let paste = render_paste(&lines, layout, sep_char);
     let json = json!({
         "number": header.number,
@@ -535,8 +515,7 @@ pub(crate) async fn build_pack(
         "payment_method": "Chuyển khoản",
         "lines": lines,
         "paste": { "layout": layout, "separator": sep, "columns": columns, "block": paste },
-        "total_before_vat": header.total,
-        "vat_amount": computed_vat,
+        "total": header.total,
     });
 
     let export_count: i64 = sqlx::query_scalar!(
@@ -569,7 +548,6 @@ pub(crate) async fn build_pack(
         paste_sep: sep.to_string(),
         paste_columns: columns.iter().map(|c| c.to_string()).collect(),
         computed_total,
-        computed_vat,
         text,
         json,
         export_count,
@@ -999,8 +977,14 @@ mod tests {
         let pack = build_pack(&pool, id, "full", "\t").await.unwrap();
         assert_eq!(pack.lines.len(), 2);
         assert!(pack.text.contains("Bình NN Rossi"));
-        assert!(pack.text.contains("TỔNG THANH TOÁN: 30.300")); // 30.000 + 1% thuế
-                                                                // Khối dán: mỗi dòng 1 dòng hàng, 6 cột theo bố cục "full".
+        // Hóa đơn bán của hộ không tách thuế: tổng là số tiền khách trả.
+        assert!(pack.text.contains("Tổng tiền: 30.000"));
+        assert!(
+            !pack.text.to_lowercase().contains("thuế"),
+            "khối dán không được nhắc thuế: {}",
+            pack.text
+        );
+        // Khối dán: mỗi dòng 1 dòng hàng, 6 cột theo bố cục "full".
         let paste_lines: Vec<&str> = pack.paste.trim().lines().collect();
         assert_eq!(paste_lines.len(), 2);
         assert_eq!(paste_lines[0].split('\t').count(), 6);
@@ -1056,34 +1040,6 @@ mod tests {
         // Với Tab thì dấu phẩy trong tên vô hại, giữ nguyên.
         let pack = build_pack(&pool, id, "no_discount", "\t").await.unwrap();
         assert!(pack.paste.starts_with("Bình lọc, loại lớn\t"));
-    }
-
-    #[tokio::test]
-    async fn canh_bao_trong_hop_khi_dong_nhieu_muc_thue_suat() {
-        // Bên kia chỉ áp 1 tỷ lệ % cho cả hóa đơn → hóa đơn trộn nhóm ngành thì
-        // số thuế sẽ lệch với cách tính của app.
-        let pool = test_pool().await;
-        let id = seed_invoice(&pool, "HD0012", 30_000.0).await;
-        add_line(&pool, id, "P1", "Hàng 1%", 1.0, 10_000.0).await;
-        add_line(&pool, id, "P2", "Dịch vụ 5%", 1.0, 20_000.0).await;
-        // Chỉ dòng dịch vụ chuyển sang 5%; dòng hàng hóa giữ 1% của PPHH.
-        sqlx::query!(
-            "UPDATE invoice_item SET vat_rate = 0.05 WHERE invoice_id = ? AND unit_price = 20000.0",
-            id
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let pack = build_pack(&pool, id, "full", "\t").await.unwrap();
-        let warn = pack
-            .checks
-            .iter()
-            .find(|c| c.level == "warn")
-            .map(|c| c.message.clone())
-            .unwrap_or_default();
-        assert!(warn.contains("mức thuế suất"), "{warn:?}");
-        assert!(warn.contains("tách hóa đơn"), "{warn:?}");
     }
 
     #[tokio::test]

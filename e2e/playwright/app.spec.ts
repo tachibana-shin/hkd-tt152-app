@@ -625,7 +625,11 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   await expect(exportLine.getByRole("cell").nth(3)).toHaveText("2");
   await expect(exportLine.getByRole("cell").nth(4)).toHaveText("10.000 đ");
   await expect(exportLine.getByRole("cell").nth(6)).toHaveText("20.000 đ");
+  // Cột thuế suất chỉ là cơ sở kê cuối kỳ — hóa đơn không tách thuế.
   await expect(exportLine.getByRole("cell").nth(7)).toHaveText("1% Phân phối, cung cấp hàng hóa");
+  await expect(dlg.getByText("Tổng tiền (khách trả)")).toBeVisible();
+  await expect(dlg.getByText("20.000 đ", { exact: true }).first()).toBeVisible();
+  await expect(dlg.getByText("20.200 đ")).toHaveCount(0);
 
   // Khối dán mặc định: "Tên · ĐVT · SL · Đơn giá · Thành tiền", tách bằng dấu phẩy,
   // số không dấu phân cách nghìn, không kèm thuế suất (bên kia tự áp tỷ lệ %).

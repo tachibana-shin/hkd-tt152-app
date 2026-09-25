@@ -220,18 +220,8 @@ async function markExported() {
           <div class="font-medium">{{ pack.header.date_vn }}</div>
         </div>
         <div>
-          <div class="text-gray-500">Tổng (chưa thuế)</div>
-          <div class="font-medium">{{ fmtVnd(pack.header.total) }}</div>
-        </div>
-        <div>
-          <div class="text-gray-500">Thuế GTGT</div>
-          <div class="font-medium">{{ fmtVnd(pack.computed_vat) }}</div>
-        </div>
-        <div>
-          <div class="text-gray-500">Tổng thanh toán</div>
-          <div class="font-semibold">
-            {{ fmtVnd(pack.header.total + pack.computed_vat) }}
-          </div>
+          <div class="text-gray-500">Tổng tiền (khách trả)</div>
+          <div class="font-semibold">{{ fmtVnd(pack.header.total) }}</div>
         </div>
       </div>
 
@@ -247,7 +237,12 @@ async function markExported() {
               <th class="w-28 px-2 py-1 text-right">Đơn giá</th>
               <th class="w-24 px-2 py-1 text-right">Chiết khấu</th>
               <th class="w-28 px-2 py-1 text-right">Thành tiền</th>
-              <th class="px-2 py-1 text-left">Thuế</th>
+              <th
+                class="px-2 py-1 text-left"
+                title="Cơ sở tính thuế cuối kỳ — không có trên hóa đơn"
+              >
+                Thuế suất (kê cuối kỳ)
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -334,8 +329,8 @@ async function markExported() {
         </div>
         <Textarea :model-value="body" readonly rows="8" class="w-full font-mono text-xs" />
         <p class="mt-1 text-xs text-gray-500">
-          Khối dán không kèm thuế suất — bên kia tự áp tỷ lệ % đã khai trong hồ sơ. Số viết không
-          dấu phân cách nghìn để máy đọc đúng.
+          Hóa đơn bán không tách thuế: tổng tiền là số tiền khách trả, thuế tính cuối kỳ theo tỷ lệ
+          % × doanh thu. Số trong khối dán viết không dấu phân cách nghìn để máy đọc đúng.
         </p>
       </div>
     </div>
