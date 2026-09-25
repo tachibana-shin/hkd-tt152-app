@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice SET status = 'exported' WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4218c31dfd454485d9193f4e0e1c89fbdc8a5d199f126924e6edb062167c28ae"
+}

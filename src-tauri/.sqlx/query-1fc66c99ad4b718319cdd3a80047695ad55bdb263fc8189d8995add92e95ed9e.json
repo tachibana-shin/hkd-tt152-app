@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice SET status = 'draft', e_invoice_no = '00000001' WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1fc66c99ad4b718319cdd3a80047695ad55bdb263fc8189d8995add92e95ed9e"
+}

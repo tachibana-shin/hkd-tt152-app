@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM invoice_item WHERE invoice_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2160c3fc009157e25daac5ccce02b6401e02f7264b759cbf97572452fbbd87c9"
+}

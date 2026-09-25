@@ -17,6 +17,7 @@ const toast = useToast();
 const draftDialog = ref(false);
 const detailDialog = ref(false);
 const saving = ref(false);
+const confirm = useConfirm();
 
 // ─── Thêm khách hàng nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
 const customerDialog = ref(false);
@@ -124,6 +125,31 @@ function openStatus(inv: Invoice, mode: "cancelled" | "adjusted") {
   statusTarget.value = inv;
   statusMode.value = mode;
   statusVisible.value = true;
+}
+
+// ─── Xoá hóa đơn nháp ───
+// Hóa đơn bán không trừ kho/không ghi bút toán nên xoá nháp không ảnh hưởng sổ
+// sách; các trạng thái sau nháp (đã chép, đã phát hành) đi luồng hủy/điều chỉnh.
+function removeInvoice(inv: Invoice) {
+  confirm.require({
+    header: "Xoá hóa đơn nháp",
+    message: `Xoá hóa đơn nháp ${inv.number} (${fmtVnd(inv.total)})? Chỉ xoá được khi hóa đơn còn ở trạng thái nháp.`,
+    icon: "pi pi-exclamation-triangle",
+    acceptLabel: "Xoá",
+    rejectLabel: "Hủy",
+    accept: async () => {
+      try {
+        await invoiceStore.deleteInvoice(inv.id);
+        toast.add({
+          severity: "success",
+          summary: "Đã xoá hóa đơn nháp",
+          detail: inv.number,
+        });
+      } catch (e) {
+        toast.add({ severity: "error", summary: "Không xoá được", detail: String(e) });
+      }
+    },
+  });
 }
 
 async function afterStatusChange() {
@@ -346,6 +372,18 @@ void (async () => {
                   v-tooltip="'Bên kia đã sửa hóa đơn này'"
                   severity="warn"
                   @click="openStatus(data, 'adjusted')"
+                />
+                <!-- Nháp thì xoá được; các trạng thái sau nháp giữ lại dấu vết -->
+                <Button
+                  v-if="data.status === 'draft'"
+                  icon="pi pi-trash"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Xoá hóa đơn nháp"
+                  v-tooltip="'Xoá hóa đơn nháp'"
+                  severity="danger"
+                  @click="removeInvoice(data)"
                 />
               </template>
               <span v-else class="text-xs text-gray-500" :title="data.cancel_reason">

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity FROM stock_lot",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "571ba4a0fa387032fd49f039d5b6c5d3e0f1e1e48e3c77dabe6bd8399e02400f"
+}

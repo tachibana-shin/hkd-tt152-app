@@ -444,6 +444,7 @@ export const api = {
 
   // ─── INVOICES ───
   getInvoices: async () => parse<Invoice[]>(await call<string>("get_invoices")),
+  deleteInvoice: (id: number) => call<string>("delete_invoice", { id }),
   getInvoiceDetail: async (id: number) =>
     parse<{ invoice: Invoice; items: InvoiceItem[] }>(
       await call<string>("get_invoice_detail", { id }),

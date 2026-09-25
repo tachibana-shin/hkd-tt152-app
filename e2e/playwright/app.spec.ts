@@ -482,6 +482,80 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
 });
 
+test("Hóa đơn nháp: nút xoá dọn cả dòng hàng, hóa đơn đã xử lý thì không có nút xoá", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  // Nhập tồn cho SP001 — hóa đơn bán bắt buộc đủ tồn theo kho xuất trên dòng.
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-19",
+      voucher_no: "PN9100",
+      description: "Nhập tồn cho test xoá hóa đơn nháp",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 5, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9100",
+      date: "2026-09-20",
+      customer: "Khách Xoá nháp",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed ${created.status()}: ${await created.text()}`).toBe(
+    true,
+  );
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const row = page.locator("tr", { has: page.getByText("HD9100", { exact: true }) }).first();
+  await expect(row.getByText("Nháp", { exact: true })).toBeVisible();
+
+  // Bấm xoá → hộp xác nhận nêu rõ số hóa đơn và số tiền.
+  await row.getByRole("button", { name: "Xoá hóa đơn nháp" }).click();
+  const confirmBox = page.locator(".p-confirmdialog");
+  await expect(confirmBox.getByText("Xoá hóa đơn nháp HD9100")).toBeVisible();
+  await confirmBox.getByRole("button", { name: "Xoá", exact: true }).click();
+  await expect(row).toHaveCount(0);
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã xoá hóa đơn nháp");
+
+  // Backend cũng phải sạch: hóa đơn biến mất khỏi danh sách (dòng hàng xoá theo).
+  const after = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    number: string;
+  }>;
+  expect(after.map((i) => i.number)).not.toContain("HD9100");
+});
+
 test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản chốt + ghi nhận hủy", async ({
   page,
   request,

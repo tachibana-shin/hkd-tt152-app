@@ -223,6 +223,65 @@ pub(crate) async fn save_invoice(
     Ok(res.to_string())
 }
 
+/// Xoá hóa đơn NHÁP. An toàn về sổ sách: hóa đơn bán chỉ ghi bảng `invoice` +
+/// `invoice_item` (không trừ kho, không ghi bút toán — phiếu xuất là chứng tử riêng),
+/// nên xoá nháp không đụng tồn kho hay kế toán.
+///
+/// Chỉ xoá được `draft`: đã chép sang bên kia (`exported`) hoặc đã phát hành
+/// (`official`/`adjusted`) thì phải đi theo luồng hủy / điều chỉnh để còn dấu vết.
+async fn delete_invoice_core(pool: &SqlitePool, id: i64) -> Result<String, String> {
+    let inv = sqlx::query!(
+        "SELECT number, status, e_invoice_no FROM invoice WHERE id = ?",
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    if inv.status != "draft" {
+        return Err(format!(
+            "Chỉ xoá được hóa đơn nháp — {} đang ở trạng thái đã xử lý. Hãy dùng 'ghi nhận hủy' hoặc 'bị sửa bên kia' để giữ dấu vết đối chiếu",
+            inv.number
+        ));
+    }
+    if !inv.e_invoice_no.trim().is_empty() {
+        return Err(format!(
+            "{} đã có số HĐĐT {} — không xoá được",
+            inv.number, inv.e_invoice_no
+        ));
+    }
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Nháp chưa từng chép/hủy nên 2 bảng này thường rỗng; xoá phòng khi có để không
+    // còn dòng mồ côi.
+    sqlx::query!("DELETE FROM invoice_export WHERE invoice_id = ?", id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query!("DELETE FROM invoice_event WHERE invoice_id = ?", id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query!("DELETE FROM invoice_item WHERE invoice_id = ?", id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query!("DELETE FROM invoice WHERE id = ?", id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(inv.number)
+}
+
+#[tauri::command]
+pub(crate) async fn delete_invoice(state: State<'_, AppState>, id: i64) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let number = delete_invoice_core(&*state.pool.read().await, id).await?;
+    audit(&state, "delete", "invoice", &number).await;
+    Ok("ok".into())
+}
+
 /// Ghi nhận số HĐĐT cho hóa đơn nháp → trạng thái 'official'
 #[tauri::command]
 pub(crate) async fn link_hddt(
@@ -371,5 +430,103 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wh, "");
+    }
+
+    /// Lập 1 hóa đơn nháp có dòng hàng, trả về id.
+    async fn seed_draft(pool: &SqlitePool, number: &str) -> i64 {
+        let p = seed_product(pool, "HD-DEL", "Hàng xoá", 0.01).await;
+        let w = seed_warehouse(pool, "W1", "Kho 1").await;
+        add_stock_lot(pool, p, w, 100.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            pool,
+            number,
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-DEL", 1.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .expect("lập được hóa đơn nháp");
+        let id: i64 = sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM invoice WHERE number = ?"#,
+            number
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn xoa_hoa_don_nhap_xoa_ca_dong_hang() {
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDDEL1").await;
+
+        assert_eq!(delete_invoice_core(&pool, id).await.unwrap(), "HDDEL1");
+
+        let left: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM invoice WHERE id = ?", id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "hóa đơn phải bị xoá");
+        let lines: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM invoice_item WHERE invoice_id = ?", id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            lines, 0,
+            "dòng hàng phải xoá theo, không để lại dòng mồ côi"
+        );
+    }
+
+    #[tokio::test]
+    async fn xoa_hoa_don_nhap_khong_dung_ton_kho() {
+        // Hóa đơn bán không trừ kho: xoá nháp phải không đụng tồn (phiếu xuất mới
+        // làm thay đổi tồn), nên số lô vẫn nguyên.
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDDEL2").await;
+        let before: f64 = sqlx::query_scalar!("SELECT quantity FROM stock_lot")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        delete_invoice_core(&pool, id).await.unwrap();
+
+        let after: f64 = sqlx::query_scalar!("SELECT quantity FROM stock_lot")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(after, before);
+    }
+
+    #[tokio::test]
+    async fn khong_xoa_duoc_hoa_don_da_xuat_hoac_da_phat_hanh() {
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDDEL3").await;
+        sqlx::query!("UPDATE invoice SET status = 'exported' WHERE id = ?", id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = delete_invoice_core(&pool, id).await.unwrap_err();
+        assert!(err.contains("Chỉ xoá được hóa đơn nháp"), "{err}");
+
+        // Còn số HĐĐT thì chặn dù trạng thái vẫn là nháp.
+        sqlx::query!(
+            "UPDATE invoice SET status = 'draft', e_invoice_no = '00000001' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let err = delete_invoice_core(&pool, id).await.unwrap_err();
+        assert!(err.contains("đã có số HĐĐT"), "{err}");
+
+        let still: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM invoice WHERE id = ?", id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(still, 1, "hóa đơn bị chặn phải còn nguyên");
     }
 }

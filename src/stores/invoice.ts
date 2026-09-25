@@ -40,6 +40,12 @@ export const useInvoiceStore = defineStore("invoice", () => {
     return res;
   }
 
+  /** Xoá hóa đơn nháp. Backend chặn mọi trạng thái khác (đã chép/đã phát hành). */
+  async function deleteInvoice(id: number) {
+    await api.deleteInvoice(id);
+    await loadInvoices();
+  }
+
   async function loadCounts() {
     counts.value = await api.getInventoryCounts();
   }
@@ -67,6 +73,7 @@ export const useInvoiceStore = defineStore("invoice", () => {
     loadInvoices,
     loadDetail,
     saveDraft,
+    deleteInvoice,
     loadCounts,
     loadCountDetail,
     saveCount,

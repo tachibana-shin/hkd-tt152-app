@@ -123,6 +123,7 @@ pub fn run() {
             commands::catalog::delete_product,
             commands::catalog::delete_products,
             commands::catalog::assign_goods_industry,
+            commands::invoice::delete_invoice,
             commands::invoice_export::invoice_export_pack,
             commands::invoice_export::invoice_mark_exported,
             commands::invoice_export::invoice_events,

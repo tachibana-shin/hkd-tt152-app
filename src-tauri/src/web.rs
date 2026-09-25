@@ -448,6 +448,7 @@ pub async fn api_invoke(
 
         // ── Hóa đơn ──
         "get_invoices" => mx!(commands::invoice::get_invoices, body),
+        "delete_invoice" => mx!(commands::invoice::delete_invoice, body, id: i64),
         "get_invoice_detail" => mx!(commands::invoice::get_invoice_detail, body, id: i64),
         "save_invoice" => mx!(
             commands::invoice::save_invoice,
