@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT name, unit, is_service FROM product",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_service",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9bbd055efad0f823a2771cdcede33d0acab9e9445e7aef121798e52a7a0de4c0"
+}

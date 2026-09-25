@@ -43,43 +43,44 @@ pub(crate) fn identity_key(name: &str, unit: &str) -> String {
 /// mặt hàng mới thay vì nhập nhầm. Chuẩn hoá bằng Rust (không dùng `lower()`
 /// của SQLite vì chỉ hỗ trợ ASCII, lệch với tiếng Việt có dấu).
 pub(crate) async fn ensure_product_identity_keys(pool: &SqlitePool) -> Result<(), String> {
-    let rows: Vec<(i64, String, String, String)> =
-        sqlx::query_as("SELECT id, name, unit, identity_key FROM product")
-            .fetch_all(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+    let rows = sqlx::query!("SELECT id, name, unit, identity_key FROM product")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // nhóm (key) -> id nhỏ nhất
     let mut winner: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-    for (id, name, unit, _) in &rows {
-        if name.trim().is_empty() {
+    for r in &rows {
+        if r.name.trim().is_empty() {
             continue;
         }
-        let key = identity_key(name, unit);
+        let key = identity_key(&r.name, &r.unit);
         winner
             .entry(key)
-            .and_modify(|min| *min = (*min).min(*id))
-            .or_insert(*id);
+            .and_modify(|min| *min = (*min).min(r.id))
+            .or_insert(r.id);
     }
 
-    for (id, name, unit, current) in rows {
-        let want = if name.trim().is_empty() {
+    for r in rows {
+        let want = if r.name.trim().is_empty() {
             String::new()
         } else {
-            let key = identity_key(&name, &unit);
-            if winner.get(&key) == Some(&id) {
+            let key = identity_key(&r.name, &r.unit);
+            if winner.get(&key) == Some(&r.id) {
                 key
             } else {
                 String::new()
             }
         };
-        if current != want {
-            sqlx::query("UPDATE product SET identity_key = ? WHERE id = ?")
-                .bind(&want)
-                .bind(id)
-                .execute(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+        if r.identity_key != want {
+            sqlx::query!(
+                "UPDATE product SET identity_key = ? WHERE id = ?",
+                want,
+                r.id
+            )
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -1062,7 +1063,14 @@ mod tests {
 
     /// Chèn 1 hóa đơn cache + chi tiết giả, chạy import, kiểm tra chuỗi liên kết.
     async fn seed_invoice(pool: &SqlitePool, portal_id: &str, tthai: i64, lines: &str) -> i64 {
-        sqlx::query(
+        let status = if tthai == 1 { "pending" } else { "manual" };
+        let line_count = serde_json::from_str::<Value>(&format!("[{lines}]"))
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len() as i64;
+        let detail = format!("{{\"hdhhdvu\":[{lines}]}}");
+        sqlx::query!(
             "INSERT INTO hddt_purchase_invoice
                 (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
                  khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue, ttcktmai,
@@ -1070,35 +1078,31 @@ mod tests {
              VALUES (?, 'regular', '2026-09-01T17:00:00Z', '2026-09-02', '0106773786',
                      'Cty TNHH ABC', '001170019085', 1, 'C26ABC', '001', 1, 1,
                      100000, 8000, 0, 108000, ?, '', ?, '{}', ?)",
+            portal_id,
+            status,
+            line_count,
+            detail
         )
-        .bind(portal_id)
-        .bind(if tthai == 1 { "pending" } else { "manual" })
-        .bind(
-            serde_json::from_str::<Value>(&format!("[{lines}]"))
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .len() as i64,
-        )
-        .bind(format!("{{\"hdhhdvu\":[{lines}]}}"))
         .execute(pool)
         .await
         .unwrap();
-        let id: (i64,) = sqlx::query_as("SELECT id FROM hddt_purchase_invoice WHERE portal_id = ?")
-            .bind(portal_id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-        id.0
+        sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM hddt_purchase_invoice WHERE portal_id = ?"#,
+            portal_id
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
     }
 
     async fn load(pool: &SqlitePool, id: i64) -> CachedInvoice {
-        sqlx::query_as(
-            "SELECT id, portal_id, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
-                    status, detail_json
-             FROM hddt_purchase_invoice WHERE id = ?",
+        sqlx::query_as!(
+            CachedInvoice,
+            r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                 FROM hddt_purchase_invoice WHERE id = ?"#,
+            id
         )
-        .bind(id)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -1122,68 +1126,75 @@ mod tests {
         assert!(out.voucher_no.starts_with("PN"), "số phiếu = PN…");
 
         // Đầu phiếu tồn tại và bút toán được gắn inbound_voucher_id.
-        let header: (i64, f64, String) =
-            sqlx::query_as("SELECT id, total, source FROM inbound_voucher WHERE voucher_no = ?")
-                .bind(&out.voucher_no)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(header.2, "manual"); // save_inbound_core ghi source mặc định
-        let linked: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM journal_entry WHERE inbound_voucher_id = ?")
-                .bind(header.0)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(linked.0 > 0, "phải có bút toán gắn với đầu phiếu");
-
-        // Hóa đơn chính thức nằm ở bảng riêng, liên kết chặt với phiếu nhập;
-        // dòng cache tương ứng bị xoá.
-        let inv: (i64, i64) = sqlx::query_as(
-            "SELECT inbound_voucher_id, new_product_count
-               FROM hddt_imported_invoice WHERE portal_id = 'uuid-1'",
+        let header = sqlx::query!(
+            r#"SELECT id as "id!", total, source FROM inbound_voucher WHERE voucher_no = ?"#,
+            out.voucher_no
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(inv.0, header.0, "FK hóa đơn → phiếu nhập phải khớp");
-        assert_eq!(inv.1, 1);
-        let cache_left: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(cache_left.0, 0, "hóa đơn đã nhập không nằm lại trong cache");
+        assert_eq!(header.source, "manual"); // save_inbound_core ghi source mặc định
+        let linked: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM journal_entry WHERE inbound_voucher_id = ?",
+            header.id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(linked > 0, "phải có bút toán gắn với đầu phiếu");
+
+        // Hóa đơn chính thức nằm ở bảng riêng, liên kết chặt với phiếu nhập;
+        // dòng cache tương ứng bị xoá.
+        let inv = sqlx::query!(
+            "SELECT inbound_voucher_id, new_product_count
+               FROM hddt_imported_invoice WHERE portal_id = 'uuid-1'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            inv.inbound_voucher_id, header.id,
+            "FK hóa đơn → phiếu nhập phải khớp"
+        );
+        assert_eq!(inv.new_product_count, 1);
+        let cache_left: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cache_left, 0, "hóa đơn đã nhập không nằm lại trong cache");
 
         // NCC tự tạo theo MST.
-        let ncc: (String,) = sqlx::query_as("SELECT code FROM supplier WHERE code = ?")
-            .bind("0106773786")
-            .fetch_one(&pool)
-            .await
-            .expect("NCC phải được tạo tự động");
-        assert_eq!(ncc.0, "0106773786");
-
-        // Mặt hàng lưu khoá danh tính + mã cổng.
-        let p: (String, String, String) =
-            sqlx::query_as("SELECT code, identity_key, portal_code FROM product WHERE name = ?")
-                .bind("Bình NN Rossi")
+        let ncc: String =
+            sqlx::query_scalar!(r#"SELECT code FROM supplier WHERE code = '0106773786'"#)
                 .fetch_one(&pool)
                 .await
-                .unwrap();
-        assert_eq!(p.1, identity_key("Bình NN Rossi", "Cái"));
-        assert_eq!(p.2, "puro30SL");
+                .expect("NCC phải được tạo tự động");
+        assert_eq!(ncc, "0106773786");
+
+        // Mặt hàng lưu khoá danh tính + mã cổng.
+        let p = sqlx::query!(
+            "SELECT code, identity_key, portal_code FROM product WHERE name = 'Bình NN Rossi'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(p.identity_key, identity_key("Bình NN Rossi", "Cái"));
+        assert_eq!(p.portal_code, "puro30SL");
     }
 
     #[tokio::test]
     async fn import_reuses_product_with_same_name_and_unit() {
         let pool = test_pool().await;
         // Tạo trước mặt hàng "cùng tên, cùng đơn vị" (chữ hoa + thừa space).
-        sqlx::query(
+        let key = identity_key("  bình nn rossi  ", "CÁI");
+        sqlx::query!(
             "INSERT INTO product (code, name, unit, identity_key)
              VALUES ('SP0001', '  bình nn rossi  ', 'CÁI', ?)",
+            key
         )
-        .bind(identity_key("  bình nn rossi  ", "CÁI"))
         .execute(&pool)
         .await
         .unwrap();
@@ -1198,11 +1209,11 @@ mod tests {
             out.products_created, 0,
             "phải khớp mặt hàng đã có, không tạo mới"
         );
-        let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM product")
+        let n: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM product")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(n.0, 1);
+        assert_eq!(n, 1);
     }
 
     /// Hàng hóa tạo từ hóa đơn mặc định nhóm ngành PPHH (để xuất bán không phải
@@ -1221,24 +1232,30 @@ mod tests {
             .unwrap();
         assert_eq!(out.products_created, 2);
 
-        let goods: (String, String, i64) = sqlx::query_as(
-            "SELECT industry_code, unit, is_service FROM product WHERE name = 'Bình NN Rossi'",
+        let goods = sqlx::query!(
+            "SELECT industry_code, unit, is_service FROM product WHERE name = 'Bình NN Rossi'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(goods.0, "PPHH", "hàng hóa phải mặc định nhóm PPHH");
-        assert_eq!(goods.1, "Cái");
-        assert_eq!(goods.2, 0);
+        assert_eq!(
+            goods.industry_code, "PPHH",
+            "hàng hóa phải mặc định nhóm PPHH"
+        );
+        assert_eq!(goods.unit, "Cái");
+        assert_eq!(goods.is_service, 0);
 
-        let service: (String, i64) =
-            sqlx::query_as("SELECT industry_code, is_service FROM product WHERE name = ?")
-                .bind("Phí vận chuyển")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(service.0, "", "dịch vụ không tự gán nhóm ngành hàng hóa");
-        assert_eq!(service.1, 1);
+        let service = sqlx::query!(
+            "SELECT industry_code, is_service FROM product WHERE name = 'Phí vận chuyển'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            service.industry_code, "",
+            "dịch vụ không tự gán nhóm ngành hàng hóa"
+        );
+        assert_eq!(service.is_service, 1);
     }
 
     /// Người dùng xoá nhóm PPHH thì mặt hàng mới để trống, không ghi mã nhóm
@@ -1246,7 +1263,7 @@ mod tests {
     #[tokio::test]
     async fn missing_pphh_group_leaves_industry_empty() {
         let pool = test_pool().await;
-        sqlx::query("DELETE FROM industry_group WHERE code = 'PPHH'")
+        sqlx::query!("DELETE FROM industry_group WHERE code = 'PPHH'")
             .execute(&pool)
             .await
             .unwrap();
@@ -1256,12 +1273,12 @@ mod tests {
         import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
             .await
             .unwrap();
-        let p: (String,) =
-            sqlx::query_as("SELECT industry_code FROM product WHERE name = 'Hàng B'")
+        let p: String =
+            sqlx::query_scalar!("SELECT industry_code FROM product WHERE name = 'Hàng B'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(p.0, "");
+        assert_eq!(p, "");
     }
 
     #[tokio::test]
@@ -1280,11 +1297,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.products_created, 1, "khác đơn vị tính → mặt hàng khác");
-        let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM product")
+        let n: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM product")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(n.0, 2);
+        assert_eq!(n, 2);
     }
 
     #[tokio::test]
@@ -1306,21 +1323,21 @@ mod tests {
             .unwrap();
         assert_eq!(again.voucher_no, first.voucher_no);
         assert!(again.message.contains("Đã nhập kho trước đó"));
-        let vouchers: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM inbound_voucher")
+        let vouchers: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM inbound_voucher")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(vouchers.0, 1, "chỉ 1 phiếu nhập cho 1 hóa đơn");
+        assert_eq!(vouchers, 1, "chỉ 1 phiếu nhập cho 1 hóa đơn");
     }
 
     #[tokio::test]
     async fn voucher_numbers_do_not_collide() {
         let pool = test_pool().await;
         let a = next_inbound_voucher_no(&pool).await.unwrap();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO inbound_voucher (voucher_no, created_at) VALUES (?, datetime('now'))",
+            a
         )
-        .bind(&a)
         .execute(&pool)
         .await
         .unwrap();
@@ -1385,10 +1402,11 @@ mod tests {
             cached.is_empty(),
             "đã lấy chi tiết nên không còn chờ lấy nữa"
         );
-        let row: CachedInvoice = sqlx::query_as(
-            "SELECT id, portal_id, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
-                    status, detail_json
-               FROM hddt_purchase_invoice LIMIT 1",
+        let row: CachedInvoice = sqlx::query_as!(
+            CachedInvoice,
+            r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                 FROM hddt_purchase_invoice LIMIT 1"#
         )
         .fetch_one(&pool)
         .await
@@ -1397,20 +1415,20 @@ mod tests {
             .await
             .unwrap();
         assert!(out.ok);
-        let imported: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_imported_invoice")
+        let imported: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_imported_invoice")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(imported.0, 1);
-        let cache_left: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice")
+        assert_eq!(imported, 1);
+        let cache_left: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_purchase_invoice")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(cache_left.0, 0, "cache phải sạch sau khi nhập kho");
+        assert_eq!(cache_left, 0, "cache phải sạch sau khi nhập kho");
 
         // Quét lại cùng khoảng ngày (xoá dấu ngày) → hóa đơn đã nhập không quay
         // lại cache nữa, nên không thể tạo phiếu lần hai.
-        sqlx::query("DELETE FROM hddt_sync_day")
+        sqlx::query!("DELETE FROM hddt_sync_day")
             .execute(&pool)
             .await
             .unwrap();
@@ -1428,16 +1446,16 @@ mod tests {
             sum3.invoices_new, 0,
             "hóa đơn đã nhập không được ghi lại cache"
         );
-        let again: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice")
+        let again: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_purchase_invoice")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(again.0, 0);
-        let vouchers: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM inbound_voucher")
+        assert_eq!(again, 0);
+        let vouchers: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM inbound_voucher")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(vouchers.0, 1, "vẫn chỉ 1 phiếu nhập");
+        assert_eq!(vouchers, 1, "vẫn chỉ 1 phiếu nhập");
     }
 
     #[tokio::test]
@@ -1461,11 +1479,11 @@ mod tests {
         assert_eq!(sum.days_today, 1, "phải có 1 lượt quét hôm nay");
         assert_eq!(sum.days_scanned, 0, "hôm nay không tính vào ngày đã cache");
         assert_eq!(sum.invoices_new, 1, "hóa đơn hôm nay phải vào cache");
-        let cached: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_sync_day")
+        let cached: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_sync_day")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(cached.0, 0, "hôm nay không được đánh dấu cache");
+        assert_eq!(cached, 0, "hôm nay không được đánh dấu cache");
         assert_eq!(portal.count("/invoices/purchase"), 1, "phải gọi cổng 1 lần");
 
         // Lượt sau vẫn gọi lại hôm nay (không cache) nhưng không nhân bản hóa đơn.
@@ -1514,26 +1532,27 @@ mod tests {
         // status vẫn 'manual' → không bao giờ thử tải lại, không có nút Nhập kho.
         let pool = test_pool().await;
         let id = seed_invoice(&pool, "uuid-retry", 1, "{}").await;
-        sqlx::query(
+        sqlx::query!(
             "UPDATE hddt_purchase_invoice
                 SET status = 'manual', detail_error = 'Too Many Requests', skip_reason = 'x'
               WHERE id = ?",
+            id
         )
-        .bind(id)
         .execute(&pool)
         .await
         .unwrap();
 
         let n = retry_failed_details(&pool).await.unwrap();
         assert_eq!(n, 1);
-        let row: (String, String) =
-            sqlx::query_as("SELECT status, detail_error FROM hddt_purchase_invoice WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(row.0, "pending");
-        assert_eq!(row.1, "");
+        let row = sqlx::query!(
+            "SELECT status, detail_error FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "pending");
+        assert_eq!(row.detail_error, "");
     }
 
     /// Một lượt quét phải tự thử lại HĐ lỗi chi tiết của lượt trước (trước đây
@@ -1545,12 +1564,12 @@ mod tests {
         let client = HddtClient::for_test(&portal.base);
         let pool = test_pool().await;
         let id = seed_invoice(&pool, "uuid-retry-scan", 1, "{}").await;
-        sqlx::query(
+        sqlx::query!(
             "UPDATE hddt_purchase_invoice
                 SET status = 'manual', detail_error = 'Too Many Requests', detail_json = ''
               WHERE id = ?",
+            id
         )
-        .bind(id)
         .execute(&pool)
         .await
         .unwrap();
@@ -1576,16 +1595,16 @@ mod tests {
         .expect("quét mock thất bại");
         assert_eq!(sum.details_retried, 1, "phải đưa HĐ lỗi về hàng chờ ngay");
         assert_eq!(sum.details_ok, 1, "và lấy được dòng hàng ngay lượt này");
-        let row: (String, String, i64) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT status, detail_error, line_count FROM hddt_purchase_invoice WHERE id = ?",
+            id
         )
-        .bind(id)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(row.0, "pending");
-        assert_eq!(row.1, "");
-        assert_eq!(row.2, 1, "phải có dòng hàng để nhập kho được");
+        assert_eq!(row.status, "pending");
+        assert_eq!(row.detail_error, "");
+        assert_eq!(row.line_count, 1, "phải có dòng hàng để nhập kho được");
     }
 
     #[tokio::test]
@@ -1612,29 +1631,30 @@ mod tests {
         let out = clear_cache(&pool).await.unwrap();
         assert_eq!(out.invoices_deleted, 1, "chỉ xoá dòng cache");
         assert_eq!(out.days_deleted, 1);
-        let left: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM hddt_imported_invoice WHERE portal_id = 'uuid-keep'",
+        let left: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_imported_invoice WHERE portal_id = 'uuid-keep'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(left.0, 1, "hóa đơn đã nhập kho phải còn lại");
-        let linked: (i64,) = sqlx::query_as(
+        assert_eq!(left, 1, "hóa đơn đã nhập kho phải còn lại");
+        let linked: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM hddt_imported_invoice hi
                JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
-              WHERE hi.portal_id = 'uuid-keep'",
+              WHERE hi.portal_id = 'uuid-keep'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(linked.0, 1, "liên kết hóa đơn ↔ phiếu phải nguyên vẹn");
-        let gone: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?")
-                .bind(pending)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(gone.0, 0);
+        assert_eq!(linked, 1, "liên kết hóa đơn ↔ phiếu phải nguyên vẹn");
+        let gone: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?",
+            pending
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(gone, 0);
     }
 
     #[tokio::test]
@@ -1653,13 +1673,13 @@ mod tests {
             .unwrap();
         assert_eq!(out.products_created, 1);
         // Tên lưu đúng verbatim; đơn vị tính gộp về "Dịch vụ" + đánh dấu dịch vụ.
-        let p: (String, String, i64) = sqlx::query_as("SELECT name, unit, is_service FROM product")
+        let p = sqlx::query!("SELECT name, unit, is_service FROM product")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(p.0, long_name, "tên dòng dịch vụ phải giữ nguyên");
-        assert_eq!(p.1, "Dịch vụ");
-        assert_eq!(p.2, 1, "đánh dấu dịch vụ để không tính tồn kho");
+        assert_eq!(p.name, long_name, "tên dòng dịch vụ phải giữ nguyên");
+        assert_eq!(p.unit, "Dịch vụ");
+        assert_eq!(p.is_service, 1, "đánh dấu dịch vụ để không tính tồn kho");
 
         // Kỳ khác → mặt hàng mới.
         let next_month = long_name.replace("08/2026", "09/2026");
@@ -1672,11 +1692,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out2.products_created, 1, "kỳ khác → mặt hàng khác");
-        let n: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM product")
+        let n: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM product")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(n.0, 2);
+        assert_eq!(n, 2);
 
         // Cùng tên + cùng đơn vị → khớp mặt hàng đã có.
         let id3 = seed_invoice(&pool, "uuid-svc3", 1, &lines2).await;
@@ -1697,17 +1717,17 @@ mod tests {
         import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
             .await
             .unwrap();
-        let amount: (f64,) = sqlx::query_as(
-            "SELECT amount FROM journal_entry WHERE entry_type = 'PN' AND product_code <> ''",
+        let amount: f64 = sqlx::query_scalar!(
+            "SELECT amount FROM journal_entry WHERE entry_type = 'PN' AND product_code <> ''"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         // 2 × 2.860.000 − 2.860.000 CK = 2.860.000
         assert!(
-            (amount.0 - 2_860_000.0).abs() < 1.0,
+            (amount - 2_860_000.0).abs() < 1.0,
             "giá trị nhập = thành tiền − tiền CK, thấy {}",
-            amount.0
+            amount
         );
     }
 

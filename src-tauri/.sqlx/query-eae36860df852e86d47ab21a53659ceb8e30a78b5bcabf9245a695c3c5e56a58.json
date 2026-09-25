@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_purchase_invoice\n            (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,\n             khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue, ttcktmai,\n             tgtttbso, status, line_count, raw_json, detail_json, created_at)\n         VALUES (?, 'regular', '2026-09-01T17:00:00Z', '2026-09-02', '0106773786',\n                 'Cty TNHH ABC', '001170019085', 1, 'C26E2E', '001', 1, 1,\n                 2000000, 160000, 0, 2160000, 'pending', ?, '{}', ?, datetime('now'))\n         ON CONFLICT(portal_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "eae36860df852e86d47ab21a53659ceb8e30a78b5bcabf9245a695c3c5e56a58"
+}

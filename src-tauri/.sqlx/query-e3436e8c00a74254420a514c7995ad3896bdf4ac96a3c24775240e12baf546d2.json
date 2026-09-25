@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status, detail_error, line_count FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "detail_error",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "line_count",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e3436e8c00a74254420a514c7995ad3896bdf4ac96a3c24775240e12baf546d2"
+}

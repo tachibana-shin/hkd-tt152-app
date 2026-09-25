@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity, depleted as \"depleted: bool\" FROM stock_lot\n                 ORDER BY received_at ASC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "depleted: bool",
+        "ordinal": 1,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "29ae7dcd22edbcc52325b41a22efbc7920f641fa29d7bcd7f091edb3b3782883"
+}

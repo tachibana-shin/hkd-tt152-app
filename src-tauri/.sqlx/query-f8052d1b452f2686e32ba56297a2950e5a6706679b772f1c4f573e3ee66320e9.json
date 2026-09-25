@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT inbound_voucher_id, new_product_count\n               FROM hddt_imported_invoice WHERE portal_id = 'uuid-1'",
+  "describe": {
+    "columns": [
+      {
+        "name": "inbound_voucher_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "new_product_count",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f8052d1b452f2686e32ba56297a2950e5a6706679b772f1c4f573e3ee66320e9"
+}

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", total, source FROM inbound_voucher WHERE voucher_no = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "source",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "bb9b0c0bbf0999fda120afcee11c00f692e221b7a34f77610f72bc2bc5c54d9b"
+}

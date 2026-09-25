@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET is_service = 1, industry_code = 'DVXD-KNL' WHERE code = 'S1'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "91409643b4e2337d84e69aa9a59a88ed6d573b88ece56327432e75d3d18060d5"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT industry_code FROM product WHERE name = 'Hàng B'",
+  "describe": {
+    "columns": [
+      {
+        "name": "industry_code",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f941beaef2a91db9f994145c748024d1a54b44b2a0bb1233cfca70ac3a5661e9"
+}

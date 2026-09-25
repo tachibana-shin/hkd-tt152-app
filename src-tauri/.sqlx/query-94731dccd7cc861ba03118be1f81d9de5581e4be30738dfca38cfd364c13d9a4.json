@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT gross_salary, bh_employee, net_pay FROM payroll WHERE period = '2026-05'",
+  "describe": {
+    "columns": [
+      {
+        "name": "gross_salary",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "bh_employee",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "net_pay",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "94731dccd7cc861ba03118be1f81d9de5581e4be30738dfca38cfd364c13d9a4"
+}

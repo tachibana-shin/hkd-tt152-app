@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT DISTINCT period FROM payroll ORDER BY period DESC",
+  "describe": {
+    "columns": [
+      {
+        "name": "period",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "55a06feb8bb53b602d4dbb4cfa1edf932c233cd861afc539e9f06fd6b4cae993"
+}

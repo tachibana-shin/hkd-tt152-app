@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT code, SUM(d) AS \"debit_mvmt!: f64\", SUM(c) AS \"credit_mvmt!: f64\" FROM (\n               SELECT debit_account AS code, amount AS d, 0.0 AS c FROM journal_entry\n               WHERE posting_date >= ? AND posting_date <= ?\n               UNION ALL\n               SELECT credit_account, 0.0, amount FROM journal_entry\n               WHERE posting_date >= ? AND posting_date <= ?\n            ) GROUP BY code",
+  "describe": {
+    "columns": [
+      {
+        "name": "code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "debit_mvmt!: f64",
+        "ordinal": 1,
+        "type_info": "Null"
+      },
+      {
+        "name": "credit_mvmt!: f64",
+        "ordinal": 2,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "75e665ebdabacc3bfbe994832627fc043ddeb38c277a4092d2f46e2caf8e95fb"
+}

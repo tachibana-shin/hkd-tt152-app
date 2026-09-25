@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT entry_type, debit_account, credit_account, amount, posting_date\n             FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
+  "describe": {
+    "columns": [
+      {
+        "name": "entry_type",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "debit_account",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "credit_account",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5af5e4f327132aa7de2027a185b07c4be551d1be5abc7835bcf808fde8a008b3"
+}

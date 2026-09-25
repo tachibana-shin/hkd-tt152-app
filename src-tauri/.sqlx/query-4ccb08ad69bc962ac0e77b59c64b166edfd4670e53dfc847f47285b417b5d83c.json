@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT unit_cost FROM stock_lot ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "unit_cost",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4ccb08ad69bc962ac0e77b59c64b166edfd4670e53dfc847f47285b417b5d83c"
+}

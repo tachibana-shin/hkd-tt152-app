@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM hddt_imported_invoice hi\n               JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id\n              WHERE hi.portal_id = 'uuid-keep'",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "52747562c3976d28fa2b1b4ee2dac8bd253d7d1302b9ecb4ca6aefd0fb9325de"
+}

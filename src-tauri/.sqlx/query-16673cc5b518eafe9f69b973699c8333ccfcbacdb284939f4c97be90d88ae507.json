@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM attendance WHERE work_date LIKE ? || '-%'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "16673cc5b518eafe9f69b973699c8333ccfcbacdb284939f4c97be90d88ae507"
+}

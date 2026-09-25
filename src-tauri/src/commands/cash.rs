@@ -53,12 +53,11 @@ pub(crate) async fn save_cash_entry(
         &input.credit_account
     };
     for code in [debit, credit] {
-        let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM account WHERE code = ?")
-            .bind(code)
+        let exists: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM account WHERE code = ?", code)
             .fetch_one(&*pool)
             .await
             .map_err(|e| e.to_string())?;
-        if exists.0 == 0 {
+        if exists == 0 {
             return Err(format!(
                 "Tài khoản '{}' chưa có trong danh mục tài khoản — hãy thêm ở màn Tài khoản trước khi lập phiếu",
                 code

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO inbound_voucher (voucher_no, created_at) VALUES (?, datetime('now'))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "fe81224958a9e8b8960dcd54dfc8397d57b13d4c6c45bd4bcf1f06f8a9b3fb36"
+}

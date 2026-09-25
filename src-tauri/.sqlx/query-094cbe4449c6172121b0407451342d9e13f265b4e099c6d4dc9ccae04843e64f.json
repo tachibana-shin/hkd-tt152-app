@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO inbound_voucher\n            (voucher_no, posting_date, supplier_code, description, reference_no,\n             inbound_type, warehouse_code, unit_code, vat_rate, source, note, created_at)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '', datetime('now'))\n         ON CONFLICT(voucher_no) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "094cbe4449c6172121b0407451342d9e13f265b4e099c6d4dc9ccae04843e64f"
+}

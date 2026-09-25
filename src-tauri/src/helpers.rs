@@ -10,16 +10,18 @@ pub(crate) async fn resolve_product(
     tx: &mut SqliteTransaction<'_>,
     code: &str,
 ) -> Result<ProductInfo, String> {
-    let row: (i64, bool, String) =
-        sqlx::query_as("SELECT id, is_service, industry_code FROM product WHERE code = ?")
-            .bind(code)
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|_| format!("Không tìm thấy sản phẩm có mã '{}'", code))?;
+    let row = sqlx::query!(
+        r#"SELECT id as "id!", is_service as "is_service: bool", industry_code
+             FROM product WHERE code = ?"#,
+        code
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|_| format!("Không tìm thấy sản phẩm có mã '{}'", code))?;
     Ok(ProductInfo {
-        id: row.0,
-        is_service: row.1,
-        industry_code: row.2,
+        id: row.id,
+        is_service: row.is_service,
+        industry_code: row.industry_code,
     })
 }
 
@@ -29,23 +31,26 @@ pub(crate) async fn resolve_warehouse(
     product_code: &str,
 ) -> Result<i64, String> {
     if !warehouse_code.is_empty() {
-        let row: (i64,) = sqlx::query_as("SELECT id FROM warehouse WHERE code = ?")
-            .bind(warehouse_code)
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|_| format!("Không tìm thấy kho có mã '{}'", warehouse_code))?;
-        return Ok(row.0);
+        let row = sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM warehouse WHERE code = ?"#,
+            warehouse_code
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|_| format!("Không tìm thấy kho có mã '{}'", warehouse_code))?;
+        return Ok(row);
     }
     // fallback: default_warehouse_id của sản phẩm, hoặc kho đầu tiên
-    let row: (i64,) = sqlx::query_as(
-        "SELECT COALESCE(p.default_warehouse_id, (SELECT id FROM warehouse ORDER BY id LIMIT 1))
-         FROM product p WHERE p.code = ?",
+    // COALESCE không suy được kiểu từ schema → ép `!: i64` (rỗng sẽ lỗi ở fetch_one).
+    let row = sqlx::query_scalar!(
+        r#"SELECT COALESCE(p.default_warehouse_id, (SELECT id FROM warehouse ORDER BY id LIMIT 1)) as "wh!: i64"
+           FROM product p WHERE p.code = ?"#,
+        product_code
     )
-    .bind(product_code)
     .fetch_one(&mut **tx)
     .await
     .map_err(|_| "Không có kho nào. Vui lòng tạo kho trước.".to_string())?;
-    Ok(row.0)
+    Ok(row)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -164,14 +169,15 @@ pub(crate) async fn audit(app: &AppState, action: &str, entity: &str, detail: &s
         .as_ref()
         .map(|u| u.username.clone())
         .unwrap_or_default();
-    let _ =
-        sqlx::query("INSERT INTO audit_log (action, entity, detail, username) VALUES (?, ?, ?, ?)")
-            .bind(action)
-            .bind(entity)
-            .bind(detail)
-            .bind(username)
-            .execute(&*app.pool.read().await)
-            .await;
+    let _ = sqlx::query!(
+        "INSERT INTO audit_log (action, entity, detail, username) VALUES (?, ?, ?, ?)",
+        action,
+        entity,
+        detail,
+        username
+    )
+    .execute(&*app.pool.read().await)
+    .await;
 }
 
 #[cfg(test)]

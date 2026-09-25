@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT code FROM supplier WHERE code = '0106773786'",
+  "describe": {
+    "columns": [
+      {
+        "name": "code",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d924a37bc7849f4ea8c3db3f586ce48bc11130e8c6670fd0c3be3dbcff48d152"
+}

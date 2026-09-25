@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", quantity, unit_cost FROM stock_lot\n               WHERE product_id = ? AND warehouse_id = ? AND depleted = 0\n               ORDER BY received_at ASC, id ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_cost",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "803b03665e526f39bfb65c73c4842cc8ca4a8bebae9e616a14ef894939f49ed7"
+}

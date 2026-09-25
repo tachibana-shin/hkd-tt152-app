@@ -23,47 +23,48 @@ pub(crate) async fn test_pool() -> SqlitePool {
 }
 
 pub(crate) async fn seed_product(pool: &SqlitePool, code: &str, name: &str, vat_rate: f64) -> i64 {
-    sqlx::query(
-        "INSERT INTO product (code, name, unit, vat_rate)
-         VALUES (?, ?, 'Cái', ?)",
+    sqlx::query!(
+        "INSERT INTO product (code, name, unit, vat_rate) VALUES (?, ?, 'Cái', ?)",
+        code,
+        name,
+        vat_rate
     )
-    .bind(code)
-    .bind(name)
-    .bind(vat_rate)
     .execute(pool)
     .await
     .expect("seed product");
-    sqlx::query_scalar("SELECT id FROM product WHERE code = ?")
-        .bind(code)
+    sqlx::query_scalar!(r#"SELECT id as "id!" FROM product WHERE code = ?"#, code)
         .fetch_one(pool)
         .await
         .expect("product id")
 }
 
 pub(crate) async fn seed_warehouse(pool: &SqlitePool, code: &str, name: &str) -> i64 {
-    sqlx::query("INSERT INTO warehouse (code, name) VALUES (?, ?)")
-        .bind(code)
-        .bind(name)
-        .execute(pool)
-        .await
-        .expect("seed warehouse");
-    sqlx::query_scalar("SELECT id FROM warehouse WHERE code = ?")
-        .bind(code)
+    sqlx::query!(
+        "INSERT INTO warehouse (code, name) VALUES (?, ?)",
+        code,
+        name
+    )
+    .execute(pool)
+    .await
+    .expect("seed warehouse");
+    sqlx::query_scalar!(r#"SELECT id as "id!" FROM warehouse WHERE code = ?"#, code)
         .fetch_one(pool)
         .await
         .expect("warehouse id")
 }
 
 pub(crate) async fn seed_customer(pool: &SqlitePool, code: &str, name: &str) -> i64 {
-    sqlx::query("INSERT INTO customer (code, name, tax_code) VALUES (?, ?, ?)")
-        .bind(code)
-        .bind(name)
-        .bind(format!("MST-{}", code))
-        .execute(pool)
-        .await
-        .expect("seed customer");
-    sqlx::query_scalar("SELECT id FROM customer WHERE code = ?")
-        .bind(code)
+    let tax_code = format!("MST-{}", code);
+    sqlx::query!(
+        "INSERT INTO customer (code, name, tax_code) VALUES (?, ?, ?)",
+        code,
+        name,
+        tax_code
+    )
+    .execute(pool)
+    .await
+    .expect("seed customer");
+    sqlx::query_scalar!(r#"SELECT id as "id!" FROM customer WHERE code = ?"#, code)
         .fetch_one(pool)
         .await
         .expect("customer id")
@@ -80,23 +81,22 @@ pub(crate) async fn seed_employee(
     allowance_phone: f64,
     bh_salary: f64,
 ) -> i64 {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO employee (code, name, department, position, job, basic_salary,
              allowance_cv, allowance_xx, allowance_phone, bh_salary, hired_on, left_on, dependents)
          VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, '', '', 0)",
+        code,
+        name,
+        basic_salary,
+        allowance_cv,
+        allowance_xx,
+        allowance_phone,
+        bh_salary
     )
-    .bind(code)
-    .bind(name)
-    .bind(basic_salary)
-    .bind(allowance_cv)
-    .bind(allowance_xx)
-    .bind(allowance_phone)
-    .bind(bh_salary)
     .execute(pool)
     .await
     .expect("seed employee");
-    sqlx::query_scalar("SELECT id FROM employee WHERE code = ?")
-        .bind(code)
+    sqlx::query_scalar!(r#"SELECT id as "id!" FROM employee WHERE code = ?"#, code)
         .fetch_one(pool)
         .await
         .expect("employee id")
@@ -110,15 +110,15 @@ pub(crate) async fn add_stock_lot(
     unit_cost: f64,
     received_at: &str,
 ) {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO stock_lot (product_id, warehouse_id, quantity, unit_cost, received_at, depleted)
          VALUES (?, ?, ?, ?, ?, 0)",
+        product_id,
+        warehouse_id,
+        quantity,
+        unit_cost,
+        received_at
     )
-    .bind(product_id)
-    .bind(warehouse_id)
-    .bind(quantity)
-    .bind(unit_cost)
-    .bind(received_at)
     .execute(pool)
     .await
     .expect("add stock lot");
@@ -138,28 +138,29 @@ pub(crate) async fn add_journal_px(
     vat_rate: f64,
     pit_rate: f64,
 ) {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO journal_entry
          (posting_date, voucher_no, doc_date, entry_type, description, product_code,
           quantity, unit_price, amount, debit_account, credit_account,
           industry_code, vat_rate, pit_rate, unit_code, adjust_code, note)
          VALUES (?, ?, ?, 'PX', 'test', ?, ?, ?, ?, '131', '511', ?, ?, ?, 'HKD', '', '')",
+        posting_date,
+        voucher_no,
+        posting_date,
+        product_code,
+        quantity,
+        unit_price,
+        amount,
+        industry_code,
+        vat_rate,
+        pit_rate
     )
-    .bind(posting_date)
-    .bind(voucher_no)
-    .bind(posting_date)
-    .bind(product_code)
-    .bind(quantity)
-    .bind(unit_price)
-    .bind(amount)
-    .bind(industry_code)
-    .bind(vat_rate)
-    .bind(pit_rate)
     .execute(pool)
     .await
     .expect("add journal px");
 }
 
+/// Đếm/scalar với SQL do test truyền vào → runtime query (macro cần SQL hằng số).
 pub(crate) async fn scalar_i64(pool: &SqlitePool, sql: &str) -> i64 {
     sqlx::query_scalar(sql)
         .fetch_one(pool)
@@ -167,6 +168,7 @@ pub(crate) async fn scalar_i64(pool: &SqlitePool, sql: &str) -> i64 {
         .expect("scalar i64")
 }
 
+/// Xem `scalar_i64`.
 pub(crate) async fn scalar_f64(pool: &SqlitePool, sql: &str) -> f64 {
     sqlx::query_scalar(sql)
         .fetch_one(pool)
@@ -199,7 +201,7 @@ mod tests {
 
         // seed_default_users tạo admin/admin123 (băm SHA-256, không seed tĩnh được)
         let hash: String =
-            sqlx::query_scalar("SELECT password_hash FROM app_user WHERE username = 'admin'")
+            sqlx::query_scalar!("SELECT password_hash FROM app_user WHERE username = 'admin'")
                 .fetch_one(&pool)
                 .await
                 .expect("admin user seeded");

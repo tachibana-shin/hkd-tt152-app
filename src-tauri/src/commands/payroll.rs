@@ -77,14 +77,22 @@ pub(crate) async fn save_payroll_core(
     let mut total_employer = 0.0;
     let mut count = 0i64;
     for item in items {
-        let emp: (i64, f64, f64, f64, f64, f64) = sqlx::query_as(
-            "SELECT id, basic_salary, allowance_cv, allowance_xx, allowance_phone, bh_salary
-             FROM employee WHERE code = ?",
+        let row = sqlx::query!(
+            r#"SELECT id as "id!", basic_salary, allowance_cv, allowance_xx, allowance_phone, bh_salary
+                 FROM employee WHERE code = ?"#,
+            item.employee_code
         )
-        .bind(&item.employee_code)
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| format!("Không tìm thấy nhân viên '{}'", item.employee_code))?;
+        let emp = (
+            row.id,
+            row.basic_salary,
+            row.allowance_cv,
+            row.allowance_xx,
+            row.allowance_phone,
+            row.bh_salary,
+        );
 
         // Lương thời gian = lương HĐ / 26 x Số công; phụ cấp lấy từ thẻ nhân viên
         let c = calc_payroll_line(
@@ -99,7 +107,9 @@ pub(crate) async fn save_payroll_core(
             item.advance,
         );
 
-        sqlx::query(
+        let employee_id = emp.0;
+        let note = item.note.clone();
+        sqlx::query!(
             "INSERT INTO payroll (period, employee_id, work_days, bonus, advance, pit_amount,
                      gross_salary, bh_employer, bh_employee, net_pay, note)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -109,18 +119,18 @@ pub(crate) async fn save_payroll_core(
                 gross_salary = excluded.gross_salary, bh_employer = excluded.bh_employer,
                 bh_employee = excluded.bh_employee, net_pay = excluded.net_pay,
                 note = excluded.note",
+            period,
+            employee_id,
+            item.work_days,
+            item.bonus,
+            item.advance,
+            item.pit_amount,
+            c.gross,
+            c.bh_employer,
+            c.bh_employee,
+            c.net,
+            note
         )
-        .bind(period)
-        .bind(emp.0)
-        .bind(item.work_days)
-        .bind(item.bonus)
-        .bind(item.advance)
-        .bind(item.pit_amount)
-        .bind(c.gross)
-        .bind(c.bh_employer)
-        .bind(c.bh_employee)
-        .bind(c.net)
-        .bind(&item.note)
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
@@ -132,12 +142,13 @@ pub(crate) async fn save_payroll_core(
 
     // Phiếu chi lương tổng (PC: Nợ 642 / Có 111) — tự sinh nếu kỳ chưa có
     let voucher = format!("LUONG-{}", period);
-    let existing: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM journal_entry WHERE voucher_no = ?")
-            .bind(&voucher)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+    let existing: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = ?",
+        voucher
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
     let desc = format!("Chi lương tháng {}", period);
     if existing == 0 {
         insert_journal_entry(
@@ -163,14 +174,15 @@ pub(crate) async fn save_payroll_core(
         )
         .await?;
     } else {
-        sqlx::query(
+        let net = round2(total_net);
+        sqlx::query!(
             "UPDATE journal_entry SET amount = ?, unit_price = ?, description = ?
              WHERE voucher_no = ?",
+            net,
+            net,
+            desc,
+            voucher
         )
-        .bind(round2(total_net))
-        .bind(round2(total_net))
-        .bind(&desc)
-        .bind(&voucher)
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
@@ -209,7 +221,7 @@ pub(crate) async fn save_employee(
     if input.code.is_empty() || input.name.is_empty() {
         return Err("Thiếu mã hoặc tên nhân viên".into());
     }
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO employee (code, name, department, position, job, basic_salary,
                 allowance_cv, allowance_xx, allowance_phone, bh_salary,
                 hired_on, left_on, dependents)
@@ -224,20 +236,20 @@ pub(crate) async fn save_employee(
             bh_salary = excluded.bh_salary,
             hired_on = excluded.hired_on, left_on = excluded.left_on,
             dependents = excluded.dependents",
+        input.code,
+        input.name,
+        input.department,
+        input.position,
+        input.job,
+        input.basic_salary,
+        input.allowance_cv,
+        input.allowance_xx,
+        input.allowance_phone,
+        input.bh_salary,
+        input.hired_on,
+        input.left_on,
+        input.dependents
     )
-    .bind(&input.code)
-    .bind(&input.name)
-    .bind(&input.department)
-    .bind(&input.position)
-    .bind(&input.job)
-    .bind(input.basic_salary)
-    .bind(input.allowance_cv)
-    .bind(input.allowance_xx)
-    .bind(input.allowance_phone)
-    .bind(input.bh_salary)
-    .bind(&input.hired_on)
-    .bind(&input.left_on)
-    .bind(input.dependents)
     .execute(&*state.pool.read().await)
     .await
     .map_err(|e| e.to_string())?;
@@ -249,7 +261,7 @@ pub(crate) async fn save_employee(
 #[tauri::command]
 pub(crate) async fn get_payroll_periods(state: State<'_, AppState>) -> Result<String, String> {
     let rows: Vec<String> =
-        sqlx::query_scalar("SELECT DISTINCT period FROM payroll ORDER BY period DESC")
+        sqlx::query_scalar!("SELECT DISTINCT period FROM payroll ORDER BY period DESC")
             .fetch_all(&*state.pool.read().await)
             .await
             .map_err(|e| e.to_string())?;
@@ -401,28 +413,30 @@ mod tests {
         assert_eq!(out.total_net, 5_475_000.0);
         assert_eq!(out.total_employer, 1_075_000.0);
 
-        let (gross, bh_emp, net): (f64, f64, f64) = sqlx::query_as(
-            "SELECT gross_salary, bh_employee, net_pay FROM payroll WHERE period = '2026-05'",
+        let row = sqlx::query!(
+            "SELECT gross_salary, bh_employee, net_pay FROM payroll WHERE period = '2026-05'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!((gross, bh_emp, net), (6_000_000.0, 525_000.0, 5_475_000.0));
+        assert_eq!(
+            (row.gross_salary, row.bh_employee, row.net_pay),
+            (6_000_000.0, 525_000.0, 5_475_000.0)
+        );
 
         // Tự sinh 1 phiếu chi lương tổng: PC Nợ 642 / Có 111
-        let (etype, debit, credit, amount, date): (String, String, String, f64, String) =
-            sqlx::query_as(
-                "SELECT entry_type, debit_account, credit_account, amount, posting_date
-             FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(etype, "PC");
-        assert_eq!(debit, "642");
-        assert_eq!(credit, "111");
-        assert_eq!(amount, 5_475_000.0);
-        assert_eq!(date, "2026-05-28");
+        let je = sqlx::query!(
+            "SELECT entry_type, debit_account, credit_account, amount, posting_date
+             FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(je.entry_type, "PC");
+        assert_eq!(je.debit_account, "642");
+        assert_eq!(je.credit_account, "111");
+        assert_eq!(je.amount, 5_475_000.0);
+        assert_eq!(je.posting_date, "2026-05-28");
     }
 
     #[tokio::test]
@@ -449,12 +463,13 @@ mod tests {
             .unwrap();
         assert_eq!(out.rows, 1);
 
-        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM payroll WHERE period = '2026-05'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let vouchers: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
+        let rows: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM payroll WHERE period = '2026-05'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let vouchers: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'"
         )
         .fetch_one(&pool)
         .await
@@ -464,12 +479,12 @@ mod tests {
 
         // Số công 13 → gross 2.500.000 + 1.000.000 phụ cấp = 3.500.000; net = 3.500.000 - 525.000
         let (net, amount): (f64, f64) = (
-            sqlx::query_scalar("SELECT net_pay FROM payroll WHERE period = '2026-05'")
+            sqlx::query_scalar!("SELECT net_pay FROM payroll WHERE period = '2026-05'")
                 .fetch_one(&pool)
                 .await
                 .unwrap(),
-            sqlx::query_scalar(
-                "SELECT amount FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
+            sqlx::query_scalar!(
+                "SELECT amount FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'"
             )
             .fetch_one(&pool)
             .await

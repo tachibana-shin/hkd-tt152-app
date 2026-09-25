@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO audit_log (action, entity, detail, username) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b311babd3b90273199df22b7dfefc6aeb69e7a53a6cfbcd6acc40f2f96be8484"
+}

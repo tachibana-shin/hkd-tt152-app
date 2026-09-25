@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT code, name, opening_debit, opening_credit FROM account ORDER BY code",
+  "describe": {
+    "columns": [
+      {
+        "name": "code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "opening_debit",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "opening_credit",
+        "ordinal": 3,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "941290e1dc0c0cae6c1094c200531c30c253a84030f1fdc45e430b4041709bfe"
+}

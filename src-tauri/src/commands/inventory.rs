@@ -74,16 +74,16 @@ pub(crate) async fn save_inventory_count(
     for item in &items {
         let product = resolve_product(&mut tx, &item.product_code).await?;
         let wh_id = resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
-        let book: (f64,) = sqlx::query_as(
-            "SELECT COALESCE(SUM(quantity), 0.0) FROM stock_lot
-             WHERE product_id = ? AND warehouse_id = ? AND depleted = 0",
+        let book: f64 = sqlx::query_scalar!(
+            r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+               WHERE product_id = ? AND warehouse_id = ? AND depleted = 0"#,
+            product.id,
+            wh_id
         )
-        .bind(product.id)
-        .bind(wh_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-        let variance = item.counted_qty - book.0;
+        let variance = item.counted_qty - book;
         sqlx::query!(
             "INSERT INTO inventory_count_item (count_id, product_id, warehouse_id, counted_qty, variance)
              VALUES (?, ?, ?, ?, ?)",

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT debit_account, credit_account, adjust_code FROM journal_entry\n             WHERE voucher_no = 'PNK-DC01' AND debit_account = '331' AND credit_account = '152'",
+  "describe": {
+    "columns": [
+      {
+        "name": "debit_account",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "credit_account",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "adjust_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dd9120e1a4ef58082b9ad311ffecc98e40ce81c9291eef51cf5d60ae23a4e417"
+}

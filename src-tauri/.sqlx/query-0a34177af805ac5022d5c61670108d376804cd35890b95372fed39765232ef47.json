@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE journal_entry SET amount = ?, unit_price = ?, description = ?\n             WHERE voucher_no = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0a34177af805ac5022d5c61670108d376804cd35890b95372fed39765232ef47"
+}

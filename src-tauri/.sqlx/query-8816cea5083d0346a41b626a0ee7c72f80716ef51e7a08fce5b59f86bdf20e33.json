@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT debit_account, credit_account, adjust_code FROM journal_entry\n             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PX'",
+  "describe": {
+    "columns": [
+      {
+        "name": "debit_account",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "credit_account",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "adjust_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8816cea5083d0346a41b626a0ee7c72f80716ef51e7a08fce5b59f86bdf20e33"
+}

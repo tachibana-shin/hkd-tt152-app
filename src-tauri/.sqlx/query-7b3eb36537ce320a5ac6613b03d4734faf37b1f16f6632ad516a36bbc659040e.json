@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT voucher_no FROM journal_entry WHERE entry_type = 'PT'",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7b3eb36537ce320a5ac6613b03d4734faf37b1f16f6632ad516a36bbc659040e"
+}

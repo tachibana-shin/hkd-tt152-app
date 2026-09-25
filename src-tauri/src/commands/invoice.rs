@@ -86,12 +86,14 @@ async fn save_invoice_core(
                 item.product_code
             ));
         }
-        let (vat_rate, pit_rate): (f64, f64) =
-            sqlx::query_as("SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?")
-                .bind(&industry)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", industry))?;
+        let group = sqlx::query!(
+            "SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?",
+            industry
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", industry))?;
+        let (vat_rate, pit_rate) = (group.vat_rate, group.pit_rate);
         basis.push((industry, vat_rate, pit_rate));
 
         // Sản phẩm dịch vụ (nhân công...) không theo dõi tồn kho → bỏ qua kiểm tra.
@@ -99,23 +101,24 @@ async fn save_invoice_core(
             continue;
         }
         // Kiểm tra tồn theo ĐÚNG kho xuất trên dòng (rỗng → tổng mọi kho).
-        let available: (f64,) = if item.warehouse_code.trim().is_empty() {
-            sqlx::query_as(
-                "SELECT COALESCE(SUM(quantity), 0.0) FROM stock_lot WHERE product_id = ? AND depleted = 0",
+        let available: f64 = if item.warehouse_code.trim().is_empty() {
+            sqlx::query_scalar!(
+                r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+                   WHERE product_id = ? AND depleted = 0"#,
+                product.id
             )
-            .bind(product.id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| e.to_string())?
         } else {
             let wh_id =
                 resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
-            sqlx::query_as(
-                "SELECT COALESCE(SUM(quantity), 0.0) FROM stock_lot
-                 WHERE product_id = ? AND warehouse_id = ? AND depleted = 0",
+            sqlx::query_scalar!(
+                r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+                   WHERE product_id = ? AND warehouse_id = ? AND depleted = 0"#,
+                product.id,
+                wh_id
             )
-            .bind(product.id)
-            .bind(wh_id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| e.to_string())?
@@ -125,10 +128,10 @@ async fn save_invoice_core(
         } else {
             "kho đã chọn"
         };
-        if item.quantity - available.0 > 1e-9 {
+        if item.quantity - available > 1e-9 {
             shortage.push(format!(
                 "{}: cần {:.2}, tồn {} {:.2}",
-                item.product_code, item.quantity, where_str, available.0
+                item.product_code, item.quantity, where_str, available
             ));
         }
     }
@@ -167,19 +170,22 @@ async fn save_invoice_core(
     for (i, item) in items.iter().enumerate() {
         let product = resolve_product(&mut tx, &item.product_code).await?;
         let subtotal = round2(item.quantity * item.unit_price - item.discount);
-        sqlx::query(
+        let (basis_code, basis_vat, basis_pit) = basis[i].clone();
+        sqlx::query!(
             "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
                                        industry_code, vat_rate, pit_rate, discount, warehouse_code)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            invoice_id,
+            product.id,
+            item.quantity,
+            item.unit_price,
+            subtotal,
+            basis_code,
+            basis_vat,
+            basis_pit,
+            item.discount,
+            item.warehouse_code
         )
-        .bind(invoice_id)
-        .bind(product.id)
-        .bind(item.quantity)
-        .bind(item.unit_price)
-        .bind(subtotal)
-        .bind(&basis[i].0)
-        .bind(basis[i].1)
-        .bind(basis[i].2)
         .bind(item.discount)
         .bind(&item.warehouse_code)
         .execute(&mut *tx)
@@ -291,11 +297,11 @@ mod tests {
         assert_eq!(res["tax_payable"].as_f64().unwrap(), 150.0);
 
         // Dòng hóa đơn lưu đủ discount + kho xuất
-        let (subtotal, discount, wh): (f64, f64, String) =
-            sqlx::query_as("SELECT subtotal, discount, warehouse_code FROM invoice_item")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let row = sqlx::query!("SELECT subtotal, discount, warehouse_code FROM invoice_item")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let (subtotal, discount, wh) = (row.subtotal, row.discount, row.warehouse_code);
         assert_eq!((subtotal, discount), (15_000.0, 5_000.0));
         assert_eq!(wh, "W1");
     }
@@ -358,7 +364,7 @@ mod tests {
         .expect("đủ tổng tồn các kho");
         assert_eq!(res["total"].as_f64().unwrap(), 5_000.0);
         // Kho xuất để trống → lưu chuỗi rỗng
-        let wh: String = sqlx::query_scalar("SELECT warehouse_code FROM invoice_item")
+        let wh: String = sqlx::query_scalar!("SELECT warehouse_code FROM invoice_item")
             .fetch_one(&pool)
             .await
             .unwrap();

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM app_user WHERE role = 'admin' AND active = 1 AND id != ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0d41b25a5a9b3c0e48f4a9f0e43f10a774b1a0be1de4fb735af15ad22f1f5a00"
+}

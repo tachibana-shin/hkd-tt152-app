@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO app_user (username, display_name, password_hash, role)\n             VALUES ('admin', 'Quản trị', ?, 'admin')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "43ef53a195184a1310b761fef5eb7de887fbf6d5e2ef944803e04c6a15ec708c"
+}

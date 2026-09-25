@@ -47,11 +47,13 @@ pub(crate) async fn save_attendance(
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
     // Xóa dữ liệu cũ của kỳ, sau đó ghi lại các ô đã chấm
-    sqlx::query("DELETE FROM attendance WHERE work_date LIKE ? || '-%'")
-        .bind(&period)
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
+    sqlx::query!(
+        "DELETE FROM attendance WHERE work_date LIKE ? || '-%'",
+        period
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
 
     let mut saved = 0i64;
     for e in &entries {
@@ -65,18 +67,23 @@ pub(crate) async fn save_attendance(
                 e.work_date, period
             ));
         }
-        let emp_id: i64 = sqlx::query_scalar("SELECT id FROM employee WHERE code = ?")
-            .bind(&e.employee_code)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|_| format!("Không tìm thấy nhân viên '{}'", e.employee_code))?;
-        sqlx::query("INSERT INTO attendance (work_date, employee_id, status) VALUES (?, ?, ?)")
-            .bind(&e.work_date)
-            .bind(emp_id)
-            .bind(status)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+        let emp_id: i64 = sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM employee WHERE code = ?"#,
+            e.employee_code
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| format!("Không tìm thấy nhân viên '{}'", e.employee_code))?;
+        let work_date = e.work_date.clone();
+        sqlx::query!(
+            "INSERT INTO attendance (work_date, employee_id, status) VALUES (?, ?, ?)",
+            work_date,
+            emp_id,
+            status
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
         saved += 1;
     }
 

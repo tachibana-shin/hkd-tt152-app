@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO customer (code, name, tax_code) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "2ae8952d6beba978e8a65db97225d77dd746514f9a03040014c26660fc044a2a"
+}

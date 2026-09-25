@@ -96,12 +96,12 @@ async fn read_config(state: &State<'_, AppState>) -> Result<HddtConfig, String> 
 
 /// Upsert a single `app_setting` key.
 async fn upsert(state: &State<'_, AppState>, key: &str, value: &str) -> Result<(), String> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO app_setting (key, value) VALUES (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        key,
+        value
     )
-    .bind(key)
-    .bind(value)
     .execute(&*state.pool.read().await)
     .await
     .map_err(|e| e.to_string())?;
@@ -530,7 +530,10 @@ pub(crate) async fn hddt_sync_test_seed(
         .and_then(serde_json::Value::as_array)
         .map(|a| a.len())
         .unwrap_or(0);
-    sqlx::query(
+    // Biểu thức tạm bind trước: macro giữ tham chiếu tới hết `.await`.
+    let line_count = lines as i64;
+    let detail_json = detail.to_string();
+    sqlx::query!(
         "INSERT INTO hddt_purchase_invoice
             (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
              khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue, ttcktmai,
@@ -539,10 +542,10 @@ pub(crate) async fn hddt_sync_test_seed(
                  'Cty TNHH ABC', '001170019085', 1, 'C26E2E', '001', 1, 1,
                  2000000, 160000, 0, 2160000, 'pending', ?, '{}', ?, datetime('now'))
          ON CONFLICT(portal_id) DO NOTHING",
+        portal_id,
+        line_count,
+        detail_json
     )
-    .bind(&portal_id)
-    .bind(lines as i64)
-    .bind(detail.to_string())
     .execute(&*pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -650,12 +653,13 @@ pub(crate) async fn hddt_sync_import(
     let targets: Vec<CachedInvoice> = if let Some(list) = ids.filter(|l| !l.is_empty()) {
         let mut out = Vec::new();
         for id in list {
-            let row: Option<CachedInvoice> = sqlx::query_as(
-                "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
-                        status, detail_json
-                   FROM hddt_purchase_invoice WHERE id = ?",
+            let row: Option<CachedInvoice> = sqlx::query_as!(
+                CachedInvoice,
+                r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+                          khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                     FROM hddt_purchase_invoice WHERE id = ?"#,
+                id
             )
-            .bind(id)
             .fetch_optional(&*pool)
             .await
             .map_err(|e| e.to_string())?;
@@ -665,12 +669,13 @@ pub(crate) async fn hddt_sync_import(
         }
         out
     } else {
-        sqlx::query_as(
-            "SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten, khmshdon, khhdon, shdon,
-                    status, detail_json
-               FROM hddt_purchase_invoice
-              WHERE status = 'pending' AND detail_json <> '' AND detail_error = ''
-              ORDER BY posting_date, khhdon, shdon",
+        sqlx::query_as!(
+            CachedInvoice,
+            r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                 FROM hddt_purchase_invoice
+                WHERE status = 'pending' AND detail_json <> '' AND detail_error = ''
+                ORDER BY posting_date, khhdon, shdon"#
         )
         .fetch_all(&*pool)
         .await

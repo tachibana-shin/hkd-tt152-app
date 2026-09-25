@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT username, role FROM app_user WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "username",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "role",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "343800844a13bcd0ba46b37414cc796757136b1b480cbb729597d901421f5e55"
+}

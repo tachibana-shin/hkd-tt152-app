@@ -584,59 +584,60 @@ pub(crate) async fn next_product_code(state: State<'_, AppState>) -> Result<Stri
 
 /// Tự sinh mã tiếp theo: prefix + số tự tăng + đệm 0 — ví dụ KHO001, KH001,
 /// NCC001... Dò theo mã đang có trong bảng nên không bao giờ trùng.
-async fn next_entity_code(
-    pool: &SqlitePool,
-    table: &str,
-    prefix: &str,
-    digits: usize,
-) -> Result<String, String> {
-    let sql = format!("SELECT code FROM {}", table);
-    let rows: Vec<(String,)> = sqlx::query_as(&sql)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+fn next_code_of(codes: Vec<String>, prefix: &str, digits: usize) -> String {
     let mut max_num: i64 = 0;
-    for (code,) in rows {
+    for code in &codes {
         if let Some(num) = code.strip_prefix(prefix) {
             if let Ok(n) = num.trim_start_matches('0').trim().parse::<i64>() {
                 max_num = max_num.max(n);
             }
         }
     }
-    Ok(format!(
-        "{}{:0>width$}",
-        prefix,
-        max_num + 1,
-        width = digits
-    ))
+    format!("{}{:0>width$}", prefix, max_num + 1, width = digits)
 }
 
 #[tauri::command]
 pub(crate) async fn next_warehouse_code(state: State<'_, AppState>) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     let pool = state.pool.read().await;
-    next_entity_code(&pool, "warehouse", "KHO", 3).await
+    let codes: Vec<String> = sqlx::query_scalar!("SELECT code FROM warehouse")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(next_code_of(codes, "KHO", 3))
 }
 
 #[tauri::command]
 pub(crate) async fn next_customer_code(state: State<'_, AppState>) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let pool = state.pool.read().await;
-    next_entity_code(&pool, "customer", "KH", 3).await
+    let codes: Vec<String> = sqlx::query_scalar!("SELECT code FROM customer")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(next_code_of(codes, "KH", 3))
 }
 
 #[tauri::command]
 pub(crate) async fn next_supplier_code(state: State<'_, AppState>) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let pool = state.pool.read().await;
-    next_entity_code(&pool, "supplier", "NCC", 3).await
+    let codes: Vec<String> = sqlx::query_scalar!("SELECT code FROM supplier")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(next_code_of(codes, "NCC", 3))
 }
 
 #[tauri::command]
 pub(crate) async fn next_employee_code(state: State<'_, AppState>) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let pool = state.pool.read().await;
-    next_entity_code(&pool, "employee", "NV", 3).await
+    let codes: Vec<String> = sqlx::query_scalar!("SELECT code FROM employee")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(next_code_of(codes, "NV", 3))
 }
 
 // ─── LAZY LOAD SẢN PHẨM ───

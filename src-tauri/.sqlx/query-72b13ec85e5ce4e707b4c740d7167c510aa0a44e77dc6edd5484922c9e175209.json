@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status, e_invoice_no, e_invoice_symbol, e_invoice_date FROM invoice",
+  "describe": {
+    "columns": [
+      {
+        "name": "status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_no",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_symbol",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_date",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "72b13ec85e5ce4e707b4c740d7167c510aa0a44e77dc6edd5484922c9e175209"
+}

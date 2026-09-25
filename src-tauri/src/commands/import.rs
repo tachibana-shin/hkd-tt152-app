@@ -30,42 +30,46 @@ pub(crate) async fn import_nhap_lieu(
             continue;
         }
         // insert trực tiếp để lưu được cả Ngày chứng từ (doc_date) và Kỳ khai thuế (tax_period)
-        sqlx::query(
+        // Biểu thức tạm (`if ... { } else { .. }`) bind trước: macro giữ
+        // tham chiếu tới hết `.await`.
+        let doc_date = if it.doc_date.is_empty() {
+            it.posting_date.clone()
+        } else {
+            it.doc_date.clone()
+        };
+        let unit_code = if it.unit_code.is_empty() {
+            "HKD".to_string()
+        } else {
+            it.unit_code.clone()
+        };
+        sqlx::query!(
             "INSERT INTO journal_entry
              (posting_date, voucher_no, doc_date, description, product_code,
               supplier_code, customer_code, quantity, unit_price, amount, entry_type,
               debit_account, credit_account, industry_code, vat_rate, pit_rate,
               tax_period, unit_code, adjust_code, note)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            it.posting_date,
+            it.voucher_no,
+            doc_date,
+            it.description,
+            it.product_code,
+            it.supplier_code,
+            it.customer_code,
+            it.quantity,
+            it.unit_price,
+            it.amount,
+            it.entry_type,
+            it.debit_account,
+            it.credit_account,
+            it.industry_code,
+            it.vat_rate,
+            it.pit_rate,
+            it.tax_period,
+            unit_code,
+            it.adjust_code,
+            it.note
         )
-        .bind(&it.posting_date)
-        .bind(&it.voucher_no)
-        .bind(if it.doc_date.is_empty() {
-            &it.posting_date
-        } else {
-            &it.doc_date
-        })
-        .bind(&it.description)
-        .bind(&it.product_code)
-        .bind(&it.supplier_code)
-        .bind(&it.customer_code)
-        .bind(it.quantity)
-        .bind(it.unit_price)
-        .bind(it.amount)
-        .bind(&it.entry_type)
-        .bind(&it.debit_account)
-        .bind(&it.credit_account)
-        .bind(&it.industry_code)
-        .bind(it.vat_rate)
-        .bind(it.pit_rate)
-        .bind(it.tax_period)
-        .bind(if it.unit_code.is_empty() {
-            "HKD"
-        } else {
-            &it.unit_code
-        })
-        .bind(&it.adjust_code)
-        .bind(&it.note)
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;

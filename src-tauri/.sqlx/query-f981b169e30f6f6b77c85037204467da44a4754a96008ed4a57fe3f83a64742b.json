@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT amount FROM journal_entry WHERE voucher_no = 'LUONG-2026-05'",
+  "describe": {
+    "columns": [
+      {
+        "name": "amount",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f981b169e30f6f6b77c85037204467da44a4754a96008ed4a57fe3f83a64742b"
+}

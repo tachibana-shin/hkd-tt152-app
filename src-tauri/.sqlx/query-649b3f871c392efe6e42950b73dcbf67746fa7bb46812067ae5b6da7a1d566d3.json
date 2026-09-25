@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", portal_id, posting_date, nbmst, nbten,\n                          khmshdon as \"khmshdon!\", khhdon, shdon, status, detail_json\n                     FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "portal_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "nbmst",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "nbten",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "khmshdon!",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "khhdon",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "shdon",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "detail_json",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "649b3f871c392efe6e42950b73dcbf67746fa7bb46812067ae5b6da7a1d566d3"
+}

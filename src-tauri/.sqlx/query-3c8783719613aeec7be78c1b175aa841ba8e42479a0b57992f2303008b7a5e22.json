@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity FROM stock_lot ORDER BY received_at ASC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3c8783719613aeec7be78c1b175aa841ba8e42479a0b57992f2303008b7a5e22"
+}

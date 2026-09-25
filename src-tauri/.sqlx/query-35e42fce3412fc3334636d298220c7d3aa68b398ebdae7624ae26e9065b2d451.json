@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO product (code, name, unit, identity_key)\n             VALUES ('SP0001', '  bình nn rossi  ', 'CÁI', ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "35e42fce3412fc3334636d298220c7d3aa68b398ebdae7624ae26e9065b2d451"
+}

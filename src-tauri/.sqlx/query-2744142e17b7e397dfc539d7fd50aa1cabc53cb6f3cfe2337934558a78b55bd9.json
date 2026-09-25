@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", basic_salary, allowance_cv, allowance_xx, allowance_phone, bh_salary\n                 FROM employee WHERE code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "basic_salary",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "allowance_cv",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "allowance_xx",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "allowance_phone",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "bh_salary",
+        "ordinal": 5,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2744142e17b7e397dfc539d7fd50aa1cabc53cb6f3cfe2337934558a78b55bd9"
+}

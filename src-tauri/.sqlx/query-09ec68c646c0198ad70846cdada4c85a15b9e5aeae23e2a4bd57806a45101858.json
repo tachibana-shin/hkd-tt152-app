@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO payroll (period, employee_id, work_days, bonus, advance, pit_amount,\n                     gross_salary, bh_employer, bh_employee, net_pay, note)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n             ON CONFLICT(period, employee_id) DO UPDATE SET\n                work_days = excluded.work_days, bonus = excluded.bonus,\n                advance = excluded.advance, pit_amount = excluded.pit_amount,\n                gross_salary = excluded.gross_salary, bh_employer = excluded.bh_employer,\n                bh_employee = excluded.bh_employee, net_pay = excluded.net_pay,\n                note = excluded.note",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "09ec68c646c0198ad70846cdada4c85a15b9e5aeae23e2a4bd57806a45101858"
+}

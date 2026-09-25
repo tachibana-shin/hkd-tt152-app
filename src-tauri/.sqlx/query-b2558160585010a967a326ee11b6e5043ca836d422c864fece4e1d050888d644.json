@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT entry_type, debit_account, credit_account, amount, vat_rate\n             FROM journal_entry WHERE voucher_no = 'PXK-01'",
+  "describe": {
+    "columns": [
+      {
+        "name": "entry_type",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "debit_account",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "credit_account",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_rate",
+        "ordinal": 4,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b2558160585010a967a326ee11b6e5043ca836d422c864fece4e1d050888d644"
+}

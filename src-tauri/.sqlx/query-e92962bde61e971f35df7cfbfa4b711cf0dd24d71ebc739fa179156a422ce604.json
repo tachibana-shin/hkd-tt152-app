@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity, unit_price, subtotal, industry_code FROM invoice_item",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "subtotal",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "industry_code",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e92962bde61e971f35df7cfbfa4b711cf0dd24d71ebc739fa179156a422ce604"
+}

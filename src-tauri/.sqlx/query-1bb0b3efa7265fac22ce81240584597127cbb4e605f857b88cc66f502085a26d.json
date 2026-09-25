@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT industry_code, is_service FROM product WHERE name = 'Phí vận chuyển'",
+  "describe": {
+    "columns": [
+      {
+        "name": "industry_code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_service",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "1bb0b3efa7265fac22ce81240584597127cbb4e605f857b88cc66f502085a26d"
+}

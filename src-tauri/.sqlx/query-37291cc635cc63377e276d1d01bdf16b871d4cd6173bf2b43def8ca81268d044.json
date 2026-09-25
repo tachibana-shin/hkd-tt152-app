@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice\n                SET status = 'manual', detail_error = 'Too Many Requests', skip_reason = 'x'\n              WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "37291cc635cc63377e276d1d01bdf16b871d4cd6173bf2b43def8ca81268d044"
+}

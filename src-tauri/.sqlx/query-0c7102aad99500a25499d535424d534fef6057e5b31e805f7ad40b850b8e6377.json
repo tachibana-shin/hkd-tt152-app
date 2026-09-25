@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE app_user SET display_name = ?, role = ?, active = ? WHERE username = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0c7102aad99500a25499d535424d534fef6057e5b31e805f7ad40b850b8e6377"
+}

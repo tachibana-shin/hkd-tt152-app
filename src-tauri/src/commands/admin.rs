@@ -21,6 +21,8 @@ pub(crate) async fn create_backup(
     app: tauri::AppHandle,
 ) -> Result<String, String> {
     require_role(&state, &["admin"]).await?;
+    // PRAGMA không khai báo kiểu cột (NULL) nên macro sqlx không map được →
+    // giữ runtime query, đây là câu lệnh bảo trì DB chứ không đụng schema.
     sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .execute(&*state.pool.read().await)
         .await

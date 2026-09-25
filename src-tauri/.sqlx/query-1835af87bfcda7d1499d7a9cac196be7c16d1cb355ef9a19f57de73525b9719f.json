@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT entry_type, debit_account, credit_account, amount, customer_code, note\n             FROM journal_entry WHERE voucher_no = 'PT001'",
+  "describe": {
+    "columns": [
+      {
+        "name": "entry_type",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "debit_account",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "credit_account",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "customer_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "note",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1835af87bfcda7d1499d7a9cac196be7c16d1cb355ef9a19f57de73525b9719f"
+}

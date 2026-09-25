@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status, detail_error FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "detail_error",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b4e204e84afbb16fa875de2910a243c0e2e2f861961c85f3927c2cc4096bdde9"
+}

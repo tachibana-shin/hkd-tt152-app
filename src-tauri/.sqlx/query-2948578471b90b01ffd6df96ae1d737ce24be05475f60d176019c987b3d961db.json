@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT industry_code, unit, is_service FROM product WHERE name = 'Bình NN Rossi'",
+  "describe": {
+    "columns": [
+      {
+        "name": "industry_code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_service",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2948578471b90b01ffd6df96ae1d737ce24be05475f60d176019c987b3d961db"
+}

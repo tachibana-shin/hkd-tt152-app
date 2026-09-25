@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT net_pay FROM payroll WHERE period = '2026-05'",
+  "describe": {
+    "columns": [
+      {
+        "name": "net_pay",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "552d9b2b375dd6decdd8ecb5711dfe291c5c7560f6607b02b4148f2d9eadfa0f"
+}

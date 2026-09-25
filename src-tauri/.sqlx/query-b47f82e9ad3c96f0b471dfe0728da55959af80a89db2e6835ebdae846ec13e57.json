@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET identity_key = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b47f82e9ad3c96f0b471dfe0728da55959af80a89db2e6835ebdae846ec13e57"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO employee (code, name, department, position, job, basic_salary,\n             allowance_cv, allowance_xx, allowance_phone, bh_salary, hired_on, left_on, dependents)\n         VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, '', '', 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "07bd08f6a3a9bb84a5ac0fa02dfabe05bdf92125119321e68056f2f372773ac3"
+}

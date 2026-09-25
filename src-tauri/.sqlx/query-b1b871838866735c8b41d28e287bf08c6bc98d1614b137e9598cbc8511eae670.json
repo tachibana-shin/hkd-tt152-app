@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO employee (code, name, department, position, job, basic_salary,\n                allowance_cv, allowance_xx, allowance_phone, bh_salary,\n                hired_on, left_on, dependents)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n         ON CONFLICT(code) DO UPDATE SET\n            name = excluded.name, department = excluded.department,\n            position = excluded.position, job = excluded.job,\n            basic_salary = excluded.basic_salary,\n            allowance_cv = excluded.allowance_cv,\n            allowance_xx = excluded.allowance_xx,\n            allowance_phone = excluded.allowance_phone,\n            bh_salary = excluded.bh_salary,\n            hired_on = excluded.hired_on, left_on = excluded.left_on,\n            dependents = excluded.dependents",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "b1b871838866735c8b41d28e287bf08c6bc98d1614b137e9598cbc8511eae670"
+}

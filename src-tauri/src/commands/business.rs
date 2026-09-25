@@ -48,7 +48,7 @@ pub(crate) async fn save_business_config(
     require_role(&state, &["admin"]).await?;
     let pool = state.pool.read().await;
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO business (id, name, tax_code, address, short_name, ownership,
                                province, tax_code_issued_on, phone, email, hddt_start_date)
          VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -59,17 +59,17 @@ pub(crate) async fn save_business_config(
             tax_code_issued_on = excluded.tax_code_issued_on,
             phone = excluded.phone, email = excluded.email,
             hddt_start_date = excluded.hddt_start_date",
+        name,
+        tax_code,
+        address,
+        short_name,
+        ownership,
+        province,
+        tax_code_issued_on,
+        phone,
+        email,
+        hddt_start_date
     )
-    .bind(&name)
-    .bind(&tax_code)
-    .bind(&address)
-    .bind(&short_name)
-    .bind(&ownership)
-    .bind(&province)
-    .bind(&tax_code_issued_on)
-    .bind(&phone)
-    .bind(&email)
-    .bind(&hddt_start_date)
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;

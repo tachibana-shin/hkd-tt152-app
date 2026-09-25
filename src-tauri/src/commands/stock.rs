@@ -87,31 +87,32 @@ pub(crate) async fn save_inbound_core(
     // Đầu phiếu nhập (inbound_voucher) — id này là điểm neo để hóa đơn chính
     // thức liên kết chặt với phiếu nhập. Tạo TRƯỚC các dòng bút toán để
     // gắn inbound_voucher_id ngay khi ghi.
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO inbound_voucher
             (voucher_no, posting_date, supplier_code, description, reference_no,
              inbound_type, warehouse_code, unit_code, vat_rate, source, note, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', '', datetime('now'))
          ON CONFLICT(voucher_no) DO NOTHING",
+        voucher_no,
+        posting_date,
+        supplier_code,
+        description,
+        reference_no,
+        inbound_type,
+        warehouse_code,
+        unit_code,
+        vat_rate
     )
-    .bind(voucher_no)
-    .bind(posting_date)
-    .bind(supplier_code)
-    .bind(description)
-    .bind(reference_no)
-    .bind(inbound_type)
-    .bind(warehouse_code)
-    .bind(unit_code)
-    .bind(vat_rate)
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
-    let inbound_header_id: (i64,) =
-        sqlx::query_as("SELECT id FROM inbound_voucher WHERE voucher_no = ?")
-            .bind(voucher_no)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?;
+    let inbound_header_id: i64 = sqlx::query_scalar!(
+        r#"SELECT id as "id!" FROM inbound_voucher WHERE voucher_no = ?"#,
+        voucher_no
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
 
     // TK mặc định theo loại nhập (rỗng → mặc định):
     //   purchase  → Nợ 152 (hàng hóa) / Có 331 (phải trả người bán)
@@ -171,16 +172,19 @@ pub(crate) async fn save_inbound_core(
         if inbound_type == "adjust" && adjust_dir == "down" {
             let wh = resolve_warehouse(&mut tx, warehouse_code, &item.product_code).await?;
             let product_id = resolve_product(&mut tx, &item.product_code).await?.id;
-            let lots: Vec<(i64, f64, f64)> = sqlx::query_as(
-                "SELECT id, quantity, unit_cost FROM stock_lot
-                 WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
-                 ORDER BY received_at ASC, id ASC",
+            let lots: Vec<(i64, f64, f64)> = sqlx::query!(
+                r#"SELECT id as "id!", quantity, unit_cost FROM stock_lot
+                   WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
+                   ORDER BY received_at ASC, id ASC"#,
+                product_id,
+                wh
             )
-            .bind(product_id)
-            .bind(wh)
             .fetch_all(&mut *tx)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|r| (r.id, r.quantity, r.unit_cost))
+            .collect();
             let (_, takes) = allocate_fifo(&lots, item.quantity).map_err(|short| {
                 format!(
                     "Không đủ tồn kho để điều chỉnh giảm '{}': thiếu {:.2} (còn thiếu sau khi trừ hết các lô)",
@@ -366,28 +370,28 @@ pub(crate) async fn save_inbound_core(
 
     // Gắn id đầu phiếu vào các dòng bút toán của chính phiếu này + chốt tổng.
     // (Lọc theo voucher_no + entry_type để không đụng phiếu khác trùng số.)
-    sqlx::query(
+    sqlx::query!(
         "UPDATE journal_entry SET inbound_voucher_id = ?
           WHERE voucher_no = ? AND entry_type = 'PN'",
+        inbound_header_id,
+        voucher_no
     )
-    .bind(inbound_header_id.0)
-    .bind(voucher_no)
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
-    sqlx::query(
+    sqlx::query!(
         "UPDATE inbound_voucher SET total = ?, vat_amount = ?, reference_no = ?,
                 posting_date = ?, supplier_code = ?, description = ?, unit_code = ?
           WHERE id = ?",
+        total,
+        vat_total,
+        reference_no,
+        posting_date,
+        supplier_code,
+        description,
+        unit_code,
+        inbound_header_id
     )
-    .bind(total)
-    .bind(vat_total)
-    .bind(reference_no)
-    .bind(posting_date)
-    .bind(supplier_code)
-    .bind(description)
-    .bind(unit_code)
-    .bind(inbound_header_id.0)
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
@@ -404,14 +408,14 @@ pub(crate) async fn save_inbound_core(
 /// Số phiếu chi (PC) tiếp theo: lấy số lớn nhất đang có + 1 (PC001, PC002…).
 /// Khớp với quy ước gợi ý số phiếu ở màn Phiếu thu/chi.
 async fn next_pc_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PC'")
+    let rows: Vec<String> =
+        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PC'")
             .fetch_all(&mut **tx)
             .await
             .map_err(|e| e.to_string())?;
     let max = rows
         .iter()
-        .filter_map(|(v,)| {
+        .filter_map(|v| {
             let digits: String = v
                 .chars()
                 .rev()
@@ -444,14 +448,14 @@ pub(crate) struct OutboundResult {
 /// Số phiếu thu (PT) tiếp theo: lấy số lớn nhất đang có + 1 (PT001, PT002…).
 /// Khớp với quy ước gợi ý số phiếu ở màn Phiếu thu/chi.
 async fn next_pt_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PT'")
+    let rows: Vec<String> =
+        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PT'")
             .fetch_all(&mut **tx)
             .await
             .map_err(|e| e.to_string())?;
     let max = rows
         .iter()
-        .filter_map(|(v,)| {
+        .filter_map(|v| {
             let digits: String = v
                 .chars()
                 .rev()
@@ -648,16 +652,19 @@ pub(crate) async fn save_outbound_core(
         let wh_id = resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
 
         // Hàng hóa: FIFO lấy các lô chưa xuất hết theo ngày nhập, trong đúng kho đã chọn
-        let lots: Vec<(i64, f64, f64)> = sqlx::query_as(
-            "SELECT id, quantity, unit_cost FROM stock_lot
-             WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
-             ORDER BY received_at ASC, id ASC",
+        let lots: Vec<(i64, f64, f64)> = sqlx::query!(
+            r#"SELECT id as "id!", quantity, unit_cost FROM stock_lot
+               WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
+               ORDER BY received_at ASC, id ASC"#,
+            product.id,
+            wh_id
         )
-        .bind(product.id)
-        .bind(wh_id)
         .fetch_all(&mut *tx)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|r| (r.id, r.quantity, r.unit_cost))
+        .collect();
 
         let wh_name = if item.warehouse_code.trim().is_empty() {
             "kho mặc định".to_string()
@@ -807,19 +814,21 @@ pub(crate) async fn save_outbound_core(
         // Dòng chi tiết hóa đơn — giữ nguyên nhóm ngành / tỷ lệ thuế đã hạch toán.
         for (pid, qty, price, ind, vat, pit) in &invoice_lines {
             let subtotal = qty * price;
-            sqlx::query(
+            let (pid, qty, price) = (*pid, *qty, *price);
+            let (ind, vat, pit) = (ind.clone(), *vat, *pit);
+            sqlx::query!(
                 "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
                                            industry_code, vat_rate, pit_rate)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                inv_id,
+                pid,
+                qty,
+                price,
+                subtotal,
+                ind,
+                vat,
+                pit
             )
-            .bind(inv_id)
-            .bind(pid)
-            .bind(qty)
-            .bind(price)
-            .bind(subtotal)
-            .bind(ind)
-            .bind(vat)
-            .bind(pit)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -889,13 +898,13 @@ pub(crate) async fn save_inbound(
     // Công tắc "khấu trừ GTGT đầu vào" (mặc định TẮT) — tắt thì bỏ qua thuế nhập
     // kể cả khi form gửi lên (hộ nộp thuế theo doanh thu không được khấu trừ).
     let pool = state.pool.read().await;
-    let vat_deduct: (String,) = sqlx::query_as(
-        "SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0')",
+    let vat_deduct: String = sqlx::query_scalar!(
+        r#"SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0') as "v!: String""#
     )
     .fetch_one(&*pool)
     .await
     .map_err(|e| e.to_string())?;
-    let vat_rate = if vat_deduct.0 == "1" { vat_rate } else { 0.0 };
+    let vat_rate = if vat_deduct == "1" { vat_rate } else { 0.0 };
 
     // TK Nợ/Có (kể cả mặc định theo loại nhập) phải có trong danh mục tài khoản.
     let debit = if debit_account.trim().is_empty() {
@@ -931,12 +940,11 @@ pub(crate) async fn save_inbound(
         checked.push("111".to_string());
     }
     for code in &checked {
-        let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM account WHERE code = ?")
-            .bind(code)
+        let exists: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM account WHERE code = ?", code)
             .fetch_one(&*pool)
             .await
             .map_err(|e| e.to_string())?;
-        if exists.0 == 0 {
+        if exists == 0 {
             return Err(format!(
                 "Tài khoản '{}' chưa có trong danh mục tài khoản — hãy thêm ở màn Tài khoản trước khi nhập kho",
                 code
@@ -1038,11 +1046,11 @@ pub(crate) async fn save_outbound(
     // trong danh mục (chỉ khi có khách hàng — chưa biết thu của ai thì không tạo,
     // và không tạo cho phiếu điều chỉnh hóa đơn).
     if receive_now && outbound_type == "sale" && !customer_code.trim().is_empty() {
-        let exists: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM account WHERE code = '111'")
+        let exists: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM account WHERE code = '111'")
             .fetch_one(&*state.pool.read().await)
             .await
             .map_err(|e| e.to_string())?;
-        if exists.0 == 0 {
+        if exists == 0 {
             return Err(
                 "Tài khoản '111' (tiền mặt) chưa có trong danh mục tài khoản — hãy thêm ở màn Tài khoản trước khi xuất kho thu tiền ngay".into(),
             );
@@ -1275,10 +1283,11 @@ mod tests {
         let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
         // Kho mặc định được migration seed sẵn (KHO-CHINH) — khi dòng bỏ trống kho,
         // xuất rơi vào kho đầu tiên này (fallback của resolve_warehouse).
-        let (w,): (i64,) = sqlx::query_as("SELECT id FROM warehouse WHERE code = 'KHO-CHINH'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let w: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM warehouse WHERE code = 'KHO-CHINH'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
         add_stock_lot(&pool, p, w, 10.0, 1200.0, "2026-02-01").await;
 
@@ -1304,35 +1313,36 @@ mod tests {
         assert_eq!(r.cogs, 16_000.0); // FIFO: 10x1000 + 5x1200
 
         // Lô 1 cạn, lô 2 còn 5
-        let (qty1, dep1): (f64, bool) = sqlx::query_as(
-            "SELECT quantity, depleted FROM stock_lot ORDER BY received_at ASC LIMIT 1",
+        let first_lot = sqlx::query!(
+            r#"SELECT quantity, depleted as "depleted: bool" FROM stock_lot
+                 ORDER BY received_at ASC LIMIT 1"#
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        let (qty2, dep2): (f64, bool) = sqlx::query_as(
-            "SELECT quantity, depleted FROM stock_lot ORDER BY received_at DESC LIMIT 1",
+        let last_lot = sqlx::query!(
+            r#"SELECT quantity, depleted as "depleted: bool" FROM stock_lot
+                 ORDER BY received_at DESC LIMIT 1"#
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!((qty1, dep1), (0.0, true));
-        assert_eq!((qty2, dep2), (5.0, false));
+        assert_eq!((first_lot.quantity, first_lot.depleted), (0.0, true));
+        assert_eq!((last_lot.quantity, last_lot.depleted), (5.0, false));
 
         // Sổ bán hàng: Nợ 131 / Có 511, đúng tỷ lệ ngành PPHH
-        let (etype, debit, credit, amount, vat): (String, String, String, f64, f64) =
-            sqlx::query_as(
-                "SELECT entry_type, debit_account, credit_account, amount, vat_rate
-             FROM journal_entry WHERE voucher_no = 'PXK-01'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(etype, "PX");
-        assert_eq!(debit, "131");
-        assert_eq!(credit, "511");
-        assert_eq!(amount, 30_000.0);
-        assert_eq!(vat, 0.01);
+        let je = sqlx::query!(
+            "SELECT entry_type, debit_account, credit_account, amount, vat_rate
+             FROM journal_entry WHERE voucher_no = 'PXK-01'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(je.entry_type, "PX");
+        assert_eq!(je.debit_account, "131");
+        assert_eq!(je.credit_account, "511");
+        assert_eq!(je.amount, 30_000.0);
+        assert_eq!(je.vat_rate, 0.01);
     }
 
     #[tokio::test]
@@ -1398,14 +1408,15 @@ mod tests {
         .await
         .expect("xuất đúng kho W2");
         assert_eq!(r.cogs, 3_000.0); // 3 x 1000 (lô W2)
-        let (q1, q_w1): (f64, i64) =
-            sqlx::query_as("SELECT quantity, warehouse_id FROM stock_lot WHERE warehouse_id = ?")
-                .bind(w1)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(q1, 10.0);
-        assert_eq!(q_w1, w1);
+        let lot = sqlx::query!(
+            r#"SELECT quantity, warehouse_id as "wh!: i64" FROM stock_lot WHERE warehouse_id = ?"#,
+            w1
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(lot.quantity, 10.0);
+        assert_eq!(lot.wh, w1);
 
         // Xuất tiếp 1 từ W2 → thiếu (W2 đã hết, W1 còn nhưng không bị đụng tới).
         let err = save_outbound_core(
@@ -1434,8 +1445,8 @@ mod tests {
         // Dịch vụ (nhân công): không có lô tồn kho nào; nhóm ngành gán trên sản phẩm
         // (DVXD-KNL → GTGT 5%, TNCN 2%) để kiểm tra fallback khi dòng bỏ trống nhóm.
         seed_product(&pool, "S1", "Nhân công", 0.0).await;
-        sqlx::query(
-            "UPDATE product SET is_service = 1, industry_code = 'DVXD-KNL' WHERE code = 'S1'",
+        sqlx::query!(
+            "UPDATE product SET is_service = 1, industry_code = 'DVXD-KNL' WHERE code = 'S1'"
         )
         .execute(&pool)
         .await
@@ -1470,28 +1481,20 @@ mod tests {
         assert_eq!(r.cogs, 0.0);
         assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await, 0);
 
-        let (etype, debit, credit, amount, industry, vat, pit): (
-            String,
-            String,
-            String,
-            f64,
-            String,
-            f64,
-            f64,
-        ) = sqlx::query_as(
+        let je = sqlx::query!(
             "SELECT entry_type, debit_account, credit_account, amount, industry_code, vat_rate, pit_rate
-             FROM journal_entry WHERE voucher_no = 'PXK-SV'",
+             FROM journal_entry WHERE voucher_no = 'PXK-SV'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(etype, "PX");
-        assert_eq!(debit, "131");
-        assert_eq!(credit, "511");
-        assert_eq!(amount, 1_500_000.0);
-        assert_eq!(industry, "DVXD-KNL");
-        assert_eq!(vat, 0.05);
-        assert_eq!(pit, 0.02);
+        assert_eq!(je.entry_type, "PX");
+        assert_eq!(je.debit_account, "131");
+        assert_eq!(je.credit_account, "511");
+        assert_eq!(je.amount, 1_500_000.0);
+        assert_eq!(je.industry_code, "DVXD-KNL");
+        assert_eq!(je.vat_rate, 0.05);
+        assert_eq!(je.pit_rate, 0.02);
     }
 
     // ─── Thu tiền ngay: tự tạo phiếu thu (PT) liên kết thanh toán của khách hàng ───
@@ -1526,26 +1529,20 @@ mod tests {
         assert_eq!(r.pt_no, "PT001");
 
         // Phiếu thu: Nợ 111 tiền mặt / Có 131 phải thu, đủ doanh thu
-        let (etype, debit, credit, amount, cus): (String, String, String, f64, String) =
-            sqlx::query_as(
-                "SELECT entry_type, debit_account, credit_account, amount, customer_code
-                 FROM journal_entry WHERE voucher_no = 'PT001'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(etype, "PT");
-        assert_eq!(debit, "111");
-        assert_eq!(credit, "131");
-        assert_eq!(amount, 10_000.0);
-        assert_eq!(cus, "KH1");
+        let je = sqlx::query!(
+            "SELECT entry_type, debit_account, credit_account, amount, customer_code, note
+             FROM journal_entry WHERE voucher_no = 'PT001'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(je.entry_type, "PT");
+        assert_eq!(je.debit_account, "111");
+        assert_eq!(je.credit_account, "131");
+        assert_eq!(je.amount, 10_000.0);
+        assert_eq!(je.customer_code, "KH1");
         // Liên kết: ghi chú chứa số PX để truy vết PT ↔ PX
-        let (note,): (String,) =
-            sqlx::query_as("SELECT note FROM journal_entry WHERE voucher_no = 'PT001'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(note.contains("PXK-03"));
+        assert!(je.note.contains("PXK-03"), "ghi chú: {}", je.note);
 
         // Số PT tiếp theo tự tăng: PT002
         let r2 = save_outbound_core(
@@ -1848,28 +1845,22 @@ mod tests {
         assert_eq!(r.vat, 10_000.0);
 
         // Phiếu chi: Nợ 331 (phải trả NCC) / Có 111 (tiền mặt), đủ 110.000 = hàng + thuế
-        let (etype, debit, credit, amount, vat): (String, String, String, f64, f64) =
-            sqlx::query_as(
-                "SELECT entry_type, debit_account, credit_account, amount, vat_rate
-                 FROM journal_entry WHERE voucher_no = 'PC001'",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(etype, "PC");
-        assert_eq!(debit, "331");
-        assert_eq!(credit, "111");
-        assert_eq!(amount, 110_000.0);
-        assert_eq!(vat, 0.0);
-        // Liên kết: ghi chú chứa số PNK + gắn đúng nhà cung cấp
-        let (sup, note): (String, String) = sqlx::query_as(
-            "SELECT supplier_code, note FROM journal_entry WHERE voucher_no = 'PC001'",
+        let je = sqlx::query!(
+            "SELECT entry_type, debit_account, credit_account, amount, vat_rate,
+                    supplier_code, note
+             FROM journal_entry WHERE voucher_no = 'PC001'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(sup, "NCC1");
-        assert!(note.contains("PNK-05"));
+        assert_eq!(je.entry_type, "PC");
+        assert_eq!(je.debit_account, "331");
+        assert_eq!(je.credit_account, "111");
+        assert_eq!(je.amount, 110_000.0);
+        assert_eq!(je.vat_rate, 0.0);
+        // Liên kết: ghi chú chứa số PNK + gắn đúng nhà cung cấp
+        assert_eq!(je.supplier_code, "NCC1");
+        assert!(je.note.contains("PNK-05"), "ghi chú: {}", je.note);
 
         // Số PC tiếp theo tự tăng: PC002
         let r2 = save_inbound_core(
@@ -2016,23 +2007,27 @@ mod tests {
             15.0
         );
         assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await, 2);
-        let (q1,): (f64,) =
-            sqlx::query_as("SELECT quantity FROM stock_lot ORDER BY received_at ASC LIMIT 1")
+        let q1: f64 =
+            sqlx::query_scalar!("SELECT quantity FROM stock_lot ORDER BY received_at ASC LIMIT 1")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert_eq!(q1, 5.0); // lô đầu trừ 5
 
         // Sổ đảo ngược: Nợ 331 / Có 152 (hàng) + Nợ 331 / Có 133 (thuế), adjust = GiamCP
-        let (debit, credit, adj): (String, String, String) = sqlx::query_as(
+        let je = sqlx::query!(
             "SELECT debit_account, credit_account, adjust_code FROM journal_entry
-             WHERE voucher_no = 'PNK-DC01' AND debit_account = '331' AND credit_account = '152'",
+             WHERE voucher_no = 'PNK-DC01' AND debit_account = '331' AND credit_account = '152'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(
-            (debit.as_str(), credit.as_str(), adj.as_str()),
+            (
+                je.debit_account.as_str(),
+                je.credit_account.as_str(),
+                je.adjust_code.as_str()
+            ),
             ("331", "152", "GiamCP")
         );
         assert_eq!(
@@ -2130,13 +2125,16 @@ mod tests {
             scalar_f64(&pool, "SELECT SUM(quantity) FROM stock_lot").await,
             4.0
         );
-        let (debit, credit): (String, String) = sqlx::query_as(
-            "SELECT debit_account, credit_account FROM journal_entry WHERE voucher_no = 'PNK-DC03'",
+        let je = sqlx::query!(
+            "SELECT debit_account, credit_account FROM journal_entry WHERE voucher_no = 'PNK-DC03'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!((debit.as_str(), credit.as_str()), ("152", "331"));
+        assert_eq!(
+            (je.debit_account.as_str(), je.credit_account.as_str()),
+            ("152", "331")
+        );
     }
 
     // ─── Điều chỉnh hóa đơn bán (outbound_type = "adjust") ───
@@ -2179,34 +2177,41 @@ mod tests {
             23.0
         );
         assert_eq!(scalar_i64(&pool, "SELECT COUNT(*) FROM stock_lot").await, 2);
-        let (cost,): (f64,) =
-            sqlx::query_as("SELECT unit_cost FROM stock_lot ORDER BY id DESC LIMIT 1")
+        let cost: f64 =
+            sqlx::query_scalar!("SELECT unit_cost FROM stock_lot ORDER BY id DESC LIMIT 1")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert_eq!(cost, 2000.0);
 
         // PX: Nợ 511 / Có 131 (giảm doanh thu), adjust = GiamDT
-        let (debit, credit, adj): (String, String, String) = sqlx::query_as(
+        let px = sqlx::query!(
             "SELECT debit_account, credit_account, adjust_code FROM journal_entry
-             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PX'",
+             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PX'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(
-            (debit.as_str(), credit.as_str(), adj.as_str()),
+            (
+                px.debit_account.as_str(),
+                px.credit_account.as_str(),
+                px.adjust_code.as_str()
+            ),
             ("511", "131", "GiamDT")
         );
         // PN: Nợ 152 / Có 632 (nhập lại hàng, giảm giá vốn)
-        let (debit, credit): (String, String) = sqlx::query_as(
+        let pn = sqlx::query!(
             "SELECT debit_account, credit_account FROM journal_entry
-             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PN'",
+             WHERE voucher_no = 'PXK-DC01' AND entry_type = 'PN'"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!((debit.as_str(), credit.as_str()), ("152", "632"));
+        assert_eq!(
+            (pn.debit_account.as_str(), pn.credit_account.as_str()),
+            ("152", "632")
+        );
     }
 
     // Điều chỉnh giảm — kể cả "thu tiền ngay = true" cũng KHÔNG tạo phiếu thu.
@@ -2323,35 +2328,33 @@ mod tests {
         assert_eq!(r.invoice_no, "PXK-INV1");
         assert_eq!(r.invoice_status, "draft");
 
-        let (number, status, customer, tax, total, vno): (
-            String,
-            String,
-            String,
-            String,
-            f64,
-            String,
-        ) = sqlx::query_as(
+        let inv = sqlx::query!(
             "SELECT number, status, customer, customer_tax_code, total, voucher_no
-             FROM invoice",
+             FROM invoice"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!((number.as_str(), status.as_str()), ("PXK-INV1", "draft"));
-        assert_eq!(customer, "Cửa hàng Mây");
-        assert_eq!(tax, "MST-KH1");
-        assert_eq!(total, 6_000.0); // 3 x 2000
-        assert_eq!(vno, "PXK-INV1");
+        assert_eq!(
+            (inv.number.as_str(), inv.status.as_str()),
+            ("PXK-INV1", "draft")
+        );
+        assert_eq!(inv.customer, "Cửa hàng Mây");
+        assert_eq!(inv.customer_tax_code, "MST-KH1");
+        assert_eq!(inv.total, 6_000.0); // 3 x 2000
+        assert_eq!(inv.voucher_no, "PXK-INV1");
 
         // Dòng chi tiết hóa đơn: đủ hàng, nhóm ngành + tỷ lệ thuế theo bút toán.
-        let (qty, price, subtotal, ind): (f64, f64, f64, String) = sqlx::query_as(
-            "SELECT quantity, unit_price, subtotal, industry_code FROM invoice_item",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!((qty, price, subtotal), (3.0, 2000.0, 6_000.0));
-        assert_eq!(ind, "PPHH");
+        let item =
+            sqlx::query!("SELECT quantity, unit_price, subtotal, industry_code FROM invoice_item")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (item.quantity, item.unit_price, item.subtotal),
+            (3.0, 2000.0, 6_000.0)
+        );
+        assert_eq!(item.industry_code, "PPHH");
     }
 
     // Khai Số HĐĐT + Ký hiệu + Ngày ngay trên phiếu → hóa đơn kèm chuyển thành
@@ -2387,16 +2390,16 @@ mod tests {
         .expect("xuất kho kèm HĐĐT");
 
         assert_eq!(r.invoice_status, "official");
-        let (status, eno, esym, edate): (String, String, String, String) = sqlx::query_as(
-            "SELECT status, e_invoice_no, e_invoice_symbol, e_invoice_date FROM invoice",
+        let inv = sqlx::query!(
+            "SELECT status, e_invoice_no, e_invoice_symbol, e_invoice_date FROM invoice"
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(status, "official");
-        assert_eq!(eno, "E2026/001");
-        assert_eq!(esym, "1C26TT152");
-        assert_eq!(edate, "2026-07-02");
+        assert_eq!(inv.status, "official");
+        assert_eq!(inv.e_invoice_no, "E2026/001");
+        assert_eq!(inv.e_invoice_symbol, "1C26TT152");
+        assert_eq!(inv.e_invoice_date, "2026-07-02");
     }
 
     // Điều chỉnh GIẢM (khách trả lại) — dù gửi kèm thông tin hóa đơn cũng KHÔNG

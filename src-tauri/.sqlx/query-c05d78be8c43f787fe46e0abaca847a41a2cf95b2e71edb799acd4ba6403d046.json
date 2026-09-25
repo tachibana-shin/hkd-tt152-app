@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT subtotal, discount, warehouse_code FROM invoice_item",
+  "describe": {
+    "columns": [
+      {
+        "name": "subtotal",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "discount",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "warehouse_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c05d78be8c43f787fe46e0abaca847a41a2cf95b2e71edb799acd4ba6403d046"
+}

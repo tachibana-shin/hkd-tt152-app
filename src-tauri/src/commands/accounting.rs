@@ -40,30 +40,36 @@ pub(crate) async fn get_trial_balance(
     to_date: String,
 ) -> Result<String, String> {
     let pool = state.pool.read().await;
-    let accounts: Vec<(String, String, f64, f64)> = sqlx::query_as(
-        "SELECT code, name, opening_debit, opening_credit FROM account ORDER BY code",
-    )
-    .fetch_all(&*pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let accounts: Vec<(String, String, f64, f64)> =
+        sqlx::query!("SELECT code, name, opening_debit, opening_credit FROM account ORDER BY code")
+            .fetch_all(&*pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|r| (r.code, r.name, r.opening_debit, r.opening_credit))
+            .collect();
 
-    // Tổng phát sinh Nợ / Có theo từng tài khoản trong kỳ.
-    let mvmt: Vec<(String, f64, f64)> = sqlx::query_as(
-        "SELECT code, SUM(d) AS debit_mvmt, SUM(c) AS credit_mvmt FROM (
-            SELECT debit_account AS code, amount AS d, 0.0 AS c FROM journal_entry
-            WHERE posting_date >= ? AND posting_date <= ?
-            UNION ALL
-            SELECT credit_account, 0.0, amount FROM journal_entry
-            WHERE posting_date >= ? AND posting_date <= ?
-         ) GROUP BY code",
+    // Tổng phát sinh Nợ / Có theo từng tài khoản trong kỳ (SUM có ít nhất 1 dòng
+    // trong mỗi nhóm nên ép NOT NULL).
+    let mvmt: Vec<(String, f64, f64)> = sqlx::query!(
+        r#"SELECT code, SUM(d) AS "debit_mvmt!: f64", SUM(c) AS "credit_mvmt!: f64" FROM (
+               SELECT debit_account AS code, amount AS d, 0.0 AS c FROM journal_entry
+               WHERE posting_date >= ? AND posting_date <= ?
+               UNION ALL
+               SELECT credit_account, 0.0, amount FROM journal_entry
+               WHERE posting_date >= ? AND posting_date <= ?
+            ) GROUP BY code"#,
+        from_date,
+        to_date,
+        from_date,
+        to_date
     )
-    .bind(&from_date)
-    .bind(&to_date)
-    .bind(&from_date)
-    .bind(&to_date)
     .fetch_all(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .map(|r| (r.code, r.debit_mvmt, r.credit_mvmt))
+    .collect();
 
     let mv: std::collections::HashMap<String, (f64, f64)> = mvmt
         .into_iter()
@@ -212,18 +218,21 @@ pub(crate) fn profit_tncn_rate(group: i64) -> f64 {
 /// Đọc cấu hình kê khai thuế từ app_setting: (kỳ khai, phương pháp TNCN).
 /// Mặc định: quý + theo doanh thu.
 pub(crate) async fn load_tax_settings(pool: &SqlitePool) -> Result<(String, String), String> {
-    let rows: Vec<(Option<String>, String)> = sqlx::query_as(
-        "SELECT key, value FROM app_setting WHERE key IN ('tax_period', 'tax_method')",
+    let rows: Vec<(String, String)> = sqlx::query!(
+        r#"SELECT key as "key!", value FROM app_setting WHERE key IN ('tax_period', 'tax_method')"#
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .map(|r| (r.key, r.value))
+    .collect();
     let mut period = "quarter".to_string();
     let mut method = "revenue".to_string();
     for (k, v) in rows {
-        match k.as_deref() {
-            Some("tax_period") => period = v,
-            Some("tax_method") => method = v,
+        match k.as_str() {
+            "tax_period" => period = v,
+            "tax_method" => method = v,
             _ => {}
         }
     }
@@ -350,18 +359,19 @@ pub(crate) async fn get_tax_overview(
         .sum();
 
     // Chi phí trong kỳ (phiếu chi PC, trừ điều chỉnh giảm chi phí).
-    let (exp_up, exp_down): (f64, f64) = sqlx::query_as(
-        "SELECT
-            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP' THEN amount ELSE 0.0 END), 0.0),
-            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code = 'GiamCP' THEN amount ELSE 0.0 END), 0.0)
-         FROM journal_entry
-         WHERE posting_date >= ? AND posting_date <= ?",
+    let exp = sqlx::query!(
+        r#"SELECT
+              COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS "up!: f64",
+              COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code = 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS "down!: f64"
+           FROM journal_entry
+           WHERE posting_date >= ? AND posting_date <= ?"#,
+        from,
+        to
     )
-    .bind(&from)
-    .bind(&to)
     .fetch_one(&*pool)
     .await
     .map_err(|e| e.to_string())?;
+    let (exp_up, exp_down) = (exp.up, exp.down);
     let expense = exp_up - exp_down;
     let profit = period_revenue - expense;
 

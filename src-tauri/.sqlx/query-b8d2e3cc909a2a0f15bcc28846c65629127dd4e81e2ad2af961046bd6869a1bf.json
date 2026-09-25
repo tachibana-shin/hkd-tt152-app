@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT amount FROM journal_entry WHERE entry_type = 'PN' AND product_code <> ''",
+  "describe": {
+    "columns": [
+      {
+        "name": "amount",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b8d2e3cc909a2a0f15bcc28846c65629127dd4e81e2ad2af961046bd6869a1bf"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity, warehouse_id as \"wh!: i64\" FROM stock_lot WHERE warehouse_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "wh!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "20524f6bcf5a34964808b611e68825dd546eee1e21c4dd4f5172cf7e4a7166a7"
+}

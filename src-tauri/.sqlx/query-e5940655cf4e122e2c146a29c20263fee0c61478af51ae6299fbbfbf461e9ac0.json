@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT password_hash FROM app_user WHERE username = 'admin'",
+  "describe": {
+    "columns": [
+      {
+        "name": "password_hash",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e5940655cf4e122e2c146a29c20263fee0c61478af51ae6299fbbfbf461e9ac0"
+}

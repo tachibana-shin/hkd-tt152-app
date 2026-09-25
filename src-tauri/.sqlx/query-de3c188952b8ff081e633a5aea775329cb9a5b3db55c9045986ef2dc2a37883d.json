@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO attendance (work_date, employee_id, status) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "de3c188952b8ff081e633a5aea775329cb9a5b3db55c9045986ef2dc2a37883d"
+}

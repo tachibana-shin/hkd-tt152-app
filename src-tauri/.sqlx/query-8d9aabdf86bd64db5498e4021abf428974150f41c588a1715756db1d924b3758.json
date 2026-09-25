@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice\n                SET status = 'manual', detail_error = 'Too Many Requests', detail_json = ''\n              WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "8d9aabdf86bd64db5498e4021abf428974150f41c588a1715756db1d924b3758"
+}

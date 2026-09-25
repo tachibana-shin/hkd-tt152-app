@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE journal_entry SET inbound_voucher_id = ?\n          WHERE voucher_no = ? AND entry_type = 'PN'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "aaac2f5a955f938a6ce300bdb7bad8f425c6d423ce4e5f9a47440f7ca901f82f"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(SUM(quantity), 0.0) as \"qty!: f64\" FROM stock_lot\n                   WHERE product_id = ? AND warehouse_id = ? AND depleted = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "qty!: f64",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2224905d9acbe6275ef7a46591cc3a0dbcfbbd25d9b605edac70845b5390ab10"
+}

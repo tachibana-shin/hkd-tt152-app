@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(p.default_warehouse_id, (SELECT id FROM warehouse ORDER BY id LIMIT 1)) as \"wh!: i64\"\n           FROM product p WHERE p.code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "wh!: i64",
+        "ordinal": 0,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2481ee1e3912b24be25479a0e978e65cae65372b5c3390441d0fd0b971e65c37"
+}

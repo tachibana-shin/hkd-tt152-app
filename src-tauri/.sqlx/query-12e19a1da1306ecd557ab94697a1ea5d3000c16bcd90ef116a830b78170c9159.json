@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM industry_group WHERE code = 'PPHH'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "12e19a1da1306ecd557ab94697a1ea5d3000c16bcd90ef116a830b78170c9159"
+}

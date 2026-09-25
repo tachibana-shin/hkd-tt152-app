@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0') as \"v!: String\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "v!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "48fb0c3e5caf5b9be474c1c2aa3e7c2fe576b3868acf153785bab6c3e22e60e7"
+}

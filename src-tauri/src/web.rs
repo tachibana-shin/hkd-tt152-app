@@ -797,11 +797,12 @@ pub(crate) async fn set_web_server(
     require_role(&state, &["admin", "ketoan"]).await?;
     {
         let pool = state.pool.read().await;
-        sqlx::query(
+        let value = if enabled { "true" } else { "false" };
+        sqlx::query!(
             "INSERT INTO app_setting (key, value) VALUES ('web_server_enabled', ?)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            value
         )
-        .bind(if enabled { "true" } else { "false" })
         .execute(&*pool)
         .await
         .map_err(|e| e.to_string())?;

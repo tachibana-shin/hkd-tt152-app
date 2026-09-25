@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT code, identity_key, portal_code FROM product WHERE name = 'Bình NN Rossi'",
+  "describe": {
+    "columns": [
+      {
+        "name": "code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "identity_key",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "portal_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3870700d77b58ac7eccf022c10989d222b32bcd245d81ea7ecc6e14740a4dafa"
+}

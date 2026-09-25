@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO business (id, name, tax_code, address, short_name, ownership,\n                               province, tax_code_issued_on, phone, email, hddt_start_date)\n         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n         ON CONFLICT(id) DO UPDATE SET\n            name = excluded.name, tax_code = excluded.tax_code,\n            address = excluded.address, short_name = excluded.short_name,\n            ownership = excluded.ownership, province = excluded.province,\n            tax_code_issued_on = excluded.tax_code_issued_on,\n            phone = excluded.phone, email = excluded.email,\n            hddt_start_date = excluded.hddt_start_date",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "8e3a4c48bb97837919e3c91905bb464cbe9ac520f336ff13c31d58dd3df5c499"
+}
