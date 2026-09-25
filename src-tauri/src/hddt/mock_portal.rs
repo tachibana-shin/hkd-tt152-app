@@ -65,6 +65,8 @@ pub(crate) struct MockPortal {
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
     /// Trả 429 `n` lần đầu cho mọi endpoint (test retry).
     pub rate_limit_first: Arc<Mutex<usize>>,
+    /// Cắt kết nối `n` lần đầu không trả lời (test retry lỗi mạng).
+    pub transport_fail_first: Arc<Mutex<usize>>,
     /// Nội dung `hdhhdvu` trả về cho endpoint chi tiết.
     pub detail_lines: Arc<Mutex<String>>,
 }
@@ -78,6 +80,7 @@ impl MockPortal {
         let addr = listener.local_addr().expect("mock portal: addr");
         let requests = Arc::new(Mutex::new(Vec::new()));
         let rate_limit_first = Arc::new(Mutex::new(0));
+        let transport_fail_first = Arc::new(Mutex::new(0));
         let detail_lines = Arc::new(Mutex::new(
             r#"[{"ten":"Hàng mẫu","dvtinh":"Cái","mhhdvu":"SP-MOCK","sluong":2.0,"dgia":100000.0,"stckhau":0.0,"tsuat":0.08}]"#
                 .to_string(),
@@ -86,6 +89,7 @@ impl MockPortal {
             base: format!("http://{addr}"),
             requests: requests.clone(),
             rate_limit_first: rate_limit_first.clone(),
+            transport_fail_first: transport_fail_first.clone(),
             detail_lines: detail_lines.clone(),
         };
         tokio::spawn(async move {
@@ -95,9 +99,10 @@ impl MockPortal {
                 };
                 let reqs = requests.clone();
                 let rl = rate_limit_first.clone();
+                let net = transport_fail_first.clone();
                 let lines = detail_lines.clone();
                 tokio::spawn(async move {
-                    let _ = handle(socket, reqs, rl, lines).await;
+                    let _ = handle(socket, reqs, rl, net, lines).await;
                 });
             }
         });
@@ -129,6 +134,7 @@ async fn handle(
     mut socket: tokio::net::TcpStream,
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
     rate_limit_first: Arc<Mutex<usize>>,
+    transport_fail_first: Arc<Mutex<usize>>,
     detail_lines: Arc<Mutex<String>>,
 ) -> std::io::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -158,6 +164,20 @@ async fn handle(
         query: query.clone(),
         headers,
     });
+
+    // Cắt kết nối N lần đầu (không trả response) → mô phỏng timeout/đứt mạng.
+    let drop_conn = {
+        let mut n = transport_fail_first.lock().unwrap();
+        if *n > 0 {
+            *n -= 1;
+            true
+        } else {
+            false
+        }
+    };
+    if drop_conn {
+        return Ok(());
+    }
 
     // 429 cho N lần đầu nếu được cấu hình (trả về số lần 429 còn lại).
     let still_limited = {

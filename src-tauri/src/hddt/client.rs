@@ -230,6 +230,8 @@ pub(crate) struct HddtClient {
     min_call_gap: Duration,
     /// Chờ rồi thử lại (giây) khi bị 429.
     retry_429_delays: Vec<u64>,
+    /// Chờ rồi thử lại (giây) khi request hỏng giữa đường (timeout, đứt mạng).
+    retry_net_delays: Vec<u64>,
 }
 
 /// Giãn nhịp giữa 2 request liên tiếp: cổng trả 429 "Too Many Requests" khi quét
@@ -237,6 +239,9 @@ pub(crate) struct HddtClient {
 const MIN_CALL_GAP: Duration = Duration::from_millis(700);
 /// Khi bị 429, chờ rồi thử lại theo từng lần.
 const RETRY_429_DELAYS: [u64; 3] = [3, 8, 20];
+/// Lỗi kết nối (timeout, đứt mạng): thử lại 3 lần rồi mới báo lỗi — thường chỉ
+/// vài giây là kết nối lại được.
+const RETRY_NET_DELAYS: [u64; 3] = [2, 5, 10];
 
 /// 3 anti-bot headers required for EVERY portal API call (copied from the
 /// portal's own axios interceptor — verified 09/2026: without `request-id` → 403
@@ -291,6 +296,7 @@ impl HddtClient {
             last_call: std::sync::Mutex::new(None),
             min_call_gap: MIN_CALL_GAP,
             retry_429_delays: RETRY_429_DELAYS.to_vec(),
+            retry_net_delays: RETRY_NET_DELAYS.to_vec(),
         })
     }
 
@@ -301,6 +307,7 @@ impl HddtClient {
         let mut c = Self::new("u", "p", Some(base)).expect("client test");
         c.min_call_gap = Duration::ZERO;
         c.retry_429_delays = vec![0, 0, 0];
+        c.retry_net_delays = vec![0, 0, 0];
         c
     }
 
@@ -334,6 +341,12 @@ impl HddtClient {
 
     /// Như [`Self::get_throttled`], thêm header `Action` (bắt buộc cho endpoint
     /// tra cứu danh sách — header này chọn đúng hành động của tab trên cổng).
+    ///
+    /// Tự thử lại khi cổng bị giới hạn tần suất (429) **và** khi request hỏng
+    /// giữa đường (timeout, đứt kết nối): quét hàng loạt dễ gặp cả hai, mà một
+    /// lần rớt mạng thì hóa đơn bị đánh "Cần xử lý" dù lúc đó mọi thứ bình
+    /// thường. Hết số lần thử thì trả lỗi kèm số lần đã thử để người dùng
+    /// biết nguyên nhân.
     async fn get_throttled_with(
         &self,
         url: reqwest::Url,
@@ -341,7 +354,9 @@ impl HddtClient {
         referer: &str,
         action: String,
     ) -> Result<reqwest::Response, String> {
-        let mut attempt = 0;
+        let mut rate_attempt = 0;
+        let mut net_attempt = 0;
+        let max_net = self.retry_net_delays.len();
         loop {
             self.throttle().await;
             let mut h = anti_bot_headers();
@@ -351,7 +366,7 @@ impl HddtClient {
                 }
             }
             h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
-            let resp = self
+            let sent = self
                 .http
                 .get(url.clone())
                 .headers(h)
@@ -359,15 +374,32 @@ impl HddtClient {
                 .header(reqwest::header::REFERER, referer.to_string())
                 .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
                 .send()
-                .await
-                .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+                .await;
+            let resp = match sent {
+                Ok(r) => r,
+                Err(e) => {
+                    if net_attempt >= max_net {
+                        return Err(format!(
+                            "Lỗi kết nối cổng HĐĐT (đã thử {} lần): {e}",
+                            max_net + 1
+                        ));
+                    }
+                    let secs = self.retry_net_delays[net_attempt];
+                    net_attempt += 1;
+                    rate_attempt = 0;
+                    if secs > 0 {
+                        tokio::time::sleep(Duration::from_secs(secs)).await;
+                    }
+                    continue;
+                }
+            };
             if resp.status() != reqwest::StatusCode::TOO_MANY_REQUESTS
-                || attempt >= self.retry_429_delays.len()
+                || rate_attempt >= self.retry_429_delays.len()
             {
                 return Ok(resp);
             }
-            let secs = self.retry_429_delays[attempt];
-            attempt += 1;
+            let secs = self.retry_429_delays[rate_attempt];
+            rate_attempt += 1;
             if secs > 0 {
                 tokio::time::sleep(Duration::from_secs(secs)).await;
             }
@@ -843,6 +875,47 @@ mod tests {
             2,
             "mọi dòng hàng phải được lấy về để tạo phiếu nhập"
         );
+    }
+
+    #[tokio::test]
+    async fn network_error_is_retried_then_reported() {
+        // Lỗi mạng giữa chừng (timeout/đứt kết nối) phải được thử lại — nếu không,
+        // một lần rớt mạng sẽ đẩy hóa đơn sang "Cần xử lý" dù cổng vẫn bình thường.
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+
+        // 2 lần đứt kết nối rồi mới thành công → vẫn trả kết quả.
+        *portal.transport_fail_first.lock().unwrap() = 2;
+        let list = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("phải thử lại sau lỗi mạng");
+        assert_eq!(list.total, 1);
+        assert_eq!(portal.count("/invoices/purchase"), 3);
+
+        // Hết số lần thử → lỗi phải nói rõ đã thử mấy lần.
+        *portal.transport_fail_first.lock().unwrap() = 99;
+        let err = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("hết lượt thử phải báo lỗi");
+        assert!(err.contains("đã thử 4 lần"), "thông báo sai: {err}");
     }
 
     #[tokio::test]
