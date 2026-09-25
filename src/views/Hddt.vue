@@ -7,11 +7,10 @@ const router = useRouter();
 // `status` dùng chung với màn Tra cứu / Đồng bộ (xem usePortalSession) → đăng nhập
 // ở đây thì 2 màn kia cập nhật ngay, không cần nạp lại.
 const portal = usePortalSession();
-const { status } = portal;
+const { status, busy, lastError } = portal;
 
 const loading = ref(false);
 const saving = ref(false);
-const busy = ref(false); // đang đăng nhập
 
 const cfg = reactive({ username: "", password: "", base_url: "" });
 const hasPassword = ref(false);
@@ -20,28 +19,9 @@ const showPassword = ref(false);
 const savedPassword = ref("");
 const showSavedPassword = ref(false);
 
-const lastError = ref("");
-
-// ─── Captcha nhập tay (khi tự giải thất bại) ───
-const manualVisible = ref(false);
-const manualSvg = ref("");
-const manualKey = ref("");
-const manualValue = ref("");
-const manualBusy = ref(false);
-const manualError = ref("");
-/** Đang chờ người dùng nhập captcha → tạm ngừng tự đăng nhập. */
-const manualStopped = ref(false);
-
 /** Tự đổi mật khẩu khi sắp hết hạn (mặc định tắt — khôi phục mật khẩu bị mất rất khó). */
 const autoChange = ref(false);
 const changeBusy = ref(false);
-const pwDialogVisible = ref(false);
-const pwDialogNew = ref("");
-
-let timer: ReturnType<typeof setInterval> | null = null;
-
-/** Tự đăng nhập lại trước khi token hết hạn 1 giờ. */
-const RELOGIN_AHEAD = 3600;
 
 const tokenText = computed(() => {
   const s = status.value?.seconds_left ?? 0;
@@ -145,80 +125,6 @@ async function refreshStatus() {
   await portal.loadPortalStatus();
 }
 
-/** Đăng nhập (tự giải captcha). `interactive` = do người dùng bấm → có toast. */
-async function autoLogin(interactive = false) {
-  if (busy.value || manualStopped.value) return;
-  busy.value = true;
-  lastError.value = "";
-  try {
-    const res = await api.hddtLogin();
-    if (res.status) status.value = res.status;
-    if (!res.ok && res.need_manual) {
-      lastError.value = res.reason ?? "";
-      await openManual();
-    } else {
-      // Mật khẩu cổng vừa được tự đổi → cập nhật để nút "Xem mật khẩu đã lưu" hiện đúng.
-      await reloadSavedPassword();
-      if (res.password_rotated && res.new_password) {
-        pwDialogNew.value = res.new_password;
-        pwDialogVisible.value = true;
-      } else if (interactive) {
-        toast.add({ severity: "success", summary: "Đã đăng nhập cổng HĐĐT", life: 2500 });
-      }
-    }
-  } catch (e) {
-    lastError.value = String(e);
-    if (interactive) toastError("Đăng nhập HĐĐT thất bại", e);
-  } finally {
-    busy.value = false;
-  }
-}
-
-/** Lấy captcha mới + mở hộp thoại cho người dùng nhập tay. */
-async function openManual() {
-  manualStopped.value = true; // dừng tự đăng nhập để không đè captcha đang nhập
-  try {
-    const c = await api.hddtCaptcha();
-    manualKey.value = c.key;
-    manualSvg.value = c.svg;
-    manualValue.value = "";
-    manualError.value = "";
-    manualVisible.value = true;
-  } catch (e) {
-    toastError("Không lấy được captcha", e);
-  }
-}
-
-async function submitManual() {
-  const val = manualValue.value.trim();
-  if (!val) {
-    manualError.value = "Nhập mã captcha";
-    return;
-  }
-  manualBusy.value = true;
-  manualError.value = "";
-  try {
-    const res = await api.hddtLoginManual({ captchaKey: manualKey.value, captchaValue: val });
-    if (res.status) status.value = res.status;
-    if (res.ok) {
-      manualVisible.value = false;
-      manualStopped.value = false;
-      lastError.value = "";
-      toast.add({ severity: "success", summary: "Đã đăng nhập cổng HĐĐT", life: 2500 });
-    }
-  } catch (e) {
-    manualError.value = String(e);
-    await openManual(); // captcha sai → lấy mã mới
-  } finally {
-    manualBusy.value = false;
-  }
-}
-
-function onManualHide() {
-  // Người dùng đóng hộp thoại mà chưa đăng nhập được → cho phép tự thử lại.
-  if (!status.value?.logged_in) manualStopped.value = false;
-}
-
 async function save() {
   if (!cfg.username.trim()) {
     toastError("Thiếu thông tin", "Nhập tên đăng nhập HĐĐT");
@@ -234,10 +140,10 @@ async function save() {
     hasPassword.value = c.has_password;
     configured.value = c.configured;
     cfg.password = "";
-    manualStopped.value = false;
+    portal.resumeAutoLogin();
     toast.add({ severity: "success", summary: "Đã lưu tài khoản HĐĐT", life: 2500 });
     await refreshStatus();
-    if (c.configured) await autoLogin(true);
+    if (c.configured) await portal.loginPortal();
     await reloadSavedPassword(); // cập nhật để nút "Xem mật khẩu đã lưu" hiển thị đúng
   } catch (e) {
     toastError("Không lưu được", e);
@@ -270,14 +176,12 @@ async function changePassword() {
     const res = await api.hddtChangePassword();
     if (res.status) status.value = res.status;
     if (res.ok && res.new_password) {
-      pwDialogNew.value = res.new_password;
-      pwDialogVisible.value = true;
+      portal.newPassword.value = res.new_password; // hiện ở dialog dùng chung
       changeBusy.value = false;
       await reloadSavedPassword(); // mật khẩu mới đã được lưu vào CSDL → cập nhật nút "Xem mật khẩu đã lưu"
       toast.add({ severity: "success", summary: "Đã đổi mật khẩu & đăng nhập lại", life: 4000 });
     } else if (res.need_manual) {
-      lastError.value = res.reason ?? "";
-      await openManual();
+      await portal.openManual();
     } else {
       toast.add({
         severity: "error",
@@ -303,73 +207,19 @@ async function toggleSavedPassword() {
   showSavedPassword.value = true;
 }
 
-/** Copy mật khẩu mới ra clipboard (nếu bị chặn thì hiện toast). */
-async function copyNewPassword() {
-  if (!pwDialogNew.value) return;
-  try {
-    await navigator.clipboard.writeText(pwDialogNew.value);
-    toast.add({ severity: "info", summary: "Đã sao chép mật khẩu mới", life: 2000 });
-  } catch {
-    toast.add({ severity: "warn", summary: "Không truy cập được clipboard", life: 3000 });
-  }
-}
-
-async function doLogout() {
-  try {
-    await api.hddtLogout();
-    manualStopped.value = false;
-    await refreshStatus();
-    toast.add({ severity: "info", summary: "Đã đăng xuất cổng HĐĐT", life: 2000 });
-  } catch (e) {
-    toastError("Không đăng xuất được", e);
-  }
-}
-
-/** Định kỳ: token sắp/đã hết hạn thì tự đăng nhập lại. */
-async function tick() {
-  if (manualVisible.value || manualStopped.value || busy.value) return;
-  try {
-    await refreshStatus();
-  } catch {
-    return;
-  }
-  const s = status.value;
-  if (!s?.configured) return;
-  if (!s.logged_in || s.seconds_left <= RELOGIN_AHEAD) {
-    await autoLogin();
-  }
-}
-
-// Nạp cấu hình + đăng nhập ngay khi component được tạo (không đụng DOM nên không
-// cần onMounted). `loading` giữ spinner cho tới khi xong.
+// App đã tự đăng nhập cổng lúc khởi động; màn này chỉ nạp cấu hình tài khoản
+// để hiển thị/đổi. Nếu phiên bị mất (đăng xuất, hết hạn) thì thử lại tại đây.
 void (async () => {
   loading.value = true;
   try {
     await loadConfig();
-    await tick();
+    await refreshStatus();
   } catch (e) {
     toastError("Không tải được cấu hình HĐĐT", e);
   } finally {
     loading.value = false;
   }
 })();
-
-// Hẹn giờ tự đăng nhập lại. Màn này được KeepAlive giữ lại nên rời trang chỉ
-// "deactivate" chứ không unmount → dừng hẹn giờ khi ẩn, chạy lại khi quay lại.
-function startTimer() {
-  if (!timer) timer = setInterval(tick, 60_000);
-}
-
-function stopTimer() {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-}
-
-onActivated(startTimer);
-onDeactivated(stopTimer);
-onUnmounted(stopTimer);
 </script>
 
 <template>
@@ -471,7 +321,7 @@ onUnmounted(stopTimer);
               severity="secondary"
               :loading="busy"
               :disabled="busy"
-              @click="autoLogin(true)"
+              @click="portal.loginPortal()"
             />
             <Button
               v-if="status?.logged_in"
@@ -479,7 +329,7 @@ onUnmounted(stopTimer);
               icon="pi pi-sign-out"
               severity="danger"
               text
-              @click="doLogout"
+              @click="portal.logoutPortal()"
             />
           </div>
 
@@ -643,59 +493,5 @@ onUnmounted(stopTimer);
         </template>
       </Card>
     </template>
-
-    <!-- Nhập captcha thủ công -->
-    <Dialog
-      v-model:visible="manualVisible"
-      modal
-      header="Nhập captcha"
-      :style="{ width: '420px' }"
-      @hide="onManualHide"
-    >
-      <div class="space-y-3">
-        <p class="text-sm text-gray-600">
-          Không giải được captcha tự động. Nhập 6 ký tự trong ảnh dưới đây:
-        </p>
-        <div
-          class="flex justify-center rounded border border-gray-200 bg-gray-50 p-3"
-          v-html="manualSvg"
-        />
-        <InputText
-          v-model="manualValue"
-          class="w-full text-center text-lg tracking-widest"
-          maxlength="6"
-          placeholder="XXXXXX"
-          @keyup.enter="submitManual"
-        />
-        <div v-if="manualError" class="text-sm text-red-600">{{ manualError }}</div>
-      </div>
-      <template #footer>
-        <Button label="Hủy" severity="secondary" text @click="manualVisible = false" />
-        <Button label="Xác nhận" icon="pi pi-check" :loading="manualBusy" @click="submitManual" />
-      </template>
-    </Dialog>
-
-    <!-- Mật khẩu mới (sau khi đổi) -->
-    <Dialog
-      v-model:visible="pwDialogVisible"
-      modal
-      header="Mật khẩu mới"
-      :style="{ width: '400px' }"
-      :closable="false"
-    >
-      <div class="space-y-3">
-        <p class="text-sm text-gray-600">
-          Đã tự đổi mật khẩu cổng HĐĐT thành công. Mật khẩu mới được lưu trong app; nếu bạn cần đăng
-          nhập trực tiếp trên cổng web, hãy giữ lại mật khẩu dưới đây:
-        </p>
-        <div class="flex gap-2">
-          <InputText :value="pwDialogNew" readonly class="flex-1 font-mono" />
-          <Button icon="pi pi-copy" severity="secondary" @click="copyNewPassword" />
-        </div>
-      </div>
-      <template #footer>
-        <Button label="Đã lưu" @click="pwDialogVisible = false" />
-      </template>
-    </Dialog>
   </div>
 </template>

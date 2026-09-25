@@ -390,6 +390,34 @@ async function loginPortal(api: APIRequestContext) {
   return body;
 }
 
+test("HĐĐT: app tự đăng nhập cổng lúc khởi động, không cần mở màn HĐĐT", async ({
+  page,
+  request,
+}) => {
+  // Cấu hình trỏ mock portal + đăng nhập một lần để app có token hợp lệ.
+  await request.post("/api/hddt_save_config", {
+    data: { username: "0100000000", password: "mock", baseUrl: MOCK_PORTAL_URL },
+  });
+  await request.post("/api/hddt_login", { data: {} });
+
+  // Mở app (đăng nhập nội bộ) — không chạm vào menu HĐĐT.
+  await ensureLoggedIn(page);
+  await expect
+    .poll(
+      async () => (await (await request.post("/api/hddt_status", { data: {} })).json()).logged_in,
+      {
+        timeout: 20_000,
+      },
+    )
+    .toBe(true);
+
+  // Vào thẳng màn Đồng bộ: không được hiện cảnh báo "chưa đăng nhập".
+  await sidebarButton(page, "Đồng bộ HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+  await expect(page.getByText("Chưa đăng nhập cổng HĐĐT", { exact: false })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Đăng nhập cổng HĐĐT" })).toBeHidden();
+});
+
 test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả về hóa đơn", async ({
   page,
   request,

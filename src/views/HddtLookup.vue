@@ -294,7 +294,13 @@ const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
 
 // Bộ lọc khởi tạo ở trên (ô mặc định "bán ra × máy tính tiền"); chỉ cần đọc
 // trạng thái phiên cổng — không có thao tác ref/DOM nên gọi thẳng ở root.
-void portal.loadPortalStatus();
+// App đã đảm bảo phiên lúc khởi động; gọi thêm ở đây để màn này tự đăng nhập
+// nếu phiên đã mất (đăng xuất, token hết hạn) và mở popup nhập captcha tay.
+void (async () => {
+  const result = await portal.ensureSession();
+  if (result === "need_manual") await portal.openManual();
+  else if (result === "logged_in") portal.startHeartbeat();
+})();
 </script>
 
 <template>

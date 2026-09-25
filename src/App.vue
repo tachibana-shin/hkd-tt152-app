@@ -3,6 +3,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
 import { useBusinessStore } from "@/stores/business";
 import { useThemeStore } from "@/stores/theme";
+import { usePortalSession } from "@/composables/usePortalSession";
 import LoginView from "@/views/LoginView.vue";
 
 const route = useRoute();
@@ -12,6 +13,7 @@ const profile = useProfileStore();
 const business = useBusinessStore();
 const theme = useThemeStore();
 const toast = useToast();
+const portal = usePortalSession();
 const pageTitle = computed(() => route.meta?.title || "HKD Kế Toán");
 
 // Luồng khởi động: nạp hồ sơ + prefs → thử auto-login → chọn hồ sơ (nhiều hồ sơ)
@@ -50,6 +52,30 @@ async function bootstrap() {
     }
   }
   bootstrapped.value = true;
+
+  // Cổng HĐĐT: đăng nhập ngay khi app mở, không đợi vào màn HĐĐT. Solver captcha
+  // không xong thì bật hộp thoại nhập tay; các màn chỉ cần đọc trạng thái.
+  await ensurePortalSession();
+}
+
+/** Đảm bảo có phiên cổng HĐĐT (đăng nhập tự + mở popup khi cần nhập tay). */
+async function ensurePortalSession() {
+  const result = await portal.ensureSession();
+  if (result === "need_manual") {
+    // Chỉ hỏi khi cổng đã cấu hình (không hỏi vô ích ở máy chưa nhập tài khoản).
+    await portal.openManual();
+    return;
+  }
+  if (result === "failed") {
+    toast.add({
+      severity: "warn",
+      summary: "Chưa đăng nhập được cổng HĐĐT",
+      detail: `${portal.lastError.value || "Lỗi không rõ"} — mở màn HĐĐT để thử lại.`,
+      life: 6000,
+    });
+    return;
+  }
+  if (result === "logged_in") portal.startHeartbeat();
 }
 
 async function onPickProfile(key: string) {
@@ -202,6 +228,10 @@ onMounted(() => {
   theme.init(); // áp theme đã lưu + theo dõi đổi giao diện hệ thống
   bootstrap();
 });
+
+onUnmounted(() => {
+  portal.stopHeartbeat();
+});
 </script>
 
 <template>
@@ -335,6 +365,9 @@ onMounted(() => {
 
   <Toast position="top-right" />
   <ConfirmDialog />
+
+  <!-- Captcha tay + mật khẩu mới của cổng HĐĐT: một bản dùng chung cho cả app -->
+  <HddtPortalDialogs />
 
   <!-- Bắt buộc cập nhật thông tin hộ kinh doanh ngay sau khi đăng nhập (chỉ admin) -->
   <BusinessConfigDialog

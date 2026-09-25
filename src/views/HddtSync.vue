@@ -198,7 +198,13 @@ void (async () => {
   // Cache đồng bộ là dữ liệu cục bộ → tải luôn để thấy trạng thái trước khi quét.
   await loadSyncPreview();
 })();
-void portal.loadPortalStatus();
+// App đã đảm bảo phiên lúc khởi động; gọi thêm ở đây để màn này tự đăng nhập
+// nếu phiên đã mất (đăng xuất, token hết hạn) và mở popup nhập captcha tay.
+void (async () => {
+  const result = await portal.ensureSession();
+  if (result === "need_manual") await portal.openManual();
+  else if (result === "logged_in") portal.startHeartbeat();
+})();
 </script>
 
 <template>

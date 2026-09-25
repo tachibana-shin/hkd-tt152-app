@@ -29,6 +29,7 @@ declare module 'vue' {
     EmptyState: typeof import('./components/EmptyState.vue')['default']
     FileUpload: typeof import('primevue/fileupload')['default']
     FormField: typeof import('./components/FormField.vue')['default']
+    HddtPortalDialogs: typeof import('./components/HddtPortalDialogs.vue')['default']
     IconField: typeof import('primevue/iconfield')['default']
     IMdiBank: typeof import('~icons/mdi/bank')['default']
     IMdiBookOpenPageVariant: typeof import('~icons/mdi/book-open-page-variant')['default']
