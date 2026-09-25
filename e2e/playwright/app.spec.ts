@@ -258,6 +258,11 @@ test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu
   const names = (products as Array<{ name: string }>).map((p) => p.name);
   expect(names).toContain("Bình NN Rossi E2E");
   expect(names).toContain("Bộ lọc E2E");
+  // Mặt hàng hàng hóa tạo từ hóa đơn mặc định nhóm "PPHH" (Phân phối, cung cấp
+  // hàng hóa) để xuất bán không phải gán nhóm ngành bằng tay.
+  const synced = products as Array<{ name: string; industry_code: string; is_service: number }>;
+  expect(synced.find((p) => p.name === "Bình NN Rossi E2E")?.industry_code).toBe("PPHH");
+  expect(synced.find((p) => p.name === "Bộ lọc E2E")?.industry_code).toBe("PPHH");
 });
 
 test("Đồng bộ HĐ mua: chạy lần 2 không tạo trùng", async ({ page, request }) => {

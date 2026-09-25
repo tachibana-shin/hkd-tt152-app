@@ -7,7 +7,7 @@
 //   * Idempotent — `hddt_purchase_invoice.portal_id` UNIQUE (id của cổng) nên
 //     quét lại hay import lại 2 lần đều không tạo trùng.
 //   * Ngày đã quét thì cache trong `hddt_sync_day` (hóa đơn ngày đã qua không đổi).
-//   * Hôm nay bỏ qua — hóa đơn hôm nay còn có thể phát sinh/điều chỉnh thêm.
+//   * Hôm nay vẫn quét nhưng không cache — hóa đơn trong ngày còn phát sinh.
 
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Serialize;
@@ -21,6 +21,11 @@ use crate::models::InboundItemInput;
 /// Ngày cổng chấp nhận trong 1 request (HTTP 400 nếu vượt: "Khoảng thời gian
 /// tìm kiếm không được lớn hơn 1 tháng").
 const MAX_WINDOW_DAYS: i64 = 30;
+
+/// Nhóm ngành mặc định cho mặt hàng HÀNG HÓA tạo từ hóa đơn: "PPHH" — Phân phối,
+/// cung cấp hàng hóa (có sẵn từ migration khởi tạo). Hàng hóa mua vào từ hóa đơn
+/// luôn thuộc nhóm này nên không bắt người dùng gán tay trước khi xuất bán.
+const GOODS_INDUSTRY_CODE: &str = "PPHH";
 
 /// Danh tính mặt hàng: `tên` + `đơn vị tính`, chuẩn hoá Unicode.
 /// Dùng `\u{1f}` (unit separator) làm dấu phân cách để không nhập nhầm
@@ -580,12 +585,23 @@ async fn resolve_start(pool: &SqlitePool, from: &str) -> Result<NaiveDate, Strin
     }
 }
 
-/// Mốc cuối: min(tham số `to`, hôm qua) — hóa đơn hôm nay còn đang phát sinh.
-/// Mốc cuối người dùng chọn; rỗng → hôm nay. Không chặn hôm nay: phần "không cache
-/// hôm nay" do `scan` xử lý.
+/// Mốc cuối: người dùng chọn (rỗng → hôm nay). Không chặn hôm nay: phần "không
+/// cache hôm nay" do `scan` xử lý.
 async fn resolve_end(to: &str) -> Result<NaiveDate, String> {
     let asked = NaiveDate::parse_from_str(to.trim(), "%Y-%m-%d").ok();
     Ok(asked.unwrap_or_else(|| chrono::Local::now().date_naive()))
+}
+
+/// Nhóm ngành gán cho mặt hàng hàng hóa tạo từ hóa đơn. Trả về rỗng nếu nhóm
+/// `PPHH` không còn trong danh mục (người dùng đã xoá) — để màn Sản phẩm báo
+/// cần gán nhóm ngành thay vì ghi mã không tồn tại.
+async fn goods_industry_code(pool: &SqlitePool) -> Result<String, String> {
+    let found: Option<(String,)> = sqlx::query_as("SELECT code FROM industry_group WHERE code = ?")
+        .bind(GOODS_INDUSTRY_CODE)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(found.map(|(c,)| c).unwrap_or_default())
 }
 
 // ─── Import: tạo phiếu nhập kho từ hóa đơn đã cache ───
@@ -646,6 +662,7 @@ pub(crate) async fn import_invoice(
     // 1) Mặt hàng: khớp theo (tên, đơn vị); thiếu thì tạo mới.
     let mut items: Vec<InboundItemInput> = Vec::new();
     let mut created = 0usize;
+    let goods_industry = goods_industry_code(pool).await?;
     for line in &lines {
         let name = f(line, "ten");
         // Dịch vụ (phí, phí dịch vụ…) không có đơn vị tính → cổng trả null: đơn vị
@@ -675,11 +692,19 @@ pub(crate) async fn import_invoice(
                 // Dòng không có đơn vị tính = dịch vụ (cổng trả dvtinh = null):
                 // đánh dấu is_service để không tính tồn kho cho nó.
                 let is_service = i64::from(raw_unit.trim().is_empty());
+                // Hàng hóa (không phải dịch vụ) mặc định nhóm "PPHH" — người dùng
+                // không phải gán tay trước khi xuất bán. Dịch vụ để rỗng: tỷ lệ
+                // thuế của dịch vụ người dùng chọn theo ngành thực tế.
+                let industry = if is_service == 0 {
+                    goods_industry.as_str()
+                } else {
+                    ""
+                };
                 sqlx::query(
                     "INSERT INTO product (code, name, unit, sale_price, cost_price,
                                           min_stock, vat_rate, import_tax_rate, is_service,
                                           industry_code, identity_key, portal_code)
-                     VALUES (?, ?, ?, 0, ?, 0, ?, 0, ?, '', ?, ?)",
+                     VALUES (?, ?, ?, 0, ?, 0, ?, 0, ?, ?, ?, ?)",
                 )
                 .bind(&code)
                 .bind(&name)
@@ -687,6 +712,7 @@ pub(crate) async fn import_invoice(
                 .bind(cost)
                 .bind(num(line, "tsuat"))
                 .bind(is_service)
+                .bind(industry)
                 .bind(&key)
                 .bind(f(line, "mhhdvu"))
                 .execute(pool)
@@ -1138,6 +1164,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n.0, 1);
+    }
+
+    /// Hàng hóa tạo từ hóa đơn mặc định nhóm ngành PPHH (để xuất bán không phải
+    /// gán tay); dòng dịch vụ (cổng trả dvtinh = null) để trống vì tỷ lệ thuế
+    /// phụ thuộc ngành thực tế.
+    #[tokio::test]
+    async fn goods_product_gets_pphh_industry_service_stays_empty() {
+        let pool = test_pool().await;
+        let lines = r#"{"ten":"Bình NN Rossi","dvtinh":"Cái","mhhdvu":"puro30","sluong":1.0,
+                        "dgia":100.0,"stckhau":0.0,"tsuat":0.08},
+                       {"ten":"Phí vận chuyển","dvtinh":null,"mhhdvu":"phi","sluong":1.0,
+                        "dgia":50.0,"stckhau":0.0,"tsuat":0.1}"#;
+        let id = seed_invoice(&pool, "uuid-industry", 1, lines).await;
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        assert_eq!(out.products_created, 2);
+
+        let goods: (String, String, i64) = sqlx::query_as(
+            "SELECT industry_code, unit, is_service FROM product WHERE name = 'Bình NN Rossi'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(goods.0, "PPHH", "hàng hóa phải mặc định nhóm PPHH");
+        assert_eq!(goods.1, "Cái");
+        assert_eq!(goods.2, 0);
+
+        let service: (String, i64) =
+            sqlx::query_as("SELECT industry_code, is_service FROM product WHERE name = ?")
+                .bind("Phí vận chuyển")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(service.0, "", "dịch vụ không tự gán nhóm ngành hàng hóa");
+        assert_eq!(service.1, 1);
+    }
+
+    /// Người dùng xoá nhóm PPHH thì mặt hàng mới để trống, không ghi mã nhóm
+    /// không tồn tại (màn Sản phẩm sẽ báo cần gán nhóm ngành).
+    #[tokio::test]
+    async fn missing_pphh_group_leaves_industry_empty() {
+        let pool = test_pool().await;
+        sqlx::query("DELETE FROM industry_group WHERE code = 'PPHH'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let lines = r#"{"ten":"Hàng B","dvtinh":"Cái","mhhdvu":"b","sluong":1.0,
+                        "dgia":100.0,"stckhau":0.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-no-industry", 1, lines).await;
+        import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        let p: (String,) =
+            sqlx::query_as("SELECT industry_code FROM product WHERE name = 'Hàng B'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(p.0, "");
     }
 
     #[tokio::test]
