@@ -64,7 +64,16 @@ function nextInvoiceNo() {
   form.number = `HD${String(next).padStart(4, "0")}`;
 }
 
+// ─── Lập mới / sửa nháp: dùng chung một dialog ───
+// editingId rỗng = lập mới; có id = sửa hóa đơn nháp đó.
+const editingId = ref<number | null>(null);
+const draftHeader = computed(() =>
+  editingId.value ? `Sửa hóa đơn nháp ${form.number}` : "Lập hóa đơn bán hàng (nháp)",
+);
+const draftActionLabel = computed(() => (editingId.value ? "Lưu thay đổi" : "Lập hóa đơn"));
+
 function openCreate() {
+  editingId.value = null;
   Object.assign(form, {
     date: new Date(),
     customer: "",
@@ -73,6 +82,35 @@ function openCreate() {
   });
   nextInvoiceNo();
   draftDialog.value = true;
+}
+
+/** Mở dialog sửa, nạp sẵn hóa đơn + dòng hàng hiện có. */
+async function openEdit(inv: Invoice) {
+  saving.value = true;
+  try {
+    const d = await invoiceStore.loadDetail(inv.id);
+    if (!d) return;
+    editingId.value = inv.id;
+    Object.assign(form, {
+      number: d.invoice.number,
+      date: new Date(d.invoice.date),
+      customer: d.invoice.customer ?? "",
+      customer_tax_code: d.invoice.customer_tax_code ?? "",
+      items: d.items.map((it) => ({
+        product_code: it.product_code ?? "",
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        industry_code: it.industry_code ?? "",
+        discount: it.discount ?? 0,
+        warehouse_code: it.warehouse_code ?? "",
+      })),
+    });
+    draftDialog.value = true;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không mở được hóa đơn", detail: String(e) });
+  } finally {
+    saving.value = false;
+  }
 }
 
 function addRow() {
@@ -173,18 +211,21 @@ async function save() {
   }
   saving.value = true;
   try {
+    const payload = {
+      number: form.number,
+      date: iso(form.date),
+      customer: form.customer,
+      customer_tax_code: form.customer_tax_code,
+      items: rows.map((it) => ({ ...it })),
+    };
     const res = JSON.parse(
-      await invoiceStore.saveDraft({
-        number: form.number,
-        date: iso(form.date),
-        customer: form.customer,
-        customer_tax_code: form.customer_tax_code,
-        items: rows.map((it) => ({ ...it })),
-      }),
+      editingId.value
+        ? await invoiceStore.updateInvoice({ id: editingId.value, ...payload })
+        : await invoiceStore.saveDraft(payload),
     );
     toast.add({
       severity: "success",
-      summary: `Đã lập hóa đơn ${form.number}`,
+      summary: editingId.value ? `Đã sửa hóa đơn ${form.number}` : `Đã lập hóa đơn ${form.number}`,
       detail: `Tổng tiền: ${fmt(res.total)} đ • Thuế phải nộp (tỷ lệ nhóm ngành): ${fmt(res.tax_payable ?? 0)} đ`,
     });
     draftDialog.value = false;
@@ -373,7 +414,18 @@ void (async () => {
                   severity="warn"
                   @click="openStatus(data, 'adjusted')"
                 />
-                <!-- Nháp thì xoá được; các trạng thái sau nháp giữ lại dấu vết -->
+                <!-- Nháp thì sửa/xoá được; các trạng thái sau nháp giữ lại dấu vết -->
+                <Button
+                  v-if="data.status === 'draft'"
+                  icon="pi pi-file-edit"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Sửa hóa đơn nháp"
+                  v-tooltip="'Sửa hóa đơn nháp'"
+                  severity="secondary"
+                  @click="openEdit(data)"
+                />
                 <Button
                   v-if="data.status === 'draft'"
                   icon="pi pi-trash"
@@ -398,19 +450,20 @@ void (async () => {
       </template>
     </Card>
 
-    <!-- Dialog lập hóa đơn nháp -->
+    <!-- Dialog lập mới / sửa hóa đơn nháp -->
     <AppDialog
       v-model:visible="draftDialog"
-      header="Lập hóa đơn bán hàng (nháp)"
+      :header="draftHeader"
       width="max-w-6xl"
-      action-label="Lập hóa đơn"
+      :action-label="draftActionLabel"
       :saving="saving"
       :show-action="auth.canAccounting"
       @action="save"
     >
       <div class="grid grid-cols-3 gap-4 py-2">
         <FormField label="Số hóa đơn">
-          <InputText v-model="form.number" disabled size="small" />
+          <!-- Lập mới tự sinh số; sửa thì người dùng được sửa lại. -->
+          <InputText v-model="form.number" :disabled="!editingId" size="small" />
         </FormField>
         <FormField label="Ngày lập">
           <DatePicker v-model="form.date" dateFormat="dd/mm/yy" size="small" class="w-full" />

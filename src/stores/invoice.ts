@@ -17,8 +17,10 @@ export const useInvoiceStore = defineStore("invoice", () => {
     }
   }
 
+  /** Nạp chi tiết 1 hóa đơn (dùng cả cho hộp xem và để nạp sẵn dữ liệu khi sửa). */
   async function loadDetail(id: number) {
     detail.value = await api.getInvoiceDetail(id);
+    return detail.value;
   }
 
   async function saveDraft(args: {
@@ -36,6 +38,27 @@ export const useInvoiceStore = defineStore("invoice", () => {
     }[];
   }) {
     const res = await api.saveInvoice(args);
+    await loadInvoices();
+    return res;
+  }
+
+  /** Sửa hóa đơn nháp (backend chặn mọi trạng thái sau nháp). */
+  async function updateInvoice(args: {
+    id: number;
+    number: string;
+    date: string;
+    customer: string;
+    customer_tax_code: string;
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      industry_code?: string;
+      discount?: number;
+      warehouse_code?: string;
+    }[];
+  }) {
+    const res = await api.updateInvoice(args);
     await loadInvoices();
     return res;
   }
@@ -73,6 +96,7 @@ export const useInvoiceStore = defineStore("invoice", () => {
     loadInvoices,
     loadDetail,
     saveDraft,
+    updateInvoice,
     deleteInvoice,
     loadCounts,
     loadCountDetail,

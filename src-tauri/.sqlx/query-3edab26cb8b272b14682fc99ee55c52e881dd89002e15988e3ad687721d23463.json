@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT customer, customer_tax_code, date, total FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "customer",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_tax_code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "date",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "total",
+        "ordinal": 3,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3edab26cb8b272b14682fc99ee55c52e881dd89002e15988e3ad687721d23463"
+}

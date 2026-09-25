@@ -54,26 +54,41 @@ pub(crate) async fn get_invoice_detail(
     Ok(serde_json::json!({ "invoice": inv, "items": items }).to_string())
 }
 
-/// Nghiệp vụ lập hóa đơn nháp — tách riêng để test trực tiếp (không cần tauri::State).
-/// Kiểm tra tồn kho theo ĐÚNG kho xuất trên từng dòng (rỗng → tổng mọi kho),
-/// giá trị dòng = Thành tiền (SL × Đơn giá) − Tiền CK (chiết khấu).
-async fn save_invoice_core(
-    pool: &SqlitePool,
-    number: &str,
-    date: &str,
-    customer: &str,
-    customer_tax_code: &str,
+/// 1 dòng hóa đơn đã qua kiểm tra (có sẵn mã sản phẩm, nhóm ngành, tỷ lệ thuế).
+struct PreparedLine {
+    product_id: i64,
+    quantity: f64,
+    unit_price: f64,
+    /// Giá trị dòng = Thành tiền (SL × Đơn giá) − Tiền CK (chiết khấu).
+    subtotal: f64,
+    industry_code: String,
+    vat_rate: f64,
+    pit_rate: f64,
+    discount: f64,
+    warehouse_code: String,
+}
+
+struct PreparedInvoice {
+    total: f64,
+    tax_payable: f64,
+    lines: Vec<PreparedLine>,
+}
+
+/// Kiểm tra + dựng dòng hóa đơn từ input người dùng: nhóm ngành phải hợp lệ, tồn
+/// kho phải đủ theo ĐÚNG kho xuất trên từng dòng (rỗng → tổng mọi kho), và tính
+/// tổng tiền. Dùng chung cho lập mới và sửa hóa đơn nháp.
+async fn prepare_invoice(
+    tx: &mut SqliteTransaction<'_>,
     items: &[InvoiceItemInput],
-) -> Result<serde_json::Value, String> {
+) -> Result<PreparedInvoice, String> {
     if items.is_empty() {
         return Err("Chưa có mặt hàng nào trong hóa đơn".into());
     }
-    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
 
     let mut basis: Vec<(String, f64, f64)> = Vec::with_capacity(items.len());
     let mut shortage: Vec<String> = Vec::new();
     for item in items {
-        let product = resolve_product(&mut tx, &item.product_code).await?;
+        let product = resolve_product(tx, &item.product_code).await?;
 
         // Nhóm ngành trên dòng: ưu tiên khai trên dòng, rỗng → nhóm ngành
         // mặc định của sản phẩm (cơ sở tỷ lệ thuế bán ra).
@@ -92,7 +107,7 @@ async fn save_invoice_core(
             "SELECT vat_rate, pit_rate FROM industry_group WHERE code = ?",
             industry
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|_| format!("Nhóm ngành '{}' không hợp lệ", industry))?;
         let (vat_rate, pit_rate) = (group.vat_rate, group.pit_rate);
@@ -109,19 +124,18 @@ async fn save_invoice_core(
                    WHERE product_id = ? AND depleted = 0"#,
                 product.id
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| e.to_string())?
         } else {
-            let wh_id =
-                resolve_warehouse(&mut tx, &item.warehouse_code, &item.product_code).await?;
+            let wh_id = resolve_warehouse(tx, &item.warehouse_code, &item.product_code).await?;
             sqlx::query_scalar!(
                 r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
                    WHERE product_id = ? AND warehouse_id = ? AND depleted = 0"#,
                 product.id,
                 wh_id
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|e| e.to_string())?
         };
@@ -146,63 +160,181 @@ async fn save_invoice_core(
     // theo dõi; trường "Thuế suất GTGT" của sản phẩm là thuế đầu vào, không dùng.
     let mut total = 0.0;
     let mut tax_payable = 0.0;
+    let mut lines = Vec::with_capacity(items.len());
     for (i, item) in items.iter().enumerate() {
-        // Giá trị dòng = Thành tiền (SL × Đơn giá) − Tiền CK (chiết khấu).
+        let product = resolve_product(tx, &item.product_code).await?;
         let subtotal = round2(item.quantity * item.unit_price - item.discount);
         total += subtotal;
         tax_payable += subtotal * basis[i].1;
-    }
-    let vat_amount = 0.0;
-
-    let res = sqlx::query!(
-        "INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'draft')",
-        number,
-        date,
-        customer,
-        customer_tax_code,
-        total,
-        vat_amount
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| e.to_string())?;
-    let invoice_id = res.last_insert_rowid();
-
-    for (i, item) in items.iter().enumerate() {
-        let product = resolve_product(&mut tx, &item.product_code).await?;
-        let subtotal = round2(item.quantity * item.unit_price - item.discount);
         let (basis_code, basis_vat, basis_pit) = basis[i].clone();
+        lines.push(PreparedLine {
+            product_id: product.id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            subtotal,
+            industry_code: basis_code,
+            vat_rate: basis_vat,
+            pit_rate: basis_pit,
+            discount: item.discount,
+            warehouse_code: item.warehouse_code.clone(),
+        });
+    }
+
+    Ok(PreparedInvoice {
+        total,
+        tax_payable,
+        lines,
+    })
+}
+
+/// Ghi dòng hóa đơn đã chuẩn bị vào bảng `invoice_item`.
+async fn insert_invoice_items(
+    tx: &mut SqliteTransaction<'_>,
+    invoice_id: i64,
+    lines: &[PreparedLine],
+) -> Result<(), String> {
+    for l in lines {
         sqlx::query!(
             "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
                                        industry_code, vat_rate, pit_rate, discount, warehouse_code)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             invoice_id,
-            product.id,
-            item.quantity,
-            item.unit_price,
-            subtotal,
-            basis_code,
-            basis_vat,
-            basis_pit,
-            item.discount,
-            item.warehouse_code
+            l.product_id,
+            l.quantity,
+            l.unit_price,
+            l.subtotal,
+            l.industry_code,
+            l.vat_rate,
+            l.pit_rate,
+            l.discount,
+            l.warehouse_code
         )
-        .bind(item.discount)
-        .bind(&item.warehouse_code)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// Nghiệp vụ lập hóa đơn nháp — tách riêng để test trực tiếp (không cần tauri::State).
+async fn save_invoice_core(
+    pool: &SqlitePool,
+    number: &str,
+    date: &str,
+    customer: &str,
+    customer_tax_code: &str,
+    items: &[InvoiceItemInput],
+) -> Result<serde_json::Value, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let prepared = prepare_invoice(&mut tx, items).await?;
+
+    // `vat_amount` luôn 0: hộ không tách thuế trên hóa đơn (tính cuối kỳ).
+    let res = sqlx::query!(
+        "INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount, status)
+         VALUES (?, ?, ?, ?, ?, 0.0, 'draft')",
+        number,
+        date,
+        customer,
+        customer_tax_code,
+        prepared.total
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let invoice_id = res.last_insert_rowid();
+    insert_invoice_items(&mut tx, invoice_id, &prepared.lines).await?;
 
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "ok": true,
         "invoice_id": invoice_id,
-        "total": round2(total),
-        "vat_amount": vat_amount,
-        "tax_payable": round2(tax_payable),
+        "total": round2(prepared.total),
+        "vat_amount": 0.0,
+        "tax_payable": round2(prepared.tax_payable),
     }))
+}
+
+/// Sửa hóa đơn NHÁP: thay toàn bộ dòng hàng và cập nhật thông tin chung.
+///
+/// Chỉ nháp được sửa — đã chép sang bên kia (`exported`) hoặc đã phát hành thì
+/// phải đi luồng hủy / điều chỉnh để giữ dấu vết đối chiếu.
+async fn update_invoice_core(
+    pool: &SqlitePool,
+    id: i64,
+    number: &str,
+    date: &str,
+    customer: &str,
+    customer_tax_code: &str,
+    items: &[InvoiceItemInput],
+) -> Result<serde_json::Value, String> {
+    let inv = sqlx::query!("SELECT number, status FROM invoice WHERE id = ?", id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    if inv.status != "draft" {
+        return Err(format!(
+            "Chỉ sửa được hóa đơn nháp — {} đang ở trạng thái đã xử lý",
+            inv.number
+        ));
+    }
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let prepared = prepare_invoice(&mut tx, items).await?;
+    sqlx::query!(
+        "UPDATE invoice SET number = ?, date = ?, customer = ?, customer_tax_code = ?, total = ?
+          WHERE id = ?",
+        number,
+        date,
+        customer,
+        customer_tax_code,
+        prepared.total,
+        id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    // Thay trọn danh sách dòng: bỏ dòng cũ rồi ghi lại (hóa đơn bán không trừ
+    // kho/ghi bút toán nên không cần điều chỉnh gì khác).
+    sqlx::query!("DELETE FROM invoice_item WHERE invoice_id = ?", id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    insert_invoice_items(&mut tx, id, &prepared.lines).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "invoice_id": id,
+        "total": round2(prepared.total),
+        "vat_amount": 0.0,
+        "tax_payable": round2(prepared.tax_payable),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn update_invoice(
+    state: State<'_, AppState>,
+    id: i64,
+    number: String,
+    date: String,
+    customer: String,
+    customer_tax_code: String,
+    items: Vec<InvoiceItemInput>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let res = update_invoice_core(
+        &*state.pool.read().await,
+        id,
+        &number,
+        &date,
+        &customer,
+        &customer_tax_code,
+        &items,
+    )
+    .await?;
+    audit(&state, "update", "invoice", &number).await;
+    Ok(res.to_string())
 }
 
 /// Tạo hóa đơn nháp — kiểm tra tồn kho trước khi lưu
@@ -528,5 +660,200 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(still, 1, "hóa đơn bị chặn phải còn nguyên");
+    }
+
+    #[tokio::test]
+    async fn sua_hoa_don_nhap_thay_dong_cu_du_dong_hang() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-EDIT", "Hàng sửa", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 100.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HDE1",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT", 2.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HDE1'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        // Sửa thành 2 dòng, đổi khách/SL/giá.
+        let res = update_invoice_core(
+            &pool,
+            id,
+            "HDE1",
+            "2026-03-11",
+            "Khách Y",
+            "MST-Y",
+            &[
+                line("HD-EDIT", 3.0, 2000.0, 500.0, "W1"),
+                line("HD-EDIT", 1.0, 1000.0, 0.0, "W1"),
+            ],
+        )
+        .await
+        .unwrap();
+        // 3×2000 − 500 = 5500, cộng 1000 = 6500.
+        assert_eq!(res["total"].as_f64().unwrap(), 6_500.0);
+
+        let inv = sqlx::query!(
+            "SELECT customer, customer_tax_code, date, total FROM invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(inv.customer, "Khách Y");
+        assert_eq!(inv.customer_tax_code, "MST-Y");
+        assert_eq!(inv.date, "2026-03-11");
+        assert_eq!(inv.total, 6_500.0);
+
+        // 2 dòng mới, không dòng cũ sót lại.
+        let rows: Vec<(f64, f64, f64, f64)> = sqlx::query!(
+            "SELECT quantity, unit_price, discount, subtotal FROM invoice_item
+              WHERE invoice_id = ? ORDER BY id",
+            id
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.quantity, r.unit_price, r.discount, r.subtotal))
+        .collect();
+        assert_eq!(
+            rows,
+            vec![(3.0, 2000.0, 500.0, 5500.0), (1.0, 1000.0, 0.0, 1000.0)]
+        );
+    }
+
+    #[tokio::test]
+    async fn sua_hoa_don_nhap_giu_nguyen_trang_thai_nhap() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-EDIT2", "Hàng giữ", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 100.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HDE2",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT2", 1.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HDE2'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        update_invoice_core(
+            &pool,
+            id,
+            "HDE2",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT2", 5.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap();
+        let status: String = sqlx::query_scalar!("SELECT status FROM invoice WHERE id = ?", id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(status, "draft", "sửa nháp không được đổi trạng thái");
+    }
+
+    #[tokio::test]
+    async fn khong_sua_duoc_hoa_don_da_xuat_hoac_da_phat_hanh() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-EDIT3", "Hàng chặn", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 100.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HDE3",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT3", 1.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HDE3'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        sqlx::query!("UPDATE invoice SET status = 'exported' WHERE id = ?", id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let err = update_invoice_core(
+            &pool,
+            id,
+            "HDE3",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT3", 9.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Chỉ sửa được hóa đơn nháp"), "{err}");
+
+        // Dữ liệu phải còn nguyên sau khi bị chặn.
+        let qty: f64 =
+            sqlx::query_scalar!("SELECT quantity FROM invoice_item WHERE invoice_id = ?", id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(qty, 1.0);
+    }
+
+    #[tokio::test]
+    async fn sua_hoa_don_nhap_van_kiem_tra_ton_kho() {
+        // Sửa số lượng vượt tồn phải bị chặn như lúc lập mới.
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-EDIT4", "Hàng ít tồn", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 5.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HDE4",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT4", 2.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HDE4'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let err = update_invoice_core(
+            &pool,
+            id,
+            "HDE4",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT4", 99.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Không đủ tồn kho"), "{err}");
     }
 }

@@ -482,6 +482,83 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
 });
 
+test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-18",
+      voucher_no: "PN9200",
+      description: "Nhập tồn cho test sửa hóa đơn nháp",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 20, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9200",
+      date: "2026-09-18",
+      customer: "Khách Sửa",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed ${created.status()}: ${await created.text()}`).toBe(
+    true,
+  );
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const row = page.locator("tr", { has: page.getByText("HD9200", { exact: true }) }).first();
+  await row.getByRole("button", { name: "Sửa hóa đơn nháp" }).click();
+
+  // Dialog sửa: tiêu đề + dữ liệu cũ nạp sẵn.
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByText("Sửa hóa đơn nháp HD9200")).toBeVisible();
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await expect(custInput).toHaveValue("Khách Sửa");
+  const inLine = dlg.locator("tbody tr", { hasText: "Bottled water" });
+  const qtyInput = inLine.getByRole("spinbutton").first();
+  await expect(qtyInput).toHaveValue("1");
+
+  // Sửa SL 1 → 3, đổi khách.
+  await qtyInput.fill("3");
+  await custInput.fill("Khách Sửa Mới");
+  await custInput.press("Enter");
+  await dlg.getByRole("button", { name: "Lưu thay đổi" }).click();
+  await expect(dlg).toBeHidden();
+
+  // Tổng tiền trong bảng phải theo SL mới (3 × 10.000), khách cũ biến mất.
+  await expect(row.getByText("30.000 đ", { exact: true })).toBeVisible();
+  await expect(page.getByText("Khách Sửa Mới", { exact: true })).toBeVisible();
+  await expect(page.getByText("Khách Sửa", { exact: true })).toHaveCount(0);
+});
+
 test("Hóa đơn nháp: nút xoá dọn cả dòng hàng, hóa đơn đã xử lý thì không có nút xoá", async ({
   page,
   request,

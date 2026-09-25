@@ -41,7 +41,7 @@ export default defineConfig({
       // up, so health 200 also means Vite is ready.
       url: `http://127.0.0.1:${WEB_PORT}/api/health`,
       reuseExistingServer: false,
-      timeout: 300_000, // first `tauri dev` run compiles Rust — allow generous time
+      timeout: 900_000, // first `tauri dev` run compiles + links Rust — allow generous time
       stdout: "pipe",
       stderr: "pipe",
     },

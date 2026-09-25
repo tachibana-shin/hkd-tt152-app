@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity FROM invoice_item WHERE invoice_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "20f5a1fa907576c91f189ad568df5e87b2ff6f323eb33c3b4dda7ef350dc793a"
+}

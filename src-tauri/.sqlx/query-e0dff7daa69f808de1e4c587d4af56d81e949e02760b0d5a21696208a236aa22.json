@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity, unit_price, discount, subtotal FROM invoice_item\n              WHERE invoice_id = ? ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "discount",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "subtotal",
+        "ordinal": 3,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e0dff7daa69f808de1e4c587d4af56d81e949e02760b0d5a21696208a236aa22"
+}
