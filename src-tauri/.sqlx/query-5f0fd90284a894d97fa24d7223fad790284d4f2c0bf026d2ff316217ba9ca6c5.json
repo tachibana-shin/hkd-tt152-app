@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT ii.id, p.code, p.name, p.unit, ii.quantity, ii.unit_price, ii.discount,\n                  ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n            WHERE ii.invoice_id = ?\n            ORDER BY ii.id",
+  "query": "SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,\n                  ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n             JOIN invoice i ON i.id = ii.invoice_id\n            WHERE i.status IN ('draft', 'exported')\n            ORDER BY ii.invoice_id, ii.id",
   "describe": {
     "columns": [
       {
-        "name": "id",
+        "name": "invoice_id",
         "ordinal": 0,
         "type_info": "Integer"
       },
@@ -60,7 +60,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -76,5 +76,5 @@
       false
     ]
   },
-  "hash": "7a2e7ea3abcbea7ddfed9f2a4872c32930f8a5760eb6d015fa0d1d8b480bccfd"
+  "hash": "5f0fd90284a894d97fa24d7223fad790284d4f2c0bf026d2ff316217ba9ca6c5"
 }

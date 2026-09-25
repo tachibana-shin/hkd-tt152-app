@@ -127,6 +127,7 @@ pub fn run() {
             commands::invoice::update_invoice,
             commands::invoice_export::invoice_export_pack,
             commands::invoice_export::invoice_mark_exported,
+            commands::invoice_export::invoice_queue,
             commands::invoice_export::invoice_events,
             commands::invoice_export::invoice_set_status,
             commands::catalog::next_product_code,

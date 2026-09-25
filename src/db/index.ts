@@ -91,6 +91,7 @@ import type {
   HddtSyncClearCache,
   InvoiceEvent,
   InvoiceExportPack,
+  InvoiceQueueItem,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -550,6 +551,7 @@ export const api = {
         pasteSep: args.pasteSep,
       }),
     ),
+  invoiceQueue: async () => parse<InvoiceQueueItem[]>(await call<string>("invoice_queue", {})),
   invoiceEvents: async (invoiceId: number) =>
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {

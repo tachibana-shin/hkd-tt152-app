@@ -91,6 +91,7 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
     ["Xuất kho", "Xuất kho / Bán hàng"],
     ["Tồn kho", "Tồn kho"],
     ["Hóa đơn", "Hóa đơn"],
+    ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT"],
     ["HĐĐT", "Hóa đơn điện tử"],
     ["Tra cứu HĐĐT", "Tra cứu HĐĐT"],
     ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua"],
@@ -482,6 +483,120 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
 });
 
+test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checklist và phím tắt", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // 2 hóa đơn: 1 nháp sẵn sàng, 1 nháp thiếu MST (lỗi chặn chép), 1 đã phát hành.
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-17",
+      voucher_no: "PN9300",
+      description: "Nhập tồn cho test hàng chờ xuất",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 30, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  const mk = async (number: string, taxCode: string) => {
+    const res = await request.post("/api/save_invoice", {
+      data: {
+        number,
+        date: "2026-09-17",
+        customer: `Khách ${number}`,
+        customer_tax_code: taxCode,
+        items: [
+          {
+            product_code: "SP001",
+            quantity: 1,
+            unit_price: 10000,
+            industry_code: "PPHH",
+            discount: 0,
+            warehouse_code: "",
+          },
+        ],
+      },
+    });
+    expect(res.ok(), `save_invoice ${number} failed: ${await res.text()}`).toBe(true);
+    return number;
+  };
+  await mk("HD9300", "0100000000"); // sẵn sàng chép
+  await mk("HD9301", "MST-SAI"); // lỗi MST → chặn
+
+  // Một hóa đơn đã phát hành (không nằm trong hàng chờ): lấy id theo số HĐ vì các
+  // test trước đã tạo hóa đơn nên id không cố định.
+  const mkIssued = await mk("HD9302", "0100000000");
+  const list = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    id: number;
+    number: string;
+  }>;
+  const issuedId = list.find((i) => i.number === "HD9302")?.id;
+  expect(issuedId, `vừa lập ${mkIssued}`).toBeTruthy();
+  const issued = await request.post("/api/link_hddt", {
+    data: {
+      invoiceId: issuedId,
+      hddtNo: "00000999",
+      hddtSymbol: "1C26TT152",
+      hddtDate: "2026-09-17",
+    },
+  });
+  expect(issued.ok(), `link_hddt failed: ${await issued.text()}`).toBe(true);
+
+  await sidebarButton(page, "Chờ xuất HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Chờ xuất HĐĐT");
+
+  // Cả 2 hóa đơn chưa phát hành đều có mặt; hóa đơn đã phát hành thì không.
+  const rowOk = page.locator("tr", { has: page.getByText("HD9300", { exact: true }) }).first();
+  const rowBad = page.locator("tr", { has: page.getByText("HD9301", { exact: true }) }).first();
+  await expect(rowOk.getByText("Sẵn sàng chép")).toBeVisible();
+  await expect(rowBad.getByText("1 lỗi")).toBeVisible();
+  await expect(rowBad.getByText(/MST người mua/)).toBeVisible();
+  // Nút chép bị khoá khi còn lỗi.
+  await expect(rowBad.getByRole("button", { name: "Chép sang dịch vụ HĐĐT khác" })).toBeDisabled();
+  await expect(rowOk.getByRole("button", { name: "Chép sang dịch vụ HĐĐT khác" })).toBeEnabled();
+
+  // Lọc theo trạng thái: không có hóa đơn nào "đã chép" ở thời điểm này.
+  await page.getByRole("button", { name: "Đã chép", exact: true }).click();
+  await expect(page.getByText(/Không còn hóa đơn nào chờ xuất/)).toBeVisible();
+  await page.getByRole("button", { name: "Tất cả", exact: true }).click();
+  await expect(rowOk).toBeVisible();
+
+  // Màn tự chọn sẵn dòng chưa chép, không lỗi → F8 mở hộp thoại chép cho dòng đó.
+  await page.keyboard.press("F8");
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByText("Chép hóa đơn HD9300 sang dịch vụ khác")).toBeVisible();
+  await dlg.getByRole("button", { name: "Đã chép sang bên kia" }).click();
+  await expect(dlg).toBeHidden();
+
+  // Đã chép → hàng hiện trạng thái chờ phát hành, F9 ghi số HĐĐT → biến khỏi danh sách.
+  const rowCopied = page.locator("tr", { has: page.getByText("HD9300", { exact: true }) }).first();
+  await expect(rowCopied.getByText("Đã chép — chờ phát hành")).toBeVisible();
+  // Dòng vừa chép không còn là dòng ưu tiên → chọn tay rồi F9.
+  await rowCopied.getByRole("cell").nth(1).click();
+  await page.keyboard.press("F9");
+  const linkDlg = page.getByRole("dialog");
+  await linkDlg.getByLabel("Số HĐĐT").fill("00000900");
+  await linkDlg.getByLabel("Ký hiệu HĐĐT").fill("1C26TT152");
+  await linkDlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(linkDlg).toBeHidden();
+  await expect(page.getByText("HD9300", { exact: true })).toHaveCount(0);
+});
+
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {
   await ensureLoggedIn(page);
   await sidebarButton(page, "Hóa đơn").click();
@@ -711,6 +826,12 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   // Khối dán mặc định: "Tên · ĐVT · SL · Đơn giá · Thành tiền", tách bằng dấu phẩy,
   // số không dấu phân cách nghìn, không kèm thuế suất (bên kia tự áp tỷ lệ %).
   const pasteBox = dlg.getByRole("textbox");
+  // Nút chuyển kiểu chép phải render (SelectButton của PrimeVue không auto-import).
+  await expect(dlg.getByRole("button", { name: "Dán dòng hàng" })).toBeVisible();
+  await dlg.getByRole("button", { name: "Text đầy đủ" }).click();
+  await expect(pasteBox).toHaveValue(/Tổng tiền: 20\.000/);
+  await dlg.getByRole("button", { name: "Dán dòng hàng" }).click();
+
   await expect(pasteBox).toHaveValue(/^Bottled water,Bottle,2,10000,20000\s*$/);
   await expect(dlg.getByText("Tên hàng · ĐVT · SL · Đơn giá · Thành tiền")).toBeVisible();
 

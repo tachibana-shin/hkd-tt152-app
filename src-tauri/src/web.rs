@@ -413,6 +413,7 @@ pub async fn api_invoke(
             paste_layout: String,
             paste_sep: String
         ),
+        "invoice_queue" => mx!(commands::invoice_export::invoice_queue, body),
         "invoice_events" => mx!(commands::invoice_export::invoice_events, body, invoice_id: i64),
         "invoice_set_status" => mx!(
             commands::invoice_export::invoice_set_status,

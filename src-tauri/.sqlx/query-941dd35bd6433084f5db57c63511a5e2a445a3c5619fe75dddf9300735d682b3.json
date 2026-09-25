@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ie.invoice_id, ie.total, ie.payload_json\n             FROM invoice_export ie\n             JOIN (SELECT invoice_id, MAX(id) AS mid FROM invoice_export GROUP BY invoice_id) m\n               ON m.mid = ie.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "invoice_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "payload_json",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "941dd35bd6433084f5db57c63511a5e2a445a3c5619fe75dddf9300735d682b3"
+}

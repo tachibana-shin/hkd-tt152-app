@@ -93,6 +93,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "Hóa đơn" },
   },
   {
+    path: "/invoice-queue",
+    name: "invoice-queue",
+    component: () => import("@/views/InvoiceQueue.vue"),
+    meta: { title: "Chờ xuất HĐĐT" },
+  },
+  {
     path: "/hddt",
     name: "hddt",
     component: () => import("@/views/Hddt.vue"),

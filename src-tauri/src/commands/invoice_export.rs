@@ -247,7 +247,64 @@ fn has_errors(checks: &[ExportCheck]) -> bool {
     checks.iter().any(|c| c.level == "error")
 }
 
-/// Nạp header + dòng hàng (kèm nhóm ngành và ánh xạ mặt hàng bên kia nếu có).
+/// Dòng hàng thô từ `invoice_item` + `product` (dùng chung để dựng ExportLine).
+#[derive(sqlx::FromRow)]
+struct RawItem {
+    /// Hóa đơn chủ — dựng gói cho 1 hóa đơn thì bằng id đang xét, gom cho cả
+    /// hàng chờ xuất thì lọc theo cột này.
+    invoice_id: i64,
+    code: String,
+    name: String,
+    unit: String,
+    quantity: f64,
+    unit_price: f64,
+    discount: f64,
+    subtotal: f64,
+    industry_code: String,
+    vat_rate: f64,
+    warehouse_code: String,
+}
+
+fn to_export_line(idx: usize, it: &RawItem, groups: &[(String, String)]) -> ExportLine {
+    let mut warnings = Vec::new();
+    if it.vat_rate == 0.0 && it.industry_code.trim().is_empty() {
+        warnings.push("Thuế 0% nhưng chưa có nhóm ngành".into());
+    }
+    let industry_name = groups
+        .iter()
+        .find(|(c, _)| *c == it.industry_code)
+        .map(|(_, n)| n.clone())
+        .unwrap_or_default();
+    ExportLine {
+        stt: idx as i64 + 1,
+        product_code: it.code.clone(),
+        product_name: clean_name(&it.name),
+        unit: it.unit.clone(),
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        discount: it.discount,
+        amount: it.subtotal - it.discount,
+        industry_code: it.industry_code.clone(),
+        industry_name: industry_name.clone(),
+        vat_rate: it.vat_rate,
+        // fmt_pct đã kèm dấu % — chỉ ghép tên nhóm ngành.
+        vat_label: format!("{} {}", fmt_pct(it.vat_rate), industry_name),
+        warehouse_code: it.warehouse_code.clone(),
+        warnings,
+    }
+}
+
+async fn load_industry_groups(pool: &SqlitePool) -> Result<Vec<(String, String)>, String> {
+    Ok(sqlx::query!("SELECT code, name FROM industry_group")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|g| (g.code, g.name))
+        .collect::<Vec<_>>())
+}
+
+/// Nạp header + dòng hàng của 1 hóa đơn.
 async fn load_header_and_lines(
     pool: &SqlitePool,
     invoice_id: i64,
@@ -268,17 +325,12 @@ async fn load_header_and_lines(
     .map_err(|e| e.to_string())?
     .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
 
-    let groups: Vec<(String, String)> = sqlx::query!("SELECT code, name FROM industry_group")
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|g| (g.code, g.name))
-        .collect();
+    let groups = load_industry_groups(pool).await?;
 
-    let items = sqlx::query!(
-        r#"SELECT ii.id, p.code, p.name, p.unit, ii.quantity, ii.unit_price, ii.discount,
-                  ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
+    let items: Vec<RawItem> = sqlx::query_as!(
+        RawItem,
+        r#"SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,
+                  ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
              FROM invoice_item ii
              JOIN product p ON p.id = ii.product_id
             WHERE ii.invoice_id = ?
@@ -289,35 +341,11 @@ async fn load_header_and_lines(
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut lines = Vec::with_capacity(items.len());
-    for (idx, it) in items.iter().enumerate() {
-        let mut warnings = Vec::new();
-        if it.vat_rate == 0.0 && it.industry_code.trim().is_empty() {
-            warnings.push("Thuế 0% nhưng chưa có nhóm ngành".into());
-        }
-        let industry_name = groups
-            .iter()
-            .find(|(c, _)| *c == it.industry_code)
-            .map(|(_, n)| n.clone())
-            .unwrap_or_default();
-        lines.push(ExportLine {
-            stt: idx as i64 + 1,
-            product_code: it.code.clone(),
-            product_name: clean_name(&it.name),
-            unit: it.unit.clone(),
-            quantity: it.quantity,
-            unit_price: it.unit_price,
-            discount: it.discount,
-            amount: it.subtotal - it.discount,
-            industry_code: it.industry_code.clone(),
-            industry_name: industry_name.clone(),
-            vat_rate: it.vat_rate,
-            // fmt_pct đã kèm dấu % — chỉ ghép tên nhóm ngành.
-            vat_label: format!("{} {}", fmt_pct(it.vat_rate), industry_name),
-            warehouse_code: it.warehouse_code.clone(),
-            warnings,
-        });
-    }
+    let lines: Vec<ExportLine> = items
+        .iter()
+        .enumerate()
+        .map(|(idx, it)| to_export_line(idx, it, &groups))
+        .collect();
 
     let date_vn = fmt_date_vn(&row.date);
     let header = ExportHeader {
@@ -566,6 +594,25 @@ async fn latest_snapshot_total(pool: &SqlitePool, invoice_id: i64) -> Result<Opt
     Ok(row.map(|r| r.total))
 }
 
+/// So 2 danh sách (mã hàng, SL, đơn giá) của bản chốt và hiện tại.
+fn pairs_match(saved: &[(String, f64, f64)], now: &[(String, f64, f64)]) -> bool {
+    saved.len() == now.len()
+        && saved
+            .iter()
+            .zip(now.iter())
+            .all(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() < 1e-6 && (a.2 - b.2).abs() < 1e-6)
+}
+
+/// Bản chốt (đã chép sang bên kia) còn khớp với hóa đơn hiện tại không.
+fn snapshot_differs(
+    saved_total: f64,
+    now_total: f64,
+    saved_pairs: &[(String, f64, f64)],
+    now_pairs: &[(String, f64, f64)],
+) -> bool {
+    (saved_total - now_total).abs() > 1.0 || !pairs_match(saved_pairs, now_pairs)
+}
+
 /// So từng dòng bản chốt với hiện tại (số lượng / đơn giá / chiết khấu).
 async fn lines_equal_snapshot(pool: &SqlitePool, invoice_id: i64) -> Result<bool, String> {
     let Some(snapshot) = sqlx::query!(
@@ -579,22 +626,7 @@ async fn lines_equal_snapshot(pool: &SqlitePool, invoice_id: i64) -> Result<bool
         return Ok(true);
     };
     let saved: serde_json::Value = serde_json::from_str(&snapshot.payload_json).unwrap_or_default();
-    let saved_lines = saved
-        .get("lines")
-        .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    let now_lines: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM invoice_item WHERE invoice_id = ?",
-        invoice_id
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    if saved_lines as i64 != now_lines {
-        return Ok(false);
-    }
-    // So tiền từng dòng theo mã hàng + số lượng + giá.
+    // So từng dòng theo mã hàng + số lượng + đơn giá.
     let saved_pairs: Vec<(String, f64, f64)> = saved_lines_vec(&saved);
     let now_pairs: Vec<(String, f64, f64)> = sqlx::query!(
         r#"SELECT p.code, ii.quantity, ii.unit_price
@@ -608,13 +640,7 @@ async fn lines_equal_snapshot(pool: &SqlitePool, invoice_id: i64) -> Result<bool
     .into_iter()
     .map(|r| (r.code, r.quantity, r.unit_price))
     .collect();
-    if saved_pairs.len() != now_pairs.len() {
-        return Ok(false);
-    }
-    Ok(saved_pairs
-        .iter()
-        .zip(now_pairs.iter())
-        .all(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() < 1e-6 && (a.2 - b.2).abs() < 1e-6))
+    Ok(pairs_match(&saved_pairs, &now_pairs))
 }
 
 fn saved_lines_vec(v: &serde_json::Value) -> Vec<(String, f64, f64)> {
@@ -745,6 +771,147 @@ pub(crate) async fn invoice_mark_exported(
     .await?;
     audit(&state, "export", "invoice", &pack.header.number).await;
     Ok(serde_json::to_string(&pack).unwrap_or_default())
+}
+
+/// 1 dòng trong hàng chờ xuất: hóa đơn + kết quả kiểm tra trước khi chép.
+#[derive(serde::Serialize)]
+pub(crate) struct QueueItem {
+    pub(crate) invoice: InvoiceRow,
+    pub(crate) checks: Vec<ExportCheck>,
+    pub(crate) error_count: usize,
+    pub(crate) warn_count: usize,
+    /// Đã chép sang bên kia ít nhất 1 lần.
+    pub(crate) copied: bool,
+    /// Đã chép xong mà hóa đơn bị sửa sau đó → phải sửa lại bên kia.
+    pub(crate) edited_after_export: bool,
+}
+
+/// Hàng chờ xuất: hóa đơn nháp hoặc đã chép mà chưa phát hành, kèm checklist.
+///
+/// Gom bằng 3 truy vấn cho cả danh sách (hóa đơn · dòng hàng · bản chốt gần nhất)
+/// thay vì dựng gói chép riêng cho từng hóa đơn — màn này chỉ cần biết "có chép
+/// được không", không cần dựng khối dán.
+pub(crate) async fn queue_items(pool: &SqlitePool) -> Result<Vec<QueueItem>, String> {
+    let invoices: Vec<InvoiceRow> = sqlx::query_as!(
+        InvoiceRow,
+        r#"SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
+                  status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
+                  exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no
+             FROM invoice
+            WHERE status IN ('draft', 'exported')
+            ORDER BY date ASC, id ASC"#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if invoices.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let groups = load_industry_groups(pool).await?;
+    let items: Vec<RawItem> = sqlx::query_as!(
+        RawItem,
+        r#"SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,
+                  ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
+             FROM invoice_item ii
+             JOIN product p ON p.id = ii.product_id
+             JOIN invoice i ON i.id = ii.invoice_id
+            WHERE i.status IN ('draft', 'exported')
+            ORDER BY ii.invoice_id, ii.id"#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Bản chốt gần nhất của mỗi hóa đơn (1 truy vấn cho cả danh sách).
+    let snapshots: Vec<(i64, f64, String)> = sqlx::query!(
+        r#"SELECT ie.invoice_id, ie.total, ie.payload_json
+             FROM invoice_export ie
+             JOIN (SELECT invoice_id, MAX(id) AS mid FROM invoice_export GROUP BY invoice_id) m
+               ON m.mid = ie.id"#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .map(|r| (r.invoice_id, r.total, r.payload_json))
+    .collect();
+
+    // (mã hàng, SL, đơn giá) hiện tại của các hóa đơn trong hàng chờ.
+    let now_pairs: Vec<(i64, String, f64, f64)> = sqlx::query!(
+        r#"SELECT ii.invoice_id, p.code, ii.quantity, ii.unit_price
+             FROM invoice_item ii
+             JOIN product p ON p.id = ii.product_id
+             JOIN invoice i ON i.id = ii.invoice_id
+            WHERE i.status IN ('draft', 'exported')
+            ORDER BY ii.invoice_id, ii.id"#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .map(|r| (r.invoice_id, r.code, r.quantity, r.unit_price))
+    .collect();
+
+    let mut out = Vec::with_capacity(invoices.len());
+    for inv in invoices {
+        let Some(id) = inv.id else { continue };
+        let own: Vec<&RawItem> = items.iter().filter(|r| r.invoice_id == id).collect();
+        let lines: Vec<ExportLine> = own
+            .iter()
+            .enumerate()
+            .map(|(idx, it)| to_export_line(idx, it, &groups))
+            .collect();
+        // Header rút gọn: checklist không dùng thông tin hồ sơ DN.
+        let header = ExportHeader {
+            id,
+            number: inv.number.clone(),
+            date: inv.date.clone(),
+            date_vn: fmt_date_vn(&inv.date),
+            customer: inv.customer.clone(),
+            customer_tax_code: inv.customer_tax_code.clone(),
+            status: inv.status.clone(),
+            total: inv.total,
+            vat_amount: inv.vat_amount,
+            e_invoice_no: inv.e_invoice_no.clone(),
+            e_invoice_symbol: inv.e_invoice_symbol.clone(),
+            voucher_no: inv.voucher_no.clone(),
+            biz_name: String::new(),
+            biz_tax_code: String::new(),
+            biz_address: String::new(),
+            biz_phone: String::new(),
+        };
+        let checks = build_checks(&header, &lines);
+
+        let snap = snapshots.iter().find(|(iid, _, _)| *iid == id);
+        let edited_after_export = snap.is_some_and(|(_, saved_total, json)| {
+            let saved: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+            let saved_pairs = saved_lines_vec(&saved);
+            let now: Vec<(String, f64, f64)> = now_pairs
+                .iter()
+                .filter(|(iid, _, _, _)| *iid == id)
+                .map(|(_, code, qty, price)| (code.clone(), *qty, *price))
+                .collect();
+            snapshot_differs(*saved_total, inv.total, &saved_pairs, &now)
+        });
+
+        out.push(QueueItem {
+            error_count: checks.iter().filter(|c| c.level == "error").count(),
+            warn_count: checks.iter().filter(|c| c.level == "warn").count(),
+            checks,
+            copied: snap.is_some(),
+            edited_after_export,
+            invoice: inv,
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub(crate) async fn invoice_queue(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let items = queue_items(&*state.pool.read().await).await?;
+    Ok(serde_json::to_string(&items).unwrap_or_default())
 }
 
 /// Lịch sử trạng thái của 1 hóa đơn (đối chiếu lại với bên kia).
@@ -1218,5 +1385,83 @@ mod tests {
             "HĐ đã phát hành không được hạ trạng thái"
         );
         assert_eq!(pack.export_count, 1, "vẫn lưu bản chốt để đối chiếu");
+    }
+
+    #[tokio::test]
+    async fn hang_cho_xuat_chi_lay_hoa_don_chua_phat_hanh() {
+        let pool = test_pool().await;
+        // Nháp: có trong hàng chờ.
+        let d1 = seed_invoice(&pool, "HDQ1", 30_000.0).await;
+        add_line(&pool, d1, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
+        // Đã chép: cũng trong hàng chờ.
+        let d2 = seed_invoice(&pool, "HDQ2", 30_000.0).await;
+        add_line(&pool, d2, "P2", "Bộ lọc", 2.0, 15_000.0).await;
+        mark_exported_core(&pool, d2, "no_discount", ",", "admin")
+            .await
+            .unwrap();
+        // Đã phát hành: không còn việc chép → không có trong hàng chờ.
+        let d3 = seed_invoice(&pool, "HDQ3", 30_000.0).await;
+        add_line(&pool, d3, "P3", "Bình lọc", 2.0, 15_000.0).await;
+        sqlx::query!("UPDATE invoice SET status = 'official' WHERE id = ?", d3)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let q = queue_items(&pool).await.unwrap();
+        let numbers: Vec<&str> = q.iter().map(|i| i.invoice.number.as_str()).collect();
+        assert_eq!(numbers, vec!["HDQ1", "HDQ2"]);
+        let d2row = q.iter().find(|i| i.invoice.number == "HDQ2").unwrap();
+        assert!(d2row.copied, "hóa đơn đã chép thì phải đánh dấu copied");
+        assert!(!d2row.edited_after_export);
+        assert_eq!(d2row.error_count, 0);
+    }
+
+    #[tokio::test]
+    async fn hang_cho_xuat_bao_loi_chan_khong_thay_bien_khong_hop_le() {
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "HDQ4", 30_000.0).await;
+        add_line(&pool, id, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
+        // MST sai → lỗi chặn chép.
+        sqlx::query!(
+            "UPDATE invoice SET customer_tax_code = 'MST-SAI' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let q = queue_items(&pool).await.unwrap();
+        let row = &q[0];
+        assert_eq!(row.error_count, 1, "checks: {:?}", row.checks);
+        assert!(row
+            .checks
+            .iter()
+            .any(|c| c.level == "error" && c.message.contains("MST")));
+        assert_eq!(row.warn_count, 0);
+    }
+
+    #[tokio::test]
+    async fn hang_cho_xuat_bao_hoa_don_sua_sau_khi_chep() {
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "HDQ5", 30_000.0).await;
+        add_line(&pool, id, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
+        mark_exported_core(&pool, id, "no_discount", ",", "admin")
+            .await
+            .unwrap();
+
+        // Sửa SL sau khi đã chép → phải báo để người dùng sửa lại bên kia.
+        sqlx::query!(
+            "UPDATE invoice_item SET quantity = 3.0 WHERE invoice_id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let q = queue_items(&pool).await.unwrap();
+        assert!(q[0].copied);
+        assert!(
+            q[0].edited_after_export,
+            "phải phát hiện hóa đơn lệch với bản chốt"
+        );
     }
 }

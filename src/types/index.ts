@@ -345,6 +345,18 @@ export interface InvoiceExportPack {
   edited_after_export: boolean;
 }
 
+/** 1 dòng hàng chờ xuất: hóa đơn chưa phát hành + kết quả kiểm tra trước khi chép. */
+export interface InvoiceQueueItem {
+  invoice: Invoice;
+  checks: InvoiceExportCheck[];
+  error_count: number;
+  warn_count: number;
+  /** Đã chép sang bên kia ít nhất 1 lần. */
+  copied: boolean;
+  /** Đã chép xong mà hóa đơn bị sửa sau đó → phải sửa lại bên kia. */
+  edited_after_export: boolean;
+}
+
 /** Một bước trong lịch sử trạng thái hóa đơn (đối chiếu lại với bên kia). */
 export interface InvoiceEvent {
   id: number;

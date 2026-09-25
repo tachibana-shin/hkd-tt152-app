@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
-import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
@@ -10,122 +9,40 @@ import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 const auth = useAuthStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
-const { products, customers, industryGroups, warehouses } = storeToRefs(catalog);
+const { industryGroups } = storeToRefs(catalog);
 const { invoices, detail, loading } = storeToRefs(invoiceStore);
 const toast = useToast();
 
 const draftDialog = ref(false);
 const detailDialog = ref(false);
-const saving = ref(false);
 const confirm = useConfirm();
 
-// ─── Thêm khách hàng nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
-const customerDialog = ref(false);
-
-function onCustomerSaved(code: string) {
-  const c = catalog.customers.find((x) => x.code === code);
-  if (c) {
-    form.customer = c.name;
-    if (c.tax_code) form.customer_tax_code = c.tax_code;
-  }
-}
-
-const linkDialog = ref(false);
-const linking = ref(false);
-const linkTarget = ref<Invoice | null>(null);
-const linkForm = reactive({
-  hddtNo: "",
-  hddtSymbol: "",
-  hddtDate: new Date(),
-});
-
-const form = reactive({
-  number: "",
-  date: new Date(),
-  customer: "",
-  customer_tax_code: "",
-  items: [] as {
-    product_code: string;
-    quantity: number;
-    unit_price: number;
-    industry_code?: string;
-    discount?: number;
-    warehouse_code?: string;
-  }[],
-});
-
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
-
-function nextInvoiceNo() {
-  const nums = invoices.value
-    .map((i) => parseInt(i.number.replace(/[^\d]/g, ""), 10))
-    .filter((n) => !isNaN(n));
-  const next = nums.length ? Math.max(...nums) + 1 : 1;
-  form.number = `HD${String(next).padStart(4, "0")}`;
-}
-
-// ─── Lập mới / sửa nháp: dùng chung một dialog ───
-// editingId rỗng = lập mới; có id = sửa hóa đơn nháp đó.
-const editingId = ref<number | null>(null);
-const draftHeader = computed(() =>
-  editingId.value ? `Sửa hóa đơn nháp ${form.number}` : "Lập hóa đơn bán hàng (nháp)",
-);
-const draftActionLabel = computed(() => (editingId.value ? "Lưu thay đổi" : "Lập hóa đơn"));
+// Hóa đơn đang sửa (null = lập mới) — hộp thoại lập/sửa dùng chung 1 component.
+const editingInvoice = ref<Invoice | null>(null);
 
 function openCreate() {
-  editingId.value = null;
-  Object.assign(form, {
-    date: new Date(),
-    customer: "",
-    customer_tax_code: "",
-    items: [],
-  });
-  nextInvoiceNo();
+  editingInvoice.value = null;
   draftDialog.value = true;
 }
 
-/** Mở dialog sửa, nạp sẵn hóa đơn + dòng hàng hiện có. */
-async function openEdit(inv: Invoice) {
-  saving.value = true;
-  try {
-    const d = await invoiceStore.loadDetail(inv.id);
-    if (!d) return;
-    editingId.value = inv.id;
-    Object.assign(form, {
-      number: d.invoice.number,
-      date: new Date(d.invoice.date),
-      customer: d.invoice.customer ?? "",
-      customer_tax_code: d.invoice.customer_tax_code ?? "",
-      items: d.items.map((it) => ({
-        product_code: it.product_code ?? "",
-        quantity: it.quantity,
-        unit_price: it.unit_price,
-        industry_code: it.industry_code ?? "",
-        discount: it.discount ?? 0,
-        warehouse_code: it.warehouse_code ?? "",
-      })),
-    });
-    draftDialog.value = true;
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Không mở được hóa đơn", detail: String(e) });
-  } finally {
-    saving.value = false;
-  }
+function openEdit(inv: Invoice) {
+  editingInvoice.value = inv;
+  draftDialog.value = true;
 }
 
-function addRow() {
-  form.items.push({
-    product_code: "",
-    quantity: 1,
-    unit_price: 0,
-    industry_code: "",
-    discount: 0,
-    warehouse_code: "",
-  });
+const linkDialog = ref(false);
+const linkTarget = ref<Invoice | null>(null);
+
+function openLinkHddt(inv: Invoice) {
+  linkTarget.value = inv;
+  linkDialog.value = true;
 }
 
-function removeRow(i: number) {
-  form.items.splice(i, 1);
+/** Sau khi ghi số HĐĐT: nạp lại danh sách + cập nhật hóa đơn đang mở. */
+async function afterLink() {
+  await invoiceStore.loadInvoices();
+  const fresh = linkTarget.value ? invoices.value.find((i) => i.id === linkTarget.value?.id) : null;
+  if (fresh) linkTarget.value = fresh;
 }
 
 const statusBadge: Record<string, "secondary" | "info" | "success" | "danger" | "warn"> = {
@@ -198,96 +115,9 @@ async function afterStatusChange() {
   }
 }
 
-async function save() {
-  // Kiểu nhập liên tục (pre-input) luôn để lại dòng trống cuối → bỏ dòng chưa chọn hàng.
-  const rows = form.items.filter((it) => it.product_code);
-  if (!rows.length || !form.customer) {
-    toast.add({
-      severity: "warn",
-      summary: "Thiếu thông tin",
-      detail: "Cần khách hàng và ít nhất 1 mặt hàng",
-    });
-    return;
-  }
-  saving.value = true;
-  try {
-    const payload = {
-      number: form.number,
-      date: iso(form.date),
-      customer: form.customer,
-      customer_tax_code: form.customer_tax_code,
-      items: rows.map((it) => ({ ...it })),
-    };
-    const res = JSON.parse(
-      editingId.value
-        ? await invoiceStore.updateInvoice({ id: editingId.value, ...payload })
-        : await invoiceStore.saveDraft(payload),
-    );
-    toast.add({
-      severity: "success",
-      summary: editingId.value ? `Đã sửa hóa đơn ${form.number}` : `Đã lập hóa đơn ${form.number}`,
-      detail: `Tổng tiền: ${fmt(res.total)} đ • Thuế phải nộp (tỷ lệ nhóm ngành): ${fmt(res.tax_payable ?? 0)} đ`,
-    });
-    draftDialog.value = false;
-  } catch (e) {
-    toast.add({
-      severity: "error",
-      summary: "Không lập được hóa đơn",
-      detail: String(e),
-    });
-  } finally {
-    saving.value = false;
-  }
-}
-
 async function showDetail(inv: Invoice) {
   await invoiceStore.loadDetail(inv.id);
   detailDialog.value = true;
-}
-
-function openLinkHddt(inv: Invoice) {
-  linkTarget.value = inv;
-  linkForm.hddtNo = inv.e_invoice_no ?? "";
-  linkForm.hddtSymbol = inv.e_invoice_symbol ?? "";
-  linkForm.hddtDate = inv.e_invoice_date ? new Date(inv.e_invoice_date) : new Date();
-  linkDialog.value = true;
-}
-
-async function saveLink() {
-  if (!linkTarget.value) return;
-  const hddtNo = linkForm.hddtNo.trim();
-  if (!hddtNo) {
-    toast.add({
-      severity: "warn",
-      summary: "Thiếu Số HĐĐT",
-      detail: "Vui lòng nhập Số hóa đơn điện tử trước khi lưu liên kết",
-    });
-    return;
-  }
-  linking.value = true;
-  try {
-    await api.linkHddt({
-      invoiceId: linkTarget.value.id,
-      hddtNo,
-      hddtSymbol: linkForm.hddtSymbol.trim(),
-      hddtDate: iso(linkForm.hddtDate),
-    });
-    toast.add({
-      severity: "success",
-      summary: "Đã liên kết HĐĐT",
-      detail: `Hóa đơn ${linkTarget.value.number} chuyển sang trạng thái Đã liên kết HĐĐT`,
-    });
-    linkDialog.value = false;
-    await invoiceStore.loadInvoices();
-  } catch (e) {
-    toast.add({
-      severity: "error",
-      summary: "Liên kết HĐĐT thất bại",
-      detail: String(e),
-    });
-  } finally {
-    linking.value = false;
-  }
 }
 
 void (async () => {
@@ -450,81 +280,12 @@ void (async () => {
       </template>
     </Card>
 
-    <!-- Dialog lập mới / sửa hóa đơn nháp -->
-    <AppDialog
+    <!-- Lập mới / sửa hóa đơn nháp -->
+    <InvoiceDraftDialog
       v-model:visible="draftDialog"
-      :header="draftHeader"
-      width="max-w-6xl"
-      :action-label="draftActionLabel"
-      :saving="saving"
-      :show-action="auth.canAccounting"
-      @action="save"
-    >
-      <div class="grid grid-cols-3 gap-4 py-2">
-        <FormField label="Số hóa đơn">
-          <!-- Lập mới tự sinh số; sửa thì người dùng được sửa lại. -->
-          <InputText v-model="form.number" :disabled="!editingId" size="small" />
-        </FormField>
-        <FormField label="Ngày lập">
-          <DatePicker v-model="form.date" dateFormat="dd/mm/yy" size="small" class="w-full" />
-        </FormField>
-        <FormField label="MST khách hàng">
-          <InputText v-model="form.customer_tax_code" placeholder="Mã số thuế" size="small" />
-        </FormField>
-        <FormField label="Khách hàng" required class="col-span-3">
-          <div class="flex gap-2">
-            <Select
-              v-model="form.customer"
-              :options="customers"
-              optionLabel="name"
-              optionValue="name"
-              :editable="true"
-              filter
-              size="small"
-              class="w-full"
-              placeholder="Chọn hoặc nhập tên khách hàng"
-              @change="
-                (e: any) => {
-                  const c = customers.find((x) => x.name === e.value) as any;
-                  if (c?.tax_code) form.customer_tax_code = (c as any).tax_code;
-                }
-              "
-            />
-            <Button
-              v-if="auth.canAccounting"
-              icon="pi pi-plus"
-              text
-              rounded
-              severity="secondary"
-              aria-label="Thêm khách hàng nhanh"
-              v-tooltip="'Thêm khách hàng nhanh'"
-              @click="customerDialog = true"
-            />
-          </div>
-        </FormField>
-      </div>
-
-      <LineItemsEditor
-        :items="form.items"
-        :products="products"
-        :industry-groups="industryGroups"
-        :warehouses="warehouses"
-        :can-edit="auth.canAccounting"
-        price-field="sale_price"
-        show-industry
-        show-amount
-        amount-input
-        show-discount
-        show-unit
-        show-warehouse
-        compact
-        show-add-product
-        info="Nhập thẳng Thành tiền từng dòng (Đơn giá tự tính = Thành tiền ÷ SL, đổi SL được). Nhóm ngành tự lấy theo sản phẩm (đổi được trên dòng). Tiền CK trừ vào giá trị dòng (Thành tiền − CK). Hàng hóa phải có đủ tồn kho theo đúng kho xuất trên dòng; sản phẩm dịch vụ (nhân công...) không cần tồn kho."
-        total-label="Tổng tiền:"
-        @add="addRow"
-        @remove="removeRow"
-      />
-    </AppDialog>
+      :edit-invoice="editingInvoice"
+      @done="invoiceStore.loadInvoices()"
+    />
 
     <!-- Dialog chi tiết hóa đơn -->
     <AppDialog
@@ -609,50 +370,8 @@ void (async () => {
     </AppDialog>
 
     <!-- Dialog liên kết HĐĐT -->
-    <AppDialog
-      v-model:visible="linkDialog"
-      header="Liên kết hóa đơn điện tử (HĐĐT)"
-      width="max-w-md"
-      action-label="Lưu liên kết"
-      action-icon="pi pi-link"
-      :saving="linking"
-      :show-action="auth.canAccounting"
-      @action="saveLink"
-    >
-      <div class="flex flex-col gap-4 py-2">
-        <p v-if="linkTarget" class="text-sm text-gray-600">
-          Hóa đơn <b>{{ linkTarget.number }}</b> — {{ linkTarget.customer || "—" }}. Sau khi lưu,
-          chuyển sang trạng thái <b>Đã liên kết HĐĐT</b>.
-        </p>
-        <FormField label="Số HĐĐT" required input-id="link-hddt-no">
-          <InputText
-            :id="'link-hddt-no'"
-            v-model="linkForm.hddtNo"
-            placeholder="Nhập số hóa đơn điện tử"
-            class="w-full"
-          />
-        </FormField>
-        <FormField label="Ký hiệu HĐĐT" input-id="link-hddt-symbol">
-          <InputText
-            :id="'link-hddt-symbol'"
-            v-model="linkForm.hddtSymbol"
-            placeholder="Nhập ký hiệu (VD: 1C24TT152)"
-            class="w-full"
-          />
-        </FormField>
-        <FormField label="Ngày HĐĐT">
-          <DatePicker v-model="linkForm.hddtDate" dateFormat="dd/mm/yy" class="w-full" />
-        </FormField>
-      </div>
-    </AppDialog>
-
-    <!-- Thêm khách hàng nhanh — dùng chung dialog chuẩn (tự sinh mã + tra cứu MST) -->
-    <PartnerDialog
-      v-model:visible="customerDialog"
-      kind="customer"
-      :show-action="auth.canAccounting"
-      @saved="onCustomerSaved"
-    />
+    <!-- Ghi nhận số HĐĐT sau khi phát hành bên kia -->
+    <InvoiceLinkDialog v-model:visible="linkDialog" :invoice="linkTarget" @done="afterLink" />
 
     <!-- Chép hóa đơn sang dịch vụ HĐĐT khác: kiểm tra trước + lưu bản chốt -->
     <InvoiceExportDialog

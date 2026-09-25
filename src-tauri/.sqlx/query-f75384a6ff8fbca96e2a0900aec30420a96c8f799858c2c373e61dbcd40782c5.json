@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice SET customer_tax_code = 'MST-SAI' WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f75384a6ff8fbca96e2a0900aec30420a96c8f799858c2c373e61dbcd40782c5"
+}

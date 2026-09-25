@@ -12,6 +12,8 @@ import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import Textarea from "primevue/textarea";
+// PrimeVue không được auto-import trong dự án — import tường minh.
+import SelectButton from "primevue/selectbutton";
 import type { Invoice, InvoiceExportPack } from "@/types";
 import { fmtVnd } from "@/utils/format";
 
