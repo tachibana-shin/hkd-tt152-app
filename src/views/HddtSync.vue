@@ -33,8 +33,9 @@ function fmtMoney(v: unknown) {
 
 // ─── Đồng bộ hóa đơn mua từ cổng HĐĐT ───
 // Quét cổng 1 lần → cache theo ngày; xem trước (đọc cache, không mạng) →
-// nhập kho (tạo mặt hàng/NCC/phiếu). Ngày hôm nay bị bỏ qua: hóa đơn hôm nay
-// còn đang phát sinh. Mốc bắt đầu = hddt_start_date khai trong popup cấu hình HKD.
+// nhập kho (tạo mặt hàng/NCC/phiếu). Ngày hôm nay được quét nhưng không cache:
+// hóa đơn hôm nay
+// vẫn còn phát sinh nên mỗi lượt quét đều lấy lại. Mốc bắt đầu = hddt_start_date.
 const syncFrom = ref<Date | null>(null);
 const syncTo = ref<Date | null>(null);
 const syncKinds = ref<{ regular: boolean; cashRegister: boolean }>({
@@ -53,13 +54,15 @@ function syncIsoDate(d: Date | null) {
 }
 
 /** Mốc bắt đầu = hddt_start_date của hộ; mốc cuối = hôm qua. */
+/** Mốc cuối mặc định = hôm nay (hôm nay luôn được quét nhưng không cache).
+ *  Mốc đầu = ngày bắt đầu dùng HĐĐT khai trong popup cấu hình HKD. */
 function syncDefaultRange() {
   const to = new Date();
-  to.setDate(to.getDate() - 1);
   const start = business.config?.hddt_start_date
     ? new Date(`${business.config.hddt_start_date}T00:00:00`)
     : null;
-  return { from: start && !Number.isNaN(start.getTime()) ? start : to, to };
+  const from = start && !Number.isNaN(start.getTime()) ? start : new Date(to);
+  return { from, to };
 }
 
 const syncKindList = computed(() => {
@@ -105,6 +108,7 @@ async function onSyncScan() {
       `Đã quét ${s.days_scanned} ngày` +
       (s.days_cached > 0 ? ` (bỏ qua ${s.days_cached} ngày đã có cache)` : "") +
       (s.details_retried > 0 ? ` · thử lại ${s.details_retried} HĐ lỗi` : "") +
+      (s.days_today > 0 ? " · hôm nay (không cache)" : "") +
       ` · hóa đơn mới ${s.invoices_new} · có dòng hàng ${s.details_ok} · lỗi ${s.details_failed}` +
       ` · cần xử lý ${s.need_manual}`;
     // Không bật `retryFailed` ở đây: scan đã tự thử lại các HĐ lỗi chi tiết. Bật
@@ -236,7 +240,7 @@ void (async () => {
       <p class="mb-3 text-xs text-gray-500">
         Quét hóa đơn mua từ cổng HĐĐT và tạo phiếu nhập kho tự động. Ngày đã quét được lưu lại (hóa
         đơn ngày đã qua không đổi) — lần sau app không gọi lại cổng cho những ngày đó. Hôm nay không
-        quét (hóa đơn hôm nay còn đang phát sinh). Mặt hàng khớp theo
+        quét lại. Mặt hàng khớp theo
         <b>tên + đơn vị tính</b>; chưa có thì app tự tạo. Tên dòng dịch vụ (phí) giữ nguyên — vì tên
         có kẹp kỳ/tháng nên mỗi kỳ là một mặt hàng riêng; số mặt hàng sẽ tạo mới luôn hiện ở cột
         "Dòng / HH mới" để bạn xem trước khi nhập kho.

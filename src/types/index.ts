@@ -657,6 +657,8 @@ export interface HddtSyncScanSummary {
   need_manual: number;
   /** Hóa đơn lỗi chi tiết lượt trước được thử lại lượt này. */
   details_retried: number;
+  /** Đã quét hôm nay (luôn quét lại, không cache). */
+  days_today: number;
 }
 
 /** 1 dòng hóa đơn mua trong bảng xem trước (đọc từ cache, không gọi cổng). */

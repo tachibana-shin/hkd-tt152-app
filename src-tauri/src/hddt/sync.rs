@@ -160,12 +160,63 @@ pub(crate) struct ScanSummary {
     pub(crate) need_manual: usize,
     /// Hóa đơn lỗi chi tiết lượt trước được thử lại lượt này.
     pub(crate) details_retried: usize,
+    /// Số lần đã quét hôm nay (luôn quét lại, không cache).
+    pub(crate) days_today: usize,
+}
+
+/// Quét một cửa sổ ngày (đã gom ≤ 30 ngày) rồi ghi cache từng hóa đơn. Việc đánh
+/// dấu "ngày đã quét" do caller quyết định — hôm nay thì cố ý không đánh dấu.
+async fn scan_window(
+    pool: &SqlitePool,
+    client: &HddtClient,
+    token: &str,
+    kind: InvoiceKind,
+    win_start: NaiveDate,
+    win_end: NaiveDate,
+    sum: &mut ScanSummary,
+) -> Result<(), String> {
+    let mut state: Option<String> = None;
+    loop {
+        let q = InvoiceQuery {
+            direction: crate::hddt::InvoiceDirection::Purchase,
+            kind,
+            // Cổng từ chối size > 50 (HTTP 500) → lấy tối đa 50/lần.
+            size: crate::hddt::MAX_PAGE_SIZE,
+            state: state.clone(),
+            from: Some(iso_to_portal_day(&win_start.to_string())),
+            to: Some(iso_to_portal_day(&win_end.to_string())),
+            // Tất cả kết quả kiểm tra: bỏ lọc để không bỏ sót HĐ.
+            ttxly: Some("-1".into()),
+            ..Default::default()
+        };
+        let list = client.query_invoices(token, &q).await?;
+        let rows = list.datas.len();
+        for row in &list.datas {
+            if upsert_invoice(pool, row, kind).await? {
+                sum.invoices_new += 1;
+            } else {
+                sum.invoices_existing += 1;
+            }
+        }
+        state = list
+            .state
+            .as_ref()
+            .and_then(|s| s.as_str())
+            .map(str::to_string)
+            .filter(|s| !s.is_empty());
+        if state.is_none() || rows == 0 {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Quét cổng trong khoảng ngày và ghi cache.
 ///
 /// `from`/`to` = yyyy-mm-dd. Mốc thấp nhất lấy từ `hddt_start_date` (khai
-/// báo trong popup cấu hình HKD). Mốc cao nhất là **hôm qua**.
+/// báo trong popup cấu hình HKD). Mốc cao nhất có thể là **hôm nay**: người dùng
+/// được chọn ngày hiện tại, nhưng ngày hôm nay không được đánh dấu cache (hóa đơn
+/// trong ngày còn phát sinh) nên mỗi lượt quét đều lấy lại.
 pub(crate) async fn scan(
     pool: &SqlitePool,
     client: &HddtClient,
@@ -181,24 +232,25 @@ pub(crate) async fn scan(
         ..Default::default()
     };
 
+    let today = chrono::Local::now().date_naive();
     let start_date = resolve_start(pool, from).await?;
     let end_date = resolve_end(to).await?;
     if start_date > end_date {
         return Err(format!(
-            "Khoảng quét rỗng sau khi bỏ hôm nay (mốc cuối là {}). Hóa đơn hôm nay còn \
-             đang phát sinh nên không quét — hãy chọn đến ngày hôm qua.",
-            end_date
+            "Khoảng ngày không hợp lệ: {} → {}. Hãy chọn \"Từ ngày lập\" không sau \
+             \"Đến ngày lập\".",
+            start_date, end_date
         ));
     }
+    // Ngày đã qua thì cache (hóa đơn không đổi); hôm nay thì quét nhưng không cache.
+    let cache_end = std::cmp::min(end_date, today - Duration::days(1));
 
-    // Chỉ quét những ngày CHƯA có cache cho loại HĐ đó: hóa đơn ngày đã qua không
-    // đổi nên không cần gọi lại cổng. Ngày hôm nay không bao giờ quét/cache.
     for kind in kinds {
         let cached = cached_days(pool, *kind).await?;
         // `NaiveDate` không có `Iterator::filter` thuận tiện → dựng list ngày trước.
         let mut all_days: Vec<NaiveDate> = Vec::new();
         let mut d = start_date;
-        while d <= end_date {
+        while d <= cache_end {
             all_days.push(d);
             d += Duration::days(1);
         }
@@ -208,6 +260,13 @@ pub(crate) async fn scan(
             .filter(|d| !cached.contains(&d.format("%Y-%m-%d").to_string()))
             .collect();
         sum.days_cached += all_days.len() - missing.len();
+
+        // Hôm nay: lấy để thấy hóa đơn vừa phát sinh, nhưng KHÔNG đánh dấu cache
+        // để lượt quét sau vẫn lấy lại được.
+        if end_date >= today {
+            scan_window(pool, client, token, *kind, today, today, &mut sum).await?;
+            sum.days_today += 1;
+        }
         if missing.is_empty() {
             continue;
         }
@@ -227,40 +286,7 @@ pub(crate) async fn scan(
             }
             let win_end = missing[j];
             let days = (win_end - win_start).num_days() + 1;
-
-            let mut state: Option<String> = None;
-            loop {
-                let q = InvoiceQuery {
-                    direction: crate::hddt::InvoiceDirection::Purchase,
-                    kind: *kind,
-                    // Cổng từ chối size > 50 (HTTP 500) → lấy tối đa 50/lần.
-                    size: crate::hddt::MAX_PAGE_SIZE,
-                    state: state.clone(),
-                    from: Some(iso_to_portal_day(&win_start.to_string())),
-                    to: Some(iso_to_portal_day(&win_end.to_string())),
-                    // Tất cả kết quả kiểm tra: bỏ lọc để không bỏ sót HĐ.
-                    ttxly: Some("-1".into()),
-                    ..Default::default()
-                };
-                let list = client.query_invoices(token, &q).await?;
-                let rows = list.datas.len();
-                for row in &list.datas {
-                    if upsert_invoice(pool, row, *kind).await? {
-                        sum.invoices_new += 1;
-                    } else {
-                        sum.invoices_existing += 1;
-                    }
-                }
-                state = list
-                    .state
-                    .as_ref()
-                    .and_then(|s| s.as_str())
-                    .map(str::to_string)
-                    .filter(|s| !s.is_empty());
-                if state.is_none() || rows == 0 {
-                    break;
-                }
-            }
+            scan_window(pool, client, token, *kind, win_start, win_end, &mut sum).await?;
             // Đánh dấu ngày đã quét cho loại này (kể cả 0 hóa đơn).
             sum.days_scanned += days as usize;
             mark_days_scanned(pool, win_start, win_end, *kind).await?;
@@ -555,13 +581,11 @@ async fn resolve_start(pool: &SqlitePool, from: &str) -> Result<NaiveDate, Strin
 }
 
 /// Mốc cuối: min(tham số `to`, hôm qua) — hóa đơn hôm nay còn đang phát sinh.
+/// Mốc cuối người dùng chọn; rỗng → hôm nay. Không chặn hôm nay: phần "không cache
+/// hôm nay" do `scan` xử lý.
 async fn resolve_end(to: &str) -> Result<NaiveDate, String> {
-    let yesterday = chrono::Local::now().date_naive() - Duration::days(1);
     let asked = NaiveDate::parse_from_str(to.trim(), "%Y-%m-%d").ok();
-    Ok(match asked {
-        Some(a) => a.min(yesterday),
-        None => yesterday,
-    })
+    Ok(asked.unwrap_or_else(|| chrono::Local::now().date_naive()))
 }
 
 // ─── Import: tạo phiếu nhập kho từ hóa đơn đã cache ───
@@ -1293,13 +1317,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scan_today_is_never_cached() {
+    async fn scan_today_is_fetched_but_never_cached() {
         use crate::hddt::mock_portal::MockPortal;
         let portal = MockPortal::start().await;
         let client = HddtClient::for_test(&portal.base);
         let pool = test_pool().await;
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let err = scan(
+
+        let sum = scan(
             &pool,
             &client,
             "mock-token",
@@ -1308,14 +1333,37 @@ mod tests {
             &[InvoiceKind::Regular],
         )
         .await
-        .expect_err("hôm nay không được quét");
-        assert!(err.contains("hôm nay"), "thông báo phải nói rõ: {err}");
+        .expect("quét hôm nay phải chạy được");
+        assert_eq!(sum.days_today, 1, "phải có 1 lượt quét hôm nay");
+        assert_eq!(sum.days_scanned, 0, "hôm nay không tính vào ngày đã cache");
+        assert_eq!(sum.invoices_new, 1, "hóa đơn hôm nay phải vào cache");
         let cached: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM hddt_sync_day")
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(cached.0, 0, "hôm nay không được đánh dấu cache");
-        assert_eq!(portal.count("/invoices/"), 0, "không gọi cổng cho hôm nay");
+        assert_eq!(portal.count("/invoices/purchase"), 1, "phải gọi cổng 1 lần");
+
+        // Lượt sau vẫn gọi lại hôm nay (không cache) nhưng không nhân bản hóa đơn.
+        portal.reset();
+        let sum2 = scan(
+            &pool,
+            &client,
+            "mock-token",
+            &today,
+            &today,
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect("quét lại hôm nay phải chạy được");
+        assert_eq!(sum2.days_today, 1);
+        assert_eq!(sum2.invoices_new, 0, "không tạo bản ghi trùng");
+        assert_eq!(sum2.invoices_existing, 1, "hóa đơn đã cache thì bỏ qua");
+        assert_eq!(
+            portal.count("/invoices/purchase"),
+            1,
+            "vẫn phải gọi lại cổng"
+        );
     }
 
     #[tokio::test]
