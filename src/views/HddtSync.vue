@@ -104,9 +104,13 @@ async function onSyncScan() {
     syncScanMsg.value =
       `Đã quét ${s.days_scanned} ngày` +
       (s.days_cached > 0 ? ` (bỏ qua ${s.days_cached} ngày đã có cache)` : "") +
+      (s.details_retried > 0 ? ` · thử lại ${s.details_retried} HĐ lỗi` : "") +
       ` · hóa đơn mới ${s.invoices_new} · có dòng hàng ${s.details_ok} · lỗi ${s.details_failed}` +
       ` · cần xử lý ${s.need_manual}`;
-    await loadSyncPreview(s.details_failed > 0);
+    // Không bật `retryFailed` ở đây: scan đã tự thử lại các HĐ lỗi chi tiết. Bật
+    // ở đây sẽ xoá lỗi và biến HĐ chưa có dòng hàng thành "chờ nhập kho" → bấm
+    // nhập kho sẽ báo "Hóa đơn không có dòng hàng".
+    await loadSyncPreview();
   } catch (e) {
     toastError("Lỗi quét cổng HĐĐT", e);
   } finally {

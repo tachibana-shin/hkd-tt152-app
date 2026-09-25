@@ -158,6 +158,8 @@ pub(crate) struct ScanSummary {
     pub(crate) details_failed: usize,
     /// Hóa đơn bị đánh dấu cần người xử lý (thay thế/điều chỉnh/hủy).
     pub(crate) need_manual: usize,
+    /// Hóa đơn lỗi chi tiết lượt trước được thử lại lượt này.
+    pub(crate) details_retried: usize,
 }
 
 /// Quét cổng trong khoảng ngày và ghi cache.
@@ -172,7 +174,12 @@ pub(crate) async fn scan(
     to: &str,
     kinds: &[InvoiceKind],
 ) -> Result<ScanSummary, String> {
-    let mut sum = ScanSummary::default();
+    // Hóa đơn lượt trước lỗi chi tiết (429, mạng chập chờn…) → thử lại ngay
+    // trong lượt quét này, không bắt người dùng phải bấm "Quét cổng" hai lần.
+    let mut sum = ScanSummary {
+        details_retried: retry_failed_details(pool).await?,
+        ..Default::default()
+    };
 
     let start_date = resolve_start(pool, from).await?;
     let end_date = resolve_end(to).await?;
@@ -1355,6 +1362,58 @@ mod tests {
                 .unwrap();
         assert_eq!(row.0, "pending");
         assert_eq!(row.1, "");
+    }
+
+    /// Một lượt quét phải tự thử lại HĐ lỗi chi tiết của lượt trước (trước đây
+    /// phải bấm "Quét cổng" hai lần mới lấy lại được dòng hàng).
+    #[tokio::test]
+    async fn scan_retries_previously_failed_details_in_one_pass() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-retry-scan", 1, "{}").await;
+        sqlx::query(
+            "UPDATE hddt_purchase_invoice
+                SET status = 'manual', detail_error = 'Too Many Requests', detail_json = ''
+              WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // Ngày đã có cache → lượt quét này không gọi danh sách, chỉ thử lại chi tiết.
+        mark_days_scanned(
+            &pool,
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 24).unwrap(),
+            InvoiceKind::Regular,
+        )
+        .await
+        .unwrap();
+
+        let sum = scan(
+            &pool,
+            &client,
+            "mock-token",
+            "2026-09-01",
+            "2026-09-24",
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect("quét mock thất bại");
+        assert_eq!(sum.details_retried, 1, "phải đưa HĐ lỗi về hàng chờ ngay");
+        assert_eq!(sum.details_ok, 1, "và lấy được dòng hàng ngay lượt này");
+        let row: (String, String, i64) = sqlx::query_as(
+            "SELECT status, detail_error, line_count FROM hddt_purchase_invoice WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "pending");
+        assert_eq!(row.1, "");
+        assert_eq!(row.2, 1, "phải có dòng hàng để nhập kho được");
     }
 
     #[tokio::test]

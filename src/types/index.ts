@@ -655,6 +655,8 @@ export interface HddtSyncScanSummary {
   details_failed: number;
   /** Hóa đơn cần người xử lý (thay thế/điều chỉnh/hủy). */
   need_manual: number;
+  /** Hóa đơn lỗi chi tiết lượt trước được thử lại lượt này. */
+  details_retried: number;
 }
 
 /** 1 dòng hóa đơn mua trong bảng xem trước (đọc từ cache, không gọi cổng). */
