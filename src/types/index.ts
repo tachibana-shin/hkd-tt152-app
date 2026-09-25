@@ -333,8 +333,13 @@ export interface InvoiceExportPack {
   checks: InvoiceExportCheck[];
   computed_total: number;
   computed_vat: number;
+  /** Khối dán vào ô text tự do bên kia: mỗi dòng 1 dòng hàng, không kèm thuế suất. */
+  paste: string;
+  paste_layout: string;
+  paste_sep: string;
+  /** Nhãn các cột theo đúng thứ tự trong `paste`. */
+  paste_columns: string[];
   text: string;
-  tsv: string;
   json: unknown;
   export_count: number;
   /** Hóa đơn đã bị sửa sau lần chép gần nhất → cần sửa lại bên kia. */
@@ -481,6 +486,10 @@ export interface AppSettings {
   /** Khấu trừ thuế GTGT đầu vào (hộ nộp thuế theo lợi nhuận mới được khấu trừ).
    *  Mặc định TẮT — theo doanh thu, giá nhập kho đã gồm thuế, không tách TK 133. */
   vat_deduct: boolean;
+  /** Bố cục cột của khối dán sang máy tính tiền bên kia (xem hộp thoại chép hóa đơn). */
+  invoice_paste_layout?: string;
+  /** Dấu tách cột của khối dán: "\t" | "," | ";" | "|" */
+  invoice_paste_sep?: string;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───

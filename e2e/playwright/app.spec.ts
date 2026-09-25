@@ -627,6 +627,12 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   await expect(exportLine.getByRole("cell").nth(6)).toHaveText("20.000 đ");
   await expect(exportLine.getByRole("cell").nth(7)).toHaveText("1% Phân phối, cung cấp hàng hóa");
 
+  // Khối dán mặc định: "Tên · ĐVT · SL · Đơn giá · Thành tiền", tách bằng dấu phẩy,
+  // số không dấu phân cách nghìn, không kèm thuế suất (bên kia tự áp tỷ lệ %).
+  const pasteBox = dlg.getByRole("textbox");
+  await expect(pasteBox).toHaveValue(/^Bottled water,Bottle,2,10000,20000\s*$/);
+  await expect(dlg.getByText("Tên hàng · ĐVT · SL · Đơn giá · Thành tiền")).toBeVisible();
+
   // 3) Bấm "Đã chép sang bên kia" → lưu bản chốt, trạng thái chuyển sang đã chép.
   await dlg.getByRole("button", { name: "Đã chép sang bên kia" }).click();
   await expect(dlg).toBeHidden();

@@ -1,3 +1,9 @@
+/** Bố cục cột + dấu tách cột của khối dán sang máy tính tiền bên kia. */
+export interface PasteFormat {
+  pasteLayout: "full" | "no_discount" | "no_unit" | "amount_only";
+  pasteSep: string;
+}
+
 // Typed Tauri invoke wrappers — single entry point cho mọi backend call.
 import { invoke } from "@tauri-apps/api/core";
 
@@ -505,10 +511,22 @@ export const api = {
   restoreBackup: (filename: string) => call<string>("restore_backup", { filename }),
 
   // ─── Xuất hóa đơn sang dịch vụ HĐĐT khác (chép tay) ───
-  invoiceExportPack: async (invoiceId: number) =>
-    parse<InvoiceExportPack>(await call<string>("invoice_export_pack", { invoiceId })),
-  invoiceMarkExported: async (invoiceId: number) =>
-    parse<InvoiceExportPack>(await call<string>("invoice_mark_exported", { invoiceId })),
+  invoiceExportPack: async (invoiceId: number, args: PasteFormat) =>
+    parse<InvoiceExportPack>(
+      await call<string>("invoice_export_pack", {
+        invoiceId,
+        pasteLayout: args.pasteLayout,
+        pasteSep: args.pasteSep,
+      }),
+    ),
+  invoiceMarkExported: async (invoiceId: number, args: PasteFormat) =>
+    parse<InvoiceExportPack>(
+      await call<string>("invoice_mark_exported", {
+        invoiceId,
+        pasteLayout: args.pasteLayout,
+        pasteSep: args.pasteSep,
+      }),
+    ),
   invoiceEvents: async (invoiceId: number) =>
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 /**
- * Chép hóa đơn sang dịch vụ HĐĐT khác (không có API → chép tay).
+ * Chép hóa đơn sang máy tính tiền bên kia (không có API → chép tay).
  *
- * Dialog dựng sẵn đúng nội dung cần nhập, có kiểm tra trước khi chép (lỗi chặn /
- * cảnh báo), 3 kiểu sao chép (text thuần · TSV cho Excel · JSON) và bước đánh dấu
- * "đã chép" — lúc đó app lưu bản chốt để sau này phát hiện hóa đơn bị sửa.
+ * Bên kia không có danh mục hàng: mỗi lần phát hành phải nhập lại từng dòng
+ * vào ô text tự do nhận nhiều dòng. Dialog dựng sẵn khối dán theo đúng bố cục
+ * cột + dấu phân cách mà form bên kia nhận (chọn 1 lần, app nhớ cho các hóa
+ * đơn sau), kèm kiểm tra trước khi chép và bước đánh dấu "đã chép" — lúc đó app
+ * lưu bản chốt để sau này phát hiện hóa đơn bị sửa.
  */
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
+import { useSettingsStore } from "@/stores/settings";
 import Textarea from "primevue/textarea";
 import type { Invoice, InvoiceExportPack } from "@/types";
 import { fmtVnd } from "@/utils/format";
@@ -17,12 +20,31 @@ const props = defineProps<{ invoice: Invoice | null }>();
 const emit = defineEmits<{ done: [] }>();
 
 const auth = useAuthStore();
+const settings = useSettingsStore();
 const toast = useToast();
 const pack = ref<InvoiceExportPack | null>(null);
 const loading = ref(false);
 const saving = ref(false);
-const tab = ref<"text" | "tsv" | "json">("tsv");
+const tab = ref<"paste" | "text" | "json">("paste");
 const showChecks = ref(true);
+
+/** Bố cục cột của 1 dòng dán, theo những gì form bên kia thực nhận. */
+const layoutOptions = [
+  { value: "full", label: "Tên · ĐVT · SL · Đơn giá · CK · Thành tiền" },
+  { value: "no_discount", label: "Tên · ĐVT · SL · Đơn giá · Thành tiền" },
+  { value: "no_unit", label: "Tên · SL · Đơn giá · Thành tiền" },
+  { value: "amount_only", label: "Tên · SL · Thành tiền" },
+];
+const sepOptions = [
+  { value: ",", label: "Dấu phẩy  ,  (phần mềm POS hay dùng)" },
+  { value: "\t", label: "Tab" },
+  { value: ";", label: "Dấu chấm phẩy  ;" },
+  { value: "|", label: "Dấu gạch đứng  |" },
+];
+
+type PasteLayout = "full" | "no_discount" | "no_unit" | "amount_only";
+const pasteLayout = ref<PasteLayout>("no_discount");
+const pasteSep = ref(",");
 
 const errors = computed(() => pack.value?.checks.filter((c) => c.level === "error") ?? []);
 const warns = computed(() => pack.value?.checks.filter((c) => c.level === "warn") ?? []);
@@ -32,19 +54,44 @@ const body = computed(() => {
   if (!pack.value) return "";
   if (tab.value === "text") return pack.value.text;
   if (tab.value === "json") return JSON.stringify(pack.value.json, null, 2);
-  return pack.value.tsv;
+  return pack.value.paste;
 });
 
+/** Đọc lựa chọn đã lưu, dựng lại gói chép theo bố cục/dấu phân cách đó. */
 async function load() {
   if (!props.invoice?.id) return;
   loading.value = true;
   try {
-    pack.value = await api.invoiceExportPack(props.invoice.id);
+    const saved = settings.settings;
+    if (saved) {
+      const layout = saved.invoice_paste_layout;
+      const sep = saved.invoice_paste_sep;
+      if (layout && layoutOptions.some((o) => o.value === layout))
+        pasteLayout.value = layout as PasteLayout;
+      if (sep && sepOptions.some((o) => o.value === sep)) pasteSep.value = sep;
+    }
+    pack.value = await api.invoiceExportPack(props.invoice.id, {
+      pasteLayout: pasteLayout.value,
+      pasteSep: pasteSep.value,
+    });
   } catch (e) {
     pack.value = null;
     toast.add({ severity: "error", summary: "Không dựng được dữ liệu chép", detail: String(e) });
   } finally {
     loading.value = false;
+  }
+}
+
+/** Đổi bố cục/dấu phân cách → dựng lại khối dán và nhớ lại cho lần sau. */
+async function onFormatChange() {
+  await load();
+  try {
+    await settings.save({
+      invoice_paste_layout: pasteLayout.value,
+      invoice_paste_sep: pasteSep.value,
+    });
+  } catch {
+    // Không nhớ được lựa chọn không ảnh hưởng việc chép — bỏ qua.
   }
 }
 
@@ -63,7 +110,10 @@ async function copy() {
     toast.add({
       severity: "success",
       summary: "Đã chép vào clipboard",
-      detail: `${tab.value === "tsv" ? "Dán vào bảng (Excel tách cột tự động)" : "Dán vào ô nhập của dịch vụ"}`,
+      detail:
+        tab.value === "paste"
+          ? `Dán vào ô dòng hàng bên kia (tách cột bằng ${pasteSep.value === "\t" ? "Tab" : `"${pasteSep.value}"`})`
+          : "Dán vào ô nhập của dịch vụ",
     });
   } catch (e) {
     toast.add({ severity: "error", summary: "Không chép được", detail: String(e) });
@@ -74,7 +124,10 @@ async function markExported() {
   if (!props.invoice?.id) return;
   saving.value = true;
   try {
-    pack.value = await api.invoiceMarkExported(props.invoice.id);
+    pack.value = await api.invoiceMarkExported(props.invoice.id, {
+      pasteLayout: pasteLayout.value,
+      pasteSep: pasteSep.value,
+    });
     toast.add({
       severity: "success",
       summary: "Đã ghi nhận bản chốt",
@@ -217,14 +270,42 @@ async function markExported() {
         </table>
       </div>
 
+      <!-- Bố cục + dấu phân cách: chọn đúng với form máy tính tiền đang dùng -->
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <FormField label="Cột của 1 dòng dán" input-id="paste-layout">
+          <Select
+            :id="'paste-layout'"
+            v-model="pasteLayout"
+            :options="layoutOptions"
+            option-label="label"
+            option-value="value"
+            size="small"
+            class="w-full"
+            @change="onFormatChange"
+          />
+        </FormField>
+        <FormField label="Dấu tách cột" input-id="paste-sep">
+          <Select
+            :id="'paste-sep'"
+            v-model="pasteSep"
+            :options="sepOptions"
+            option-label="label"
+            option-value="value"
+            size="small"
+            class="w-full"
+            @change="onFormatChange"
+          />
+        </FormField>
+      </div>
+
       <!-- Khối chép -->
       <div>
         <div class="mb-1 flex flex-wrap items-center gap-2">
           <SelectButton
             v-model="tab"
             :options="[
-              { label: 'Bảng (dán Excel)', value: 'tsv' },
-              { label: 'Text thuần', value: 'text' },
+              { label: 'Dán dòng hàng', value: 'paste' },
+              { label: 'Text đầy đủ', value: 'text' },
               { label: 'JSON', value: 'json' },
             ]"
             option-label="label"
@@ -243,8 +324,8 @@ async function markExported() {
           />
           <span class="text-xs text-gray-500">
             {{
-              tab === "tsv"
-                ? "Dán thẳng vào ô bảng bên kia — Excel/Sheets tách cột tự động."
+              tab === "paste"
+                ? `Dán vào ô dòng hàng bên kia — cột: ${pack.paste_columns.join(" · ")}`
                 : tab === "text"
                   ? "Dán vào ô nhập tự do / khung mô tả."
                   : "Khi bên kia có ô nhập JSON."
@@ -252,6 +333,10 @@ async function markExported() {
           </span>
         </div>
         <Textarea :model-value="body" readonly rows="8" class="w-full font-mono text-xs" />
+        <p class="mt-1 text-xs text-gray-500">
+          Khối dán không kèm thuế suất — bên kia tự áp tỷ lệ % đã khai trong hồ sơ. Số viết không
+          dấu phân cách nghìn để máy đọc đúng.
+        </p>
       </div>
     </div>
   </AppDialog>

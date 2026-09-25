@@ -116,6 +116,57 @@ pub(crate) fn clean_name(name: &str) -> String {
     name.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Số để máy đọc: KHÔNG dấu chấm phân cách nghìn (bên kia tự định dạng khi hiển
+/// thị, "15.000" sẽ bị đọc thành 15), tối đa 2 chữ số thập phân, bỏ số 0 thừa.
+fn fmt_plain(v: f64) -> String {
+    let r = (v * 100.0).round() / 100.0;
+    let s = format!("{r}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
+}
+
+/// Ô text tự do bên kia tự tách cột theo dấu phân cách, nên tên hàng/đơn vị có
+/// chứa đúng ký tự đó sẽ vỡ thành 2 cột và dán ra số liệu sai. Thay bằng khoảng
+/// trắng để dòng dán không bị lệch cột.
+fn clean_field(text: &str, sep: char) -> String {
+    clean_name(&text.replace(['\n', '\r', sep], " "))
+}
+
+/// Bố cục cột của 1 dòng dán. Bên kia không có danh mục hàng — mỗi lần phát hành
+/// phải nhập lại từng dòng — nên khối dán phải đúng số cột và đúng thứ tự form
+/// máy tính tiền nhận. Người dùng chọn 1 bố cục, app nhớ lại cho các hóa đơn sau.
+fn paste_columns(layout: &str) -> Result<Vec<&'static str>, String> {
+    Ok(match layout {
+        "full" => vec![
+            "Tên hàng",
+            "ĐVT",
+            "SL",
+            "Đơn giá",
+            "Chiết khấu",
+            "Thành tiền",
+        ],
+        "no_discount" => vec!["Tên hàng", "ĐVT", "SL", "Đơn giá", "Thành tiền"],
+        "no_unit" => vec!["Tên hàng", "SL", "Đơn giá", "Thành tiền"],
+        "amount_only" => vec!["Tên hàng", "SL", "Thành tiền"],
+        other => return Err(format!("Bố cục dán không hợp lệ: {other}")),
+    })
+}
+
+/// Dấu tách cột mà ô text bên kia nhận. Tab an toàn nhất (hiếm khi xuất hiện trong
+/// tên hàng) nhưng nhiều phần mềm POS tách theo dấu phẩy — để người dùng chọn.
+fn paste_separator(sep: &str) -> Result<char, String> {
+    match sep {
+        "\t" => Ok('\t'),
+        "," => Ok(','),
+        ";" => Ok(';'),
+        "|" => Ok('|'),
+        other => Err(format!("Dấu phân cách không hợp lệ: {other:?}")),
+    }
+}
+
 /// 1 dòng hàng trong gói xuất.
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct ExportLine {
@@ -174,8 +225,15 @@ pub(crate) struct ExportPack {
     /// Tổng tiền tính lại từ dòng (đối chiếu với `header.total`).
     pub(crate) computed_total: f64,
     pub(crate) computed_vat: f64,
+    /// Khối dán vào ô text tự do bên kia: mỗi dòng 1 dòng hàng, cột tách theo
+    /// `paste_sep`, không chứa thuế suất (bên kia không nhập, tự áp tỷ lệ %).
+    pub(crate) paste: String,
+    /// Bố cục + dấu phân cách đã dùng, để UI hiển thị và lưu lại lựa chọn.
+    pub(crate) paste_layout: String,
+    pub(crate) paste_sep: String,
+    /// Nhãn các cột theo đúng thứ tự trong `paste` (để người dùng đối chiếu).
+    pub(crate) paste_columns: Vec<String>,
     pub(crate) text: String,
-    pub(crate) tsv: String,
     pub(crate) json: serde_json::Value,
     /// Số bản chốt đã lưu (0 = lần đầu).
     pub(crate) export_count: i64,
@@ -340,6 +398,23 @@ fn build_checks(header: &ExportHeader, lines: &[ExportLine]) -> Vec<ExportCheck>
         });
     }
 
+    // Bên kia không nhập thuế suất từng dòng, chỉ áp 1 tỷ lệ % đã khai cho cả
+    // hóa đơn. Hóa đơn trộn nhiều nhóm ngành sẽ ra số thuế khác với cách tính
+    // của app → nên tách hóa đơn theo nhóm ngành.
+    let mut rates: Vec<String> = lines.iter().map(|l| fmt_pct(l.vat_rate)).collect();
+    rates.sort();
+    rates.dedup();
+    if rates.len() > 1 {
+        checks.push(ExportCheck {
+            level: "warn".into(),
+            message: format!(
+                "Dòng có {} mức thuế suất ({}) nhưng bên kia chỉ áp 1 tỷ lệ cho cả hóa đơn — tách hóa đơn theo nhóm ngành để số thuế khớp",
+                rates.len(),
+                rates.join(", ")
+            ),
+        });
+    }
+
     if header.status == "cancelled" {
         checks.push(ExportCheck {
             level: "error".into(),
@@ -401,37 +476,65 @@ fn render_text(header: &ExportHeader, lines: &[ExportLine], computed_vat: f64) -
     s
 }
 
-fn render_tsv(lines: &[ExportLine]) -> String {
+/// Dựng khối dán: mỗi dòng 1 dòng hàng, cột theo bố cục đã chọn, số ở dạng máy
+/// đọc được. Cố ý KHÔNG kèm thuế suất — bên kia tự tính theo tỷ lệ % trong hồ sơ.
+fn render_paste(lines: &[ExportLine], layout: &str, sep: char) -> String {
     let mut s = String::new();
     for l in lines {
-        s.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-            l.product_name,
-            l.unit,
-            fmt_qty(l.quantity),
-            fmt_money(l.unit_price),
-            fmt_money(l.discount),
-            fmt_money(l.amount),
-            l.vat_label
-        ));
+        let name = clean_field(&l.product_name, sep);
+        let unit = clean_field(&l.unit, sep);
+        let cells: Vec<String> = match layout {
+            "full" => vec![
+                name,
+                unit,
+                fmt_plain(l.quantity),
+                fmt_plain(l.unit_price),
+                fmt_plain(l.discount),
+                fmt_plain(l.amount),
+            ],
+            "no_discount" => vec![
+                name,
+                unit,
+                fmt_plain(l.quantity),
+                fmt_plain(l.unit_price),
+                fmt_plain(l.amount),
+            ],
+            "no_unit" => vec![
+                name,
+                fmt_plain(l.quantity),
+                fmt_plain(l.unit_price),
+                fmt_plain(l.amount),
+            ],
+            _ => vec![name, fmt_plain(l.quantity), fmt_plain(l.amount)],
+        };
+        s.push_str(&cells.join(&sep.to_string()));
+        s.push('\n');
     }
     s
 }
 
 /// Dựng gói chép hoàn chỉnh (dùng cho cả dialog lẫn bản chốt).
-pub(crate) async fn build_pack(pool: &SqlitePool, invoice_id: i64) -> Result<ExportPack, String> {
+pub(crate) async fn build_pack(
+    pool: &SqlitePool,
+    invoice_id: i64,
+    layout: &str,
+    sep: &str,
+) -> Result<ExportPack, String> {
+    let columns = paste_columns(layout)?;
+    let sep_char = paste_separator(sep)?;
     let (header, lines) = load_header_and_lines(pool, invoice_id).await?;
     let checks = build_checks(&header, &lines);
     let computed_total: f64 = lines.iter().map(|l| l.amount).sum();
     let computed_vat: f64 = lines.iter().map(|l| l.amount * l.vat_rate).sum();
     let text = render_text(&header, &lines, computed_vat);
-    let tsv = render_tsv(&lines);
+    let paste = render_paste(&lines, layout, sep_char);
     let json = json!({
         "number": header.number,
         "date": header.date_vn,
         "customer": { "name": header.customer, "tax_code": header.customer_tax_code },
         "payment_method": "Chuyển khoản",
         "lines": lines,
+        "paste": { "layout": layout, "separator": sep, "columns": columns, "block": paste },
         "total_before_vat": header.total,
         "vat_amount": computed_vat,
     });
@@ -461,10 +564,13 @@ pub(crate) async fn build_pack(pool: &SqlitePool, invoice_id: i64) -> Result<Exp
         header,
         lines,
         checks,
+        paste,
+        paste_layout: layout.to_string(),
+        paste_sep: sep.to_string(),
+        paste_columns: columns.iter().map(|c| c.to_string()).collect(),
         computed_total,
         computed_vat,
         text,
-        tsv,
         json,
         export_count,
         edited_after_export,
@@ -555,9 +661,11 @@ fn saved_lines_vec(v: &serde_json::Value) -> Vec<(String, f64, f64)> {
 async fn mark_exported_core(
     pool: &SqlitePool,
     invoice_id: i64,
+    layout: &str,
+    sep: &str,
     actor: &str,
 ) -> Result<ExportPack, String> {
-    let pack = build_pack(pool, invoice_id).await?;
+    let pack = build_pack(pool, invoice_id, layout, sep).await?;
     if has_errors(&pack.checks) {
         let msgs: Vec<String> = pack
             .checks
@@ -579,14 +687,14 @@ async fn mark_exported_core(
     let payload_json = serde_json::to_string(&pack.json).unwrap_or_else(|_| "{}".into());
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::query!(
-        r#"INSERT INTO invoice_export (invoice_id, total, line_count, payload_json, payload_text, payload_tsv)
+        r#"INSERT INTO invoice_export (invoice_id, total, line_count, payload_json, payload_text, payload_paste)
            VALUES (?, ?, ?, ?, ?, ?)"#,
         invoice_id,
         pack.header.total,
         line_count,
         payload_json,
         pack.text,
-        pack.tsv
+        pack.paste
     )
     .execute(&mut *tx)
     .await
@@ -613,16 +721,24 @@ async fn mark_exported_core(
         .map_err(|e| e.to_string())?;
     }
     tx.commit().await.map_err(|e| e.to_string())?;
-    build_pack(pool, invoice_id).await
+    build_pack(pool, invoice_id, layout, sep).await
 }
 
 #[tauri::command]
 pub(crate) async fn invoice_export_pack(
     state: State<'_, AppState>,
     invoice_id: i64,
+    paste_layout: String,
+    paste_sep: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
-    let pack = build_pack(&*state.pool.read().await, invoice_id).await?;
+    let pack = build_pack(
+        &*state.pool.read().await,
+        invoice_id,
+        &paste_layout,
+        &paste_sep,
+    )
+    .await?;
     Ok(serde_json::to_string(&pack).unwrap_or_default())
 }
 
@@ -630,6 +746,8 @@ pub(crate) async fn invoice_export_pack(
 pub(crate) async fn invoice_mark_exported(
     state: State<'_, AppState>,
     invoice_id: i64,
+    paste_layout: String,
+    paste_sep: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let actor = state
@@ -639,7 +757,14 @@ pub(crate) async fn invoice_mark_exported(
         .as_ref()
         .map(|u| u.username.clone())
         .unwrap_or_default();
-    let pack = mark_exported_core(&*state.pool.read().await, invoice_id, &actor).await?;
+    let pack = mark_exported_core(
+        &*state.pool.read().await,
+        invoice_id,
+        &paste_layout,
+        &paste_sep,
+        &actor,
+    )
+    .await?;
     audit(&state, "export", "invoice", &pack.header.number).await;
     Ok(serde_json::to_string(&pack).unwrap_or_default())
 }
@@ -865,22 +990,100 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pack_contains_tsv_and_text_for_copy() {
+    async fn pack_contains_paste_block_and_text() {
         let pool = test_pool().await;
         let id = seed_invoice(&pool, "HD0001", 30_000.0).await;
         add_line(&pool, id, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
         add_line(&pool, id, "P2", "Bộ lọc", 1.0, 0.0).await;
 
-        let pack = build_pack(&pool, id).await.unwrap();
+        let pack = build_pack(&pool, id, "full", "\t").await.unwrap();
         assert_eq!(pack.lines.len(), 2);
         assert!(pack.text.contains("Bình NN Rossi"));
         assert!(pack.text.contains("TỔNG THANH TOÁN: 30.300")); // 30.000 + 1% thuế
-                                                                // TSV: mỗi dòng 7 cột, tách bằng tab (dán Excel tự tách cột).
-        let tsv_lines: Vec<&str> = pack.tsv.trim().lines().collect();
-        assert_eq!(tsv_lines.len(), 2);
-        assert_eq!(tsv_lines[0].split('\t').count(), 7);
-        assert!(tsv_lines[0].starts_with("Bình NN Rossi\tCái\t2\t15.000"));
+                                                                // Khối dán: mỗi dòng 1 dòng hàng, 6 cột theo bố cục "full".
+        let paste_lines: Vec<&str> = pack.paste.trim().lines().collect();
+        assert_eq!(paste_lines.len(), 2);
+        assert_eq!(paste_lines[0].split('\t').count(), 6);
+        assert_eq!(paste_lines[0], "Bình NN Rossi\tCái\t2\t15000\t0\t30000");
+        // Số không dấu chấm phân cách nghìn để bên kia đọc đúng (15.000 → 15).
+        assert!(!pack.paste.contains("15.000"), "{}", pack.paste);
+        // Bên kia không nhập thuế suất → không kèm cột thuế.
+        assert!(!pack.paste.contains('%'), "{}", pack.paste);
+        assert_eq!(pack.paste_columns.len(), 6);
         assert!(pack.checks.iter().all(|c| c.level != "error"));
+    }
+
+    #[test]
+    fn plain_numbers_have_no_thousand_separator() {
+        assert_eq!(fmt_plain(15_000.0), "15000");
+        assert_eq!(fmt_plain(1_250_000.0), "1250000");
+        assert_eq!(fmt_plain(2.5), "2.5");
+        assert_eq!(fmt_plain(0.0), "0");
+    }
+
+    #[tokio::test]
+    async fn paste_layout_and_separator_reshape_the_block() {
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "HD0010", 30_000.0).await;
+        add_line(&pool, id, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
+
+        // Bố cục rút gọn + dấu phẩy (nhiều phần mềm POS tách theo dấu phẩy).
+        let pack = build_pack(&pool, id, "no_discount", ",").await.unwrap();
+        assert_eq!(pack.paste.trim(), "Bình NN Rossi,Cái,2,15000,30000");
+        assert_eq!(
+            pack.paste_columns,
+            vec!["Tên hàng", "ĐVT", "SL", "Đơn giá", "Thành tiền"]
+        );
+
+        let pack = build_pack(&pool, id, "amount_only", ";").await.unwrap();
+        assert_eq!(pack.paste.trim(), "Bình NN Rossi;2;30000");
+
+        // Bố cục / dấu phân cách lạ → báo lỗi thay vì dựng ra khối dán sai.
+        assert!(build_pack(&pool, id, "khong_co", ",").await.is_err());
+        assert!(build_pack(&pool, id, "full", "@").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn ten_hang_chua_dau_phan_cach_duoc_thay_bang_khoang_trang() {
+        // Ô text tự do tách cột theo dấu phân cách: tên chứa đúng dấu đó sẽ vỡ
+        // thành 2 cột và số liệu dán ra sai.
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "HD0011", 30_000.0).await;
+        add_line(&pool, id, "P1", "Bình lọc, loại lớn", 2.0, 15_000.0).await;
+
+        let pack = build_pack(&pool, id, "no_discount", ",").await.unwrap();
+        assert_eq!(pack.paste.trim(), "Bình lọc loại lớn,Cái,2,15000,30000");
+        // Với Tab thì dấu phẩy trong tên vô hại, giữ nguyên.
+        let pack = build_pack(&pool, id, "no_discount", "\t").await.unwrap();
+        assert!(pack.paste.starts_with("Bình lọc, loại lớn\t"));
+    }
+
+    #[tokio::test]
+    async fn canh_bao_trong_hop_khi_dong_nhieu_muc_thue_suat() {
+        // Bên kia chỉ áp 1 tỷ lệ % cho cả hóa đơn → hóa đơn trộn nhóm ngành thì
+        // số thuế sẽ lệch với cách tính của app.
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "HD0012", 30_000.0).await;
+        add_line(&pool, id, "P1", "Hàng 1%", 1.0, 10_000.0).await;
+        add_line(&pool, id, "P2", "Dịch vụ 5%", 1.0, 20_000.0).await;
+        // Chỉ dòng dịch vụ chuyển sang 5%; dòng hàng hóa giữ 1% của PPHH.
+        sqlx::query!(
+            "UPDATE invoice_item SET vat_rate = 0.05 WHERE invoice_id = ? AND unit_price = 20000.0",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let pack = build_pack(&pool, id, "full", "\t").await.unwrap();
+        let warn = pack
+            .checks
+            .iter()
+            .find(|c| c.level == "warn")
+            .map(|c| c.message.clone())
+            .unwrap_or_default();
+        assert!(warn.contains("mức thuế suất"), "{warn:?}");
+        assert!(warn.contains("tách hóa đơn"), "{warn:?}");
     }
 
     #[tokio::test]
@@ -900,7 +1103,7 @@ mod tests {
                 .unwrap();
         add_line(&pool, id, "P1", "Hàng A", 1.0, 20_000.0).await; // tổng dòng 20.000 ≠ 10.000
 
-        let pack = build_pack(&pool, id).await.unwrap();
+        let pack = build_pack(&pool, id, "full", "\t").await.unwrap();
         let errors: Vec<&str> = pack
             .checks
             .iter()
@@ -911,7 +1114,9 @@ mod tests {
         assert!(errors.iter().any(|m| m.contains("Tổng tiền")), "{errors:?}");
 
         // Chặn không cho chép.
-        let err = mark_exported_core(&pool, id, "admin").await.unwrap_err();
+        let err = mark_exported_core(&pool, id, "full", "\t", "admin")
+            .await
+            .unwrap_err();
         assert!(err.contains("Chưa thể chép"), "{err}");
     }
 
@@ -921,7 +1126,9 @@ mod tests {
         let id = seed_invoice(&pool, "HD0003", 30_000.0).await;
         add_line(&pool, id, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
 
-        let pack = mark_exported_core(&pool, id, "admin").await.unwrap();
+        let pack = mark_exported_core(&pool, id, "full", "\t", "admin")
+            .await
+            .unwrap();
         assert_eq!(pack.header.status, "exported");
         assert_eq!(pack.export_count, 1);
         assert!(!pack.edited_after_export);
@@ -934,7 +1141,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let after = build_pack(&pool, id).await.unwrap();
+        let after = build_pack(&pool, id, "full", "\t").await.unwrap();
         assert!(
             after.edited_after_export,
             "phải phát hiện HĐ bị sửa sau khi chép"
@@ -1047,7 +1254,9 @@ mod tests {
             .await
             .unwrap();
 
-        let pack = mark_exported_core(&pool, id, "admin").await.unwrap();
+        let pack = mark_exported_core(&pool, id, "full", "\t", "admin")
+            .await
+            .unwrap();
         assert_eq!(
             pack.header.status, "official",
             "HĐ đã phát hành không được hạ trạng thái"

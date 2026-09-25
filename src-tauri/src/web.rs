@@ -402,12 +402,16 @@ pub async fn api_invoke(
         "invoice_export_pack" => mx!(
             commands::invoice_export::invoice_export_pack,
             body,
-            invoice_id: i64
+            invoice_id: i64,
+            paste_layout: String,
+            paste_sep: String
         ),
         "invoice_mark_exported" => mx!(
             commands::invoice_export::invoice_mark_exported,
             body,
-            invoice_id: i64
+            invoice_id: i64,
+            paste_layout: String,
+            paste_sep: String
         ),
         "invoice_events" => mx!(commands::invoice_export::invoice_events, body, invoice_id: i64),
         "invoice_set_status" => mx!(
