@@ -324,6 +324,146 @@ test("Đồng bộ HĐ mua: xoá cache giữ nguyên hóa đơn đã nhập kho"
   expect(String(rows[0].voucher_no)).toMatch(/^PN\d+$/);
 });
 
+test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ danh sách Nhập/Xuất kho", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Chuẩn bị 1 phiếu nhập + 1 phiếu xuất qua API để test không phụ thuộc thứ tự test khác.
+  const inbound = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-02-01",
+      voucher_no: "PN9001",
+      description: "Phiếu nhập để test xem phiếu",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 3, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: true,
+      adjust_dir: "up",
+    },
+  });
+  expect(inbound.ok(), `save_inbound failed ${inbound.status()}`).toBe(true);
+  const outbound = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-02-02",
+      voucher_no: "PX9001",
+      description: "Phiếu xuất để test xem phiếu",
+      customer_code: "",
+      unit_code: "HKD",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 2,
+          unit_price: 15000,
+          industry_code: "PPHH",
+          warehouse_code: "",
+        },
+      ],
+      note: "",
+      receive_now: true,
+      outbound_type: "sale",
+      adjust_dir: "down",
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+    },
+  });
+  expect(outbound.ok(), `save_outbound failed ${outbound.status()}: ${await outbound.text()}`).toBe(
+    true,
+  );
+
+  // ── 1. Từ màn Đồng bộ HĐĐT: bấm số phiếu trong cột "Phiếu nhập" ──
+  // Seed 1 hóa đơn mua rồi nhập kho để màn Đồng bộ có dòng đã nhập (tự chứa,
+  // không phụ thuộc test khác).
+  const seed = await request.post("/api/hddt_sync_test_seed", {
+    data: {
+      portal_id: "e2e-uuid-view",
+      detail: {
+        hdhhdvu: [
+          {
+            ten: "Bình NN xem phiếu",
+            dvtinh: "Cái",
+            mhhdvu: "xemphieu",
+            sluong: 1,
+            dgia: 250000,
+            stckhau: 0,
+            tsuat: 0.08,
+          },
+        ],
+      },
+    },
+  });
+  expect(seed.ok(), `seed hddt_sync_test_seed failed ${seed.status()}`).toBe(true);
+  const imported = await request.post("/api/hddt_sync_import", {
+    data: {
+      ids: [],
+      warehouse_code: null,
+      unit_code: null,
+      debit_account: null,
+      credit_account: null,
+    },
+  });
+  expect(
+    imported.ok(),
+    `hddt_sync_import failed ${imported.status()}: ${await imported.text()}`,
+  ).toBe(true);
+
+  await sidebarButton(page, "Đồng bộ HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+  await expect(page.getByText("Đã nhập kho", { exact: true }).first()).toBeVisible({
+    timeout: 15_000,
+  });
+  const preview = await request.post("/api/hddt_sync_preview", {
+    data: { from: null, to: null, retry_failed: false },
+  });
+  const syncVoucher = String((await preview.json()).rows?.[0]?.voucher_no ?? "");
+  expect(syncVoucher).toMatch(/^PN\d+$/);
+  await page.getByRole("button", { name: `Xem phiếu ${syncVoucher}` }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByText("PHIẾU NHẬP KHO")).toBeVisible();
+  await expect(dlg.getByText("01-VT")).toBeVisible();
+  const syncLine = dlg.locator("tbody tr", { hasText: "Bình NN xem phiếu" });
+  await expect(syncLine.getByRole("cell").nth(4)).toHaveText("1"); // SL
+  await expect(dlg.locator("tfoot")).toContainText("250.000 đ");
+  await dlg.getByRole("button", { name: "Đóng" }).click();
+  await expect(dlg).toBeHidden();
+
+  // ── 2. Danh sách Nhập kho: bấm nút mắt ở cột thao tác ──
+  await sidebarButton(page, "Nhập kho").click();
+  await expect(page.locator("header h2")).toHaveText("Nhập kho");
+  const inRow = page.locator("tr", { has: page.getByText("PN9001", { exact: true }) }).first();
+  await inRow.getByRole("button", { name: "Xem phiếu", exact: true }).click();
+  await expect(dlg.getByText("PHIẾU NHẬP KHO")).toBeVisible();
+  const inLine = dlg.locator("tbody tr", { hasText: "Bottled water" });
+  await expect(inLine.getByRole("cell").nth(4)).toHaveText("3"); // SL = 3
+  await expect(inLine.getByRole("cell").nth(5)).toHaveText("10.000 đ"); // đơn giá
+  await expect(dlg.locator("tfoot")).toContainText("30.000 đ"); // 3 × 10.000
+  await dlg.getByRole("button", { name: "Đóng" }).click();
+  await expect(dlg).toBeHidden();
+
+  // ── 3. Danh sách Xuất kho: cùng dialog nhưng hiển thị PX ──
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
+  const outRow = page.locator("tr", { has: page.getByText("PX9001", { exact: true }) }).first();
+  await outRow.getByRole("button", { name: "Xem phiếu", exact: true }).click();
+  await expect(dlg.getByText("PHIẾU XUẤT KHO")).toBeVisible();
+  await expect(dlg.getByText("02-VT")).toBeVisible();
+  const outLine = dlg.locator("tbody tr", { hasText: "Bottled water" });
+  await expect(outLine.getByRole("cell").nth(4)).toHaveText("2"); // SL = 2
+  await expect(dlg.locator("tfoot")).toContainText("30.000 đ"); // 2 × 15.000
+  // Nút In phiếu điều hướng tới màn in dùng chung (không phải dialog).
+  await dlg.getByRole("button", { name: "In phiếu" }).click();
+  await expect(page).toHaveURL(/\/print\/PX9001$/);
+  await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
+});
+
 // ─── HĐĐT: tra cứu hóa đơn (mock portal offline, E2E_HDDT_LIVE=1 để dùng cổng thật) ───
 
 /**

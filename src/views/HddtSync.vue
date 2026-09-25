@@ -192,8 +192,18 @@ function syncKindLabel(k: string) {
   return k === "cash-register" ? "Máy tính tiền" : "HĐ điện tử";
 }
 
+// ─── Xem phiếu nhập kho đã tạo từ hóa đơn ───
+const viewVoucherNo = ref("");
+const viewVoucherVisible = ref(false);
+
+function openVoucher(no: string) {
+  viewVoucherNo.value = no;
+  viewVoucherVisible.value = true;
+}
+
 // Mốc bắt đầu = hddt_start_date của hộ → phải nạp config trước rồi mới tính;
-// mốc cuối = hôm qua. Không dùng onMounted vì không có thao tác ref/DOM ở đây.
+// mốc cuối = hôm nay (hôm nay quét nhưng không cache). Không dùng onMounted vì
+// không có thao tác ref/DOM ở đây.
 void (async () => {
   await business.load();
   const range = syncDefaultRange();
@@ -337,7 +347,15 @@ void (async () => {
         </Column>
         <Column header="Phiếu nhập" :style="{ width: '8rem' }">
           <template #body="{ data }">
-            <span v-if="data.voucher_no" class="text-xs text-green-700">{{ data.voucher_no }}</span>
+            <Button
+              v-if="data.voucher_no"
+              :label="data.voucher_no"
+              link
+              class="!p-0 text-xs text-green-700"
+              :aria-label="`Xem phiếu ${data.voucher_no}`"
+              v-tooltip="'Xem phiếu nhập'"
+              @click="openVoucher(data.voucher_no)"
+            />
             <span v-else class="text-xs text-gray-400">—</span>
           </template>
         </Column>
@@ -354,5 +372,7 @@ void (async () => {
         </Column>
       </AppDataTable>
     </SectionCard>
+
+    <VoucherViewDialog v-model:visible="viewVoucherVisible" :voucher-no="viewVoucherNo" />
   </div>
 </template>

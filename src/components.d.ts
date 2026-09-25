@@ -78,5 +78,6 @@ declare module 'vue' {
     Toast: typeof import('primevue/toast')['default']
     ToggleSwitch: typeof import('primevue/toggleswitch')['default']
     Toolbar: typeof import('primevue/toolbar')['default']
+    VoucherViewDialog: typeof import('./components/VoucherViewDialog.vue')['default']
   }
 }

@@ -78,6 +78,15 @@ function printVoucher(row: { voucher_no: string }) {
   router.push("/print/" + encodeURIComponent(row.voucher_no));
 }
 
+// ─── Xem phiếu (chỉ đọc) — dùng chung VoucherViewDialog ───
+const viewVoucherNo = ref("");
+const viewVoucherVisible = ref(false);
+
+function openVoucher(no: string) {
+  viewVoucherNo.value = no;
+  viewVoucherVisible.value = true;
+}
+
 // Lập phiếu điều chỉnh (trả lại NCC) nhanh từ 1 phiếu nhập gốc: tự điền nhà cung
 // cấp + từng mặt hàng (SL, đơn giá) theo đúng chứng từ đang xem.
 async function adjustFromVoucher(row: { voucher_no: string }) {
@@ -271,9 +280,20 @@ void (async () => {
           paginator
           :rows="10"
           actions-header="Thao tác"
-          actions-width="96"
+          actions-width="132"
         >
-          <Column field="voucher_no" header="Số phiếu" />
+          <Column field="voucher_no" header="Số phiếu">
+            <template #body="{ data }">
+              <Button
+                :label="data.voucher_no"
+                link
+                class="!p-0 text-sm"
+                :aria-label="`Xem phiếu ${data.voucher_no}`"
+                v-tooltip="'Xem phiếu'"
+                @click="openVoucher(data.voucher_no)"
+              />
+            </template>
+          </Column>
           <Column field="posting_date" header="Ngày" />
           <Column field="product_code" header="Mã SP" />
           <Column field="description" header="Diễn giải" />
@@ -289,6 +309,15 @@ void (async () => {
           </Column>
           <template #actions="{ data }">
             <div class="flex justify-center gap-1">
+              <Button
+                icon="pi pi-eye"
+                text
+                rounded
+                size="small"
+                aria-label="Xem phiếu"
+                v-tooltip="'Xem phiếu'"
+                @click="openVoucher(data.voucher_no)"
+              />
               <Button
                 v-if="!data.adjust_code"
                 icon="pi pi-undo"
@@ -473,6 +502,9 @@ void (async () => {
         @remove="removeRow"
       />
     </AppDialog>
+
+    <!-- Xem phiếu (chỉ đọc) — dùng chung cho cả PN/PX -->
+    <VoucherViewDialog v-model:visible="viewVoucherVisible" :voucher-no="viewVoucherNo" />
 
     <!-- Thêm nhà cung cấp nhanh — dùng chung dialog chuẩn (tự sinh mã + tra cứu MST) -->
     <PartnerDialog
