@@ -626,10 +626,6 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   await expect(exportLine.getByRole("cell").nth(4)).toHaveText("10.000 đ");
   await expect(exportLine.getByRole("cell").nth(6)).toHaveText("20.000 đ");
   await expect(exportLine.getByRole("cell").nth(7)).toHaveText("1% Phân phối, cung cấp hàng hóa");
-  // Cảnh báo mặt hàng chưa khớp ở bên kia (chưa có bảng ánh xạ) — mức warn, vẫn chép được.
-  await expect(
-    dlg.getByText("chưa có mặt hàng tương ứng ở bên kia", { exact: false }).first(),
-  ).toBeVisible();
 
   // 3) Bấm "Đã chép sang bên kia" → lưu bản chốt, trạng thái chuyển sang đã chép.
   await dlg.getByRole("button", { name: "Đã chép sang bên kia" }).click();

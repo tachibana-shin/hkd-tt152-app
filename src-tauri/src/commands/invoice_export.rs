@@ -133,13 +133,8 @@ pub(crate) struct ExportLine {
     pub(crate) vat_rate: f64,
     /// Tên nhóm ngành để dán cho bên kia không cần tra danh mục.
     pub(crate) vat_label: String,
-    /// Mã mặt hàng ở bên kia (lấy từ `product_remote`, rỗng nếu chưa khớp).
-    pub(crate) remote_code: String,
-    pub(crate) remote_name: String,
-    /// true = chưa có trong danh mục bên kia (xem module `product_remote`).
-    pub(crate) needs_remote_product: bool,
     pub(crate) warehouse_code: String,
-    /// Cảnh báo riêng của dòng (tên quá dài sau rút gọn, chưa có mã bên kia…).
+    /// Cảnh báo riêng của dòng (vd thuế 0% mà chưa có nhóm ngành).
     pub(crate) warnings: Vec<String>,
 }
 
@@ -223,12 +218,9 @@ async fn load_header_and_lines(
 
     let items = sqlx::query!(
         r#"SELECT ii.id, p.code, p.name, p.unit, ii.quantity, ii.unit_price, ii.discount,
-                  ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code,
-                  COALESCE(pr.remote_code, '') AS remote_code,
-                  COALESCE(pr.remote_name, '') AS remote_name
+                  ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
              FROM invoice_item ii
              JOIN product p ON p.id = ii.product_id
-             LEFT JOIN product_remote pr ON pr.product_id = p.id
             WHERE ii.invoice_id = ?
             ORDER BY ii.id"#,
         invoice_id
@@ -240,10 +232,6 @@ async fn load_header_and_lines(
     let mut lines = Vec::with_capacity(items.len());
     for (idx, it) in items.iter().enumerate() {
         let mut warnings = Vec::new();
-        let remote_ok = !it.remote_code.trim().is_empty() || !it.remote_name.trim().is_empty();
-        if !remote_ok {
-            warnings.push("Chưa có mặt hàng tương ứng ở bên kia — xem màn Khớp mặt hàng".into());
-        }
         if it.vat_rate == 0.0 && it.industry_code.trim().is_empty() {
             warnings.push("Thuế 0% nhưng chưa có nhóm ngành".into());
         }
@@ -266,9 +254,6 @@ async fn load_header_and_lines(
             vat_rate: it.vat_rate,
             // fmt_pct đã kèm dấu % — chỉ ghép tên nhóm ngành.
             vat_label: format!("{} {}", fmt_pct(it.vat_rate), industry_name),
-            remote_code: it.remote_code.clone(),
-            remote_name: it.remote_name.clone(),
-            needs_remote_product: !remote_ok,
             warehouse_code: it.warehouse_code.clone(),
             warnings,
         });
@@ -351,17 +336,6 @@ fn build_checks(header: &ExportHeader, lines: &[ExportLine]) -> Vec<ExportCheck>
                     .cloned()
                     .collect::<Vec<_>>()
                     .join(", ")
-            ),
-        });
-    }
-
-    let missing_remote = lines.iter().filter(|l| l.needs_remote_product).count();
-    if missing_remote > 0 {
-        checks.push(ExportCheck {
-            level: "warn".into(),
-            message: format!(
-                "{missing_remote}/{} dòng chưa có mặt hàng tương ứng ở bên kia — dùng màn Khớp mặt hàng để ánh xạ 1 lần",
-                lines.len()
             ),
         });
     }
@@ -906,8 +880,6 @@ mod tests {
         assert_eq!(tsv_lines.len(), 2);
         assert_eq!(tsv_lines[0].split('\t').count(), 7);
         assert!(tsv_lines[0].starts_with("Bình NN Rossi\tCái\t2\t15.000"));
-        // Không có mặt hàng bên kia → cảnh báo (mức warn, không chặn).
-        assert!(pack.lines.iter().all(|l| l.needs_remote_product));
         assert!(pack.checks.iter().all(|c| c.level != "error"));
     }
 

@@ -300,9 +300,6 @@ export interface InvoiceExportLine {
   vat_rate: number;
   /** Nhãn thuế sẵn để dán, vd "1% Phân phối, cung cấp hàng hóa". */
   vat_label: string;
-  remote_code: string;
-  remote_name: string;
-  needs_remote_product: boolean;
   warnings: string[];
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT ii.id, p.code, p.name, p.unit, ii.quantity, ii.unit_price, ii.discount,\n                  ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code,\n                  COALESCE(pr.remote_code, '') AS remote_code,\n                  COALESCE(pr.remote_name, '') AS remote_name\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n             LEFT JOIN product_remote pr ON pr.product_id = p.id\n            WHERE ii.invoice_id = ?\n            ORDER BY ii.id",
+  "query": "SELECT ii.id, p.code, p.name, p.unit, ii.quantity, ii.unit_price, ii.discount,\n                  ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n            WHERE ii.invoice_id = ?\n            ORDER BY ii.id",
   "describe": {
     "columns": [
       {
@@ -57,16 +57,6 @@
         "name": "warehouse_code",
         "ordinal": 10,
         "type_info": "Text"
-      },
-      {
-        "name": "remote_code",
-        "ordinal": 11,
-        "type_info": "Text"
-      },
-      {
-        "name": "remote_name",
-        "ordinal": 12,
-        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -83,10 +73,8 @@
       false,
       false,
       false,
-      false,
-      false,
       false
     ]
   },
-  "hash": "1a0f62045a30c1add5deb1a8935bd6509d02a5f75a8c262a33f7a45e50e881e2"
+  "hash": "7a2e7ea3abcbea7ddfed9f2a4872c32930f8a5760eb6d015fa0d1d8b480bccfd"
 }
