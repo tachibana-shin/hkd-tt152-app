@@ -595,6 +595,13 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   await linkDlg.getByRole("button", { name: "Lưu" }).click();
   await expect(linkDlg).toBeHidden();
   await expect(page.getByText("HD9300", { exact: true })).toHaveCount(0);
+
+  // Ký hiệu vừa dùng được ghi vào hồ sơ hộ → hóa đơn sau mở hộp thoại phải tự điền
+  // ký hiệu, không phải gõ lại.
+  await rowBad.getByRole("button", { name: "Ghi số HĐĐT đã phát hành" }).click();
+  const nextDlg = page.getByRole("dialog");
+  await expect(nextDlg.getByLabel("Ký hiệu HĐĐT")).toHaveValue("1C26TT152");
+  await nextDlg.getByRole("button", { name: "Đóng" }).click();
 });
 
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {

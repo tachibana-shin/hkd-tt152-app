@@ -247,7 +247,8 @@ pub async fn api_invoke(
             tax_code_issued_on: String,
             phone: String,
             email: String,
-            hddt_start_date: String
+            hddt_start_date: String,
+            hddt_symbol: String
         ),
         "get_app_settings" => mx!(commands::settings::get_app_settings, body),
         "save_app_settings" => mx!(

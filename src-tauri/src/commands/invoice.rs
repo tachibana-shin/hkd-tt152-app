@@ -414,7 +414,41 @@ pub(crate) async fn delete_invoice(state: State<'_, AppState>, id: i64) -> Resul
     Ok("ok".into())
 }
 
-/// Ghi nhận số HĐĐT cho hóa đơn nháp → trạng thái 'official'
+/// Ghi nhận số HĐĐT cho hóa đơn nháp → trạng thái 'official'.
+///
+/// Ký hiệu gõ ở đây cũng được lưu vào hồ sơ HKD (`business.hddt_symbol`) làm
+/// mặc định cho lần sau — mỗi hộ có một ký hiệu riêng và đổi mẫu số theo năm
+/// không cần sửa lại từng hóa đơn.
+async fn link_hddt_core(
+    pool: &SqlitePool,
+    invoice_id: i64,
+    hddt_no: &str,
+    hddt_symbol: &str,
+    hddt_date: &str,
+) -> Result<String, String> {
+    let symbol = hddt_symbol.trim();
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query!(
+        "UPDATE invoice SET status = 'official', e_invoice_no = ?, e_invoice_symbol = ?, e_invoice_date = ? WHERE id = ?",
+        hddt_no,
+        symbol,
+        hddt_date,
+        invoice_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    // Ký hiệu rỗng thì giữ nguyên ký hiệu đang lưu trong hồ sơ.
+    if !symbol.is_empty() {
+        sqlx::query!("UPDATE business SET hddt_symbol = ? WHERE id = 1", symbol)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(symbol.to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn link_hddt(
     state: State<'_, AppState>,
@@ -424,21 +458,19 @@ pub(crate) async fn link_hddt(
     hddt_date: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
-    sqlx::query!(
-        "UPDATE invoice SET status = 'official', e_invoice_no = ?, e_invoice_symbol = ?, e_invoice_date = ? WHERE id = ?",
-        hddt_no,
-        hddt_symbol,
-        hddt_date,
-        invoice_id
+    let symbol = link_hddt_core(
+        &*state.pool.read().await,
+        invoice_id,
+        &hddt_no,
+        &hddt_symbol,
+        &hddt_date,
     )
-    .execute(&*state.pool.read().await)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     audit(
         &state,
         "link_hddt",
         "invoice",
-        &format!("invoice_id={} → {}/{}", invoice_id, hddt_symbol, hddt_no),
+        &format!("invoice_id={invoice_id} → {symbol}/{hddt_no}"),
     )
     .await;
     Ok("ok".into())
@@ -564,10 +596,12 @@ mod tests {
         assert_eq!(wh, "");
     }
 
-    /// Lập 1 hóa đơn nháp có dòng hàng, trả về id.
+    /// Lập 1 hóa đơn nháp có dòng hàng, trả về id. Mã hàng suy ra từ số hóa đơn
+    /// để gọi nhiều lần trong 1 test không đụng ràng buộc UNIQUE.
     async fn seed_draft(pool: &SqlitePool, number: &str) -> i64 {
-        let p = seed_product(pool, "HD-DEL", "Hàng xoá", 0.01).await;
-        let w = seed_warehouse(pool, "W1", "Kho 1").await;
+        let code = format!("HD-{}", number);
+        let p = seed_product(pool, &code, "Hàng nháp", 0.01).await;
+        let w = seed_warehouse(pool, &format!("W-{number}"), "Kho nháp").await;
         add_stock_lot(pool, p, w, 100.0, 1000.0, "2026-01-01").await;
         save_invoice_core(
             pool,
@@ -575,7 +609,7 @@ mod tests {
             "2026-03-10",
             "Khách X",
             "MST-X",
-            &[line("HD-DEL", 1.0, 1000.0, 0.0, "W1")],
+            &[line(&code, 1.0, 1000.0, 0.0, &format!("W-{number}"))],
         )
         .await
         .expect("lập được hóa đơn nháp");
@@ -855,5 +889,58 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.contains("Không đủ tồn kho"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn lien_ket_hddt_luu_ky_hieu_vao_ho_so_hoi_kinh_doanh() {
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDSYM1").await;
+
+        link_hddt_core(&pool, id, "00000123", "1C26TT152", "2026-09-26")
+            .await
+            .unwrap();
+
+        let inv = sqlx::query!(
+            "SELECT status, e_invoice_no, e_invoice_symbol FROM invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(inv.status, "official");
+        assert_eq!(inv.e_invoice_no, "00000123");
+        assert_eq!(inv.e_invoice_symbol, "1C26TT152");
+
+        // Ký hiệu được lưu vào hồ sơ làm mặc định cho lần sau.
+        let symbol: String = sqlx::query_scalar!("SELECT hddt_symbol FROM business WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(symbol, "1C26TT152");
+
+        // Đổi mẫu số theo năm: ký hiệu mới ghi đè ký hiệu cũ (đã cắt khoảng trắng).
+        let id2 = seed_draft(&pool, "HDSYM2").await;
+        link_hddt_core(&pool, id2, "00000001", " 1C27TT152 ", "2027-01-05")
+            .await
+            .unwrap();
+        let symbol: String = sqlx::query_scalar!("SELECT hddt_symbol FROM business WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(symbol, "1C27TT152");
+
+        // Gõ ký hiệu rỗng thì không đụng ký hiệu đang lưu trong hồ sơ.
+        let id3 = seed_draft(&pool, "HDSYM3").await;
+        link_hddt_core(&pool, id3, "00000002", "", "2027-01-06")
+            .await
+            .unwrap();
+        let symbol: String = sqlx::query_scalar!("SELECT hddt_symbol FROM business WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            symbol, "1C27TT152",
+            "ký hiệu rỗng không được xoá ký hiệu đã lưu"
+        );
     }
 }

@@ -61,6 +61,9 @@ pub(crate) struct BusinessConfigRow {
     pub(crate) email: String,
     /// Ngày bắt đầu sử dụng HĐĐT — mốc lấp hóa đơn mua vào.
     pub(crate) hddt_start_date: String,
+    /// Ký hiệu (mẫu số) HĐĐT của hộ, tuỳ chọn — mặc định cho hộp thoại liên
+    /// kết HĐĐT và được cập nhật theo lần dùng gần nhất.
+    pub(crate) hddt_symbol: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

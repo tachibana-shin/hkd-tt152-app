@@ -6,6 +6,7 @@
  */
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
+import { useBusinessStore } from "@/stores/business";
 import type { Invoice } from "@/types";
 
 const visible = defineModel<boolean>("visible", { default: false });
@@ -13,21 +14,29 @@ const props = defineProps<{ invoice: Invoice | null }>();
 const emit = defineEmits<{ done: [] }>();
 
 const auth = useAuthStore();
+const business = useBusinessStore();
 const toast = useToast();
 const linking = ref(false);
 const form = reactive({ hddtNo: "", hddtSymbol: "", hddtDate: new Date() });
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
+async function prefill() {
+  if (!business.config) await business.load();
+  form.hddtNo = props.invoice?.e_invoice_no ?? "";
+  // Ký hiệu đã ghi trên hóa đơn → dùng lại; chưa có thì lấy ký hiệu của hộ trong hồ
+  // sơ (hộp thoại này tự cập nhật trở lại hồ sơ sau mỗi lần liên kết).
+  form.hddtSymbol = props.invoice?.e_invoice_symbol || business.config?.hddt_symbol || "";
+  form.hddtDate = props.invoice?.e_invoice_date
+    ? new Date(props.invoice.e_invoice_date)
+    : new Date();
+}
+
 watch(
   [visible, () => props.invoice?.id],
   ([open, id], [wasOpen, wasId]) => {
     if (!open || (wasOpen && id === wasId)) return;
-    form.hddtNo = props.invoice?.e_invoice_no ?? "";
-    form.hddtSymbol = props.invoice?.e_invoice_symbol ?? "";
-    form.hddtDate = props.invoice?.e_invoice_date
-      ? new Date(props.invoice.e_invoice_date)
-      : new Date();
+    void prefill();
   },
   { immediate: true },
 );
@@ -56,6 +65,9 @@ async function save() {
       summary: "Đã liên kết HĐĐT",
       detail: `Hóa đơn ${props.invoice.number} chuyển sang trạng thái Đã liên kết HĐĐT`,
     });
+    // Ký hiệu vừa dùng đã được lưu vào hồ sơ → nạp lại để hóa đơn sau mặc định
+    // đúng ký hiệu mới (đổi mẫu số theo năm chỉ cần gõ ở đây một lần).
+    await business.load();
     visible.value = false;
     emit("done");
   } catch (e) {
@@ -71,6 +83,7 @@ async function save() {
     v-model:visible="visible"
     :header="`Liên kết hóa đơn điện tử (HĐĐT) — ${invoice?.number ?? ''}`"
     width="max-w-lg"
+    cancel-label="Đóng"
     action-label="Lưu"
     :saving="linking"
     :show-action="auth.canAccounting"

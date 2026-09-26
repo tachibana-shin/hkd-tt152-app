@@ -37,6 +37,9 @@ const form = reactive({
   email: "",
   // Ngày bắt đầu sử dụng HĐĐT — mốc lấp hóa đơn mua vào (bắt buộc nhập).
   hddt_start_date: null as Date | null,
+  // Ký hiệu (mẫu số) HĐĐT của hộ — tuỳ chọn, dùng làm mặc định khi liên kết
+  // HĐĐT và tự cập nhật theo lần dùng gần nhất.
+  hddt_symbol: "",
   // Công tắc khấu trừ GTGT đầu vào — mặc định TẮT (hộ nộp thuế theo doanh thu).
   vat_deduct: false,
 });
@@ -105,6 +108,7 @@ watch(
       phone: c.phone,
       email: c.email,
       hddt_start_date: parseDate(c.hddt_start_date),
+      hddt_symbol: c.hddt_symbol ?? "",
     });
     lookupLoading.value = false;
     lookupResults.value = [];
@@ -301,6 +305,13 @@ async function save() {
             App dùng ngày này làm mốc bắt đầu khi lấp hóa đơn mua vào từ cổng HĐĐT.
           </p>
         </template>
+      </FormField>
+      <FormField label="Ký hiệu HĐĐT của hộ">
+        <InputText v-model="form.hddt_symbol" placeholder="VD: 1C26TT152" class="w-full" />
+        <p class="mt-1 text-xs text-gray-500">
+          Mỗi hộ có một ký hiệu riêng. Hộp thoại "Liên kết HĐĐT" lấy giá trị này làm mặc định và tự
+          cập nhật theo lần dùng gần nhất.
+        </p>
       </FormField>
       <FormField label="Số điện thoại">
         <InputText v-model="form.phone" />

@@ -171,6 +171,7 @@ export const api = {
       phone: cfg.phone ?? "",
       email: cfg.email ?? "",
       hddtStartDate: cfg.hddt_start_date ?? "",
+      hddtSymbol: cfg.hddt_symbol ?? "",
     }),
 
   // ─── CÀI ĐẶT MẶC ĐỊNH ───

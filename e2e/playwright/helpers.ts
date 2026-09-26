@@ -32,6 +32,8 @@ export async function seedApp(baseURL: string) {
         email: "e2e@test.local",
         // Bắt buộc — mốc lấp hóa đơn mua vào từ cổng HĐĐT.
         hddtStartDate: "2026-01-01",
+        // Tuỳ chọn — ký hiệu HĐĐT của hộ (mặc định khi liên kết HĐĐT).
+        hddtSymbol: "1C26TT152",
       },
     });
     if (!biz.ok()) {

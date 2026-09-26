@@ -476,6 +476,11 @@ export interface BusinessConfig {
    * Mốc dùng để lấp hóa đơn mua vào từ cổng HĐĐT — nhập "Tất cả" nếu không nhớ.
    */
   hddt_start_date: string;
+  /**
+   * Ký hiệu (mẫu số) HĐĐT của hộ — tuỳ chọn, dùng làm mặc định khi liên kết HĐĐT
+   * và được cập nhật theo lần dùng gần nhất.
+   */
+  hddt_symbol: string;
 }
 
 // ─── Cài đặt mặc định (bảng app_setting) ───

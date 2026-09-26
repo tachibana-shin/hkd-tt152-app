@@ -21,7 +21,7 @@ pub(crate) async fn get_business_info(state: State<'_, AppState>) -> Result<Stri
 pub(crate) async fn get_business_config(state: State<'_, AppState>) -> Result<String, String> {
     let row = sqlx::query_as::<_, BusinessConfigRow>(
         "SELECT name, tax_code, address, short_name, ownership,
-                province, tax_code_issued_on, phone, email, hddt_start_date
+                province, tax_code_issued_on, phone, email, hddt_start_date, hddt_symbol
          FROM business WHERE id = 1",
     )
     .fetch_one(&*state.pool.read().await)
@@ -44,21 +44,24 @@ pub(crate) async fn save_business_config(
     phone: String,
     email: String,
     hddt_start_date: String,
+    hddt_symbol: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin"]).await?;
     let pool = state.pool.read().await;
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::query!(
         "INSERT INTO business (id, name, tax_code, address, short_name, ownership,
-                               province, tax_code_issued_on, phone, email, hddt_start_date)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               province, tax_code_issued_on, phone, email, hddt_start_date,
+                               hddt_symbol)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, tax_code = excluded.tax_code,
             address = excluded.address, short_name = excluded.short_name,
             ownership = excluded.ownership, province = excluded.province,
             tax_code_issued_on = excluded.tax_code_issued_on,
             phone = excluded.phone, email = excluded.email,
-            hddt_start_date = excluded.hddt_start_date",
+            hddt_start_date = excluded.hddt_start_date,
+            hddt_symbol = excluded.hddt_symbol",
         name,
         tax_code,
         address,
@@ -68,7 +71,8 @@ pub(crate) async fn save_business_config(
         tax_code_issued_on,
         phone,
         email,
-        hddt_start_date
+        hddt_start_date,
+        hddt_symbol
     )
     .execute(&mut *tx)
     .await
