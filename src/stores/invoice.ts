@@ -63,6 +63,13 @@ export const useInvoiceStore = defineStore("invoice", () => {
     return res;
   }
 
+  /** Lập phiếu xuất từ hóa đơn (1-1) rồi nạp lại danh sách. */
+  async function createOutbound(invoiceId: number) {
+    const no = await api.createInvoiceOutbound(invoiceId);
+    await loadInvoices();
+    return no;
+  }
+
   /** Xoá hóa đơn nháp. Backend chặn mọi trạng thái khác (đã chép/đã phát hành). */
   async function deleteInvoice(id: number) {
     await api.deleteInvoice(id);
@@ -97,6 +104,7 @@ export const useInvoiceStore = defineStore("invoice", () => {
     loadDetail,
     saveDraft,
     updateInvoice,
+    createOutbound,
     deleteInvoice,
     loadCounts,
     loadCountDetail,

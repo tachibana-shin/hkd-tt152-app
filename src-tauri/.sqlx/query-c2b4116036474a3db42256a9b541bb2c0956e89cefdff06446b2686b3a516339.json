@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity FROM stock_lot WHERE product_id = ? AND depleted = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c2b4116036474a3db42256a9b541bb2c0956e89cefdff06446b2686b3a516339"
+}

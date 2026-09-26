@@ -560,6 +560,165 @@ pub(crate) async fn link_hddt(
     Ok(res.to_string())
 }
 
+/// Sinh số phiếu xuất kế tiếp (PX + 3 chữ số) — cùng quy tắc với màn Xuất kho để
+/// số do backend sinh không lệch với số màn hình gợi ý.
+async fn next_px_no(pool: &SqlitePool) -> Result<String, String> {
+    let rows: Vec<String> =
+        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PX'")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let max = rows
+        .iter()
+        .filter_map(|v| {
+            let digits: String = v
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            digits.parse::<i64>().ok()
+        })
+        .max()
+        .unwrap_or(0);
+    Ok(format!("PX{:03}", max + 1))
+}
+
+/// Lập phiếu xuất cho một hóa đơn chưa có phiếu.
+///
+/// Hóa đơn lập ở màn Hóa đơn chỉ ghi bảng `invoice` — nếu không sinh phiếu xuất
+/// thì tồn kho không giảm và doanh thu không vào sổ, tức là khoản bán đó không
+/// được tính vào tờ khai thuế. Hàm này dựng phiếu xuất từ đúng dòng hàng của hóa
+/// đơn (kể cả tiền chiết khấu) rồi liên kết 1-1 qua `voucher_no`.
+///
+/// Ngày phiếu = ngày hóa đơn (đã được đồng bộ theo ngày HĐĐT) để doanh thu rơi
+/// đúng kỳ của chứng từ. Thiếu tồn thì cả phiếu không được tạo — sửa tồn kho rồi
+/// bấm lại, không để lại trạng thái lệch sổ.
+pub(crate) async fn create_outbound_from_invoice(
+    pool: &SqlitePool,
+    invoice_id: i64,
+) -> Result<String, String> {
+    let inv = sqlx::query!(
+        "SELECT number, date, customer, customer_tax_code, voucher_no, status
+           FROM invoice WHERE id = ?",
+        invoice_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    if !inv.voucher_no.trim().is_empty() {
+        return Err(format!(
+            "Hóa đơn {} đã có phiếu xuất {}",
+            inv.number, inv.voucher_no
+        ));
+    }
+    if inv.status == "cancelled" {
+        return Err("Hóa đơn đã hủy — không lập được phiếu xuất".into());
+    }
+
+    // Mã khách trong danh mục: ưu tiên theo MST, không có thì theo tên. Không tìm
+    // thấy thì để rỗng — phiếu vẫn ghi doanh thu, chỉ không gắn mã khách.
+    let mst = inv.customer_tax_code.trim().to_string();
+    let customer_code: String = if mst.is_empty() {
+        String::new()
+    } else {
+        sqlx::query_scalar!("SELECT code FROM customer WHERE tax_code = ?", mst)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    };
+    let customer_code = if customer_code.is_empty() {
+        let name = inv.customer.clone();
+        sqlx::query_scalar!("SELECT code FROM customer WHERE name = ?", name)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    } else {
+        customer_code
+    };
+
+    let rows = sqlx::query!(
+        r#"SELECT p.code, ii.quantity, ii.unit_price, ii.discount, ii.industry_code,
+                  ii.warehouse_code
+             FROM invoice_item ii JOIN product p ON p.id = ii.product_id
+            WHERE ii.invoice_id = ? ORDER BY ii.id"#,
+        invoice_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if rows.is_empty() {
+        return Err(format!("Hóa đơn {} chưa có dòng hàng", inv.number));
+    }
+    let items: Vec<OutboundItemInput> = rows
+        .iter()
+        .map(|r| OutboundItemInput {
+            product_code: r.code.clone(),
+            quantity: r.quantity,
+            unit_price: r.unit_price,
+            discount: r.discount,
+            industry_code: r.industry_code.clone(),
+            warehouse_code: r.warehouse_code.clone(),
+        })
+        .collect();
+
+    let voucher_no = next_px_no(pool).await?;
+    let description = format!("Bán hàng theo hóa đơn {}", inv.number);
+    let empty_invoice = OutboundInvoiceInput {
+        number: String::new(),
+        e_invoice_no: String::new(),
+        e_invoice_symbol: String::new(),
+        e_invoice_date: String::new(),
+    };
+    crate::commands::stock::save_outbound_core(
+        pool,
+        &inv.date,
+        &voucher_no,
+        &description,
+        &customer_code,
+        "HKD",
+        &items,
+        "",
+        false,
+        "sale",
+        "up",
+        &empty_invoice,
+    )
+    .await?;
+
+    sqlx::query!(
+        "UPDATE invoice SET voucher_no = ? WHERE id = ?",
+        voucher_no,
+        invoice_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(voucher_no)
+}
+
+#[tauri::command]
+pub(crate) async fn create_invoice_outbound(
+    state: State<'_, AppState>,
+    invoice_id: i64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let no = create_outbound_from_invoice(&*state.pool.read().await, invoice_id).await?;
+    audit(
+        &state,
+        "create_outbound",
+        "invoice",
+        &format!("invoice_id={invoice_id} → {no}"),
+    )
+    .await;
+    Ok(no)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1122,5 +1281,122 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(date, "2026-03-10");
+    }
+
+    /// Hóa đơn nháp + tồn kho → tạo phiếu xuất phải trừ tồn, ghi Nợ 131/Có 511
+    /// và liên kết 1-1 với hóa đơn.
+    #[tokio::test]
+    async fn tao_phieu_xuat_tu_hoa_don_ghi_so_troi_ton() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-PX1", "Hàng xuất", 0.01).await;
+        let w = seed_warehouse(&pool, "W-PX1", "Kho PX").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HDPX1",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[
+                line("HD-PX1", 2.0, 1000.0, 0.0, "W-PX1"),
+                line("HD-PX1", 1.0, 2000.0, 500.0, "W-PX1"),
+            ],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HDPX1'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let px = create_outbound_from_invoice(&pool, id).await.unwrap();
+        assert_eq!(px, "PX001");
+
+        // Tồn còn 10 − 3 = 7.
+        let qty: f64 = sqlx::query_scalar!(
+            "SELECT quantity FROM stock_lot WHERE product_id = ? AND depleted = 0",
+            p
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(qty, 7.0);
+
+        // Doanh thu ghi sổ = 2×1000 + (1×2000 − 500) = 3500 (có chiết khấu trên dòng).
+        let rev: f64 = sqlx::query_scalar!(
+            "SELECT COALESCE(SUM(amount), 0.0) as \"q!: f64\" FROM journal_entry
+              WHERE entry_type = 'PX' AND debit_account = '131'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rev, 3_500.0);
+        let credit: String = sqlx::query_scalar!(
+            "SELECT credit_account FROM journal_entry WHERE entry_type = 'PX' LIMIT 1"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(credit, "511");
+
+        // Liên kết 1-1: hóa đơn đã trỏ phiếu, tạo lần 2 bị chặn.
+        let voucher: String =
+            sqlx::query_scalar!("SELECT voucher_no FROM invoice WHERE id = ?", id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(voucher, "PX001");
+        let err = create_outbound_from_invoice(&pool, id).await.unwrap_err();
+        assert!(err.contains("đã có phiếu xuất"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn tao_phieu_xuat_thieu_ton_thi_khong_duoc_tao() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-PX2", "Hàng thiếu tồn", 0.01).await;
+        let w = seed_warehouse(&pool, "W-PX2", "Kho PX2").await;
+        add_stock_lot(&pool, p, w, 5.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HDPX2",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-PX2", 5.0, 1000.0, 0.0, "W-PX2")],
+        )
+        .await
+        .unwrap();
+        // Tồn bị xuất mất ở nơi khác sau khi lập nháp (giả lập bán ngoài app) →
+        // lúc tạo phiếu xuất sẽ thiếu tồn.
+        sqlx::query!(
+            "UPDATE stock_lot SET quantity = 1.0 WHERE product_id = ?",
+            p
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HDPX2'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let err = create_outbound_from_invoice(&pool, id).await.unwrap_err();
+        assert!(err.contains("Không đủ tồn kho"), "{err}");
+
+        // Không để lại trạng thái lệch sổ: hóa đơn chưa gắn phiếu, sổ chưa có PX.
+        let voucher: String =
+            sqlx::query_scalar!("SELECT voucher_no FROM invoice WHERE id = ?", id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(voucher, "");
+        let px_count: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PX'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(px_count, 0, "phiếu lỗi phải rollback trọn vẹn");
     }
 }

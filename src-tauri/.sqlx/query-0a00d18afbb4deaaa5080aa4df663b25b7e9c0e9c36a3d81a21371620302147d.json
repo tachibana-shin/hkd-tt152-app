@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT credit_account FROM journal_entry WHERE entry_type = 'PX' LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "credit_account",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0a00d18afbb4deaaa5080aa4df663b25b7e9c0e9c36a3d81a21371620302147d"
+}

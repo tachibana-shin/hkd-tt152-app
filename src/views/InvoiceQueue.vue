@@ -244,6 +244,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               />
             </template>
           </Column>
+          <Column header="Phiếu xuất">
+            <template #body="{ data }">
+              <span v-if="data.invoice.voucher_no">{{ data.invoice.voucher_no }}</span>
+              <span v-else class="text-xs text-amber-700" title="Doanh thu chưa vào sổ">
+                ⚠ chưa có
+              </span>
+            </template>
+          </Column>
           <Column header="Kiểm tra">
             <template #body="{ data }">
               <div v-if="data.error_count" class="text-xs text-red-600">

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE stock_lot SET quantity = 1.0 WHERE product_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "65d8685e845cc68b2952cc23cb2ec6477c8a5f38225ee75e9d697fecdde52c61"
+}

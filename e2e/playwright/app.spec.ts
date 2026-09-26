@@ -538,12 +538,19 @@ test("Liên kết HĐĐT: ngày hóa đơn đồng bộ theo ngày HĐĐT bên k
   await expect(row.getByText("2026-09-29", { exact: true }).first()).toBeVisible();
 
   await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
-  const dlg = page.getByRole("dialog");
+  // Định danh theo tên: hộp thoại khác của màn Hóa đơn vẫn nằm trong DOM.
+  const dlg = page.getByRole("dialog", { name: /Liên kết hóa đơn điện tử/ });
   await dlg.getByLabel("Số HĐĐT").fill("00009400");
   await dlg.getByLabel("Ký hiệu HĐĐT").fill("1C26TT152");
-  // DatePicker: gõ ngày rồi Enter để chốt giá trị vào model (Escape sẽ hoàn tác).
-  await dlg.getByLabel("Ngày HĐĐT").fill("30/09/2026");
-  await dlg.getByLabel("Ngày HĐĐT").press("Enter");
+  // DatePicker có mask nhập ngày: phải gõ từng ký tự (fill một lần không được
+  // mask xử lý) rồi Enter để chốt giá trị vào model.
+  const dateInput = dlg.getByLabel("Ngày HĐĐT");
+  await dateInput.click();
+  // Ô đang có sẵn ngày mặc định (hôm nay) → chọn hết rồi gõ đè.
+  await dateInput.press("ControlOrMeta+a");
+  await dateInput.pressSequentially("30/09/2026", { delay: 30 });
+  await dateInput.press("Enter");
+  await expect(dateInput).toHaveValue("30/09/2026");
   await dlg.getByRole("button", { name: "Lưu" }).click();
   await expect(dlg).toBeHidden();
 
@@ -564,6 +571,103 @@ test("Liên kết HĐĐT: ngày hóa đơn đồng bộ theo ngày HĐĐT bên k
     "Ngày hóa đơn đã cập nhật theo HĐĐT",
   );
   await expect(page.getByText("2026-09-29", { exact: true })).toHaveCount(0);
+});
+
+test("Ghi nhận HĐĐT: tự lập phiếu xuất để doanh thu vào sổ", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-25",
+      voucher_no: "PN9500",
+      description: "Nhập tồn cho test tự lập phiếu xuất",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 50, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed: ${await stockIn.text()}`).toBe(true);
+
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9500",
+      date: "2026-09-26",
+      customer: "Khách Tự Sinh PX",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 2,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed: ${await created.text()}`).toBe(true);
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const row = page.locator("tr", { has: page.getByText("HD9500", { exact: true }) }).first();
+  await expect(row.getByText("—", { exact: true }).first()).toBeVisible();
+
+  await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
+  const dlg = page.getByRole("dialog");
+  // Tuỳ chọn lập phiếu xuất bật sẵn.
+  await expect(dlg.getByText("Lập phiếu xuất cho hóa đơn này")).toBeVisible();
+  await dlg.getByLabel("Số HĐĐT").fill("00009500");
+  await dlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.locator(".p-toast-detail").last()).toContainText("Đã lập phiếu xuất PX");
+
+  // Hóa đơn đã trỏ phiếu xuất.
+  const after = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    number: string;
+    status: string;
+    voucher_no: string;
+  }>;
+  const inv = after.find((i) => i.number === "HD9500");
+  expect(inv?.status).toBe("official");
+  expect(inv?.voucher_no, "hóa đơn phải liên kết phiếu xuất").toMatch(/^PX\d+$/);
+
+  // Sổ có bút toán Nợ 131 / Có 511 cho phiếu đó → doanh thu đã vào tờ khai.
+  const entries = (await (
+    await request.post("/api/get_voucher", { data: { voucherNo: inv?.voucher_no } })
+  ).json()) as Array<{
+    entry_type: string;
+    debit_account: string;
+    credit_account: string;
+    amount: number;
+  }>;
+  const revenue = entries.find((e) => e.entry_type === "PX");
+  expect(revenue?.debit_account).toBe("131");
+  expect(revenue?.credit_account).toBe("511");
+  expect(revenue?.amount).toBe(20000);
+
+  // Phiếu xuất vừa sinh phải xuất hiện ở màn Xuất kho (đã trừ tồn FIFO + ghi sổ).
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
+  await expect(
+    page.locator("tr", { has: page.getByText(inv?.voucher_no ?? "", { exact: true }) }).first(),
+  ).toBeVisible();
+
+  // Nút tạo phiếu xuất biến mất vì hóa đơn đã có phiếu.
+  await sidebarButton(page, "Hóa đơn").click();
+  const row2 = page.locator("tr", { has: page.getByText("HD9500", { exact: true }) }).first();
+  await expect(row2.getByRole("button", { name: "Lập phiếu xuất từ hóa đơn" })).toHaveCount(0);
 });
 
 test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checklist và phím tắt", async ({

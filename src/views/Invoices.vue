@@ -107,6 +107,29 @@ function removeInvoice(inv: Invoice) {
   });
 }
 
+/** Lập phiếu xuất từ hóa đơn (1-1) — hóa đơn lập ở màn Hóa đơn thì chưa có PX. */
+function makeOutbound(inv: Invoice) {
+  confirm.require({
+    header: "Lập phiếu xuất",
+    message: `Lập phiếu xuất cho hóa đơn ${inv.number} (${fmtVnd(inv.total)})? Sẽ trừ tồn kho theo kho xuất trên từng dòng và ghi doanh thu Nợ 131 / Có 511.`,
+    icon: "pi pi-receipt",
+    acceptLabel: "Lập phiếu xuất",
+    rejectLabel: "Hủy",
+    accept: async () => {
+      try {
+        const no = await invoiceStore.createOutbound(inv.id);
+        toast.add({
+          severity: "success",
+          summary: "Đã lập phiếu xuất",
+          detail: `${no} · doanh thu đã vào sổ, tồn kho đã trừ`,
+        });
+      } catch (e) {
+        toast.add({ severity: "error", summary: "Không lập được phiếu xuất", detail: String(e) });
+      }
+    },
+  });
+}
+
 async function afterStatusChange() {
   await invoiceStore.loadInvoices();
   if (statusTarget.value) {
@@ -258,6 +281,20 @@ void (async () => {
                   @click="openStatus(data, 'adjusted')"
                 />
                 <!-- Nháp thì sửa/xoá được; các trạng thái sau nháp giữ lại dấu vết -->
+                <!-- Đã phát hành mà chưa có phiếu xuất → sổ đang thiếu khoản bán này -->
+                <Button
+                  v-if="
+                    (data.status === 'official' || data.status === 'exported') && !data.voucher_no
+                  "
+                  icon="pi pi-receipt"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Lập phiếu xuất từ hóa đơn"
+                  v-tooltip="'Lập phiếu xuất (trừ tồn + ghi doanh thu)'"
+                  severity="success"
+                  @click="makeOutbound(data)"
+                />
                 <Button
                   v-if="data.status === 'draft'"
                   icon="pi pi-file-edit"

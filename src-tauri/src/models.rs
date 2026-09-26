@@ -350,6 +350,11 @@ pub(crate) struct OutboundItemInput {
     pub(crate) product_code: String,
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
+    /// Tiền chiết khấu thương mại trên dòng (đ) — doanh thu ghi vào sổ =
+    /// SL × Đơn giá − CK. Mặc định 0; dùng khi lập phiếu xuất từ hóa đơn để
+    /// doanh thu khớp đúng tổng hóa đơn.
+    #[serde(default)]
+    pub(crate) discount: f64,
     pub(crate) industry_code: String,
     /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
     #[serde(default)]

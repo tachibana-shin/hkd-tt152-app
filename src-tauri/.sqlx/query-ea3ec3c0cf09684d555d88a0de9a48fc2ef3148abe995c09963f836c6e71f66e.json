@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT voucher_no FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ea3ec3c0cf09684d555d88a0de9a48fc2ef3148abe995c09963f836c6e71f66e"
+}

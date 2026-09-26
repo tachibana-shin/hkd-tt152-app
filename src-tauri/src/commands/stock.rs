@@ -533,8 +533,8 @@ pub(crate) async fn save_outbound_core(
             (r.vat_rate, r.pit_rate)
         };
 
-        // ghi sổ bán hàng (doanh thu = giá bán * SL)
-        let amount = item.quantity * item.unit_price;
+        // Ghi sổ bán hàng: doanh thu dòng = SL × Đơn giá − Tiền CK (chiết khấu).
+        let amount = round2(item.quantity * item.unit_price - item.discount);
 
         // Sản phẩm dịch vụ (nhân công...): không theo dõi tồn kho → chỉ ghi doanh thu,
         // không xuất FIFO, không giá vốn.
@@ -1190,6 +1190,7 @@ mod tests {
             product_code: product_code.into(),
             quantity,
             unit_price,
+            discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: "".into(), // rỗng → kho mặc định / kho đầu tiên
         }
@@ -1205,6 +1206,7 @@ mod tests {
             product_code: product_code.into(),
             quantity,
             unit_price,
+            discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: warehouse_code.into(),
         }
@@ -1463,6 +1465,7 @@ mod tests {
                 product_code: "S1".into(),
                 quantity: 5.0,
                 unit_price: 300_000.0,
+                discount: 0.0,
                 industry_code: "".into(), // rỗng → lấy nhóm ngành của sản phẩm
                 warehouse_code: "".into(),
             }],

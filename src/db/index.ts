@@ -554,6 +554,9 @@ export const api = {
       }),
     ),
   invoiceQueue: async () => parse<InvoiceQueueItem[]>(await call<string>("invoice_queue", {})),
+  /** Lập phiếu xuất cho hóa đơn chưa có phiếu (trừ tồn + ghi Nợ 131/Có 511). */
+  createInvoiceOutbound: (invoiceId: number) =>
+    call<string>("create_invoice_outbound", { invoiceId }),
   invoiceEvents: async (invoiceId: number) =>
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {
