@@ -10,7 +10,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
 import type { Invoice } from "@/types";
-import { fmtInt as fmt, toIsoDate } from "@/utils/format";
+import { fmtInt as fmt, parseIsoDate, toIsoDate } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ editInvoice?: Invoice | null }>();
@@ -103,7 +103,7 @@ watch(
       editingId.value = id;
       Object.assign(form, {
         number: d.invoice.number,
-        date: new Date(d.invoice.date),
+        date: parseIsoDate(d.invoice.date) ?? new Date(),
         customer: d.invoice.customer ?? "",
         customer_tax_code: d.invoice.customer_tax_code ?? "",
         items: d.items.map((it) => ({

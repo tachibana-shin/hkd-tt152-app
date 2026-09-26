@@ -4,7 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
 import type { Invoice, InvoiceItem } from "@/types";
-import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -182,9 +182,9 @@ void (async () => {
                 <span
                   v-if="data.exported_at"
                   class="text-xs text-gray-400"
-                  :title="`Đã chép sang bên kia lúc ${data.exported_at}`"
+                  :title="`Đã chép sang bên kia lúc ${fmtLocalDateTime(data.exported_at)}`"
                 >
-                  đã chép {{ data.exported_at.slice(0, 16) }}
+                  đã chép {{ fmtLocalDateTime(data.exported_at) }}
                 </span>
               </div>
             </template>

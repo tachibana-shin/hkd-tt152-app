@@ -9,6 +9,7 @@ import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import Textarea from "primevue/textarea";
 import type { Invoice, InvoiceEvent } from "@/types";
+import { fmtLocalDateTime } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ invoice: Invoice | null; mode: "cancelled" | "adjusted" }>();
@@ -166,7 +167,7 @@ async function save() {
         <div class="mb-1 text-xs font-medium text-gray-500">Lịch sử trạng thái</div>
         <ul class="space-y-0.5 text-xs text-gray-600">
           <li v-for="e in events" :key="e.id">
-            <span class="font-mono text-gray-400">{{ e.at }}</span>
+            <span class="text-gray-400">{{ fmtLocalDateTime(e.at) }}</span>
             {{ statusLabel[e.from_status] ?? (e.from_status || "(mới)") }} →
             <b>{{ statusLabel[e.to_status] ?? e.to_status }}</b>
             <span v-if="e.reason"> · {{ e.reason }}</span>

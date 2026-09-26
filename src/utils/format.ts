@@ -29,3 +29,25 @@ export const toIsoDate = (d: Date | null | undefined): string => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
+
+/**
+ * Mốc thời gian do SQLite ghi bằng `datetime('now')` (giờ UTC) → chuỗi giờ địa
+ * phương để hiển thị. Không có mốc giờ trong chuỗi nên phải gắn `Z` (UTC) khi
+ * parse, rồi định dạng theo giờ máy — nếu hiện thẳng chuỗi gốc sẽ lệch 7 giờ ở
+ * Việt Nam.
+ */
+export const fmtLocalDateTime = (ts?: string | null): string => {
+  if (!ts) return "";
+  const d = new Date(`${ts.trim().replace(" ", "T")}Z`);
+  if (Number.isNaN(d.getTime())) return ts;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+/**
+ * Ngày trong DB (yyyy-mm-dd) → Date lúc 00:00 **giờ địa phương** để đưa vào
+ * DatePicker. `new Date("2026-09-29")` sẽ là 00:00 UTC nên lệch một ngày ở múi
+ * giờ âm.
+ */
+export const parseIsoDate = (s?: string | null): Date | null =>
+  s?.trim() ? new Date(`${s.trim().slice(0, 10)}T00:00:00`) : null;

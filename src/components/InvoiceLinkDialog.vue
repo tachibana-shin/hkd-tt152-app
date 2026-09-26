@@ -8,7 +8,7 @@ import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { useBusinessStore } from "@/stores/business";
 import type { Invoice } from "@/types";
-import { toIsoDate } from "@/utils/format";
+import { parseIsoDate, toIsoDate } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ invoice: Invoice | null }>();
@@ -26,9 +26,7 @@ async function prefill() {
   // Ký hiệu đã ghi trên hóa đơn → dùng lại; chưa có thì lấy ký hiệu của hộ trong hồ
   // sơ (hộp thoại này tự cập nhật trở lại hồ sơ sau mỗi lần liên kết).
   form.hddtSymbol = props.invoice?.e_invoice_symbol || business.config?.hddt_symbol || "";
-  form.hddtDate = props.invoice?.e_invoice_date
-    ? new Date(props.invoice.e_invoice_date)
-    : new Date();
+  form.hddtDate = parseIsoDate(props.invoice?.e_invoice_date) ?? new Date();
 }
 
 watch(
