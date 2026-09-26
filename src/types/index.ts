@@ -284,6 +284,18 @@ export interface Invoice {
   items?: InvoiceItem[];
 }
 
+/** Kết quả ghi nhận số HĐĐT — app đồng bộ ngày hóa đơn theo ngày HĐĐT khi
+ *  hóa đơn không gắn phiếu xuất; nếu gắn phiếu xuất thì báo lệch kỳ. */
+export interface InvoiceLinkResult {
+  ok: boolean;
+  symbol: string;
+  date_synced: boolean;
+  old_date: string;
+  hddt_date: string;
+  voucher_no: string;
+  warning: string;
+}
+
 /** 1 dòng hàng trong gói chép sang dịch vụ HĐĐT khác. */
 export interface InvoiceExportLine {
   stt: number;

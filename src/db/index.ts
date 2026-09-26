@@ -92,6 +92,7 @@ import type {
   InvoiceEvent,
   InvoiceExportPack,
   InvoiceQueueItem,
+  InvoiceLinkResult,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -571,13 +572,20 @@ export const api = {
     }),
 
   // ─── HĐĐT ───
-  linkHddt: (args: { invoiceId: number; hddtNo: string; hddtSymbol: string; hddtDate: string }) =>
-    call<string>("link_hddt", {
-      invoiceId: args.invoiceId,
-      hddtNo: args.hddtNo,
-      hddtSymbol: args.hddtSymbol,
-      hddtDate: args.hddtDate,
-    }),
+  linkHddt: async (args: {
+    invoiceId: number;
+    hddtNo: string;
+    hddtSymbol: string;
+    hddtDate: string;
+  }) =>
+    parse<InvoiceLinkResult>(
+      await call<string>("link_hddt", {
+        invoiceId: args.invoiceId,
+        hddtNo: args.hddtNo,
+        hddtSymbol: args.hddtSymbol,
+        hddtDate: args.hddtDate,
+      }),
+    ),
   // Tài khoản cổng HĐĐT
   hddtGetConfig: async () => parse<HddtConfig>(await call<string>("hddt_get_config")),
   /** Đọc mật khẩu HĐĐT đã lưu (Plaintext, chỉ trong app local). */

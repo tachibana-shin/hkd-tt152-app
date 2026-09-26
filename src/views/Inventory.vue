@@ -4,7 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import { useInvoiceStore } from "@/stores/invoice";
-import { fmtDec as fmt, fmtVnd } from "@/utils/format";
+import { fmtDec as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -31,8 +31,6 @@ const countForm = reactive({
     counted_qty: number;
   }[],
 });
-
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
 const totalValue = computed(() => summary.value.reduce((s, r) => s + r.balance, 0));
 const lowStock = computed(() =>
@@ -76,7 +74,7 @@ async function saveCount() {
   saving.value = true;
   try {
     await invoice.saveCount({
-      date: iso(countForm.date),
+      date: toIsoDate(countForm.date),
       note: countForm.note,
       items: countForm.items.map((it) => ({ ...it })),
     });

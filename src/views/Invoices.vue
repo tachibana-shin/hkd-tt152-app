@@ -195,6 +195,19 @@ void (async () => {
           <Column header="Ký hiệu">
             <template #body="{ data }">{{ data.e_invoice_symbol || "—" }}</template>
           </Column>
+          <Column header="Ngày HĐĐT">
+            <template #body="{ data }">
+              <span>{{ data.e_invoice_date || "—" }}</span>
+              <!-- Ngày HĐĐT khác ngày phiếu xuất = doanh thu kê lệch kỳ với chứng từ -->
+              <div
+                v-if="data.e_invoice_date && data.voucher_no && data.e_invoice_date !== data.date"
+                class="text-xs text-amber-700"
+                :title="`Phiếu xuất ${data.voucher_no} giữ ngày ${data.date}`"
+              >
+                ⚠ phiếu xuất: {{ data.date }}
+              </div>
+            </template>
+          </Column>
           <Column field="voucher_no" header="Phiếu xuất">
             <template #body="{ data }">{{ data.voucher_no || "—" }}</template>
           </Column>

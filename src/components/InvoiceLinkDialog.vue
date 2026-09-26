@@ -8,6 +8,7 @@ import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { useBusinessStore } from "@/stores/business";
 import type { Invoice } from "@/types";
+import { toIsoDate } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ invoice: Invoice | null }>();
@@ -18,8 +19,6 @@ const business = useBusinessStore();
 const toast = useToast();
 const linking = ref(false);
 const form = reactive({ hddtNo: "", hddtSymbol: "", hddtDate: new Date() });
-
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
 async function prefill() {
   if (!business.config) await business.load();
@@ -54,17 +53,23 @@ async function save() {
   }
   linking.value = true;
   try {
-    await api.linkHddt({
+    const res = await api.linkHddt({
       invoiceId: props.invoice.id,
       hddtNo,
       hddtSymbol: form.hddtSymbol.trim(),
-      hddtDate: iso(form.hddtDate),
+      hddtDate: toIsoDate(form.hddtDate),
     });
+    const syncDetail = res.date_synced
+      ? ` Ngày hóa đơn đã cập nhật theo HĐĐT: ${res.old_date} → ${res.hddt_date}.`
+      : "";
     toast.add({
-      severity: "success",
+      severity: res.warning ? "warn" : "success",
       summary: "Đã liên kết HĐĐT",
-      detail: `Hóa đơn ${props.invoice.number} chuyển sang trạng thái Đã liên kết HĐĐT`,
+      detail: `Hóa đơn ${props.invoice.number} chuyển sang trạng thái Đã phát hành.${syncDetail}`,
     });
+    if (res.warning) {
+      toast.add({ severity: "warn", summary: "Lưu ý ngày", detail: res.warning, life: 9000 });
+    }
     // Ký hiệu vừa dùng đã được lưu vào hồ sơ → nạp lại để hóa đơn sau mặc định
     // đúng ký hiệu mới (đổi mẫu số theo năm chỉ cần gõ ở đây một lần).
     await business.load();
@@ -110,8 +115,13 @@ async function save() {
           class="w-full"
         />
       </FormField>
-      <FormField label="Ngày HĐĐT">
-        <DatePicker v-model="form.hddtDate" dateFormat="dd/mm/yy" class="w-full" />
+      <FormField label="Ngày HĐĐT" input-id="link-hddt-date">
+        <DatePicker
+          :input-id="'link-hddt-date'"
+          v-model="form.hddtDate"
+          dateFormat="dd/mm/yy"
+          class="w-full"
+        />
       </FormField>
     </div>
   </AppDialog>

@@ -483,6 +483,89 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
 });
 
+test("Liên kết HĐĐT: ngày hóa đơn đồng bộ theo ngày HĐĐT bên kia", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-28",
+      voucher_no: "PN9400",
+      description: "Nhập tồn cho test đồng bộ ngày HĐĐT",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 20, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  // Nháp lập ngày 29, bên kia phát hành HĐĐT ngày 30.
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9400",
+      date: "2026-09-29",
+      customer: "Khách Lệch Ngày",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed: ${await created.text()}`).toBe(true);
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const row = page.locator("tr", { has: page.getByText("HD9400", { exact: true }) }).first();
+  await expect(row.getByText("2026-09-29", { exact: true }).first()).toBeVisible();
+
+  await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByLabel("Số HĐĐT").fill("00009400");
+  await dlg.getByLabel("Ký hiệu HĐĐT").fill("1C26TT152");
+  // DatePicker: gõ ngày rồi Enter để chốt giá trị vào model (Escape sẽ hoàn tác).
+  await dlg.getByLabel("Ngày HĐĐT").fill("30/09/2026");
+  await dlg.getByLabel("Ngày HĐĐT").press("Enter");
+  await dlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(dlg).toBeHidden();
+
+  // Ngày lập hóa đơn phải được đồng bộ sang ngày HĐĐT (30, không còn 29).
+  const after = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    number: string;
+    date: string;
+    e_invoice_date: string;
+    status: string;
+  }>;
+  const inv = after.find((i) => i.number === "HD9400");
+  expect(inv?.e_invoice_date, "ngày nhập ở hộp thoại").toBe("2026-09-30");
+  expect(inv?.date, "ngày hóa đơn phải theo ngày HĐĐT").toBe("2026-09-30");
+  expect(inv?.status).toBe("official");
+
+  // Toast nhắc đã đồng bộ ngày.
+  await expect(page.locator(".p-toast-detail").last()).toContainText(
+    "Ngày hóa đơn đã cập nhật theo HĐĐT",
+  );
+  await expect(page.getByText("2026-09-29", { exact: true })).toHaveCount(0);
+});
+
 test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checklist và phím tắt", async ({
   page,
   request,

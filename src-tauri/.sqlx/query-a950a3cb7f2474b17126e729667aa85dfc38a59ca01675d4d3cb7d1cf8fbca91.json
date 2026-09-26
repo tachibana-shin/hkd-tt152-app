@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reason FROM invoice_event WHERE invoice_id = ? ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "reason",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a950a3cb7f2474b17126e729667aa85dfc38a59ca01675d4d3cb7d1cf8fbca91"
+}

@@ -4,7 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { api } from "@/db";
 import type { JournalEntryRow, Account } from "@/types";
-import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -62,7 +62,6 @@ const objectCode = computed({
   },
 });
 
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 function suggestVoucherNo(type: string) {
   const nums = entries.value
     .filter((e) => e.entry_type === type)
@@ -158,7 +157,7 @@ async function save() {
   try {
     await api.saveCashEntry({
       entry_type: form.entry_type,
-      posting_date: iso(form.posting_date),
+      posting_date: toIsoDate(form.posting_date),
       voucher_no: form.voucher_no.trim(),
       description: form.description.trim(),
       customer_code: form.entry_type === "PT" ? form.customer_code : "",

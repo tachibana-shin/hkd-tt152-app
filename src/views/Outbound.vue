@@ -5,7 +5,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import { api } from "@/db";
-import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -122,8 +122,6 @@ function onTypeChange() {
   }
 }
 
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
-
 function nextVoucherNo() {
   const nums = entries.value
     .filter((e) => e.entry_type === "PX")
@@ -197,7 +195,7 @@ async function save() {
   try {
     const res = JSON.parse(
       await stock.outbound({
-        posting_date: iso(form.posting_date),
+        posting_date: toIsoDate(form.posting_date),
         voucher_no: form.voucher_no,
         description: form.description,
         customer_code: form.customer_code,
@@ -223,7 +221,7 @@ async function save() {
           number: form.voucher_no,
           e_invoice_no: form.e_invoice_no,
           e_invoice_symbol: form.e_invoice_symbol,
-          e_invoice_date: iso(form.e_invoice_date),
+          e_invoice_date: toIsoDate(form.e_invoice_date),
         },
       }),
     );

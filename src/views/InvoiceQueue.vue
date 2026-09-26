@@ -16,7 +16,7 @@ import { useAuthStore } from "@/stores/auth";
 // dùng) — phải import tường minh, nếu không SelectButton không render.
 import SelectButton from "primevue/selectbutton";
 import type { Invoice, InvoiceQueueItem } from "@/types";
-import { fmtVnd } from "@/utils/format";
+import { fmtVnd, toIsoDate } from "@/utils/format";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -32,8 +32,8 @@ const selectedId = ref<number | null>(null);
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase();
-  const f = from.value ? from.value.toISOString().slice(0, 10) : "";
-  const t = to.value ? to.value.toISOString().slice(0, 10) : "";
+  const f = toIsoDate(from.value);
+  const t = toIsoDate(to.value);
   return items.value.filter((it) => {
     const inv = it.invoice;
     if (statusFilter.value !== "all" && inv.status !== statusFilter.value) return false;

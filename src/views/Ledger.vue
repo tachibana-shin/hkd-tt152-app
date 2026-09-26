@@ -3,7 +3,7 @@ import { storeToRefs } from "pinia";
 import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import type { LedgerRow } from "@/types";
-import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 
 const business = useBusinessStore();
 const { config } = storeToRefs(business);
@@ -18,13 +18,12 @@ const entryType = ref("");
 
 const entryOptions = [{ label: "Toàn bộ", value: "" }, "PN", "PX", "PT", "PC"];
 
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 const currentYear = () => new Date().getFullYear();
 async function loadLedger() {
   loading.value = true;
   try {
-    const f = iso(fromDate.value) || `${currentYear()}-01-01`;
-    const t = iso(toDate.value) || `${currentYear()}-12-31`;
+    const f = toIsoDate(fromDate.value) || `${currentYear()}-01-01`;
+    const t = toIsoDate(toDate.value) || `${currentYear()}-12-31`;
     rows.value = await api.getLedger(f, t);
   } catch (e) {
     toast.add({

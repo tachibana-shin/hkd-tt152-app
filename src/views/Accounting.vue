@@ -11,7 +11,7 @@ import type {
   TaxOverview,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
-import { fmtInt as fmt, fmtPct as pct, fmtVnd } from "@/utils/format";
+import { fmtInt as fmt, fmtPct as pct, fmtVnd, toIsoDate } from "@/utils/format";
 
 const business = useBusinessStore();
 const auth = useAuthStore();
@@ -41,8 +41,6 @@ const toDate = ref<Date | null>(null);
 const backupDialog = ref(false);
 const configDialog = ref(false);
 
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
-
 function openConfig() {
   configDialog.value = true;
 }
@@ -55,8 +53,8 @@ async function loadReports() {
   loading.value = true;
   try {
     const year = new Date().getFullYear();
-    const f = iso(fromDate.value) || `${year}-01-01`;
-    const t = iso(toDate.value) || `${year}-12-31`;
+    const f = toIsoDate(fromDate.value) || `${year}-01-01`;
+    const t = toIsoDate(toDate.value) || `${year}-12-31`;
     const [tax, rev, balance] = await Promise.all([
       api.getTaxSummary(f, t, unitCode.value),
       api.getRevenueExpense(f, t),

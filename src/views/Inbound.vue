@@ -6,7 +6,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import { api } from "@/db";
-import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import type { Account } from "@/types";
 
 const catalog = useCatalogStore();
@@ -156,8 +156,6 @@ const form = reactive({
   pay_now: true,
 });
 
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
-
 function nextVoucherNo() {
   const nums = entries.value
     .filter((e) => e.entry_type === "PN")
@@ -217,7 +215,7 @@ async function save() {
   try {
     const res = JSON.parse(
       await stock.inbound({
-        posting_date: iso(form.posting_date),
+        posting_date: toIsoDate(form.posting_date),
         voucher_no: form.voucher_no,
         description: form.description,
         supplier_code: form.supplier_code,

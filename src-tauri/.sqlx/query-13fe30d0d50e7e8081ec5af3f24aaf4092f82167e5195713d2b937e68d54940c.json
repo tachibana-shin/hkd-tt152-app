@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice SET voucher_no = 'PX000124' WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "13fe30d0d50e7e8081ec5af3f24aaf4092f82167e5195713d2b937e68d54940c"
+}

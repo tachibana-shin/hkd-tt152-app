@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice SET status = 'official', e_invoice_no = ?, e_invoice_symbol = ?,\n                           e_invoice_date = ?, date = ?\n          WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "ea427a5b8043d0186edb1ca424a4a58c7999427a58cdf80cd29af006729b79e3"
+}

@@ -10,7 +10,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
 import type { Invoice } from "@/types";
-import { fmtInt as fmt } from "@/utils/format";
+import { fmtInt as fmt, toIsoDate } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ editInvoice?: Invoice | null }>();
@@ -45,8 +45,6 @@ const header = computed(() =>
   isEdit.value ? `Sửa hóa đơn nháp ${form.number}` : "Lập hóa đơn bán hàng (nháp)",
 );
 const actionLabel = computed(() => (isEdit.value ? "Lưu thay đổi" : "Lập hóa đơn"));
-
-const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
 
 function nextInvoiceNo() {
   const nums = invoices.value
@@ -142,7 +140,7 @@ async function save() {
   try {
     const payload = {
       number: form.number,
-      date: iso(form.date),
+      date: toIsoDate(form.date),
       customer: form.customer,
       customer_tax_code: form.customer_tax_code,
       items: rows.map((it) => ({ ...it })),

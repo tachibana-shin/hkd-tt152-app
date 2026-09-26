@@ -414,6 +414,14 @@ pub(crate) async fn delete_invoice(state: State<'_, AppState>, id: i64) -> Resul
     Ok("ok".into())
 }
 
+/// Ngày trên HĐĐT là ngày văn bản đã phát hành, nên khi khác ngày lập nháp thì
+/// hóa đơn phải theo ngày đó. Việc này chỉ an toàn khi hóa đơn **không** gắn phiếu
+/// xuất: nháp lập ở màn Hóa đơn chỉ ghi bảng invoice, sổ sách chưa ghi gì nên đổi
+/// ngày không hệ quả gì.
+fn same_period(a: &str, b: &str) -> bool {
+    a.len() >= 7 && b.len() >= 7 && a[..7] == b[..7] // cùng tháng: yyyy-mm
+}
+
 /// Ghi nhận số HĐĐT cho hóa đơn nháp → trạng thái 'official'.
 ///
 /// Ký hiệu gõ ở đây cũng được lưu vào hồ sơ HKD (`business.hddt_symbol`) làm
@@ -425,14 +433,36 @@ async fn link_hddt_core(
     hddt_no: &str,
     hddt_symbol: &str,
     hddt_date: &str,
-) -> Result<String, String> {
+) -> Result<serde_json::Value, String> {
     let symbol = hddt_symbol.trim();
+    let old = sqlx::query!(
+        "SELECT number, date, voucher_no FROM invoice WHERE id = ?",
+        invoice_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+
+    // Hóa đơn gắn phiếu xuất (lập kèm ở màn Xuất kho) thì doanh thu đã ghi sổ theo
+    // NGÀY PHIẾU — đổi ngày phiếu là dời doanh thu sang kỳ khác, không tự làm.
+    let date_synced =
+        !hddt_date.is_empty() && hddt_date != old.date && old.voucher_no.trim().is_empty();
+    let date = if date_synced {
+        hddt_date
+    } else {
+        old.date.as_str()
+    };
+
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::query!(
-        "UPDATE invoice SET status = 'official', e_invoice_no = ?, e_invoice_symbol = ?, e_invoice_date = ? WHERE id = ?",
+        "UPDATE invoice SET status = 'official', e_invoice_no = ?, e_invoice_symbol = ?,
+                           e_invoice_date = ?, date = ?
+          WHERE id = ?",
         hddt_no,
         symbol,
         hddt_date,
+        date,
         invoice_id
     )
     .execute(&mut *tx)
@@ -445,8 +475,58 @@ async fn link_hddt_core(
             .await
             .map_err(|e| e.to_string())?;
     }
+    let reason = match (date_synced, old.voucher_no.trim().is_empty()) {
+        (true, _) => format!(
+            "Ghi nhận số HĐĐT {symbol}/{hddt_no} ngày {hddt_date}; ngày hóa đơn {} → {hddt_date}",
+            old.date
+        ),
+        (false, false) if !hddt_date.is_empty() && hddt_date != old.date => format!(
+            "Ghi nhận số HĐĐT {symbol}/{hddt_no} ngày {hddt_date}; giữ ngày hóa đơn {} vì đang gắn phiếu xuất {}",
+            old.date,
+            old.voucher_no
+        ),
+        _ => format!("Ghi nhận số HĐĐT {symbol}/{hddt_no} ngày {hddt_date}"),
+    };
+    sqlx::query!(
+        r#"INSERT INTO invoice_event (invoice_id, from_status, to_status, reason, actor, ref)
+           VALUES (?, 'draft', 'official', ?, '', ?)"#,
+        invoice_id,
+        reason,
+        hddt_no
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
-    Ok(symbol.to_string())
+
+    // Cảnh báo cho người dùng: ngày sổ sách chưa theo ngày HĐĐT.
+    let warning = match (date_synced, old.voucher_no.trim().is_empty()) {
+        (_, true) | (true, _) => String::new(),
+        (false, false) if !hddt_date.is_empty() && hddt_date != old.date => {
+            if same_period(&old.date, hddt_date) {
+                format!(
+                    "Phiếu xuất {} giữ ngày {} — doanh thu vẫn kê ở kỳ của {}, còn ngày trên HĐĐT là {}",
+                    old.voucher_no, old.date, old.date, hddt_date
+                )
+            } else {
+                format!(
+                    "Lệch KỲ: phiếu xuất {} ghi ngày {} nhưng HĐĐT ngày {} — doanh thu đang kê ở kỳ của {}. Cần lập phiếu điều chỉnh nếu muốn đổi kỳ.",
+                    old.voucher_no, old.date, hddt_date, old.date
+                )
+            }
+        }
+        _ => String::new(),
+    };
+
+    Ok(json!({
+        "ok": true,
+        "symbol": symbol,
+        "date_synced": date_synced,
+        "old_date": old.date,
+        "hddt_date": hddt_date,
+        "voucher_no": old.voucher_no,
+        "warning": warning,
+    }))
 }
 
 #[tauri::command]
@@ -458,7 +538,7 @@ pub(crate) async fn link_hddt(
     hddt_date: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
-    let symbol = link_hddt_core(
+    let res = link_hddt_core(
         &*state.pool.read().await,
         invoice_id,
         &hddt_no,
@@ -470,10 +550,14 @@ pub(crate) async fn link_hddt(
         &state,
         "link_hddt",
         "invoice",
-        &format!("invoice_id={invoice_id} → {symbol}/{hddt_no}"),
+        &format!(
+            "invoice_id={invoice_id} → {}/{}",
+            hddt_symbol.trim(),
+            hddt_no
+        ),
     )
     .await;
-    Ok("ok".into())
+    Ok(res.to_string())
 }
 
 #[cfg(test)]
@@ -942,5 +1026,101 @@ mod tests {
             symbol, "1C27TT152",
             "ký hiệu rỗng không được xoá ký hiệu đã lưu"
         );
+    }
+
+    #[tokio::test]
+    async fn lien_ket_hddt_dong_bo_ngay_hoa_don_khi_khong_co_phieu_xuat() {
+        // Nháp lập ở màn Hóa đơn: không có phiếu xuất, sổ chưa ghi gì → ngày hóa
+        // đơn phải theo ngày trên HĐĐT.
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDSY1").await;
+
+        let r = link_hddt_core(&pool, id, "00000123", "1C26TT152", "2026-03-30")
+            .await
+            .unwrap();
+        assert_eq!(r["date_synced"], json!(true));
+        assert_eq!(r["old_date"], json!("2026-03-10"));
+        assert_eq!(r["warning"], json!(""));
+
+        let inv = sqlx::query!(
+            "SELECT date, e_invoice_date, status FROM invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(inv.date, "2026-03-30", "ngày hóa đơn phải theo ngày HĐĐT");
+        assert_eq!(inv.e_invoice_date, "2026-03-30");
+        assert_eq!(inv.status, "official");
+
+        // Ghi vào lịch sử để đối chiếu.
+        let reason: String = sqlx::query_scalar!(
+            "SELECT reason FROM invoice_event WHERE invoice_id = ? ORDER BY id DESC LIMIT 1",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(reason.contains("2026-03-30"), "{reason}");
+    }
+
+    #[tokio::test]
+    async fn lien_ket_hddt_khong_doi_ngay_khi_hoa_don_da_gan_phieu_xuat() {
+        // Lập kèm ở màn Xuất kho: doanh thu đã ghi sổ theo ngày phiếu → không tự
+        // đổi ngày hóa đơn, phải cảnh báo lệch (nhấn mạnh khi lệch kỳ).
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDSY2").await;
+        sqlx::query!(
+            "UPDATE invoice SET voucher_no = 'PX000123' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Lệch trong cùng tháng → nhắc nhẹ.
+        let r = link_hddt_core(&pool, id, "00000124", "1C26TT152", "2026-03-30")
+            .await
+            .unwrap();
+        assert_eq!(r["date_synced"], json!(false));
+        assert!(r["warning"].as_str().unwrap().contains("PX000123"));
+
+        let date: String = sqlx::query_scalar!("SELECT date FROM invoice WHERE id = ?", id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(date, "2026-03-10", "không được tự đổi ngày phiếu xuất");
+
+        // Lệch qua ranh giới tháng → cảnh báo nói rõ lệch kỳ.
+        let id2 = seed_draft(&pool, "HDSY3").await;
+        sqlx::query!(
+            "UPDATE invoice SET voucher_no = 'PX000124' WHERE id = ?",
+            id2
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let r = link_hddt_core(&pool, id2, "00000125", "1C26TT152", "2026-04-01")
+            .await
+            .unwrap();
+        let w = r["warning"].as_str().unwrap();
+        assert!(w.contains("Lệch KỲ"), "{w}");
+        assert!(w.contains("điều chỉnh"), "{w}");
+    }
+
+    #[tokio::test]
+    async fn lien_ket_hddt_ngay_giong_nhau_thi_khong_doi_gi() {
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDSY4").await;
+        let r = link_hddt_core(&pool, id, "00000126", "1C26TT152", "2026-03-10")
+            .await
+            .unwrap();
+        assert_eq!(r["date_synced"], json!(false));
+        assert_eq!(r["warning"], json!(""));
+        let date: String = sqlx::query_scalar!("SELECT date FROM invoice WHERE id = ?", id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(date, "2026-03-10");
     }
 }
