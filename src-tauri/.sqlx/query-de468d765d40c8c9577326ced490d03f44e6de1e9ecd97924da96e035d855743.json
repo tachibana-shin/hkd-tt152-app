@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice\n              SET status = 'replaced', replace_reason = ?, ref_invoice = ?,\n                  adjust_voucher_no = ?\n            WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "de468d765d40c8c9577326ced490d03f44e6de1e9ecd97924da96e035d855743"
+}

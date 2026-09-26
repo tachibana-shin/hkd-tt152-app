@@ -93,6 +93,7 @@ import type {
   InvoiceExportPack,
   InvoiceQueueItem,
   InvoiceLinkResult,
+  InvoiceReplaceResult,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -561,18 +562,22 @@ export const api = {
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {
     invoiceId: number;
-    toStatus: "cancelled" | "adjusted";
+    toStatus: "adjusted";
     reason: string;
     refInvoice?: string;
-    adjustVoucherNo?: string;
   }) =>
     call<string>("invoice_set_status", {
       invoiceId: args.invoiceId,
       toStatus: args.toStatus,
       reason: args.reason,
       refInvoice: args.refInvoice ?? "",
-      adjustVoucherNo: args.adjustVoucherNo ?? "",
     }),
+  /**
+   * Thay thế hóa đơn đã phát hành (TT 91/2026 Điều 10): đảo doanh thu bằng
+   * Nợ 511 / Có 131 và tạo hóa đơn nháp mới sao chép dòng hàng.
+   */
+  invoiceReplace: async (invoiceId: number, reason: string) =>
+    parse<InvoiceReplaceResult>(await call<string>("replace_invoice", { invoiceId, reason })),
 
   // ─── HĐĐT ───
   linkHddt: async (args: {

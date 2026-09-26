@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT status, cancel_reason, adjust_voucher_no FROM invoice WHERE id = ?",
+  "query": "SELECT status, replace_reason, ref_invoice, adjust_voucher_no\n                 FROM invoice WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -9,13 +9,18 @@
         "type_info": "Text"
       },
       {
-        "name": "cancel_reason",
+        "name": "replace_reason",
         "ordinal": 1,
         "type_info": "Text"
       },
       {
-        "name": "adjust_voucher_no",
+        "name": "ref_invoice",
         "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "adjust_voucher_no",
+        "ordinal": 3,
         "type_info": "Text"
       }
     ],
@@ -25,8 +30,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "63f1e936e7b83852067ae6d9b22a6f13812d4561dffa4c105a7ef39fae3f6493"
+  "hash": "0f9578048f2ca7889cbb478187265aab9bf85870701f20141856be1b0e46e011"
 }

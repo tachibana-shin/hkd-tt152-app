@@ -3,7 +3,7 @@ import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
-import type { Invoice, InvoiceItem } from "@/types";
+import type { Invoice, InvoiceItem, InvoiceReplaceResult } from "@/types";
 import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
 
 const auth = useAuthStore();
@@ -52,6 +52,7 @@ const statusBadge: Record<string, "secondary" | "info" | "success" | "danger" | 
   official: "success",
   cancelled: "danger",
   adjusted: "warn",
+  replaced: "secondary",
 };
 const statusText: Record<string, string> = {
   draft: "Nháp",
@@ -60,6 +61,7 @@ const statusText: Record<string, string> = {
   official: "Đã phát hành",
   cancelled: "Đã hủy",
   adjusted: "Đã bị sửa bên kia",
+  replaced: "Đã bị thay thế",
 };
 
 // ─── Chép sang dịch vụ HĐĐT khác (kiểm tra trước + bản chốt) ───
@@ -71,15 +73,25 @@ function openExport(inv: Invoice) {
   exportVisible.value = true;
 }
 
-// ─── Ghi nhận hủy / bị sửa bên kia ───
+// ─── Thay thế / ghi nhận bị sửa bên kia ───
 const statusVisible = ref(false);
-const statusMode = ref<"cancelled" | "adjusted">("cancelled");
+const statusMode = ref<"replace" | "adjusted">("replace");
 const statusTarget = ref<Invoice | null>(null);
 
-function openStatus(inv: Invoice, mode: "cancelled" | "adjusted") {
+function openStatus(inv: Invoice, mode: "replace" | "adjusted") {
   statusTarget.value = inv;
   statusMode.value = mode;
   statusVisible.value = true;
+}
+
+/** Sau khi thay thế: mở ngay hóa đơn nháp mới để sửa dòng hàng sai rồi xuất lại. */
+async function onReplaced(res: InvoiceReplaceResult) {
+  await invoiceStore.loadInvoices();
+  const fresh = invoices.value.find((i) => i.id === res.replacement_invoice_id);
+  if (fresh) {
+    editingInvoice.value = fresh;
+    draftDialog.value = true;
+  }
 }
 
 // ─── Xoá hóa đơn nháp ───
@@ -236,8 +248,8 @@ void (async () => {
           </Column>
           <template #actions="{ data }">
             <div v-if="auth.canAccounting" class="flex items-center justify-center gap-1">
-              <!-- Hủy rồi thì không chép/liên kết được nữa -->
-              <template v-if="data.status !== 'cancelled'">
+              <!-- Đã bị thay thế thì không chép/liên kết được nữa -->
+              <template v-if="data.status !== 'cancelled' && data.status !== 'replaced'">
                 <Button
                   icon="pi pi-copy"
                   text
@@ -259,15 +271,15 @@ void (async () => {
                   @click="openLinkHddt(data)"
                 />
                 <Button
-                  v-if="data.e_invoice_no || data.status === 'exported'"
-                  icon="pi pi-ban"
+                  v-if="data.e_invoice_no"
+                  icon="pi pi-sync"
                   text
                   rounded
                   size="small"
-                  aria-label="Ghi nhận HĐ đã hủy bên kia"
-                  v-tooltip="'Bên kia đã hủy hóa đơn này'"
+                  aria-label="Lập hóa đơn thay thế"
+                  v-tooltip="'Lập hóa đơn thay thế (đảo doanh thu + tạo HĐ nháp mới)'"
                   severity="danger"
-                  @click="openStatus(data, 'cancelled')"
+                  @click="openStatus(data, 'replace')"
                 />
                 <Button
                   v-if="data.e_invoice_no"
@@ -318,8 +330,8 @@ void (async () => {
                   @click="removeInvoice(data)"
                 />
               </template>
-              <span v-else class="text-xs text-gray-500" :title="data.cancel_reason">
-                {{ data.cancel_reason || "Đã hủy" }}
+              <span v-else class="text-xs text-gray-500" :title="data.replace_reason">
+                {{ data.replace_reason || statusText[data.status] || data.status }}
               </span>
             </div>
           </template>
@@ -430,12 +442,13 @@ void (async () => {
       @done="invoiceStore.loadInvoices()"
     />
 
-    <!-- Ghi nhận hủy / bị sửa bên kia -->
+    <!-- Thay thế / ghi nhận bị sửa bên kia -->
     <InvoiceStatusDialog
       v-model:visible="statusVisible"
       :invoice="statusTarget"
       :mode="statusMode"
       @done="afterStatusChange"
+      @replaced="onReplaced"
     />
   </div>
 </template>

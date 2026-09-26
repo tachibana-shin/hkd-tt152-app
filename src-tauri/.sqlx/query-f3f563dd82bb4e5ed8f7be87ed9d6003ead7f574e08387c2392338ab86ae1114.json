@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status, customer, customer_tax_code, total,\n                      (SELECT COUNT(*) FROM invoice_item WHERE invoice_id = invoice.id) as \"n!: i64\"\n                 FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_tax_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "total",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "n!: i64",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f3f563dd82bb4e5ed8f7be87ed9d6003ead7f574e08387c2392338ab86ae1114"
+}

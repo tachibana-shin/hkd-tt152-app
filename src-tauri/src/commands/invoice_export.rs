@@ -15,8 +15,13 @@
 //! chuyển `draft` → `exported`. Từ đó nếu sửa hóa đơn thì `build_pack` báo
 //! `edited_after_export` để người dùng biết phải sửa lại bên kia.
 //!
-//! `set_status` điều khiển phần còn lại của vòng đời: hủy (`cancelled`) hoặc bị
-//! sửa bên kia (`adjusted`); mỗi bước ghi vào `invoice_event` để đối chiếu lại.
+//! `set_status` ghi nhận **hóa đơn điều chỉnh** phát hành bên kia
+//! (`adjusted`); mỗi bước ghi vào `invoice_event` để đối chiếu lại.
+//!
+//! **Không có trạng thái "đã hủy"**: Thông tư 91/2026/TT-BTC Điều 10 quy định từ
+//! 01/07/2026 người bán không được tự ý hủy hóa đơn điện tử đã lập. Sai sót thì
+//! lập hóa đơn **thay thế** (`replace_invoice_core` trong `commands::invoice`) hoặc
+//! **điều chỉnh**; hóa đơn nháp (chưa phát hành) thì cứ sửa hoặc xoá.
 #![allow(unused_imports)]
 
 use crate::helpers::*;
@@ -428,10 +433,10 @@ fn build_checks(header: &ExportHeader, lines: &[ExportLine]) -> Vec<ExportCheck>
         });
     }
 
-    if header.status == "cancelled" {
+    if matches!(header.status.as_str(), "replaced" | "cancelled") {
         checks.push(ExportCheck {
             level: "error".into(),
-            message: "Hóa đơn đã hủy — không thể chép sang bên kia".into(),
+            message: "Hóa đơn đã bị thay thế — xem hóa đơn thay thế để chép".into(),
         });
     }
     if header.status == "official" {
@@ -682,8 +687,8 @@ async fn mark_exported_core(
             msgs.join("\n• ")
         ));
     }
-    if pack.header.status == "cancelled" {
-        return Err("Hóa đơn đã hủy — không thể chép sang bên kia".into());
+    if matches!(pack.header.status.as_str(), "replaced" | "cancelled") {
+        return Err("Hóa đơn đã bị thay thế — không thể chép sang bên kia".into());
     }
 
     let before = pack.header.status.clone();
@@ -796,7 +801,8 @@ pub(crate) async fn queue_items(pool: &SqlitePool) -> Result<Vec<QueueItem>, Str
         InvoiceRow,
         r#"SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
                   status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
-                  exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no
+                  exported_at, replace_reason, adjust_reason, ref_invoice, adjust_voucher_no,
+                  replaces_invoice_id
              FROM invoice
             WHERE status IN ('draft', 'exported')
             ORDER BY date ASC, id ASC"#
@@ -941,7 +947,7 @@ pub(crate) async fn invoice_events(
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
 
-/// Đổi trạng thái hóa đơn: hủy (`cancelled`) hoặc bị sửa bên kia (`adjusted`).
+/// Ghi nhận hóa đơn ĐIỀU CHỈNH đã phát hành bên kia (`adjusted`).
 ///
 /// Ràng buộc kế toán: hóa đơn **đã phát hành** mà hủy thì bắt buộc phải có
 /// phiếu xuất điều chỉnh (`adjust_voucher_no`) để đảo doanh thu — không cho
@@ -952,10 +958,11 @@ async fn set_status_core(
     to_status: &str,
     reason: &str,
     ref_invoice: &str,
-    adjust_voucher_no: &str,
     actor: &str,
 ) -> Result<(), String> {
-    if !matches!(to_status, "cancelled" | "adjusted") {
+    // "Hủy" không còn là cách xử lý hợp lệ (TT 91/2026 Điều 10): hóa đơn đã lập
+    // chỉ thay thế / điều chỉnh. Thay thế đi qua `replace_invoice_core`.
+    if to_status != "adjusted" {
         return Err(format!("Không hỗ trợ chuyển sang trạng thái '{to_status}'"));
     }
     let inv = sqlx::query!(
@@ -967,45 +974,32 @@ async fn set_status_core(
     .map_err(|e| e.to_string())?
     .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
 
-    if inv.status == "cancelled" {
-        return Err(format!("Hóa đơn {} đã hủy rồi", inv.number));
+    if matches!(inv.status.as_str(), "replaced" | "cancelled") {
+        return Err(format!("Hóa đơn {} đã bị thay thế rồi", inv.number));
     }
-    if matches!(inv.status.as_str(), "draft" | "exported") && to_status == "adjusted" {
+    if matches!(inv.status.as_str(), "draft" | "exported") {
         return Err("Hóa đơn chưa phát hành thì không có chuyện 'bị sửa bên kia'".into());
     }
     let reason = reason.trim();
     if reason.is_empty() {
         return Err("Cần nhập lý do".into());
     }
-    // Hủy HĐ đã phát hành → cần phiếu điều chỉnh.
-    if to_status == "cancelled" && inv.status == "official" && adjust_voucher_no.trim().is_empty() {
-        return Err(
-            "Hóa đơn đã phát hành: hãy lập phiếu xuất điều chỉnh (Nợ 511 / Có 131) rồi nhập số phiếu — không thể hủy mà không đảo sổ"
-                .into(),
-        );
-    }
-    if to_status == "adjusted" && ref_invoice.trim().is_empty() {
-        return Err("Cần nhập số HĐĐT bên kia (ký hiệu/số) để đối chiếu".into());
+    if ref_invoice.trim().is_empty() {
+        return Err("Cần nhập số HĐĐT điều chỉnh bên kia (ký hiệu/số) để đối chiếu".into());
     }
 
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Ghi nhận HĐĐT điều chỉnh: lý do + số HĐĐT liên quan. Số phiếu điều chỉnh đã
+    // ghi khi lập phiếu (màn Xuất kho) nên không nhập ở đây nữa.
     sqlx::query!(
         r#"UPDATE invoice
               SET status = ?,
-                  cancel_reason = CASE WHEN ? = 'cancelled' THEN ? ELSE cancel_reason END,
-                  adjust_reason = CASE WHEN ? = 'adjusted' THEN ? ELSE adjust_reason END,
-                  ref_invoice = CASE WHEN ? <> '' THEN ? ELSE ref_invoice END,
-                  adjust_voucher_no = CASE WHEN ? <> '' THEN ? ELSE adjust_voucher_no END
+                  adjust_reason = ?,
+                  ref_invoice = ?
             WHERE id = ?"#,
         to_status,
-        to_status,
-        reason,
-        to_status,
         reason,
         ref_invoice,
-        ref_invoice,
-        adjust_voucher_no,
-        adjust_voucher_no,
         invoice_id
     )
     .execute(&mut *tx)
@@ -1035,7 +1029,6 @@ pub(crate) async fn invoice_set_status(
     to_status: String,
     reason: String,
     ref_invoice: String,
-    adjust_voucher_no: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let actor = state
@@ -1051,7 +1044,6 @@ pub(crate) async fn invoice_set_status(
         &to_status,
         &reason,
         &ref_invoice,
-        &adjust_voucher_no,
         &actor,
     )
     .await?;
@@ -1271,8 +1263,9 @@ mod tests {
         );
     }
 
+    /// Hóa đơn đã phát hành KHÔNG hủy được (TT 91/2026 Điều 10) — chỉ thay thế.
     #[tokio::test]
-    async fn cancel_official_invoice_requires_adjustment_voucher() {
+    async fn hoa_don_da_phat_hanh_khong_ho_duoc_huy_bien_dinh() {
         let pool = test_pool().await;
         let id = seed_invoice(&pool, "HD0004", 30_000.0).await;
         add_line(&pool, id, "P1", "Bình NN Rossi", 2.0, 15_000.0).await;
@@ -1284,45 +1277,10 @@ mod tests {
         .await
         .unwrap();
 
-        let err = set_status_core(&pool, id, "cancelled", "Khách trả lại", "", "", "admin")
+        let err = set_status_core(&pool, id, "cancelled", "Khách trả lại", "", "admin")
             .await
             .unwrap_err();
-        assert!(err.contains("phiếu xuất điều chỉnh"), "{err}");
-
-        set_status_core(
-            &pool,
-            id,
-            "cancelled",
-            "Khách trả lại hàng",
-            "",
-            "PX0009",
-            "admin",
-        )
-        .await
-        .unwrap();
-        let inv = sqlx::query!(
-            r#"SELECT status, cancel_reason, adjust_voucher_no FROM invoice WHERE id = ?"#,
-            id
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(inv.status, "cancelled");
-        assert_eq!(inv.cancel_reason, "Khách trả lại hàng");
-        assert_eq!(inv.adjust_voucher_no, "PX0009");
-
-        // Lịch sử có ghi lại bước chuyển trạng thái.
-        let events: Vec<(String, String)> = sqlx::query!(
-            "SELECT from_status, to_status FROM invoice_event WHERE invoice_id = ? ORDER BY id",
-            id
-        )
-        .fetch_all(&pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| (r.from_status, r.to_status))
-        .collect();
-        assert_eq!(events, vec![("official".into(), "cancelled".into())]);
+        assert!(err.contains("Không hỗ trợ chuyển sang trạng thái"), "{err}");
     }
 
     #[tokio::test]
@@ -1335,18 +1293,10 @@ mod tests {
             .await
             .unwrap();
 
-        let err = set_status_core(
-            &pool,
-            id,
-            "adjusted",
-            "Bên kia sửa dòng hàng",
-            "",
-            "",
-            "admin",
-        )
-        .await
-        .unwrap_err();
-        assert!(err.contains("số HĐĐT bên kia"), "{err}");
+        let err = set_status_core(&pool, id, "adjusted", "Bên kia sửa dòng hàng", "", "admin")
+            .await
+            .unwrap_err();
+        assert!(err.contains("số HĐĐT điều chỉnh"), "{err}");
 
         set_status_core(
             &pool,
@@ -1354,7 +1304,6 @@ mod tests {
             "adjusted",
             "Bên kia sửa dòng hàng",
             "1C26TT152/00000124",
-            "",
             "admin",
         )
         .await

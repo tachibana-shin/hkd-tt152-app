@@ -286,11 +286,13 @@ pub(crate) struct InvoiceRow {
     pub(crate) voucher_no: String,
     /// Thời điểm bấm "Chép để xuất" (đã chép dữ liệu sang dịch vụ HĐĐT khác).
     pub(crate) exported_at: String,
-    /// Lý do hủy / bị sửa bên kia (xem `invoice_event` cho lịch sử đầy đủ).
-    pub(crate) cancel_reason: String,
+    /// Lý do bị thay thế / bị sửa bên kia (xem `invoice_event` cho lịch sử đầy đủ).
+    pub(crate) replace_reason: String,
     pub(crate) adjust_reason: String,
-    /// Số HĐĐT liên quan (HĐ thay thế) khi bị hủy/sửa.
+    /// Số HĐĐT liên quan khi bị sửa, hoặc số hóa đơn nội bộ của HĐ thay thế.
     pub(crate) ref_invoice: String,
+    /// Hóa đơn thay thế cho hóa đơn này (ngược lại với `replaces_invoice_id`).
+    pub(crate) replaces_invoice_id: Option<i64>,
     /// Phiếu xuất điều chỉnh dùng để hủy HĐ đã phát hành.
     pub(crate) adjust_voucher_no: String,
 }

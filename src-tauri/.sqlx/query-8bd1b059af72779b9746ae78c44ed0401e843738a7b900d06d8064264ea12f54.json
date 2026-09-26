@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO invoice_event (invoice_id, from_status, to_status, reason, actor, ref)\n           VALUES (?, 'official', 'replaced', ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8bd1b059af72779b9746ae78c44ed0401e843738a7b900d06d8064264ea12f54"
+}

@@ -264,10 +264,13 @@ export interface Invoice {
   /**
    * Vòng đời hóa đơn khi phát hành bằng tay qua dịch vụ khác:
    * draft (nháp) → exported (đã chép sang bên kia, chờ phát hành) →
-   * official (đã có số HĐĐT); nhánh phụ cancelled (đã hủy) và
-   * adjusted (bị sửa bên kia, đã có HĐ thay thế).
+   * official (đã có số HĐĐT); nhánh phụ adjusted (bên kia đã sửa, đã lập
+   * HĐĐT điều chỉnh) và replaced (đã bị thay thế bởi hóa đơn khác).
+   *
+   * TT 91/2026/TT-BTC Điều 10: hóa đơn điện tử đã lập không được tự hủy —
+   * sai sót thì điều chỉnh hoặc thay thế.
    */
-  status: "draft" | "exported" | "pasted" | "official" | "cancelled" | "adjusted";
+  status: "draft" | "exported" | "pasted" | "official" | "cancelled" | "adjusted" | "replaced";
   e_invoice_no?: string;
   e_invoice_symbol?: string;
   e_invoice_date?: string;
@@ -275,13 +278,24 @@ export interface Invoice {
   voucher_no?: string;
   /** Thời điểm bấm "Chép để xuất" sang dịch vụ khác. */
   exported_at?: string;
-  cancel_reason?: string;
+  /** Lý do bị thay thế (TT 91/2026 Điều 10). */
+  replace_reason?: string;
   adjust_reason?: string;
-  /** Số HĐĐT bên kia liên quan (HĐ thay thế) khi bị hủy/sửa. */
+  /** Số HĐĐT bên kia liên quan khi bị sửa, hoặc số hóa đơn nội bộ của HĐ thay thế. */
   ref_invoice?: string;
-  /** Phiếu xuất điều chỉnh đã lập để hủy hóa đơn đã phát hành. */
+  /** Phiếu đảo doanh thu (Nợ 511 / Có 131) sinh kèm khi thay thế. */
   adjust_voucher_no?: string;
+  /** Hóa đơn mà hóa đơn này thay thế (ngược lại với `ref_invoice`). */
+  replaces_invoice_id?: number | null;
   items?: InvoiceItem[];
+}
+
+/** Kết quả thay thế hóa đơn: app trả về hóa đơn nháp mới để sửa rồi xuất lại. */
+export interface InvoiceReplaceResult {
+  ok: boolean;
+  adjust_voucher_no: string;
+  replacement_invoice_id: number;
+  replacement_number: string;
 }
 
 /** Kết quả ghi nhận số HĐĐT — app đồng bộ ngày hóa đơn theo ngày HĐĐT khi

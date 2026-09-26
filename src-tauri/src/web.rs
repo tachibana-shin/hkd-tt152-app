@@ -422,9 +422,11 @@ pub async fn api_invoke(
             invoice_id: i64,
             to_status: String,
             reason: String,
-            ref_invoice: String,
-            adjust_voucher_no: String
+            ref_invoice: String
         ),
+        "replace_invoice" => {
+            mx!(commands::invoice::replace_invoice, body, invoice_id: i64, reason: String)
+        }
         "get_journal_entries" => mx!(
             commands::stock::get_journal_entries,
             body,

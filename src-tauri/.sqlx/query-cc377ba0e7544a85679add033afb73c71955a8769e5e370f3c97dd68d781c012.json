@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice\n              SET status = ?,\n                  adjust_reason = ?,\n                  ref_invoice = ?\n            WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "cc377ba0e7544a85679add033afb73c71955a8769e5e370f3c97dd68d781c012"
+}

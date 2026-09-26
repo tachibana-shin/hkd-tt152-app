@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT replaces_invoice_id FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "replaces_invoice_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "bbb5e337289c03568143ed4ddf77a4326c8ef6300868ea82baf0a8618e3ae705"
+}

@@ -1,32 +1,32 @@
 <script setup lang="ts">
 /**
- * Cập nhật trạng thái hóa đơn sau khi thao tác bên dịch vụ HĐĐT khác:
- *   * `cancelled` — bên kia đã hủy. Hóa đơn đã phát hành thì BẮT BUỘC nhập số
- *     phiếu xuất điều chỉnh (Nợ 511 / Có 131) — không cho hủy mà không đảo sổ.
- *   * `adjusted`  — bên kia đã sửa, phải nhập số HĐĐT thay thế để đối chiếu.
+ * Xử lý sai sót của hóa đơn ĐÃ phát hành bằng tay qua dịch vụ HĐĐT khác.
+ * TT 91/2026/TT-BTC Điều 10: từ 01/07/2026 không được tự hủy hóa đơn điện tử,
+ * chỉ được thông báo / lập hóa đơn điều chỉnh / lập hóa đơn thay thế.
+ *   * `replace`  — thay thế: app đảo doanh thu (Nợ 511 / Có 131) và tạo hóa đơn
+ *     nháp mới sao chép dòng hàng để người dùng sửa rồi chép xuất lại.
+ *   * `adjusted` — bên kia đã tự sửa: ghi nhận số HĐĐT điều chỉnh để đối chiếu.
  */
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import Textarea from "primevue/textarea";
-import type { Invoice, InvoiceEvent } from "@/types";
+import type { Invoice, InvoiceEvent, InvoiceReplaceResult } from "@/types";
 import { fmtLocalDateTime } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
-const props = defineProps<{ invoice: Invoice | null; mode: "cancelled" | "adjusted" }>();
-const emit = defineEmits<{ done: [] }>();
+const props = defineProps<{ invoice: Invoice | null; mode: "replace" | "adjusted" }>();
+const emit = defineEmits<{ done: []; replaced: [result: InvoiceReplaceResult] }>();
 
 const auth = useAuthStore();
 const toast = useToast();
 const reason = ref("");
 const refInvoice = ref("");
-const adjustVoucherNo = ref("");
 const events = ref<InvoiceEvent[]>([]);
 const saving = ref(false);
 
-const isCancel = computed(() => props.mode === "cancelled");
-const isOfficial = computed(() => props.invoice?.status === "official");
+const isReplace = computed(() => props.mode === "replace");
 const title = computed(() =>
-  isCancel.value ? "Ghi nhận HĐ đã hủy" : "Ghi nhận HĐ bị sửa bên kia",
+  isReplace.value ? "Lập hóa đơn thay thế" : "Ghi nhận HĐ bị sửa bên kia",
 );
 
 const statusLabel: Record<string, string> = {
@@ -35,6 +35,7 @@ const statusLabel: Record<string, string> = {
   official: "Đã phát hành",
   cancelled: "Đã hủy",
   adjusted: "Đã bị sửa bên kia",
+  replaced: "Đã bị thay thế",
 };
 
 async function loadEvents() {
@@ -53,7 +54,6 @@ watch(
     if (!open || wasOpen) return;
     reason.value = "";
     refInvoice.value = props.invoice?.ref_invoice ?? "";
-    adjustVoucherNo.value = props.invoice?.adjust_voucher_no ?? "";
     void loadEvents();
   },
   { immediate: true },
@@ -65,34 +65,35 @@ async function save() {
     toast.add({ severity: "warn", summary: "Thiếu lý do", detail: "Ghi lý do để đối chiếu sau" });
     return;
   }
-  if (isCancel.value && isOfficial.value && !adjustVoucherNo.value.trim()) {
+  if (!isReplace.value && !refInvoice.value.trim()) {
     toast.add({
       severity: "warn",
-      summary: "Cần phiếu điều chỉnh",
-      detail:
-        "Hóa đơn đã phát hành: hãy lập phiếu xuất điều chỉnh ở màn Xuất kho rồi nhập số phiếu.",
-    });
-    return;
-  }
-  if (!isCancel.value && !refInvoice.value.trim()) {
-    toast.add({
-      severity: "warn",
-      summary: "Thiếu số HĐĐT thay thế",
+      summary: "Thiếu số HĐĐT điều chỉnh",
       detail: "Nhập ký hiệu/số HĐ bên kia để đối chiếu",
     });
     return;
   }
   saving.value = true;
   try {
-    await api.invoiceSetStatus({
-      invoiceId: props.invoice.id,
-      toStatus: props.mode,
-      reason: reason.value.trim(),
-      refInvoice: refInvoice.value.trim(),
-      adjustVoucherNo: adjustVoucherNo.value.trim(),
-    });
-    toast.add({ severity: "success", summary: title.value, detail: "Đã ghi nhận lịch sử" });
-    visible.value = false;
+    if (isReplace.value) {
+      const res = await api.invoiceReplace(props.invoice.id, reason.value.trim());
+      toast.add({
+        severity: "success",
+        summary: `Đã lập hóa đơn thay thế ${res.replacement_number}`,
+        detail: `Doanh thu đã đảo bằng phiếu ${res.adjust_voucher_no} (Nợ 511 / Có 131). Sửa dòng hàng sai rồi chép xuất lại.`,
+      });
+      visible.value = false;
+      emit("replaced", res);
+    } else {
+      await api.invoiceSetStatus({
+        invoiceId: props.invoice.id,
+        toStatus: "adjusted",
+        reason: reason.value.trim(),
+        refInvoice: refInvoice.value.trim(),
+      });
+      toast.add({ severity: "success", summary: title.value, detail: "Đã ghi nhận lịch sử" });
+      visible.value = false;
+    }
     emit("done");
   } catch (e) {
     toast.add({ severity: "error", summary: "Không cập nhật được", detail: String(e) });
@@ -108,20 +109,30 @@ async function save() {
     :header="`${title} — ${invoice?.number ?? ''}`"
     width="max-w-2xl"
     cancel-label="Đóng"
-    action-label="Ghi nhận"
+    :action-label="isReplace ? 'Tạo HĐ thay thế' : 'Ghi nhận'"
     :saving="saving"
     :show-action="auth.canAccounting"
     @action="save"
   >
     <div class="space-y-3">
-      <Message v-if="isCancel && isOfficial" severity="warn" :closable="false">
-        Hóa đơn này <b>đã phát hành</b>. Hủy bên kia thì phải lập phiếu xuất điều chỉnh để đảo doanh
-        thu; app sẽ không cho hủy khi thiếu số phiếu.
+      <Message v-if="isReplace" severity="warn" :closable="false">
+        <div class="space-y-1 text-sm">
+          <div>
+            Không hủy được hóa đơn đã lập — app sẽ giữ hóa đơn này và đánh dấu
+            <b>đã bị thay thế</b>, đồng thời đảo doanh thu bằng bút toán <b>Nợ 511 / Có 131</b> đúng
+            bằng từng dòng và tạo hóa đơn nháp mới (sao chép khách + dòng hàng) để bạn sửa rồi chép
+            xuất lại.
+          </div>
+          <div>
+            Hàng hoá <b>không đụng tồn kho</b> — hàng vẫn nằm trong kho, phiếu xuất của hóa đơn thay
+            thế sẽ trừ kho như bình thường. Hàng thật sự trả lại thì lập phiếu nhập kho riêng.
+          </div>
+        </div>
       </Message>
 
       <div class="grid grid-cols-2 gap-3 text-sm">
         <FormField
-          :label="isCancel ? 'Lý do hủy' : 'Lý do bị sửa'"
+          :label="isReplace ? 'Lý do phải thay thế' : 'Lý do bị sửa'"
           required
           input-id="inv-status-reason"
           class="col-span-2"
@@ -132,27 +143,18 @@ async function save() {
             rows="2"
             class="w-full"
             :placeholder="
-              isCancel
-                ? 'Ví dụ: khách trả lại hàng, sai số lượng…'
+              isReplace
+                ? 'Ví dụ: sai số lượng bán, ghi nhầm đơn giá…'
                 : 'Ví dụ: bên kia sửa dòng hàng / đổi MST người mua…'
             "
           />
         </FormField>
         <FormField
-          v-if="isCancel"
-          label="Số phiếu xuất điều chỉnh"
-          :required="isOfficial"
-          input-id="inv-status-adjust-voucher"
+          v-if="!isReplace"
+          label="Số HĐĐT điều chỉnh bên kia"
+          required
+          input-id="inv-status-ref"
         >
-          <InputText
-            :id="'inv-status-adjust-voucher'"
-            v-model="adjustVoucherNo"
-            size="small"
-            class="w-full"
-            placeholder="PX0009 — lập ở màn Xuất kho (loại: Điều chỉnh hóa đơn bán)"
-          />
-        </FormField>
-        <FormField v-else label="Số HĐĐT thay thế bên kia" required input-id="inv-status-ref">
           <InputText
             :id="'inv-status-ref'"
             v-model="refInvoice"

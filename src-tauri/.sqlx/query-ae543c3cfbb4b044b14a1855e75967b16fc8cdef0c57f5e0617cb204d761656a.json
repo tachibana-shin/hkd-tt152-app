@@ -1,26 +1,26 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT from_status, to_status FROM invoice_event WHERE invoice_id = ? ORDER BY id",
+  "query": "SELECT debit_account, credit_account FROM journal_entry WHERE adjust_code = 'GiamDT' LIMIT 1",
   "describe": {
     "columns": [
       {
-        "name": "from_status",
+        "name": "debit_account",
         "ordinal": 0,
         "type_info": "Text"
       },
       {
-        "name": "to_status",
+        "name": "credit_account",
         "ordinal": 1,
         "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
       false
     ]
   },
-  "hash": "89b39ed68c87b48a30791ddebd35d45f3d827c3ac96489ed001b62fd7f218843"
+  "hash": "ae543c3cfbb4b044b14a1855e75967b16fc8cdef0c57f5e0617cb204d761656a"
 }

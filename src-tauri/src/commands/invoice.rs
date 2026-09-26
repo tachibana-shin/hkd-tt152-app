@@ -12,7 +12,8 @@ pub(crate) async fn get_invoices(state: State<'_, AppState>) -> Result<String, S
         InvoiceRow,
         "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
                 status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
-                exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no
+                exported_at, replace_reason, adjust_reason, ref_invoice, adjust_voucher_no,
+                replaces_invoice_id
          FROM invoice ORDER BY date DESC, id DESC"
     )
     .fetch_all(&*state.pool.read().await)
@@ -30,7 +31,8 @@ pub(crate) async fn get_invoice_detail(
         InvoiceRow,
         "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
                 status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
-                exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no
+                exported_at, replace_reason, adjust_reason, ref_invoice, adjust_voucher_no,
+                replaces_invoice_id
          FROM invoice WHERE id = ?",
         id
     )
@@ -586,6 +588,262 @@ async fn next_px_no(pool: &SqlitePool) -> Result<String, String> {
     Ok(format!("PX{:03}", max + 1))
 }
 
+/// Sinh số hóa đơn nội bộ kế tiếp (HD + 4 chữ số) — cùng quy tắc với màn Hóa đơn.
+async fn next_invoice_no(pool: &SqlitePool) -> Result<String, String> {
+    let rows: Vec<String> = sqlx::query_scalar!("SELECT number FROM invoice")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let max = rows
+        .iter()
+        .map(|v| v.chars().filter(char::is_ascii_digit).collect::<String>())
+        .filter_map(|digits| digits.parse::<i64>().ok())
+        .max()
+        .unwrap_or(0);
+    Ok(format!("HD{:04}", max + 1))
+}
+
+/// Thay thế hóa đơn điện tử đã phát hành (Thông tư 91/2026/TT-BTC Điều 10).
+///
+/// Từ 01/07/2026 không được hủy hóa đơn đã lập. Sai sót thì phát hành hóa đơn
+/// **thay thế**: hóa đơn cũ giữ nguyên trong sổ (đánh dấu "đã bị thay thế"), số
+/// tiền bị đảo bằng một bút toán Nợ 511 / Có 131 đúng bằng từng dòng hàng, và
+/// app tạo sẵn một hóa đơn nháp mới (sao chép khách + dòng hàng) để người dùng
+/// sửa sai sót rồi chép sang bên kia phát hành.
+///
+/// **Không đụng tồn kho**: hàng hoá chỉ sai trên giấy tờ, thực tế vẫn nằm trong
+/// kho — phiếu xuất của hóa đơn thay thế sẽ trừ kho như bình thường. Hàng thật sự
+/// trả lại thì người dùng lập phiếu nhập kho riêng.
+pub(crate) async fn replace_invoice_core(
+    pool: &SqlitePool,
+    invoice_id: i64,
+    reason: &str,
+    actor: &str,
+) -> Result<serde_json::Value, String> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err("Cần nhập lý do phải thay thế".into());
+    }
+    let inv = sqlx::query!(
+        r#"SELECT number, date, customer, customer_tax_code, status, voucher_no, total
+             FROM invoice WHERE id = ?"#,
+        invoice_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    match inv.status.as_str() {
+        "official" | "adjusted" => {}
+        "draft" | "exported" => {
+            return Err(format!(
+                "Hóa đơn {} chưa phát hành — sửa hoặc xoá luôn, không cần thay thế",
+                inv.number
+            ));
+        }
+        other => {
+            return Err(format!(
+                "Hóa đơn {} đang ở trạng thái '{other}'",
+                inv.number
+            ));
+        }
+    }
+
+    // Đảo doanh thu từng dòng: Nợ 511 / Có 131, adjust_code = 'GiamDT' để tờ khai
+    // thuế trừ đúng vào nhóm ngành đã kê. Số tiền khớp đúng dòng hàng gốc nên
+    // hóa đơn thay thế kê lại là cân bằng.
+    let lines = sqlx::query!(
+        r#"SELECT ii.product_id, ii.quantity, ii.unit_price, ii.subtotal, ii.discount,
+                  ii.industry_code, ii.vat_rate, ii.pit_rate
+             FROM invoice_item ii WHERE ii.invoice_id = ? ORDER BY ii.id"#,
+        invoice_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if lines.is_empty() {
+        return Err(format!("Hóa đơn {} chưa có dòng hàng", inv.number));
+    }
+    let voucher_no = format!("{}DJ", inv.voucher_no.trim());
+    if inv.voucher_no.trim().is_empty() {
+        return Err(format!(
+            "Hóa đơn {} chưa có phiếu xuất nên chưa có doanh thu trong sổ để đảo — hãy lập phiếu xuất trước",
+            inv.number
+        ));
+    }
+    let description = format!("Đảo doanh thu — thay thế hóa đơn {}", inv.number);
+    // Mã khách trong danh mục: ưu tiên theo MST, không có thì theo tên — cùng
+    // quy tắc với `create_outbound_from_invoice` để bút toán đảo gắn đúng.
+    let mst = inv.customer_tax_code.trim().to_string();
+    let customer_code: String = if mst.is_empty() {
+        String::new()
+    } else {
+        sqlx::query_scalar!("SELECT code FROM customer WHERE tax_code = ?", mst)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    };
+    let customer_code = if customer_code.is_empty() {
+        let name = inv.customer.clone();
+        sqlx::query_scalar!("SELECT code FROM customer WHERE name = ?", name)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    } else {
+        customer_code
+    };
+
+    // Số hóa đơn mới phải tính TRƯỚC khi mở transaction: pool test chỉ có 1
+    // kết nối nên truy vấn ra pool khi đang giữ transaction sẽ kẹt.
+    let new_no = next_invoice_no(pool).await?;
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    for l in &lines {
+        // `invoice_item.subtotal` đã là giá trị dòng sau chiết khấu (đúng bằng
+        // số tiền bút toán Nợ 511 / Có 131 của phiếu xuất gốc).
+        let amount = round2(l.subtotal);
+        if amount <= 0.0 {
+            continue;
+        }
+        let code = sqlx::query_scalar!("SELECT code FROM product WHERE id = ?", l.product_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        insert_journal_entry(
+            &mut tx,
+            &inv.date,
+            &voucher_no,
+            "PX",
+            &description,
+            &code,
+            "",
+            &customer_code,
+            l.quantity,
+            l.unit_price,
+            amount,
+            "511",
+            "131",
+            &l.industry_code,
+            l.vat_rate,
+            l.pit_rate,
+            "HKD",
+            "GiamDT",
+            reason,
+        )
+        .await?;
+    }
+
+    // Hóa đơn thay thế: nháp mới, sao chép khách + dòng hàng, trỏ về hóa đơn cũ.
+    let res = sqlx::query!(
+        r#"INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount,
+                               status, replaces_invoice_id)
+           VALUES (?, ?, ?, ?, ?, 0.0, 'draft', ?)"#,
+        new_no,
+        inv.date,
+        inv.customer,
+        inv.customer_tax_code,
+        inv.total,
+        invoice_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let new_id = res.last_insert_rowid();
+    for l in &lines {
+        sqlx::query!(
+            r#"INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
+                                        industry_code, vat_rate, pit_rate, discount)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            new_id,
+            l.product_id,
+            l.quantity,
+            l.unit_price,
+            l.subtotal,
+            l.industry_code,
+            l.vat_rate,
+            l.pit_rate,
+            l.discount
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    // Hóa đơn cũ: đánh dấu đã bị thay thế, ghi số hóa đơn thay thế + phiếu đảo doanh thu.
+    sqlx::query!(
+        r#"UPDATE invoice
+              SET status = 'replaced', replace_reason = ?, ref_invoice = ?,
+                  adjust_voucher_no = ?
+            WHERE id = ?"#,
+        reason,
+        new_no,
+        voucher_no,
+        invoice_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let note_old =
+        format!("Lập hóa đơn thay thế {new_no} — đảo doanh thu bằng phiếu {voucher_no}. {reason}");
+    sqlx::query!(
+        r#"INSERT INTO invoice_event (invoice_id, from_status, to_status, reason, actor, ref)
+           VALUES (?, 'official', 'replaced', ?, ?, ?)"#,
+        invoice_id,
+        note_old,
+        actor,
+        new_no
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let inv_number = inv.number.clone();
+    let note_new = format!("Hóa đơn thay thế cho hóa đơn {inv_number}. {reason}");
+    sqlx::query!(
+        r#"INSERT INTO invoice_event (invoice_id, from_status, to_status, reason, actor, ref)
+           VALUES (?, '', 'draft', ?, ?, ?)"#,
+        new_id,
+        note_new,
+        actor,
+        inv_number
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "ok": true,
+        "adjust_voucher_no": voucher_no,
+        "replacement_invoice_id": new_id,
+        "replacement_number": new_no,
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn replace_invoice(
+    state: State<'_, AppState>,
+    invoice_id: i64,
+    reason: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let actor = state
+        .current_user
+        .lock()
+        .await
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_default();
+    let res = replace_invoice_core(&*state.pool.read().await, invoice_id, &reason, &actor).await?;
+    audit(
+        &state,
+        "replace",
+        "invoice",
+        &format!("invoice_id={invoice_id}"),
+    )
+    .await;
+    Ok(res.to_string())
+}
+
 /// Lập phiếu xuất cho một hóa đơn chưa có phiếu.
 ///
 /// Hóa đơn lập ở màn Hóa đơn chỉ ghi bảng `invoice` — nếu không sinh phiếu xuất
@@ -615,8 +873,8 @@ pub(crate) async fn create_outbound_from_invoice(
             inv.number, inv.voucher_no
         ));
     }
-    if inv.status == "cancelled" {
-        return Err("Hóa đơn đã hủy — không lập được phiếu xuất".into());
+    if matches!(inv.status.as_str(), "replaced" | "cancelled") {
+        return Err("Hóa đơn đã bị thay thế — không lập được phiếu xuất".into());
     }
 
     // Mã khách trong danh mục: ưu tiên theo MST, không có thì theo tên. Không tìm
@@ -1398,5 +1656,188 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(px_count, 0, "phiếu lỗi phải rollback trọn vẹn");
+    }
+
+    /// Thay thế hóa đơn đã phát hành: đảo doanh thu, tạo hóa đơn nháp mới,
+    /// giữ nguyên tồn kho (hàng vẫn nằm trong kho — chỉ sai trên giấy tờ).
+    #[tokio::test]
+    async fn thay_the_hoa_don_da_phat_hanh_dao_doanh_thu_va_tao_hoa_don_nhap_moi() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-TH1", "Bình NN Rossi", 0.01).await;
+        let w = seed_warehouse(&pool, "W-TH1", "Kho TH").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HD0007",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[
+                line("HD-TH1", 2.0, 1000.0, 0.0, "W-TH1"),
+                line("HD-TH1", 1.0, 2000.0, 500.0, "W-TH1"),
+            ],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0007'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        create_outbound_from_invoice(&pool, id).await.unwrap();
+        link_hddt_core(&pool, id, "00000123", "1C26TT152", "2026-03-10")
+            .await
+            .unwrap();
+
+        let res = replace_invoice_core(&pool, id, "Sai số lượng bán", "admin")
+            .await
+            .unwrap();
+        let new_id = res["replacement_invoice_id"].as_i64().unwrap();
+        let new_no = res["replacement_number"].as_str().unwrap();
+        assert_eq!(new_no, "HD0008");
+        assert_eq!(res["adjust_voucher_no"].as_str().unwrap(), "PX001DJ");
+
+        // Bút toán đảo: Nợ 511 / Có 131, đúng bằng từng dòng (3.500), gắn
+        // adjust_code = 'GiamDT' để tờ khai thuế trừ vào nhóm ngành.
+        let down: f64 = sqlx::query_scalar!(
+            "SELECT COALESCE(SUM(amount), 0.0) as \"q!: f64\" FROM journal_entry
+              WHERE adjust_code = 'GiamDT'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(down, 3_500.0);
+        let acc = sqlx::query!(
+            "SELECT debit_account, credit_account FROM journal_entry WHERE adjust_code = 'GiamDT' LIMIT 1"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (acc.debit_account.as_str(), acc.credit_account.as_str()),
+            ("511", "131")
+        );
+        // Doanh thu kê trong tờ khai = ghi tăng − ghi giảm = 0.
+        let net: f64 = sqlx::query_scalar!(
+            "SELECT COALESCE(SUM(CASE WHEN adjust_code <> 'GiamDT' THEN amount ELSE 0.0 END), 0.0)
+                  - COALESCE(SUM(CASE WHEN adjust_code = 'GiamDT' THEN amount ELSE 0.0 END), 0.0)
+                    as \"q!: f64\"
+               FROM journal_entry WHERE entry_type = 'PX'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(net, 0.0);
+
+        // Tồn kho KHÔNG đụng: hàng vẫn trong kho cho hóa đơn thay thế xuất sau.
+        let qty: f64 = sqlx::query_scalar!(
+            "SELECT quantity FROM stock_lot WHERE product_id = ? AND depleted = 0",
+            p
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(qty, 7.0);
+
+        // Hóa đơn cũ: đã bị thay thế, trỏ sang hóa đơn mới, ghi phiếu đảo doanh thu.
+        let old = sqlx::query!(
+            r#"SELECT status, replace_reason, ref_invoice, adjust_voucher_no
+                 FROM invoice WHERE id = ?"#,
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old.status, "replaced");
+        assert_eq!(old.replace_reason, "Sai số lượng bán");
+        assert_eq!(old.ref_invoice, "HD0008");
+        assert_eq!(old.adjust_voucher_no, "PX001DJ");
+
+        // Hóa đơn thay thế: nháp, sao chép đủ khách + dòng hàng.
+        let fresh = sqlx::query!(
+            r#"SELECT status, customer, customer_tax_code, total,
+                      (SELECT COUNT(*) FROM invoice_item WHERE invoice_id = invoice.id) as "n!: i64"
+                 FROM invoice WHERE id = ?"#,
+            new_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(fresh.status, "draft");
+        assert_eq!(fresh.customer, "Khách X");
+        assert_eq!(fresh.customer_tax_code, "MST-X");
+        assert_eq!(fresh.total, 3_500.0);
+        assert_eq!(fresh.n, 2);
+        let repl_id: Option<i64> = sqlx::query_scalar!(
+            "SELECT replaces_invoice_id FROM invoice WHERE id = ?",
+            new_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(repl_id, Some(id));
+    }
+
+    #[tokio::test]
+    async fn thay_the_hoa_don_nhap_thi_bao_chi_can_sua_va_xoa() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-TH2", "Hàng nháp", 0.01).await;
+        let w = seed_warehouse(&pool, "W-TH2", "Kho TH2").await;
+        add_stock_lot(&pool, p, w, 5.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HD0011",
+            "2026-03-10",
+            "Khách Y",
+            "MST-Y",
+            &[line("HD-TH2", 1.0, 1000.0, 0.0, "W-TH2")],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0011'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        let err = replace_invoice_core(&pool, id, "Nháp thôi", "admin")
+            .await
+            .unwrap_err();
+        assert!(err.contains("chưa phát hành"), "{err}");
+        let err = replace_invoice_core(&pool, id, "  ", "admin")
+            .await
+            .unwrap_err();
+        assert!(err.contains("lý do"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn thay_the_hoa_don_chua_co_phieu_xuat_thi_bao_tao_phieu_truoc() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-TH3", "Hàng chưa xuất", 0.01).await;
+        let w = seed_warehouse(&pool, "W-TH3", "Kho TH3").await;
+        add_stock_lot(&pool, p, w, 5.0, 1000.0, "2026-01-01").await;
+        save_invoice_core(
+            &pool,
+            "HD0012",
+            "2026-03-10",
+            "Khách Z",
+            "MST-Z",
+            &[line("HD-TH3", 1.0, 1000.0, 0.0, "W-TH3")],
+        )
+        .await
+        .unwrap();
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0012'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        link_hddt_core(&pool, id, "00000124", "1C26TT152", "2026-03-10")
+            .await
+            .unwrap();
+
+        let err = replace_invoice_core(&pool, id, "Sai tiền", "admin")
+            .await
+            .unwrap_err();
+        assert!(err.contains("lập phiếu xuất trước"), "{err}");
     }
 }

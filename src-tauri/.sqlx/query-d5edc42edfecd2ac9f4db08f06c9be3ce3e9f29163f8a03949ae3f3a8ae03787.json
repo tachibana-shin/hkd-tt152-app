@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,\n                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,\n                exported_at, cancel_reason, adjust_reason, ref_invoice, adjust_voucher_no\n         FROM invoice WHERE id = ?",
+  "query": "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,\n                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,\n                exported_at, replace_reason, adjust_reason, ref_invoice, adjust_voucher_no,\n                replaces_invoice_id\n         FROM invoice WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -69,7 +69,7 @@
         "type_info": "Text"
       },
       {
-        "name": "cancel_reason",
+        "name": "replace_reason",
         "ordinal": 13,
         "type_info": "Text"
       },
@@ -87,6 +87,11 @@
         "name": "adjust_voucher_no",
         "ordinal": 16,
         "type_info": "Text"
+      },
+      {
+        "name": "replaces_invoice_id",
+        "ordinal": 17,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -109,8 +114,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "fc8685a0b1b7b08c2c322a2f872d0a52f08ff9bbb3429b9a7d7f205ba9c7f2d9"
+  "hash": "d5edc42edfecd2ac9f4db08f06c9be3ce3e9f29163f8a03949ae3f3a8ae03787"
 }

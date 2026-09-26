@@ -942,7 +942,7 @@ test("Hóa đơn nháp: nút xoá dọn cả dòng hàng, hóa đơn đã xử l
   expect(after.map((i) => i.number)).not.toContain("HD9100");
 });
 
-test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản chốt + ghi nhận hủy", async ({
+test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản chốt + thay thế hóa đơn", async ({
   page,
   request,
 }) => {
@@ -959,7 +959,8 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
       unit_code: "HKD",
-      items: [{ product_code: "SP001", quantity: 10, unit_price: 10000, discount: 0 }],
+      // Nhiều dư: các test dùng chung DB, tồn bị các phiếu khác trừ dần.
+      items: [{ product_code: "SP001", quantity: 100, unit_price: 10000, discount: 0 }],
       note: "",
       inbound_type: "purchase",
       reference_no: "",
@@ -1049,30 +1050,38 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   await linkDlg.getByRole("button", { name: "Lưu" }).click();
   await expect(row.getByText("Đã phát hành", { exact: true })).toBeVisible();
 
-  // 5) Hủy HĐ đã phát hành: bắt buộc có phiếu xuất điều chỉnh.
-  await row.getByRole("button", { name: "Ghi nhận HĐ đã hủy bên kia" }).click();
-  const cancelDlg = page.getByRole("dialog");
-  await expect(cancelDlg.getByText("đã phát hành", { exact: false }).first()).toBeVisible();
-  await cancelDlg.getByLabel("Lý do hủy").fill("Khách trả lại hàng");
-  await cancelDlg.getByRole("button", { name: "Ghi nhận" }).click();
-  await expect(page.locator(".p-toast-summary").last()).toContainText("Cần phiếu điều chỉnh", {
+  // 5) Thay thế HĐ đã phát hành (TT 91/2026 Điều 10: không hủy được).
+  //    Bắt buộc có lý do → app đảo doanh thu + tạo hóa đơn nháp mới.
+  await row.getByRole("button", { name: "Lập hóa đơn thay thế" }).click();
+  const replaceDlg = page.getByRole("dialog", { name: /Lập hóa đơn thay thế/ });
+  await expect(replaceDlg.getByText("Nợ 511 / Có 131", { exact: false }).first()).toBeVisible();
+  await replaceDlg.getByRole("button", { name: "Tạo HĐ thay thế" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Thiếu lý do", {
     timeout: 10_000,
   });
-  await cancelDlg.getByRole("button", { name: "Đóng" }).click();
 
-  // Có số phiếu điều chỉnh → hủa được, trạng thái thành "Đã hủy" + ghi lịch sử.
-  await row.getByRole("button", { name: "Ghi nhận HĐ đã hủy bên kia" }).click();
-  await cancelDlg.getByLabel("Lý do hủy").fill("Khách trả lại hàng");
-  await cancelDlg.getByLabel("Số phiếu xuất điều chỉnh").fill("PX9001");
-  await cancelDlg.getByRole("button", { name: "Ghi nhận" }).click();
-  await expect(row.getByText("Đã hủy", { exact: true })).toBeVisible();
+  await replaceDlg.getByLabel("Lý do phải thay thế").fill("Sai số lượng bán");
+  await replaceDlg.getByRole("button", { name: "Tạo HĐ thay thế" }).click();
+  await expect(replaceDlg).toBeHidden();
 
-  const events = await (
+  // Hóa đơn cũ chuyển sang "Đã bị thay thế"; app mở sẵn hóa đơn nháp mới để sửa.
+  const draftDlg = page.getByRole("dialog", { name: /Sửa hóa đơn nháp/ });
+  await expect(draftDlg).toBeVisible();
+  await expect(draftDlg.getByRole("textbox").first()).not.toHaveValue("HD9001");
+  await expect(row.getByText("Đã bị thay thế", { exact: true })).toBeVisible();
+
+  const replaceEvents = await (
     await request.post("/api/invoice_events", { data: { invoiceId: (inv as { id: number }).id } })
   ).json();
-  const steps = (events as Array<{ to_status: string }>).map((e) => e.to_status);
+  const steps = (replaceEvents as Array<{ to_status: string }>).map((e) => e.to_status);
   expect(steps).toContain("exported");
-  expect(steps).toContain("cancelled");
+  expect(steps).toContain("replaced");
+
+  // Đóng hộp thoại nháp: hóa đơn cũ đã bị thay thế thì không còn nút chép/liên kết.
+  await draftDlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(draftDlg).toBeHidden();
+  await expect(row.getByRole("button", { name: "Chép sang dịch vụ HĐĐT khác" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Lập hóa đơn thay thế" })).toHaveCount(0);
 });
 
 // ─── HĐĐT: tra cứu hóa đơn (mock portal offline, E2E_HDDT_LIVE=1 để dùng cổng thật) ───
