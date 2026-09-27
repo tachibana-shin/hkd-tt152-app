@@ -80,7 +80,7 @@ jobs:
           rm -f sqlx-prep.db
           for f in $(ls migrations/*.sql | sort); do sqlite3 sqlx-prep.db < "$f"; done
           DATABASE_URL="sqlite:sqlx-prep.db" SQLX_OFFLINE=false \
-            cargo sqlx prepare --workspace -- --all-targets --check
+            cargo sqlx prepare --workspace --check -- --all-targets
 
   e2e:
     name: E2E (Playwright, offline)

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vue-tsc --noEmit && vite build",
-    "check:sqlx": "cd src-tauri && rm -f sqlx-prep.db && for f in $(ls migrations/*.sql | sort); do sqlite3 sqlx-prep.db < \"$f\"; done && DATABASE_URL=sqlite:sqlx-prep.db SQLX_OFFLINE=false cargo sqlx prepare --workspace -- --all-targets --check",
+    "check:sqlx": "cd src-tauri && rm -f sqlx-prep.db && for f in $(ls migrations/*.sql | sort); do sqlite3 sqlx-prep.db < \"$f\"; done && DATABASE_URL=sqlite:sqlx-prep.db SQLX_OFFLINE=false cargo sqlx prepare --workspace --check -- --all-targets",
     "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test:rust && bun run check:sqlx",
     "dev": "vite",
     "fmt": "oxfmt && cd src-tauri && cargo fmt",
