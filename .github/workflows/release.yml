@@ -16,6 +16,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Đóng gói bản cụ thể (bỏ trống thì để semantic-release tự tính)"
+        required: false
+        type: string
 
 concurrency:
   group: release
@@ -24,6 +29,8 @@ concurrency:
 jobs:
   semantic:
     name: Tính phiên bản (semantic-release)
+    # Chỉ định version khi chạy tay → bỏ qua semantic-release.
+    if: ${{ inputs.version == '' }}
     runs-on: ubuntu-latest
     # semantic-release tự tạo tag, đẩy CHANGELOG.md và mở/nhãn Release → cần quyền ghi.
     permissions:
@@ -55,7 +62,8 @@ jobs:
   package:
     name: ${{ matrix.label }}
     needs: semantic
-    if: needs.semantic.outputs.version != ''
+    # Chạy khi semantic-release có version, hoặc khi người dùng chỉ định.
+    if: ${{ inputs.version != '' || needs.semantic.outputs.version != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -110,7 +118,9 @@ jobs:
 
       # Version của bundle phải khớp tag, nên ghi vào cả 3 file manifest.
       - name: Ghi phiên bản
-        run: node scripts/set-version.mjs ${{ needs.semantic.outputs.version }}
+        env:
+          VERSION: ${{ inputs.version || needs.semantic.outputs.version }}
+        run: node scripts/set-version.mjs "$VERSION"
 
       # Nạp chứng thư ký macOS (không bắt buộc — thiếu secret thì build không ký).
       - name: Nạp chứng thư Apple
@@ -163,14 +173,14 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         with:
-          tagName: v${{ needs.semantic.outputs.version }}
-          releaseName: HKD Kế Toán v${{ needs.semantic.outputs.version }}
+          tagName: v${{ inputs.version || needs.semantic.outputs.version }}
+          releaseName: HKD Kế Toán v${{ inputs.version || needs.semantic.outputs.version }}
           releaseBody: |
             Tải bản cài cho hệ điều hành của bạn ở phần Assets.
 
             Người dùng bản cài (.exe / .dmg / .AppImage) có thể cập nhật ngay
             trong app: Cài đặt → Cập nhật ứng dụng.
-          releaseId: ${{ needs.semantic.outputs.release_id }}
+          releaseId: ${{ needs.semantic.outputs.release_id }} # rỗng khi chạy tay → tauri-action tự tạo Release
           releaseDraft: true
-          prerelease: ${{ contains(needs.semantic.outputs.version, '-') }}
+          prerelease: ${{ contains(inputs.version || needs.semantic.outputs.version, '-') }}
           args: --target ${{ matrix.target }} ${{ matrix.args }}
