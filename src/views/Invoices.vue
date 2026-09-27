@@ -3,7 +3,8 @@ import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
-import type { Invoice, InvoiceItem, InvoiceReplaceResult } from "@/types";
+import type { Invoice, InvoiceDuplicateNumber, InvoiceItem, InvoiceReplaceResult } from "@/types";
+import { api } from "@/db";
 import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
@@ -41,7 +42,7 @@ function openLinkHddt(inv: Invoice) {
 
 /** Sau khi ghi số HĐĐT: nạp lại danh sách + cập nhật hóa đơn đang mở. */
 async function afterLink() {
-  await invoiceStore.loadInvoices();
+  await reload();
   const fresh = linkTarget.value ? invoices.value.find((i) => i.id === linkTarget.value?.id) : null;
   if (fresh) linkTarget.value = fresh;
 }
@@ -87,7 +88,7 @@ function openStatus(inv: Invoice, mode: "replace" | "adjusted") {
 
 /** Sau khi thay thế: mở ngay hóa đơn nháp mới để sửa dòng hàng sai rồi xuất lại. */
 async function onReplaced(res: InvoiceReplaceResult) {
-  await invoiceStore.loadInvoices();
+  await reload();
   const fresh = invoices.value.find((i) => i.id === res.replacement_invoice_id);
   if (fresh) {
     editingInvoice.value = fresh;
@@ -108,6 +109,8 @@ function removeInvoice(inv: Invoice) {
     accept: async () => {
       try {
         await invoiceStore.deleteInvoice(inv.id);
+        // Xoá xong phải nạp lại cả báo cáo trùng số (dọn 1 bản trùng thì hết cảnh báo).
+        await reload();
         toast.add({
           severity: "success",
           summary: "Đã xoá hóa đơn nháp",
@@ -144,7 +147,7 @@ function makeOutbound(inv: Invoice) {
 }
 
 async function afterStatusChange() {
-  await invoiceStore.loadInvoices();
+  await reload();
   if (statusTarget.value) {
     const fresh = invoices.value.find((i) => i.id === statusTarget.value?.id);
     if (fresh) statusTarget.value = fresh;
@@ -156,8 +159,25 @@ async function showDetail(inv: Invoice) {
   detailDialog.value = true;
 }
 
+// Số hóa đơn trùng: app chỉ BÁO, không tự sửa dữ liệu — người dùng tự xoá bản
+// nháp thừa, bản đã phát hành thì xử lý bằng thay thế.
+const duplicates = ref<InvoiceDuplicateNumber[]>([]);
+const onlyDuplicates = ref(false);
+
+const dupSet = computed(() => new Set(duplicates.value.map((d) => d.number)));
+const listed = computed(() =>
+  onlyDuplicates.value ? invoices.value.filter((i) => dupSet.value.has(i.number)) : invoices.value,
+);
+const dupTotal = computed(() => duplicates.value.reduce((s, d) => s + d.count, 0));
+
 async function reload() {
-  await Promise.all([catalog.loadAll(), invoiceStore.loadInvoices()]);
+  const [, dups] = await Promise.all([
+    Promise.all([catalog.loadAll(), invoiceStore.loadInvoices()]),
+    api.invoiceDuplicateNumbers(),
+  ]);
+  duplicates.value = dups;
+  // Trùng số đã được dọn hết thì tự bỏ chế độ chỉ hiện trùng.
+  if (!dups.length) onlyDuplicates.value = false;
 }
 
 void reload();
@@ -184,10 +204,32 @@ useKeepAliveRefresh(reload);
       </template>
     </Toolbar>
 
+    <!-- Số hóa đơn trùng: báo để tự dọn, không tự sửa -->
+    <Message v-if="duplicates.length" severity="warn" :closable="false" class="w-full">
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span>
+          <b>{{ duplicates.length }}</b> số hóa đơn bị dùng trùng ({{ dupTotal }} bản ghi):
+          <b v-for="(d, i) in duplicates.slice(0, 6)" :key="d.number" class="ml-1">
+            {{ d.number }} ({{ d.count }}){{ i < Math.min(duplicates.length, 6) - 1 ? "," : "" }}
+          </b>
+          <span v-if="duplicates.length > 6">…</span>
+          — thường do bấm "Lập hóa đơn" nhiều lần. Xoá bản nháp thừa; bản đã phát hành thì lập hóa
+          đơn thay thế.
+        </span>
+        <Button
+          :label="onlyDuplicates ? 'Xem tất cả' : 'Chỉ hiện hóa đơn trùng'"
+          size="small"
+          severity="warn"
+          outlined
+          @click="onlyDuplicates = !onlyDuplicates"
+        />
+      </div>
+    </Message>
+
     <Card>
       <template #content>
         <AppDataTable
-          :value="invoices"
+          :value="listed"
           :loading="loading"
           stripedRows
           paginator
@@ -248,8 +290,20 @@ useKeepAliveRefresh(reload);
               </div>
             </template>
           </Column>
-          <Column field="voucher_no" header="Phiếu xuất">
-            <template #body="{ data }">{{ data.voucher_no || "—" }}</template>
+          <Column header="Phiếu xuất">
+            <template #body="{ data }">
+              <span v-if="data.voucher_no">{{ data.voucher_no }}</span>
+              <!-- Đã phát hành mà chưa có phiếu xuất = doanh thu chưa vào sổ, tờ
+                   khai sẽ thiếu. Bấm 🧾 trên dòng để lập. -->
+              <span
+                v-else-if="data.status === 'official' || data.status === 'exported'"
+                class="text-xs text-amber-700"
+                :title="`Chưa có phiếu xuất — doanh thu chưa vào sổ. Bấm nút lập phiếu xuất ở cột Thao tác (${data.number}).`"
+              >
+                ⚠ chưa có
+              </span>
+              <span v-else>—</span>
+            </template>
           </Column>
           <template #actions="{ data }">
             <div v-if="auth.canAccounting" class="flex items-center justify-center gap-1">
@@ -340,9 +394,12 @@ useKeepAliveRefresh(reload);
               </span>
             </div>
           </template>
-          <template #empty
-            ><EmptyState text="Chưa có hóa đơn nào." icon="pi pi-receipt"
-          /></template>
+          <template #empty>
+            <EmptyState
+              :text="onlyDuplicates ? 'Không còn hóa đơn trùng số nào.' : 'Chưa có hóa đơn nào.'"
+              icon="pi pi-receipt"
+            />
+          </template>
         </AppDataTable>
       </template>
     </Card>
@@ -351,7 +408,7 @@ useKeepAliveRefresh(reload);
     <InvoiceDraftDialog
       v-model:visible="draftDialog"
       :edit-invoice="editingInvoice"
-      @done="invoiceStore.loadInvoices()"
+      @done="reload"
     />
 
     <!-- Dialog chi tiết hóa đơn -->
@@ -441,11 +498,7 @@ useKeepAliveRefresh(reload);
     <InvoiceLinkDialog v-model:visible="linkDialog" :invoice="linkTarget" @done="afterLink" />
 
     <!-- Chép hóa đơn sang dịch vụ HĐĐT khác: kiểm tra trước + lưu bản chốt -->
-    <InvoiceExportDialog
-      v-model:visible="exportVisible"
-      :invoice="exportTarget"
-      @done="invoiceStore.loadInvoices()"
-    />
+    <InvoiceExportDialog v-model:visible="exportVisible" :invoice="exportTarget" @done="reload" />
 
     <!-- Thay thế / ghi nhận bị sửa bên kia -->
     <InvoiceStatusDialog

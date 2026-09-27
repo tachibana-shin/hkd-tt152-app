@@ -94,6 +94,7 @@ import type {
   InvoiceQueueItem,
   InvoiceLinkResult,
   InvoiceReplaceResult,
+  InvoiceDuplicateNumber,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -561,6 +562,9 @@ export const api = {
   /** Lập phiếu xuất cho hóa đơn chưa có phiếu (trừ tồn + ghi Nợ 131/Có 511). */
   createInvoiceOutbound: (invoiceId: number) =>
     call<string>("create_invoice_outbound", { invoiceId }),
+  /** Số hóa đơn bị trùng (sinh ra khi bấm Lập nhiều lần) — app không tự sửa. */
+  invoiceDuplicateNumbers: async () =>
+    parse<InvoiceDuplicateNumber[]>(await call<string>("invoice_duplicate_numbers", {})),
   invoiceEvents: async (invoiceId: number) =>
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {

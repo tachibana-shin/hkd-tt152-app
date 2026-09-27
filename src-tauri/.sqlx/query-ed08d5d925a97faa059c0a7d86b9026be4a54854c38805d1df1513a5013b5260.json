@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, COUNT(*) as \"count!: i64\"\n             FROM invoice GROUP BY number HAVING COUNT(*) > 1 ORDER BY number",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "count!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "ed08d5d925a97faa059c0a7d86b9026be4a54854c38805d1df1513a5013b5260"
+}

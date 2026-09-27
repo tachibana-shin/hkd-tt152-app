@@ -86,11 +86,12 @@ async function save() {
       try {
         pxNo = await invoiceStore.createOutbound(props.invoice.id);
       } catch (e) {
+        // Hóa đơn đã phát hành nhưng chưa vào sổ — báo rõ và lâu, kèm cách xử lý.
         toast.add({
           severity: "error",
           summary: "Đã ghi nhận HĐĐT nhưng chưa lập được phiếu xuất",
-          detail: `${String(e)} — hãy xử lý rồi bấm "Tạo phiếu xuất" trên hóa đơn.`,
-          life: 12000,
+          detail: `${String(e)} — hóa đơn ${props.invoice?.number ?? ""} đang hiện "⚠ chưa có" ở cột Phiếu xuất. Xử lý xong bấm nút 🧾 ngay trên dòng hóa đơn để lập phiếu.`,
+          life: 20_000,
         });
         visible.value = false;
         emit("done");

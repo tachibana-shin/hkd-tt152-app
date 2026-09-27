@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO invoice (number, date, customer, total, status) VALUES ('HD0001', '2026-03-10', 'Khách A', 1000.0, 'draft')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "3e4a943fee39b03d8c3d0b6830695483a175a6c695b28fe1afe7e2891303ccdf"
+}

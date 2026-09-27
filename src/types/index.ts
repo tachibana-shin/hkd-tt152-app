@@ -290,6 +290,12 @@ export interface Invoice {
   items?: InvoiceItem[];
 }
 
+/** Một số hóa đơn bị dùng cho nhiều bản ghi — app báo để người dùng tự dọn. */
+export interface InvoiceDuplicateNumber {
+  number: string;
+  count: number;
+}
+
 /** Kết quả thay thế hóa đơn: app trả về hóa đơn nháp mới để sửa rồi xuất lại. */
 export interface InvoiceReplaceResult {
   ok: boolean;

@@ -447,6 +447,40 @@ async fn delete_invoice_core(pool: &SqlitePool, id: i64) -> Result<String, Strin
     Ok(inv.number)
 }
 
+/// Một số hóa đơn bị dùng cho nhiều bản ghi (sinh ra khi bấm Lập nhiều lần).
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct DuplicateNumber {
+    pub(crate) number: String,
+    pub(crate) count: i64,
+}
+
+/// Báo cáo số hóa đơn trùng — app KHÔNG tự sửa dữ liệu, chỉ để người dùng tự
+/// dọn: xoá bản nháp thừa, còn bản đã phát hành thì xử lý bằng thay thế.
+///
+/// Số hóa đơn là định danh chứng từ, trùng số làm doanh thu/tờ khai sai và
+/// khó đối chiếu với bên cổng thuế.
+pub(crate) async fn duplicate_numbers_core(
+    pool: &SqlitePool,
+) -> Result<Vec<DuplicateNumber>, String> {
+    sqlx::query_as!(
+        DuplicateNumber,
+        r#"SELECT number, COUNT(*) as "count!: i64"
+             FROM invoice GROUP BY number HAVING COUNT(*) > 1 ORDER BY number"#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn invoice_duplicate_numbers(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let rows = duplicate_numbers_core(&*state.pool.read().await).await?;
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
 #[tauri::command]
 pub(crate) async fn delete_invoice(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
@@ -1695,6 +1729,44 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(px_count, 0, "phiếu lỗi phải rollback trọn vẹn");
+    }
+
+    /// Báo cáo số hóa đơn trùng để người dùng tự dọn (app không tự sửa).
+    #[tokio::test]
+    async fn bao_cao_so_hoa_don_trung() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-DUP", "Hàng", 0.01).await;
+        let w = seed_warehouse(&pool, "W-DUP", "Kho trùng").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+        let items = [line("HD-DUP", 1.0, 1000.0, 0.0, "W-DUP")];
+
+        // Bỏ qua chặn ở tầng app để dựng dữ liệu trùng như thực tế đã lỡ xảy ra.
+        sqlx::query!("INSERT INTO invoice (number, date, customer, total, status) VALUES ('HD0001', '2026-03-10', 'Khách A', 1000.0, 'draft')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query!("INSERT INTO invoice (number, date, customer, total, status) VALUES ('HD0001', '2026-03-10', 'Khách A', 1000.0, 'draft')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        save_invoice_core(&pool, "HD0002", "2026-03-10", "Khách B", "", &items)
+            .await
+            .unwrap();
+
+        let dups = duplicate_numbers_core(&pool).await.unwrap();
+        assert_eq!(dups.len(), 1);
+        assert_eq!(dups[0].number, "HD0001");
+        assert_eq!(dups[0].count, 2);
+
+        // Xoá bản nháp trùng thì hết cảnh báo.
+        let dup_id: i64 = sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0001' ORDER BY id LIMIT 1"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        delete_invoice_core(&pool, dup_id).await.unwrap();
+        assert!(duplicate_numbers_core(&pool).await.unwrap().is_empty());
     }
 
     /// Bấm nhiều lần nút Lập hóa đơn / nhập tay số đã có → không được tạo trùng.

@@ -427,6 +427,7 @@ pub async fn api_invoke(
         "replace_invoice" => {
             mx!(commands::invoice::replace_invoice, body, invoice_id: i64, reason: String)
         }
+        "invoice_duplicate_numbers" => mx!(commands::invoice::invoice_duplicate_numbers, body),
         "get_journal_entries" => mx!(
             commands::stock::get_journal_entries,
             body,

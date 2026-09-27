@@ -775,6 +775,201 @@ test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", asy
   await expect(page.locator("tr", { hasText: "PN9800" }).first()).toBeVisible();
 });
 
+test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ liệu", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PN9700",
+      description: "Nhập tồn cho test số hóa đơn trùng",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 20, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
+
+  // Dựng cặp hóa đơn trùng số như dữ liệu lỡ có sẵn: lập phiếu xuất kèm hóa đơn
+  // hai lần với cùng số phiếu (đường này không qua chặn trùng của app).
+  const dupNo = "PX9700";
+  for (let i = 0; i < 2; i++) {
+    const res = await request.post("/api/save_outbound", {
+      data: {
+        posting_date: "2026-09-20",
+        voucher_no: dupNo,
+        description: "Lập trùng số hóa đơn để test cảnh báo",
+        customer_code: "",
+        unit_code: "HKD",
+        items: [
+          {
+            product_code: "SP001",
+            quantity: 1,
+            unit_price: 10000,
+            industry_code: "PPHH",
+            warehouse_code: "",
+          },
+        ],
+        note: "",
+        receive_now: false,
+        outbound_type: "sale",
+        adjust_dir: "down",
+        create_invoice: true,
+        invoice: { number: dupNo, eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+      },
+    });
+    expect(res.ok(), `save_outbound lần ${i + 1} failed ${res.status()}: ${await res.text()}`).toBe(
+      true,
+    );
+  }
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  // Cảnh báo nêu rõ số bị trùng và số bản ghi.
+  await expect(
+    page.getByText(`1 số hóa đơn bị dùng trùng (2 bản ghi): ${dupNo} (2)`, { exact: false }),
+  ).toBeVisible();
+
+  // Lọc xem riêng các hóa đơn trùng để tự dọn.
+  await page.getByRole("button", { name: "Chỉ hiện hóa đơn trùng" }).click();
+  const rows = page.locator("tbody tr", { has: page.getByText(dupNo, { exact: true }) });
+  await expect(rows).toHaveCount(2);
+
+  // Xoá 1 bản nháp trùng → cảnh báo biến mất, danh sách trở lại đầy đủ.
+  await rows.first().getByRole("button", { name: "Xoá hóa đơn nháp" }).click();
+  const confirmBox = page.getByRole("alertdialog", { name: "Xoá hóa đơn nháp" });
+  await confirmBox.getByRole("button", { name: "Xoá", exact: true }).click();
+  await expect(page.getByText(/số hóa đơn bị dùng trùng/)).toHaveCount(0);
+  await expect(page.locator("tr", { has: page.getByText(dupNo, { exact: true }) })).toHaveCount(1);
+});
+
+test("Hóa đơn: cảnh báo ⚠ chưa có phiếu xuất khi đã phát hành nhưng lập PX lỗi", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Mặt hàng riêng cho test + tồn vừa đủ, để không phụ thuộc tồn SP001 của test khác.
+  const prod = await request.post("/api/save_product", {
+    data: {
+      code: "SPPX1",
+      name: "Hàng không còn tồn",
+      unit: "Cái",
+      salePrice: 10000,
+      costPrice: 8000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(prod.ok(), `save_product failed ${prod.status()}`).toBe(true);
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PN9600",
+      description: "Nhập tồn cho test cảnh báo chưa có PX",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SPPX1", quantity: 5, unit_price: 8000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  // Hóa đơn nháp 5 đơn vị (đủ tồn lúc lập).
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9600",
+      date: "2026-09-20",
+      customer: "Khách Chưa Có PX",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SPPX1",
+          quantity: 5,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed ${created.status()}: ${await created.text()}`).toBe(
+    true,
+  );
+  // Tồn bị dùng hết ở nơi khác (bán ngoài app) → lúc phát hành sẽ không lập được PX.
+  const out = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PX9600",
+      description: "Dùng hết tồn SPPX1",
+      customer_code: "",
+      unit_code: "HKD",
+      items: [
+        {
+          product_code: "SPPX1",
+          quantity: 5,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          warehouse_code: "",
+        },
+      ],
+      note: "",
+      receive_now: false,
+      outbound_type: "sale",
+      adjust_dir: "down",
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+    },
+  });
+  expect(out.ok(), `save_outbound failed ${out.status()}: ${await out.text()}`).toBe(true);
+
+  await page.reload();
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  const row = page.locator("tr", { has: page.getByText("HD9600", { exact: true }) }).first();
+  // Chưa phát hành thì cột phiếu xuất bình thường, chỉ có nút lập PX.
+  await expect(row.getByText("—", { exact: true }).first()).toBeVisible();
+  await expect(row.getByText("⚠ chưa có")).toHaveCount(0);
+
+  // Ghi số HĐĐT với tuỳ chọn lập phiếu xuất → lập PX lỗi vì hết tồn.
+  await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByLabel("Số HĐĐT").fill("00009600");
+  await dlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("chưa lập được phiếu xuất", {
+    timeout: 15_000,
+  });
+
+  // Đã phát hành mà chưa có PX → dòng hóa đơn phải cảnh báo đỏ, không phải "—".
+  await expect(row.getByText("⚠ chưa có")).toBeVisible();
+  await expect(row.getByRole("button", { name: "Lập phiếu xuất từ hóa đơn" })).toBeVisible();
+});
+
 test("KeepAlive: quay lại màn đã xem thì nạp lại dữ liệu, không còn thấy bản cũ", async ({
   page,
   request,
