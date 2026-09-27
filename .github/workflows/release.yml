@@ -62,8 +62,10 @@ jobs:
   package:
     name: ${{ matrix.label }}
     needs: semantic
-    # Chạy khi semantic-release có version, hoặc khi người dùng chỉ định.
-    if: ${{ inputs.version != '' || needs.semantic.outputs.version != '' }}
+    # Luôn chạy: phiên bản lấy ở bước dưới — từ input khi chạy tay, nếu không
+    # thì từ tag v* mới nhất do semantic-release vừa đẩy lên (nguồn sự thật,
+    # không phụ thuộc output của action).
+    if: ${{ always() }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,10 +118,36 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
             build-essential libssl-dev rpm file
 
+      - name: Xác định phiên bản
+        id: ver
+        env:
+          INPUT: ${{ inputs.version }}
+          NEEDED: ${{ needs.semantic.outputs.version }}
+        run: |
+          set -euo pipefail
+          version="$INPUT"
+          if [ -z "$version" ]; then
+            # semantic-release vừa tạo tag: ưu tiên tag trùng version nó báo,
+            # không có thì lấy tag v* mới nhất trên remote.
+            if [ -n "$NEEDED" ]; then
+              version="$NEEDED"
+            else
+              version=$(git ls-remote --tags origin 'v*' \
+                | sed 's#.*refs/tags/v##' | sed 's/\^{}//' \
+                | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1)
+            fi
+          fi
+          if [ -z "$version" ]; then
+            echo "::error::Không xác định được phiên bản để đóng gói"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Đóng gói bản $version"
+
       # Version của bundle phải khớp tag, nên ghi vào cả 3 file manifest.
       - name: Ghi phiên bản
         env:
-          VERSION: ${{ inputs.version || needs.semantic.outputs.version }}
+          VERSION: ${{ steps.ver.outputs.version }}
         run: node scripts/set-version.mjs "$VERSION"
 
       # Nạp chứng thư ký macOS (không bắt buộc — thiếu secret thì build không ký).
@@ -173,14 +201,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         with:
-          tagName: v${{ inputs.version || needs.semantic.outputs.version }}
-          releaseName: HKD Kế Toán v${{ inputs.version || needs.semantic.outputs.version }}
+          tagName: v${{ steps.ver.outputs.version }}
+          releaseName: HKD Kế Toán v${{ steps.ver.outputs.version }}
           releaseBody: |
             Tải bản cài cho hệ điều hành của bạn ở phần Assets.
 
             Người dùng bản cài (.exe / .dmg / .AppImage) có thể cập nhật ngay
             trong app: Cài đặt → Cập nhật ứng dụng.
-          releaseId: ${{ needs.semantic.outputs.release_id }} # rỗng khi chạy tay → tauri-action tự tạo Release
+          # Rỗng khi chạy tay; tauri-action tự tìm/tạo Release theo tag.
+          releaseId: ${{ needs.semantic.outputs.release_id }}
           releaseDraft: true
-          prerelease: ${{ contains(inputs.version || needs.semantic.outputs.version, '-') }}
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
           args: --target ${{ matrix.target }} ${{ matrix.args }}
