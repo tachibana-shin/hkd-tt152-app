@@ -126,6 +126,9 @@ watch(
 );
 
 async function save() {
+  // Chốt bấm nhiều lần: lần gọi sau bỏ qua, nếu không sẽ lập ra nhiều hóa đơn
+  // trùng số (cùng đọc một số tự sinh ở form).
+  if (saving.value) return;
   // Kiểu nhập liên tục (pre-input) luôn để lại dòng trống cuối → bỏ dòng chưa chọn hàng.
   const rows = form.items.filter((it) => it.product_code);
   if (!rows.length || !form.customer) {

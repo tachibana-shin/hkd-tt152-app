@@ -57,14 +57,17 @@ const emit = defineEmits<{
           icon="pi pi-times"
           severity="secondary"
           outlined
+          :disabled="!!saving"
           @click="emit('update:visible', false)"
         />
+        <!-- `loading` chỉ hiện spinner, nút vẫn bấm được → bấm nhiều lần sẽ gọi
+             action nhiều lần và tạo trùng bản ghi. Phải disable thật. -->
         <Button
           v-if="showAction"
           :label="actionLabel"
           :icon="actionIcon"
           :loading="saving"
-          :disabled="actionDisabled"
+          :disabled="!!saving || !!actionDisabled"
           @click="emit('action')"
         />
       </slot>

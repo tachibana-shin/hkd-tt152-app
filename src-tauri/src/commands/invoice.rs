@@ -219,6 +219,27 @@ async fn insert_invoice_items(
 }
 
 /// Nghiệp vụ lập hóa đơn nháp — tách riêng để test trực tiếp (không cần tauri::State).
+/// Số hóa đơn đã tồn tại chưa (không phân biệt hoa/thường).
+///
+/// `except_id` = hóa đơn đang sửa thì bỏ qua chính nó (đổi số sang số khác vẫn
+/// hợp lệ, giữ nguyên số cũ cũng hợp lệ).
+async fn invoice_number_taken(
+    tx: &mut SqliteTransaction<'_>,
+    number: &str,
+    except_id: Option<i64>,
+) -> Result<bool, String> {
+    let dup: Option<i64> = sqlx::query_scalar!(
+        "SELECT id FROM invoice WHERE number = ? COLLATE NOCASE AND (? IS NULL OR id <> ?)",
+        number,
+        except_id,
+        except_id
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(dup.is_some())
+}
+
 async fn save_invoice_core(
     pool: &SqlitePool,
     number: &str,
@@ -227,7 +248,17 @@ async fn save_invoice_core(
     customer_tax_code: &str,
     items: &[InvoiceItemInput],
 ) -> Result<serde_json::Value, String> {
+    let number = number.trim();
+    if number.is_empty() {
+        return Err("Cần nhập số hóa đơn".into());
+    }
+
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Số hóa đơn là định danh của chứng từ — trùng số là dữ liệu sai (bấm Lập
+    // nhiều lần, hay nhập tay số đã có) nên chặn trước khi ghi.
+    if invoice_number_taken(&mut tx, number, None).await? {
+        return Err(format!("Số hóa đơn {number} đã tồn tại"));
+    }
     let prepared = prepare_invoice(&mut tx, items).await?;
 
     // `vat_amount` luôn 0: hộ không tách thuế trên hóa đơn (tính cuối kỳ).
@@ -280,8 +311,16 @@ async fn update_invoice_core(
             inv.number
         ));
     }
+    let number = number.trim();
+    if number.is_empty() {
+        return Err("Cần nhập số hóa đơn".into());
+    }
 
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Đổi sang số đã có hóa đơn khác thì phải báo, không cho ghi đè vô hình.
+    if invoice_number_taken(&mut tx, number, Some(id)).await? {
+        return Err(format!("Số hóa đơn {number} đã tồn tại"));
+    }
     let prepared = prepare_invoice(&mut tx, items).await?;
     sqlx::query!(
         "UPDATE invoice SET number = ?, date = ?, customer = ?, customer_tax_code = ?, total = ?
@@ -1656,6 +1695,74 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(px_count, 0, "phiếu lỗi phải rollback trọn vẹn");
+    }
+
+    /// Bấm nhiều lần nút Lập hóa đơn / nhập tay số đã có → không được tạo trùng.
+    #[tokio::test]
+    async fn so_hoa_don_trung_thi_bao_loi_khong_ghi_trung() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-SO", "Hàng", 0.01).await;
+        let w = seed_warehouse(&pool, "W-SO", "Kho số hóa đơn").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+        let items = [line("HD-SO", 1.0, 1000.0, 0.0, "W-SO")];
+
+        save_invoice_core(&pool, "HD9001", "2026-03-10", "Khách X", "MST-X", &items)
+            .await
+            .unwrap();
+
+        // Lần thứ hai (bấm Lập nhiều lần) → chặn, không sinh bản ghi thứ hai.
+        let err = save_invoice_core(&pool, "HD9001", "2026-03-10", "Khách X", "MST-X", &items)
+            .await
+            .unwrap_err();
+        assert!(err.contains("đã tồn tại"), "{err}");
+        // Khác hoa/thường cũng tính là trùng số hóa đơn.
+        let err = save_invoice_core(&pool, "hd9001", "2026-03-10", "Khách X", "MST-X", &items)
+            .await
+            .unwrap_err();
+        assert!(err.contains("đã tồn tại"), "{err}");
+
+        let count: i64 = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "c!: i64" FROM invoice WHERE number = 'HD9001'"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
+
+        // Sửa hóa đơn nháp sang số của hóa đơn khác → cũng phải chặn.
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD9001'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        save_invoice_core(&pool, "HD9002", "2026-03-10", "Khách X", "MST-X", &items)
+            .await
+            .unwrap();
+        let err = update_invoice_core(
+            &pool,
+            id,
+            "HD9002",
+            "2026-03-11",
+            "Khách X",
+            "MST-X",
+            &items,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("đã tồn tại"), "{err}");
+
+        // Sửa nháp nhưng giữ nguyên số của chính nó thì vẫn được.
+        update_invoice_core(
+            &pool,
+            id,
+            "HD9001",
+            "2026-03-11",
+            "Khách X",
+            "MST-X",
+            &items,
+        )
+        .await
+        .unwrap();
     }
 
     /// Thay thế hóa đơn đã phát hành: đảo doanh thu, tạo hóa đơn nháp mới,
