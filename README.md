@@ -265,6 +265,16 @@ Release là người dùng nhận được bản mới.
   rõ điều đó thay vì báo lỗi.
 - Máy Linux chỉ nhận OTA qua **AppImage**; bản `.deb` phải cài tay.
 
+> ⚠️ **Repo đang để Private** nên endpoint `releases/latest/download/latest.json`
+> trả 404 (không có token) → nút cập nhật sẽ báo lỗi và người dùng tải bản cài
+> cũng phải đăng nhập GitHub. Muốn OTA + tải miễn phí thì chuyển repo sang
+> Public, hoặc đổi `plugins.updater.endpoints` trong `tauri.conf.json` sang nơi
+> lưu `latest.json` công khai ( ví dụ Cloudflare R2 / trang tĩnh).
+
+Bản macOS chỉ build được `.dmg` sau khi có secret
+`APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` + `KEYCHAIN_PASSWORD`; thiếu
+chúng thì app ký ad-hoc (mở được nhưng phải bấm "Mở" ở Gatekeeper).
+
 ---
 
 ## 📚 Tài liệu
