@@ -120,6 +120,8 @@ jobs:
 
       - name: Xác định phiên bản
         id: ver
+        # Runner Windows mặc định dùng PowerShell — script dưới đây là bash.
+        shell: bash
         env:
           INPUT: ${{ inputs.version }}
           NEEDED: ${{ needs.semantic.outputs.version }}
