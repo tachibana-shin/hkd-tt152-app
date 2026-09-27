@@ -1094,7 +1094,33 @@ pub(crate) async fn get_journal_entries(
     entry_type: String,
     from_date: String,
     to_date: String,
+    search: String,
 ) -> Result<String, String> {
+    let rows = get_journal_entries_core(
+        &*state.pool.read().await,
+        &entry_type,
+        &from_date,
+        &to_date,
+        &search,
+    )
+    .await?;
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
+/// Sổ nhật ký theo bộ lọc — tách riêng để test trực tiếp (không cần tauri::State).
+///
+/// Từ khoá tìm khớp trên số phiếu / mã hàng / tên khách, nhà cung cấp / diễn
+/// giải / ghi chú. Danh sách sắp theo ngày nên phiếu có ngày cũ nằm giữa danh
+/// sách — cần đường tìm nhanh thay vì lần theo từng trang.
+pub(crate) async fn get_journal_entries_core(
+    pool: &SqlitePool,
+    entry_type: &str,
+    from_date: &str,
+    to_date: &str,
+    search: &str,
+) -> Result<Vec<JournalEntryRow>, String> {
+    let search = search.trim();
+    let like = format!("%{search}%");
     let rows: Vec<JournalEntryRow> = sqlx::query_as!(
         JournalEntryRow,
         "SELECT je.id, je.posting_date, je.voucher_no, je.entry_type, je.description,
@@ -1104,9 +1130,18 @@ pub(crate) async fn get_journal_entries(
          FROM journal_entry je
          LEFT JOIN supplier s ON s.code = je.supplier_code
          LEFT JOIN customer c ON c.code = je.customer_code
+         LEFT JOIN product pr ON pr.code = je.product_code
          WHERE (? = '' OR je.entry_type = ?)
            AND (? = '' OR je.posting_date >= ?)
            AND (? = '' OR je.posting_date <= ?)
+           AND (? = ''
+                OR je.voucher_no LIKE ? COLLATE NOCASE
+                OR je.product_code LIKE ? COLLATE NOCASE
+                OR je.description LIKE ? COLLATE NOCASE
+                OR je.note LIKE ? COLLATE NOCASE
+                OR COALESCE(s.name, '') LIKE ? COLLATE NOCASE
+                OR COALESCE(c.name, '') LIKE ? COLLATE NOCASE
+                OR COALESCE(pr.name, '') LIKE ? COLLATE NOCASE)
          ORDER BY je.posting_date DESC, je.id DESC
          LIMIT 500",
         entry_type,
@@ -1114,12 +1149,20 @@ pub(crate) async fn get_journal_entries(
         from_date,
         from_date,
         to_date,
-        to_date
+        to_date,
+        search,
+        like,
+        like,
+        like,
+        like,
+        like,
+        like,
+        like
     )
-    .fetch_all(&*state.pool.read().await)
+    .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(serde_json::to_string(&rows).unwrap_or_default())
+    Ok(rows)
 }
 
 /// Chi tiết 1 chứng từ theo số phiếu — phục vụ in PNK (mẫu 01-VT) / PXK (mẫu 02-VT).
@@ -2299,6 +2342,119 @@ mod tests {
     // Bán hàng bật "Lập kèm hóa đơn": hóa đơn số = số phiếu xuất, status 'draft'
     // (chưa khai HĐĐT), liên kết voucher_no = PX, tổng tiền = doanh thu; tên +
     // MST khách hàng lấy từ danh mục; đủ dòng chi tiết với nhóm ngành + tỷ lệ thuế.
+    /// Tìm phiếu theo số / mã hàng / khách và lọc khoảng ngày — danh sách sắp
+    /// theo ngày nên phiếu cũ nằm giữa, phải có đường tìm nhanh.
+    #[tokio::test]
+    async fn tim_phieu_theo_tu_khoa_va_loc_ngay() {
+        let pool = test_pool().await;
+        let p1 = seed_product(&pool, "SP-T1", "Bột nở", 0.01).await;
+        let p2 = seed_product(&pool, "SP-T2", "Dầu ăn", 0.01).await;
+        let _w = seed_warehouse(&pool, "W-T1", "Kho tìm").await;
+        add_stock_lot(&pool, p1, _w, 100.0, 1000.0, "2026-01-01").await;
+        add_stock_lot(&pool, p2, _w, 100.0, 2000.0, "2026-01-01").await;
+        seed_customer(&pool, "KH-T1", "Chị Hồng").await;
+
+        let px = OutboundItemInput {
+            product_code: "SP-T1".into(),
+            quantity: 2.0,
+            unit_price: 1000.0,
+            discount: 0.0,
+            industry_code: "PPHH".into(),
+            warehouse_code: "W-T1".into(),
+        };
+        let px2 = OutboundItemInput {
+            product_code: "SP-T2".into(),
+            quantity: 2.0,
+            unit_price: 2000.0,
+            discount: 0.0,
+            industry_code: "PPHH".into(),
+            warehouse_code: "W-T1".into(),
+        };
+
+        let old = save_outbound_core(
+            &pool,
+            "2026-09-01",
+            "PX9001",
+            "Phiếu cũ",
+            "",
+            "HKD",
+            &[px],
+            "",
+            false,
+            "sale",
+            "up",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .unwrap();
+        let new = save_outbound_core(
+            &pool,
+            "2026-09-20",
+            "PX9002",
+            "Phiếu mới",
+            "KH-T1",
+            "HKD",
+            &[px2],
+            "",
+            false,
+            "sale",
+            "up",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(old.entries, 1);
+        assert_eq!(new.entries, 1);
+
+        // Không lọc: cả 2 phiếu, mới nhất xếp trước.
+        let all = get_journal_entries_core(&pool, "PX", "", "", "")
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].voucher_no, "PX9002");
+
+        // Từ khoá theo số phiếu.
+        let by_no = get_journal_entries_core(&pool, "PX", "", "", "px9001")
+            .await
+            .unwrap();
+        assert_eq!(by_no.len(), 1);
+        assert_eq!(by_no[0].voucher_no, "PX9001");
+
+        // Từ khoá theo tên hàng (tiếng Việt có dấu) và theo tên khách.
+        let by_item = get_journal_entries_core(&pool, "PX", "", "", "dầu ăn")
+            .await
+            .unwrap();
+        assert_eq!(by_item.len(), 1);
+        assert_eq!(by_item[0].voucher_no, "PX9002");
+        let by_cust = get_journal_entries_core(&pool, "PX", "", "", "hồng")
+            .await
+            .unwrap();
+        assert_eq!(by_cust.len(), 1);
+        assert_eq!(by_cust[0].voucher_no, "PX9002");
+
+        // Lọc khoảng ngày: chỉ lấy phiếu trong khoảng.
+        let range = get_journal_entries_core(&pool, "PX", "2026-09-10", "2026-09-30", "")
+            .await
+            .unwrap();
+        assert_eq!(range.len(), 1);
+        assert_eq!(range[0].voucher_no, "PX9002");
+        let none = get_journal_entries_core(&pool, "PX", "2026-10-01", "2026-10-31", "")
+            .await
+            .unwrap();
+        assert!(none.is_empty());
+
+        // Từ khoá không khớp gì → rỗng (không trả về toàn bộ danh sách).
+        let miss = get_journal_entries_core(&pool, "PX", "", "", "khong-ton-tai")
+            .await
+            .unwrap();
+        assert!(miss.is_empty());
+        // Lọc nhập kho không lẫn phiếu xuất.
+        let pn = get_journal_entries_core(&pool, "PN", "", "", "PX9002")
+            .await
+            .unwrap();
+        assert!(pn.is_empty());
+    }
+
     #[tokio::test]
     async fn xuat_kho_tu_dong_lap_hoa_don_nhap() {
         let pool = test_pool().await;

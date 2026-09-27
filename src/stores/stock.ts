@@ -7,10 +7,11 @@ export const useStockStore = defineStore("stock", () => {
   const lots = ref<StockLot[]>([]);
   const loading = ref(false);
 
-  async function loadEntries(entryType = "", fromDate = "", toDate = "") {
+  /** `search` khớp số phiếu / mã hàng / khách / diễn giải / ghi chú. */
+  async function loadEntries(entryType = "", fromDate = "", toDate = "", search = "") {
     loading.value = true;
     try {
-      entries.value = await api.getJournalEntries(entryType, fromDate, toDate);
+      entries.value = await api.getJournalEntries(entryType, fromDate, toDate, search);
     } finally {
       loading.value = false;
     }

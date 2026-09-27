@@ -670,6 +670,111 @@ test("Ghi nhận HĐĐT: tự lập phiếu xuất để doanh thu vào sổ", a
   await expect(row2.getByRole("button", { name: "Lập phiếu xuất từ hóa đơn" })).toHaveCount(0);
 });
 
+test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PN9800",
+      description: "Nhập tồn cho test tìm phiếu",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 50, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
+
+  // Hai phiếu ở hai khoảng ngày khác nhau — số phiếu nằm ngoài trang đầu.
+  const makeOutbound = async (voucherNo: string, date: string, description: string) => {
+    const res = await request.post("/api/save_outbound", {
+      data: {
+        posting_date: date,
+        voucher_no: voucherNo,
+        description,
+        customer_code: "",
+        unit_code: "HKD",
+        items: [
+          {
+            product_code: "SP001",
+            quantity: 1,
+            unit_price: 15000,
+            industry_code: "PPHH",
+            warehouse_code: "",
+          },
+        ],
+        note: "",
+        receive_now: false,
+        outbound_type: "sale",
+        adjust_dir: "down",
+        create_invoice: false,
+        invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+      },
+    });
+    expect(res.ok(), `save_outbound ${voucherNo} failed ${res.status()}: ${await res.text()}`).toBe(
+      true,
+    );
+  };
+  await makeOutbound("PX9800", "2026-09-02", "Phiếu rất cũ");
+  await makeOutbound("PX9801", "2026-09-20", "Phiếu cần tìm");
+
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
+
+  // Từ khoá theo số phiếu → chỉ còn đúng phiếu đó.
+  const search = page.getByPlaceholder("Số phiếu, mã hàng, khách, diễn giải…");
+  await search.fill("PX9800");
+  await expect(page.locator("tr", { hasText: "PX9800" }).first()).toBeVisible();
+  await expect(page.locator("tr", { hasText: "PX9801" })).toHaveCount(0);
+
+  // Từ khoá tiếng Việt có dấu, khớp cả tên hàng.
+  await search.fill("cần tìm");
+  await expect(page.locator("tr", { hasText: "PX9801" }).first()).toBeVisible();
+  await expect(page.locator("tr", { hasText: "PX9800" })).toHaveCount(0);
+
+  // Lọc khoảng ngày: đủ rộng thì thấy cả hai.
+  await search.fill("");
+  await page.getByPlaceholder("Từ ngày").fill("01/09/2026");
+  await page.getByPlaceholder("Từ ngày").press("Enter");
+  await page.getByPlaceholder("Đến ngày").fill("30/09/2026");
+  await page.getByPlaceholder("Đến ngày").press("Enter");
+  await expect(page.locator("tr", { hasText: "PX9800" }).first()).toBeVisible();
+  await expect(page.locator("tr", { hasText: "PX9801" }).first()).toBeVisible();
+
+  // Thu hẹp khoảng ngày → chỉ còn phiếu trong khoảng.
+  await page.getByPlaceholder("Từ ngày").fill("10/09/2026");
+  await page.getByPlaceholder("Từ ngày").press("Enter");
+  await expect(page.locator("tr", { hasText: "PX9800" })).toHaveCount(0);
+  await expect(page.locator("tr", { hasText: "PX9801" }).first()).toBeVisible();
+
+  // Xoá lọc → thấy lại toàn bộ.
+  await page.getByRole("button", { name: "Xoá lọc" }).click();
+  await expect(page.locator("tr", { hasText: "PX9800" }).first()).toBeVisible();
+
+  // Bộ lọc được giữ khi chuyển menu (KeepAlive) và nạp lại đúng theo bộ lọc.
+  await search.fill("PX9801");
+  await sidebarButton(page, "Hóa đơn").click();
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("tr", { hasText: "PX9801" }).first()).toBeVisible();
+  await expect(page.locator("tr", { hasText: "PX9800" })).toHaveCount(0);
+
+  // Màn Nhập kho cũng lọc được, và tìm phiếu nhập theo số.
+  await page.getByRole("button", { name: "Xoá lọc" }).click();
+  await sidebarButton(page, "Nhập kho").click();
+  await expect(page.locator("header h2")).toHaveText("Nhập kho");
+  await page.getByPlaceholder("Số phiếu, mã hàng, khách, diễn giải…").fill("PN9800");
+  await expect(page.locator("tr", { hasText: "PN9800" }).first()).toBeVisible();
+});
+
 test("KeepAlive: quay lại màn đã xem thì nạp lại dữ liệu, không còn thấy bản cũ", async ({
   page,
   request,
@@ -873,6 +978,71 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   const nextDlg = page.getByRole("dialog");
   await expect(nextDlg.getByLabel("Ký hiệu HĐĐT")).toHaveValue("1C26TT152");
   await nextDlg.getByRole("button", { name: "Đóng" }).click();
+});
+
+test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa đơn", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-21",
+      voucher_no: "PN9300",
+      description: "Nhập tồn cho test bấm nhiều lần",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 30, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog");
+  const number = await dlg.getByRole("textbox").first().inputValue();
+  expect(number).toMatch(/^HD\d+$/);
+
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Bấm Nhiều Lần");
+  await custInput.press("Enter");
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  await page
+    .getByRole("option", { name: /Bottled water/ })
+    .first()
+    .click();
+  // SP001 chưa có nhóm ngành mặc định → chọn nhóm ngành trên dòng.
+  await line.getByRole("combobox").nth(1).click();
+  await page
+    .getByRole("option", { name: /Phân phối, cung cấp hàng hóa/ })
+    .first()
+    .click();
+  await line.getByRole("spinbutton").nth(1).fill("10000");
+
+  // Bấm liên tiếp nhiều lần (nút phải khoá ngay khi đang lưu).
+  const saveBtn = dlg.getByRole("button", { name: "Lập hóa đơn" });
+  await saveBtn.dblclick();
+  await expect(dlg).toBeHidden();
+  // Bấm thêm lần nữa sau khi lưu xong (dialog đã đóng) cũng không sinh bản ghi mới.
+  await page.keyboard.press("Escape");
+
+  const all = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    number: string;
+  }>;
+  const sameNo = all.filter((i) => i.number === number);
+  expect(sameNo.length, `số ${number} bị lặp: ${sameNo.length} bản ghi`).toBe(1);
+  await expect(page.locator("tr", { has: page.getByText(number, { exact: true }) })).toHaveCount(1);
 });
 
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {

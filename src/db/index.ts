@@ -405,10 +405,13 @@ export const api = {
       },
     }),
 
-  getJournalEntries: (entryType = "", fromDate = "", toDate = "") =>
-    call<string>("get_journal_entries", { entryType, fromDate, toDate }).then(parse) as Promise<
-      JournalEntryRow[]
-    >,
+  getJournalEntries: (entryType = "", fromDate = "", toDate = "", search = "") =>
+    call<string>("get_journal_entries", {
+      entryType,
+      fromDate,
+      toDate,
+      search,
+    }).then(parse) as Promise<JournalEntryRow[]>,
 
   // ─── CASH (PHIẾU THU / CHI) ───
   saveCashEntry: (input: {

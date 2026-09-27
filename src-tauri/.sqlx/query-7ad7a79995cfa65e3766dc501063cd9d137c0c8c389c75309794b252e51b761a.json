@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"c!: i64\" FROM invoice WHERE number = 'HD9001'",
+  "describe": {
+    "columns": [
+      {
+        "name": "c!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7ad7a79995cfa65e3766dc501063cd9d137c0c8c389c75309794b252e51b761a"
+}

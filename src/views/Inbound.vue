@@ -250,8 +250,15 @@ async function save() {
   }
 }
 
+// ─── Bộ lọc danh sách phiếu (giữ khi chuyển menu nhờ KeepAlive) ───
+const f = reactive({ search: "", from: null as Date | null, to: null as Date | null });
+
+function loadEntries() {
+  return stock.loadEntries("PN", toIsoDate(f.from), toIsoDate(f.to), f.search.trim());
+}
+
 async function reload() {
-  await Promise.all([catalog.loadAll(), stock.loadEntries("PN"), settings.load()]);
+  await Promise.all([catalog.loadAll(), loadEntries(), settings.load()]);
   accounts.value = await api.getAccounts();
 }
 
@@ -273,6 +280,14 @@ useKeepAliveRefresh(reload);
         <Button v-if="auth.canStock" label="Tạo phiếu nhập" icon="pi pi-plus" @click="openCreate" />
       </template>
     </Toolbar>
+
+    <!-- Tìm phiếu: danh sách sắp theo ngày nên phiếu ngày cũ nằm giữa danh sách. -->
+    <VoucherFilterBar
+      v-model:search="f.search"
+      v-model:from="f.from"
+      v-model:to="f.to"
+      @change="loadEntries"
+    />
 
     <Card>
       <template #content>

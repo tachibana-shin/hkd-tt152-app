@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT je.id, je.posting_date, je.voucher_no, je.entry_type, je.description,\n                je.product_code, je.quantity, je.unit_price, je.amount,\n                s.name AS supplier_name, c.name AS customer_name,\n                je.industry_code, je.adjust_code, je.note\n         FROM journal_entry je\n         LEFT JOIN supplier s ON s.code = je.supplier_code\n         LEFT JOIN customer c ON c.code = je.customer_code\n         WHERE (? = '' OR je.entry_type = ?)\n           AND (? = '' OR je.posting_date >= ?)\n           AND (? = '' OR je.posting_date <= ?)\n         ORDER BY je.posting_date DESC, je.id DESC\n         LIMIT 500",
+  "query": "SELECT je.id, je.posting_date, je.voucher_no, je.entry_type, je.description,\n                je.product_code, je.quantity, je.unit_price, je.amount,\n                s.name AS supplier_name, c.name AS customer_name,\n                je.industry_code, je.adjust_code, je.note\n         FROM journal_entry je\n         LEFT JOIN supplier s ON s.code = je.supplier_code\n         LEFT JOIN customer c ON c.code = je.customer_code\n         LEFT JOIN product pr ON pr.code = je.product_code\n         WHERE (? = '' OR je.entry_type = ?)\n           AND (? = '' OR je.posting_date >= ?)\n           AND (? = '' OR je.posting_date <= ?)\n           AND (? = ''\n                OR je.voucher_no LIKE ? COLLATE NOCASE\n                OR je.product_code LIKE ? COLLATE NOCASE\n                OR je.description LIKE ? COLLATE NOCASE\n                OR je.note LIKE ? COLLATE NOCASE\n                OR COALESCE(s.name, '') LIKE ? COLLATE NOCASE\n                OR COALESCE(c.name, '') LIKE ? COLLATE NOCASE\n                OR COALESCE(pr.name, '') LIKE ? COLLATE NOCASE)\n         ORDER BY je.posting_date DESC, je.id DESC\n         LIMIT 500",
   "describe": {
     "columns": [
       {
@@ -75,7 +75,7 @@
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 14
     },
     "nullable": [
       true,
@@ -94,5 +94,5 @@
       false
     ]
   },
-  "hash": "c908e4d7a2fbeb92fd8752a6f98bf4d56fcd1c559f67db6ccfee0f8296e221a8"
+  "hash": "226f0b6b8ca033647b3696a97a343f5516ccca5277bacd817c8fad9199da4cc9"
 }
