@@ -76,7 +76,7 @@ jobs:
       # Cài sqlx-cli bằng cargo: không phụ thuộc action bên thứ ba (tag tool của
       # taiki-e/install-action dễ đổi tên theo phiên bản).
       - name: Cài sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features sqlite,macros --locked
+        run: cargo install sqlx-cli --no-default-features --features sqlite
       - name: Kiểm tra bộ cache truy vấn còn mới
         run: |
           cd src-tauri
