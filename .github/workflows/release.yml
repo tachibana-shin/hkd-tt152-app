@@ -25,6 +25,11 @@ jobs:
   semantic:
     name: Tính phiên bản (semantic-release)
     runs-on: ubuntu-latest
+    # semantic-release tự tạo tag, đẩy CHANGELOG.md và mở/nhãn Release → cần quyền ghi.
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       version: ${{ steps.semantic.outputs.version }}
       release_id: ${{ steps.semantic.outputs.release_id }}
@@ -32,7 +37,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 20
