@@ -200,6 +200,73 @@ trực tiếp, hoặc mở trace trong `bun run test:e2e:report`.
 
 ---
 
+## 🚀 CI · Đóng gói · Cập nhật OTA
+
+### Kiểm tra tự động (`.github/workflows/ci.yml`)
+
+Mỗi lần push/PR chạy 4 việc song song:
+
+| Job        | Kiểm tra                                                                               |
+| ---------- | -------------------------------------------------------------------------------------- |
+| `frontend` | `vue-tsc` (kiểu dữ liệu) · `oxlint` · `oxfmt --check` · build Vite                     |
+| `rust`     | `cargo fmt --check` · `cargo clippy --all-targets -- -D warnings` · `cargo test --lib` |
+| `sqlx`     | bộ cache truy vấn `.sqlx` còn khớp code (`cargo sqlx prepare --check`)                 |
+| `e2e`      | Playwright offline đầy đủ (dựng app dưới Xvfb)                                         |
+
+Chạy đúng bộ kiểm tra đó ngay trên máy:
+
+```bash
+bun run ci          # fmt + lint + typecheck + test Rust + check sqlx
+bunx playwright test
+```
+
+Husky chặn lỗi trước khi commit: `pre-commit` chạy fmt/lint/typecheck/test Rust,
+`pre-push` kiểm tra `.sqlx` (bỏ qua kiểm tra sqlx nếu máy chưa có `sqlite3` CLI).
+
+### Đóng gói đa nền tảng (`.github/workflows/release.yml`)
+
+Commit vào `main` → [semantic-release](https://semantic-release.gitbook.io/) tính bản
+mới rồi build 6 target trong một Release nháp:
+
+- Windows x64 (NSIS + MSI), Windows ARM64 (NSIS)
+- macOS Intel + Apple Silicon (.dmg)
+- Linux x64 (AppImage + .deb), Linux ARM64 (AppImage)
+
+Cách tính phiên bản: `feat:` → minor, `fix:` → patch, `!` trong tiêu đề hoặc
+`BREAKING CHANGE` → major, commit không ghi kiểu → patch. Nhãn bản phải theo
+[Conventional Commits](https://www.conventionalcommits.org/); lần release đầu tiên
+lấy mốc `initialVersion` là `0.3.0` (đồng bộ `package.json`, `tauri.conf.json`,
+`Cargo.toml` — workflow ghi tự động bằng `scripts/set-version.mjs`).
+
+> ⚠️ Job Windows ARM64 và Linux ARM64 cần runner `windows-11-arm` /
+> `ubuntu-24.04-arm` (GitHub-hosted ARM). Nếu tài khoản chưa bật loại runner này thì
+> xoá 2 entry đó khỏi `matrix.include` trong `release.yml`.
+
+**Secrets cần thêm trong repo** (Settings → Secrets and variables → Actions):
+
+| Secret                                                                   | Bắt buộc             | Dùng để                                            |
+| ------------------------------------------------------------------------ | -------------------- | -------------------------------------------------- |
+| `TAURI_SIGNING_PRIVATE_KEY`                                              | ✅                   | ký gói cập nhật OTA (nội dung file `.tauri/*.key`) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`                                     | nếu khoá có mật khẩu | mở khoá ký                                         |
+| `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` + `KEYCHAIN_PASSWORD` | không                | ký app macOS (thiếu thì build .dmg chưa ký)        |
+| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_PASSWORD`                            | không                | notarize để mở .dmg không cần "Bỏ qua"             |
+
+Khoá ký OTA đã sinh sẵn ở `.tauri/hkd-tt152-app.key` (thư mục này **không** commit).
+Mất khoá này thì các bản cập nhật về sau không kiểm chữ ký được — hãy sao lưu riêng.
+
+### Cập nhật OTA trong app
+
+Bản cài (.exe / .dmg / .AppImage) tự làm: màn **Cài đặt → Cập nhật ứng dụng** →
+kiểm tra → tải (có thanh tiến trình) → tự khởi động lại. App lấy
+`latest.json` từ Release mới nhất của chính repo này, nên chỉ cần publish
+Release là người dùng nhận được bản mới.
+
+- Bản chạy trong trình duyệt (web server nội bộ) không có updater — giao diện báo
+  rõ điều đó thay vì báo lỗi.
+- Máy Linux chỉ nhận OTA qua **AppImage**; bản `.deb` phải cài tay.
+
+---
+
 ## 📚 Tài liệu
 
 - 📐 [Thiết kế chi tiết TT152](docs/thiet-ke-chi-tiet-TT152.md) — kiến trúc, phạm vi nghiệp vụ,

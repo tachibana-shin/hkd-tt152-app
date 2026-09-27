@@ -1,0 +1,154 @@
+name: Release
+
+# Đóng gói đa nền tảng theo phiên bản do semantic-release tính từ commit.
+#
+# Luồng: commit vào `main` → semantic-release tính bản mới (feat→minor, fix→patch,
+# ! → major) và tạo tag v… → job đóng gói build 6 target rồi gắn asset vào Release.
+#
+# Secrets cần cấu hình trong repo (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY        khoá ký OTA (nội dung file .tauri/*.key, base64 hoặc nguyên văn)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD mật khẩu khoá (để trống nếu khoá không mật khẩu)
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / KEYCHAIN_PASSWORD  (bản macOS có ký)
+#   APPLE_ID / APPLE_TEAM_ID / APPLE_PASSWORD   (không bắt buộc: chỉ dùng cho notarize)
+# Thiếu secret ký macOS thì job macOS vẫn build được nhưng app chưa ký — chỉ chạy
+# được sau khi bấm "Bỏ qua" trong Gatekeeper.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  semantic:
+    name: Tính phiên bản (semantic-release)
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semantic.outputs.version }}
+      release_id: ${{ steps.semantic.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          branch: main
+          tagFormat: "v${version}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  package:
+    name: ${{ matrix.label }}
+    needs: semantic
+    if: needs.semantic.outputs.version != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x64 (NSIS + MSI)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: --bundles nsis,msi
+          - label: Windows ARM64 (NSIS)
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            args: --bundles nsis
+          - label: macOS Intel (dmg)
+            os: macos-13
+            target: x86_64-apple-darwin
+            args: --bundles dmg
+          - label: macOS Apple Silicon (dmg)
+            os: macos-14
+            target: aarch64-apple-darwin
+            args: --bundles dmg
+          - label: Linux x64 (AppImage + deb)
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: --bundles appimage,deb
+          - label: Linux ARM64 (AppImage)
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            args: --bundles appimage
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Deps Linux (webkit + đóng gói)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            build-essential libssl-dev rpm file
+
+      # Version của bundle phải khớp tag, nên ghi vào cả 3 file manifest.
+      - name: Ghi phiên bản
+        run: node scripts/set-version.mjs ${{ needs.semantic.outputs.version }}
+
+      # Nạp chứng thư ký macOS (không bắt buộc — thiếu secret thì build không ký).
+      - name: Nạp chứng thư Apple
+        if: startsWith(matrix.os, 'macos')
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "::notice::Không có APPLE_CERTIFICATE — bản macOS sẽ KHÔNG ký chứng thư."
+            exit 0
+          fi
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-keychain-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep -E "Apple (Development|Distribution)" || true)
+          echo "Apple identities: $CERT_INFO"
+          CERT_ID=$(echo "$CERT_INFO" | head -1 | awk -F'"' '{print $2}')
+          echo "CERT_ID=$CERT_ID" >> "$GITHUB_ENV"
+
+      - name: Build & phát hành
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Bản macOS: dùng identity vừa nạp, bỏ trống thì build không ký.
+          APPLE_SIGNING_IDENTITY: ${{ env.CERT_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        with:
+          tagName: v${{ needs.semantic.outputs.version }}
+          releaseName: HKD Kế Toán v${{ needs.semantic.outputs.version }}
+          releaseBody: |
+            Tải bản cài cho hệ điều hành của bạn ở phần Assets.
+
+            Người dùng bản cài (.exe / .dmg / .AppImage) có thể cập nhật ngay
+            trong app: Cài đặt → Cập nhật ứng dụng.
+          releaseId: ${{ needs.semantic.outputs.release_id }}
+          releaseDraft: true
+          prerelease: ${{ contains(needs.semantic.outputs.version, '-') }}
+          args: --target ${{ matrix.target }} ${{ matrix.args }}

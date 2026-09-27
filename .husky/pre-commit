@@ -1,2 +1,6 @@
+# Chặn commit khi có lỗi: định dạng, lint, kiểu dữ liệu, test Rust.
+# SQLX_OFFLINE=true vì truy vấn sqlx đã được kiểm tra lúc build (bộ .sqlx commit kèm).
 bun run fmt:check
 bun run lint
+bun run typecheck
+cd src-tauri && SQLX_OFFLINE=true cargo test --lib

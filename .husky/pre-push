@@ -1,0 +1,7 @@
+# Trước khi đẩy lên remote: bộ cache truy vấn sqlx phải khớp code, nếu không
+# CI (job .sqlx) sẽ đỏ. Cần SQLite CLI để dựng lại DB từ migration.
+set -e
+cd src-tauri
+rm -f sqlx-prep.db
+for f in $(ls migrations/*.sql | sort); do sqlite3 sqlx-prep.db < "$f"; done
+DATABASE_URL="sqlite:sqlx-prep.db" SQLX_OFFLINE=false bunx cargo sqlx prepare --workspace -- --all-targets --check

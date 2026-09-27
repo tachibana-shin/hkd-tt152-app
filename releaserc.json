@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/semantic-release",
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "initialVersion": "0.3.0",
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "preset": "angular",
+        "releaseRules": [
+          { "type": "build", "release": "patch" },
+          { "type": "chore", "scope": "deps", "release": "patch" },
+          { "type": "revert", "release": "patch" },
+          { "type": null, "release": "patch" }
+        ]
+      }
+    ],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "angular",
+        "presetConfig": {
+          "types": [
+            { "type": "feat", "section": "Tính năng mới" },
+            { "type": "fix", "section": "Sửa lỗi" },
+            { "type": "perf", "section": "Hiệu năng" },
+            { "type": "refactor", "section": "Tái cấu trúc" },
+            { "type": "build", "section": "Build / phụ thuộc" },
+            { "type": "docs", "section": "Tài liệu" },
+            { "type": "test", "section": "Kiểm thử" },
+            { "type": "chore", "section": "Việc vặt" }
+          ]
+        }
+      }
+    ],
+    ["@semantic-release/changelog", { "changelogFile": "CHANGELOG.md" }],
+    [
+      "@semantic-release/git",
+      { "assets": ["CHANGELOG.md"], "message": "chore(release): ${nextRelease.version} [skip ci]" }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "successComment": false,
+        "failComment": false,
+        "labels": ["release"]
+      }
+    ]
+  ]
+}
