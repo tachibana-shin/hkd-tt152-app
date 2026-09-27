@@ -18,7 +18,7 @@ jobs:
     name: Frontend (typecheck · lint · build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -38,7 +38,7 @@ jobs:
     env:
       SQLX_OFFLINE: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -62,7 +62,7 @@ jobs:
     name: .sqlx khớp truy vấn
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -73,7 +73,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
             build-essential libssl-dev
-      - uses: taiki-e/install-action@cargo-sqlx
+      # Cài sqlx-cli bằng cargo: không phụ thuộc action bên thứ ba (tag tool của
+      # taiki-e/install-action dễ đổi tên theo phiên bản).
+      - name: Cài sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features sqlite,macros --locked
       - name: Kiểm tra bộ cache truy vấn còn mới
         run: |
           cd src-tauri
@@ -86,7 +89,7 @@ jobs:
     name: E2E (Playwright, offline)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
