@@ -77,39 +77,39 @@ test("login with valid credentials opens the Dashboard with the seeded business 
 
 test("navigating all main tabs updates the header title correctly", async ({ page }) => {
   await ensureLoggedIn(page);
-  // [sidebar button label, header h2 title]
-  const cases: Array<[string, string]> = [
-    ["Tổng quan", "Tổng quan"],
-    ["Sản phẩm", "Danh mục sản phẩm"],
-    ["Tài khoản", "Danh mục tài khoản"],
-    ["Đối tác & Kho", "Danh mục đối tác & kho"],
-    ["Bảng lương", "Bảng lương"],
-    ["Chấm công", "Chấm công"],
-    ["Thu / Chi", "Phiếu thu / chi"],
-    ["Sổ nhật ký", "Sổ nhật ký chung"],
-    ["Nhập liệu", "Nhập liệu Excel"],
-    ["Nhập kho", "Nhập kho"],
-    ["Xuất kho", "Xuất kho / Bán hàng"],
-    ["Tồn kho", "Tồn kho"],
-    ["Hóa đơn", "Hóa đơn"],
-    ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT"],
-    ["HĐĐT", "Hóa đơn điện tử"],
-    ["Tra cứu HĐĐT", "Tra cứu HĐĐT"],
-    ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua"],
-    ["Nhật ký HĐ", "Nhật ký hoạt động"],
-    ["Kế toán HKD", "Kế toán HKD"],
-    ["Người dùng", "Người dùng & phân quyền"],
-    ["Hồ sơ HKD", "Hồ sơ HKD"],
-    ["Cài đặt", "Cài đặt"],
+  // [sidebar button label, header h2 title, route]
+  const cases: Array<[string, string, string]> = [
+    ["Tổng quan", "Tổng quan", "/"],
+    ["Sản phẩm", "Danh mục sản phẩm", "/products"],
+    ["Tài khoản", "Danh mục tài khoản", "/accounts"],
+    ["Đối tác & Kho", "Danh mục đối tác & kho", "/catalogs"],
+    ["Bảng lương", "Bảng lương", "/payroll"],
+    ["Chấm công", "Chấm công", "/attendance"],
+    ["Thu / Chi", "Phiếu thu / chi", "/cash"],
+    ["Sổ nhật ký", "Sổ nhật ký chung", "/ledger"],
+    ["Nhập liệu", "Nhập liệu Excel", "/import"],
+    ["Nhập kho", "Nhập kho", "/inbound"],
+    ["Xuất kho", "Xuất kho / Bán hàng", "/outbound"],
+    ["Tồn kho", "Tồn kho", "/inventory"],
+    ["Hóa đơn", "Hóa đơn", "/invoices"],
+    ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT", "/invoice-queue"],
+    ["HĐĐT", "Hóa đơn điện tử", "/hddt"],
+    ["Tra cứu HĐĐT", "Tra cứu HĐĐT", "/hddt-lookup"],
+    ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua", "/hddt-sync"],
+    ["Nhật ký HĐ", "Nhật ký hoạt động", "/audit"],
+    ["Kế toán HKD", "Kế toán HKD", "/accounting"],
+    ["Người dùng", "Người dùng & phân quyền", "/users"],
+    ["Hồ sơ HKD", "Hồ sơ HKD", "/profiles"],
+    ["Cài đặt", "Cài đặt", "/settings"],
   ];
-  for (const [tab, title] of cases) {
+  for (const [tab, title, path] of cases) {
     // Sidebar buttons carry an icon in their accessible name (e.g. " Tổng quan") → match substring.
     await sidebarButton(page, tab).click();
-    // 30 s: runner CI chậm, mỗi lần đổi tab còn nạp lại dữ liệu (KeepAlive).
+    // Chờ URL đổi TRƯỚC: đây là tín hiệu router đã điều hướng xong. Bấm tab kế
+    // tiếp khi còn đang chuyển trang thì lần điều hướng mới bị bỏ qua — đó là
+    // nguyên nhân test này fail ngẫu nhiên trên runner CI chậm.
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
-    // Chờ app rảnh trước khi bấm tab kế tiếp: bấm khi router còn đang chuyển trang
-    // thì lần điều hướng bị bỏ qua và test fail ngẫu nhiên.
-    await page.waitForLoadState("networkidle");
   }
 });
 
