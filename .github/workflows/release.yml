@@ -168,9 +168,13 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        shell: bash
         run: |
+          # Không có chứng thư → ký ad-hoc (identity "-"). Truyền chuỗi rỗng cho
+          # APPLE_SIGNING_IDENTITY sẽ khiến codesign tìm identity rỗng và fail.
           if [ -z "$APPLE_CERTIFICATE" ]; then
-            echo "::notice::Không có APPLE_CERTIFICATE — bản macOS sẽ KHÔNG ký chứng thư."
+            echo "::notice::Không có APPLE_CERTIFICATE — build macOS ký ad-hoc (người dùng phải bấm 'Mở' khi mở app)."
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
             exit 0
           fi
           echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
@@ -183,7 +187,12 @@ jobs:
           CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep -E "Apple (Development|Distribution)" || true)
           echo "Apple identities: $CERT_INFO"
           CERT_ID=$(echo "$CERT_INFO" | head -1 | awk -F'"' '{print $2}')
-          echo "CERT_ID=$CERT_ID" >> "$GITHUB_ENV"
+          if [ -n "$CERT_ID" ]; then
+            echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Trong keychain không có identity — build macOS ký ad-hoc."
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
 
       # `createUpdaterArtifacts: true` khiến `tauri build` FAIL nếu không có khoá
       # ký → bỏ qua đóng gói thay vì đốt 20 phút runner rồi đỏ.
@@ -208,8 +217,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Bản macOS: dùng identity vừa nạp, bỏ trống thì build không ký.
-          APPLE_SIGNING_IDENTITY: ${{ env.CERT_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
