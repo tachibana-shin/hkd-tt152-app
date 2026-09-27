@@ -5,6 +5,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import { api } from "@/db";
 import type { JournalEntryRow, Account } from "@/types";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -192,13 +193,17 @@ async function save() {
   }
 }
 
-void (async () => {
+async function reload() {
   await Promise.all([
     catalog.loadAll(),
     loadEntries(),
     api.getAccounts().then((a) => (accounts.value = a)),
   ]);
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

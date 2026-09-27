@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { api, inTauri } from "@/db";
 import { useSettingsStore } from "@/stores/settings";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const settings = useSettingsStore();
 const toast = useToast();
@@ -124,8 +125,15 @@ async function onWebToggle() {
   }
 }
 
-load();
-loadWebStatus();
+function reload() {
+  void load();
+  void loadWebStatus();
+}
+
+void reload();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

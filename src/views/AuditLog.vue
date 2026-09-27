@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { api } from "@/db";
 import type { AuditEntry } from "@/types";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const toast = useToast();
 
@@ -98,6 +99,9 @@ function fmtTs(ts: string): string {
 }
 
 void load();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(load);
 </script>
 
 <template>

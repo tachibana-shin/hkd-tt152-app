@@ -10,6 +10,7 @@ import { api } from "@/db";
 import { useBusinessStore } from "@/stores/business";
 import { usePortalSession } from "@/composables/usePortalSession";
 import type { HddtSyncPreview, HddtSyncRow } from "@/types";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const toast = useToast();
 const confirm = useConfirm();
@@ -204,14 +205,23 @@ function openVoucher(no: string) {
 // Mốc bắt đầu = hddt_start_date của hộ → phải nạp config trước rồi mới tính;
 // mốc cuối = hôm nay (hôm nay quét nhưng không cache). Không dùng onMounted vì
 // không có thao tác ref/DOM ở đây.
+// Mốc ngày chỉ đặt một lần lúc mount: quay lại màn không được xoá khoảng
+// ngày người dùng đang lọc.
+async function reload() {
+  await loadSyncPreview();
+}
+
 void (async () => {
   await business.load();
   const range = syncDefaultRange();
   syncFrom.value = range.from;
   syncTo.value = range.to;
   // Cache đồng bộ là dữ liệu cục bộ → tải luôn để thấy trạng thái trước khi quét.
-  await loadSyncPreview();
+  await reload();
 })();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 // App đã đảm bảo phiên lúc khởi động; gọi thêm ở đây để màn này tự đăng nhập
 // nếu phiên đã mất (đăng xuất, token hết hạn) và mở popup nhập captcha tay.
 void (async () => {

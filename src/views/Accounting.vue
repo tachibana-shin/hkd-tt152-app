@@ -12,6 +12,7 @@ import type {
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtVnd, toIsoDate } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const business = useBusinessStore();
 const auth = useAuthStore();
@@ -255,6 +256,12 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
   await loadDeclaration();
 }
 
+// Chỉ nạp lại báo cáo + tờ khai; phần đặt mặc định kỳ khai bên dưới chạy
+// đúng một lần để không mất lựa chọn của người dùng khi quay lại màn.
+async function reload() {
+  await Promise.all([loadReports(), loadDeclaration()]);
+}
+
 void (async () => {
   await business.load();
   // Kỳ báo cáo không còn lưu — mặc định theo năm hiện tại của hệ thống.
@@ -271,8 +278,11 @@ void (async () => {
     if (declPeriod.value === "quarter") declPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
     else if (declPeriod.value === "month") declPeriodNo.value = now.getMonth() + 1;
   }
-  await Promise.all([loadReports(), loadDeclaration()]);
+  await reload();
 })();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

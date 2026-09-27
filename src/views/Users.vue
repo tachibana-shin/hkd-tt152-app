@@ -4,6 +4,7 @@ import { api } from "@/db";
 import type { AppUser, Role } from "@/types";
 import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -192,7 +193,10 @@ async function savePw() {
 
 const roleLabel = (r: string) => ROLES.find((x) => x.value === r)?.label.split(" (")[0] ?? r;
 
-load();
+void load();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(load);
 </script>
 
 <template>

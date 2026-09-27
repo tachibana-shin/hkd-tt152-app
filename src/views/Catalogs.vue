@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import type { Warehouse, Customer, Supplier, IndustryGroup } from "@/types";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
@@ -166,7 +167,10 @@ async function reload() {
 
 // Sửa qua dialog: chọn 1 dòng (tap) rồi bấm Sửa trên header tab.
 
-void catalog.loadAll();
+void reload();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

@@ -7,6 +7,7 @@ import { useSettingsStore } from "@/stores/settings";
 import ProductDialog from "@/components/ProductDialog.vue";
 import type { Product } from "@/types";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
@@ -225,8 +226,16 @@ function onProductSaved() {
   }
 }
 
-loadLazyData();
-catalog.loadIndustryGroups(); // nhóm ngành cho cột + dialog (màn này không loadAll)
+function reload() {
+  // Giữ nguyên con trang + bộ lọc đang xem: chỉ nạp lại đúng trang dữ liệu đó.
+  loadLazyData();
+  catalog.loadIndustryGroups(); // nhóm ngành cho cột + dialog (màn này không loadAll)
+}
+
+void reload();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

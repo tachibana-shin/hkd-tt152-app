@@ -4,6 +4,7 @@ import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import type { LedgerRow } from "@/types";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const business = useBusinessStore();
 const { config } = storeToRefs(business);
@@ -56,10 +57,14 @@ function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
   }
 }
 
-void (async () => {
+async function reload() {
   if (!config.value) await business.load();
   await loadLedger();
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

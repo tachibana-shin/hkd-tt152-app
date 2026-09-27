@@ -3,6 +3,7 @@ import { api } from "@/db";
 import type { AttendanceWorkDay, Employee, PayrollRow } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -222,8 +223,15 @@ async function useAttendanceWorkDays() {
   }
 }
 
-loadEmployees();
-loadPeriods();
+function reload() {
+  void loadEmployees();
+  void loadPeriods();
+}
+
+void reload();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

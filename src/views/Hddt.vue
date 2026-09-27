@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { api } from "@/db";
 import { usePortalSession } from "@/composables/usePortalSession";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const toast = useToast();
 const router = useRouter();
@@ -209,7 +210,7 @@ async function toggleSavedPassword() {
 
 // App đã tự đăng nhập cổng lúc khởi động; màn này chỉ nạp cấu hình tài khoản
 // để hiển thị/đổi. Nếu phiên bị mất (đăng xuất, hết hạn) thì thử lại tại đây.
-void (async () => {
+async function reload() {
   loading.value = true;
   try {
     await loadConfig();
@@ -219,7 +220,11 @@ void (async () => {
   } finally {
     loading.value = false;
   }
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

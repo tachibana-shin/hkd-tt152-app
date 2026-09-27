@@ -2,6 +2,7 @@
 import { api } from "@/db";
 import type { AttendanceStatus, Employee } from "@/types";
 import { useAuthStore } from "@/stores/auth";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const toast = useToast();
 const router = useRouter();
@@ -251,6 +252,9 @@ async function save() {
 }
 
 void reload();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useBusinessStore } from "@/stores/business";
 import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const profile = useProfileStore();
 const auth = useAuthStore();
@@ -221,9 +222,16 @@ async function toggleAutoLogin(p: { key: string }) {
   }
 }
 
-profile.load();
-profile.loadPrefs();
-business.load();
+function reload() {
+  void profile.load();
+  void profile.loadPrefs();
+  void business.load();
+}
+
+void reload();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 
 // ── Cài đặt thông tin hộ kinh doanh (tên, MST, địa chỉ…) ──
 const bizConfigVisible = ref(false);

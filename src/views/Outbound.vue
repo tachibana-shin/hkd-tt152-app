@@ -6,6 +6,7 @@ import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import { api } from "@/db";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -250,9 +251,13 @@ async function save() {
   }
 }
 
-void (async () => {
+async function reload() {
   await Promise.all([catalog.loadAll(), stock.loadEntries("PX")]);
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

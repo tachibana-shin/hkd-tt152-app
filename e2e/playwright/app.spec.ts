@@ -670,6 +670,90 @@ test("Ghi nhận HĐĐT: tự lập phiếu xuất để doanh thu vào sổ", a
   await expect(row2.getByRole("button", { name: "Lập phiếu xuất từ hóa đơn" })).toHaveCount(0);
 });
 
+test("KeepAlive: quay lại màn đã xem thì nạp lại dữ liệu, không còn thấy bản cũ", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  /** Tạo phiếu xuất qua API (có lập kèm hóa đơn bán hàng nếu `create_invoice`). */
+  const makeOutbound = async (voucherNo: string, qty: number) => {
+    const res = await request.post("/api/save_outbound", {
+      data: {
+        posting_date: "2026-09-20",
+        voucher_no: voucherNo,
+        description: `Phiếu xuất ${voucherNo} cho test keep alive`,
+        customer_code: "",
+        unit_code: "HKD",
+        items: [
+          {
+            product_code: "SP001",
+            quantity: qty,
+            unit_price: 15000,
+            industry_code: "PPHH",
+            warehouse_code: "",
+          },
+        ],
+        note: "",
+        receive_now: false,
+        outbound_type: "sale",
+        adjust_dir: "down",
+        create_invoice: true,
+        // Số hóa đơn = số phiếu xuất (đúng như màn Xuất kho gửi lên).
+        invoice: { number: voucherNo, eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+      },
+    });
+    expect(res.ok(), `save_outbound ${voucherNo} failed ${res.status()}: ${await res.text()}`).toBe(
+      true,
+    );
+  };
+
+  // Tồn cho 2 phiếu (các test khác cùng dùng DB nên nhập dư).
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PN9700",
+      description: "Nhập tồn cho test keep alive",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 50, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
+
+  // Vào Hóa đơn TRƯỚC, rồi sang Xuất kho — đúng thứ tự gây lỗi: sửa dữ liệu ở
+  // màn kia, quay lại màn đã cache thấy danh sách lúc mount.
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await expect(page.getByText("PX9700", { exact: true })).toHaveCount(0);
+
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
+  await expect(page.getByText("PX9700", { exact: true })).toHaveCount(0);
+
+  // 1) Dữ liệu đổi ở màn Xuất kho (sinh cả phiếu + hóa đơn kèm theo).
+  await makeOutbound("PX9700", 1);
+
+  // 2) Quay lại Hóa đơn → phải thấy hóa đơn vừa sinh, không còn danh sách cũ.
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("tr", { hasText: "PX9700" }).first()).toBeVisible();
+
+  // 3) Ngược lại: sinh phiếu mới khi đang ở màn Hóa đơn, quay lại Xuất kho →
+  //    danh sách phiếu phải có PX9701.
+  await makeOutbound("PX9701", 1);
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("tr", { hasText: "PX9701" }).first()).toBeVisible();
+});
+
 test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checklist và phím tắt", async ({
   page,
   request,

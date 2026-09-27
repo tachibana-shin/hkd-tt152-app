@@ -17,6 +17,7 @@ import { useAuthStore } from "@/stores/auth";
 import SelectButton from "primevue/selectbutton";
 import type { Invoice, InvoiceQueueItem } from "@/types";
 import { fmtVnd, toIsoDate } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -125,6 +126,9 @@ async function load() {
 }
 
 void load();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(load);
 
 // Phím tắt: chỉ khi màn này đang hiện và không có hộp thoại nào mở.
 function onKeydown(e: KeyboardEvent) {

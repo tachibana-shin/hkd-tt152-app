@@ -5,6 +5,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import { useInvoiceStore } from "@/stores/invoice";
 import { fmtDec as fmt, fmtVnd, toIsoDate } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -94,14 +95,18 @@ async function showDetail(id: number) {
   await invoice.loadCountDetail(id);
 }
 
-void (async () => {
+async function reload() {
   await Promise.all([
     catalog.loadAll(),
     stock.loadSummary(),
     stock.loadLots(""),
     invoice.loadCounts(),
   ]);
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

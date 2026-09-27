@@ -4,6 +4,7 @@ import type { RevenueExpenseRow } from "@/types";
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { fmtVnd as fmt } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const businessName = ref("...");
@@ -13,10 +14,14 @@ const revenueNet = () => (revExp.value?.revenue_up ?? 0) - (revExp.value?.revenu
 const expenseNet = () => (revExp.value?.expense_up ?? 0) - (revExp.value?.expense_down ?? 0);
 const profitLoss = () => revenueNet() - expenseNet();
 
-void (async () => {
+async function reload() {
   businessName.value = await api.getBusinessInfo();
   revExp.value = await api.getRevenueExpense("2026-01-01", "2026-12-31");
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

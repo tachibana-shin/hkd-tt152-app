@@ -8,6 +8,7 @@ import PartnerDialog from "@/components/PartnerDialog.vue";
 import { api } from "@/db";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import type { Account } from "@/types";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
@@ -249,10 +250,14 @@ async function save() {
   }
 }
 
-void (async () => {
+async function reload() {
   await Promise.all([catalog.loadAll(), stock.loadEntries("PN"), settings.load()]);
   accounts.value = await api.getAccounts();
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>

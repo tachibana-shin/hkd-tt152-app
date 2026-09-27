@@ -3,6 +3,7 @@ import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import type { Account } from "@/types";
 import { fmtVnd } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -130,6 +131,9 @@ function remove(a: Account) {
 }
 
 void load();
+
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(load);
 </script>
 
 <template>

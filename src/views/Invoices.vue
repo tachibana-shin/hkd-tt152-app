@@ -5,6 +5,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
 import type { Invoice, InvoiceItem, InvoiceReplaceResult } from "@/types";
 import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
+import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -155,9 +156,13 @@ async function showDetail(inv: Invoice) {
   detailDialog.value = true;
 }
 
-void (async () => {
+async function reload() {
   await Promise.all([catalog.loadAll(), invoiceStore.loadInvoices()]);
-})();
+}
+
+void reload();
+// Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
+useKeepAliveRefresh(reload);
 </script>
 
 <template>
