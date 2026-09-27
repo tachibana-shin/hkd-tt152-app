@@ -24,7 +24,9 @@ on:
 
 concurrency:
   group: release
-  cancel-in-progress: false
+  # Chỉ nên chạy một lần đóng gói tại một thời điểm: commit mới huỷ run đang
+  # chạy (code mới hơn luôn đúng hơn), thay vì xếp hàng chờ run cũ.
+  cancel-in-progress: true
 
 jobs:
   semantic:
