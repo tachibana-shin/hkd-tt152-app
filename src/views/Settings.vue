@@ -2,6 +2,7 @@
 import { api, inTauri } from "@/db";
 import { useSettingsStore } from "@/stores/settings";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useAppUpdater } from "@/composables/useAppUpdater";
 
 const settings = useSettingsStore();
 const toast = useToast();
@@ -20,6 +21,28 @@ const st = reactive({
 
 const saving = ref(false);
 const loading = ref(false);
+
+const updater = useAppUpdater();
+
+/** Kiểm tra cập nhật: báo rõ là đang mới nhất hay có bản mới. */
+async function onCheckUpdate() {
+  const update = await updater.checkUpdate();
+  if (updater.error.value) {
+    toast.add({
+      severity: "error",
+      summary: "Không kiểm tra được cập nhật",
+      detail: updater.error.value,
+      life: 9000,
+    });
+    return;
+  }
+  toast.add({
+    severity: update ? "info" : "success",
+    summary: update ? `Có bản mới ${update.version}` : "Đang là bản mới nhất",
+    detail: update ? "Bấm “Cài bản cập nhật” để tải và khởi động lại app." : "",
+    life: 6000,
+  });
+}
 
 function parseList(text: string): number[] {
   const nums = text
@@ -282,6 +305,68 @@ useKeepAliveRefresh(reload);
             </div>
           </section>
         </div>
+      </template>
+    </Card>
+
+    <!-- Cập nhật OTA: chỉ có ở bản cài (Tauri), bản web không tự cập nhật được. -->
+    <Card>
+      <template #content>
+        <section>
+          <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <i class="pi pi-cloud-download" /> Cập nhật ứng dụng
+          </h4>
+          <div
+            v-if="!updater.inTauri"
+            class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600"
+          >
+            Đang chạy bản web (mở bằng trình duyệt) nên không tự cập nhật được. Cài bản ứng dụng
+            (.exe / .dmg / .AppImage) để nhận cập nhật mới.
+          </div>
+          <div v-else class="space-y-3">
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+              <span class="text-gray-600">
+                Phiên bản đang chạy: <b>{{ updater.current.value || "—" }}</b>
+              </span>
+              <Button
+                label="Kiểm tra cập nhật"
+                icon="pi pi-search"
+                size="small"
+                outlined
+                :loading="updater.checking.value"
+                :disabled="updater.busy.value"
+                @click="onCheckUpdate"
+              />
+              <Button
+                v-if="updater.available.value"
+                :label="`Cài bản ${updater.available.value.version}`"
+                icon="pi pi-download"
+                size="small"
+                :loading="updater.installing.value"
+                :disabled="updater.busy.value"
+                @click="updater.installUpdate()"
+              />
+            </div>
+            <div v-if="updater.installing.value" class="text-sm">
+              <ProgressBar
+                :value="updater.percent.value"
+                :show-value="true"
+                class="h-2 w-full max-w-md"
+              />
+              <div class="mt-1 text-xs text-gray-500">
+                Đang tải bản cập nhật… xong sẽ tự khởi động lại app.
+              </div>
+            </div>
+            <p
+              v-if="updater.available.value?.notes"
+              class="text-sm text-gray-600 whitespace-pre-line"
+            >
+              {{ updater.available.value.notes }}
+            </p>
+            <p v-if="updater.error.value" class="text-sm text-red-600">
+              {{ updater.error.value }}
+            </p>
+          </div>
+        </section>
       </template>
     </Card>
   </div>

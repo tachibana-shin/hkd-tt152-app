@@ -34,6 +34,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1Q0JCRkMzQjk3REU0MEMKUldRTTVIMjV3Ny9MVmV5MWNaZjhFK2dxV3pJUnFNOGZWNzNzWVRjSzkyOGxNZHZwcUNUTWpYbzEK",
+      "endpoints": [
+        "https://github.com/tachibana-shin/hkd-tt152-app/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

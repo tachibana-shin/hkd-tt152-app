@@ -34,6 +34,8 @@ regex = "1"
 axum = "0.8"
 # Cổng HĐĐT: sinh header anti-bot `request-id` (UUID v4) cho mọi gọi API.
 uuid = { version = "1", features = ["v4"] }
+tauri-plugin-updater = "2.13.0"
+tauri-plugin-process = "2.4.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

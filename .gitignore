@@ -47,3 +47,6 @@ __pycache__/
 #HDDT captcha: unlabeled captchas (staging)
 /src-tauri/tools/hddt-captcha/new/
 captcha-samples
+
+# Khoá ký OTA (private key) — TUYỆT ĐỐI không commit
+.tauri/

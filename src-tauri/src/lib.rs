@@ -17,6 +17,9 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Cập nhật OTA: bản mới ký bằng minisign, app tải + cài + khởi động lại.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Test/E2E: trỏ app vào thư mục dữ liệu riêng (cô lập, không đụng dữ liệu thật).
             let app_dir = std::env::var("HKD_DATA_DIR")
