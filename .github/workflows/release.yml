@@ -110,6 +110,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # @tauri-apps/cli nằm trong devDependencies — thiếu bước này thì lệnh
+      # `tauri build` của tauri-action sẽ không tìm thấy.
+      - run: bun install --frozen-lockfile
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -153,6 +156,7 @@ jobs:
 
       # Version của bundle phải khớp tag, nên ghi vào cả 3 file manifest.
       - name: Ghi phiên bản
+        shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: node scripts/set-version.mjs "$VERSION"
