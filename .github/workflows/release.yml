@@ -189,6 +189,8 @@ jobs:
       # ký → bỏ qua đóng gói thay vì đốt 20 phút runner rồi đỏ.
       - name: Kiểm tra khoá ký OTA
         id: updaterkey
+        # Runner Windows mặc định dùng PowerShell — script dưới đây là bash.
+        shell: bash
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
