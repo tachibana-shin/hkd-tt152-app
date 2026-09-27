@@ -638,27 +638,7 @@ pub(crate) async fn link_hddt(
 /// Sinh số phiếu xuất kế tiếp (PX + 3 chữ số) — cùng quy tắc với màn Xuất kho để
 /// số do backend sinh không lệch với số màn hình gợi ý.
 async fn next_px_no(pool: &SqlitePool) -> Result<String, String> {
-    let rows: Vec<String> =
-        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PX'")
-            .fetch_all(pool)
-            .await
-            .map_err(|e| e.to_string())?;
-    let max = rows
-        .iter()
-        .filter_map(|v| {
-            let digits: String = v
-                .chars()
-                .rev()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-            digits.parse::<i64>().ok()
-        })
-        .max()
-        .unwrap_or(0);
-    Ok(format!("PX{:03}", max + 1))
+    crate::commands::stock::next_voucher_no_core(pool, "PX").await
 }
 
 /// Sinh số hóa đơn nội bộ kế tiếp (HD + 4 chữ số) — cùng quy tắc với màn Hóa đơn.

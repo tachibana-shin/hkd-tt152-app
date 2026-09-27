@@ -123,13 +123,9 @@ function onTypeChange() {
   }
 }
 
-function nextVoucherNo() {
-  const nums = entries.value
-    .filter((e) => e.entry_type === "PX")
-    .map((e) => parseInt(e.voucher_no.replace(/\D/g, ""), 10))
-    .filter((n) => !isNaN(n));
-  const next = nums.length ? Math.max(...nums) + 1 : 1;
-  form.voucher_no = `PX${String(next).padStart(3, "0")}`;
+/** Số phiếu do backend sinh (PX001…) — không đoán từ danh sách đang lọc. */
+async function nextVoucherNo() {
+  form.voucher_no = await api.nextVoucherNo("PX");
 }
 
 function openCreate() {
@@ -147,8 +143,8 @@ function openCreate() {
     e_invoice_date: null,
     items: [],
   });
-  nextVoucherNo();
   dialog.value = true;
+  void nextVoucherNo();
 }
 
 // ─── Thêm khách hàng nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
@@ -412,8 +408,8 @@ useKeepAliveRefresh(reload);
             class="w-full"
           />
         </FormField>
-        <FormField label="Số phiếu">
-          <InputText v-model="form.voucher_no" disabled size="small" />
+        <FormField label="Số phiếu" input-id="outbound-voucher-no">
+          <InputText :id="'outbound-voucher-no'" v-model="form.voucher_no" disabled size="small" />
         </FormField>
         <FormField label="Diễn giải">
           <InputText v-model="form.description" size="small" />

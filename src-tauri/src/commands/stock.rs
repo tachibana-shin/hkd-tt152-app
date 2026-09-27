@@ -82,7 +82,18 @@ pub(crate) async fn save_inbound_core(
     pay_now: bool,
     adjust_dir: &str,
 ) -> Result<InboundResult, String> {
+    let voucher_no = voucher_no.trim();
+    if voucher_no.is_empty() {
+        return Err("Cần nhập số phiếu".into());
+    }
+
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Số phiếu nhập đã có rồi thì chặn: bảng đầu phiếu có UNIQUE nên nếu không
+    // chặn, lần lưu sau sẽ bị `ON CONFLICT DO NOTHING` nuốt mất và gộp bút toán
+    // vào phiếu cũ — HĐĐT đồng bộ cũng sẽ neo nhầm vào phiếu đó.
+    if voucher_no_taken(&mut tx, "PN", voucher_no).await? {
+        return Err(format!("Số phiếu nhập {voucher_no} đã tồn tại"));
+    }
 
     // Đầu phiếu nhập (inbound_voucher) — id này là điểm neo để hóa đơn chính
     // thức liên kết chặt với phiếu nhập. Tạo TRƯỚC các dòng bút toán để
@@ -405,16 +416,9 @@ pub(crate) async fn save_inbound_core(
     })
 }
 
-/// Số phiếu chi (PC) tiếp theo: lấy số lớn nhất đang có + 1 (PC001, PC002…).
-/// Khớp với quy ước gợi ý số phiếu ở màn Phiếu thu/chi.
-async fn next_pc_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
-    let rows: Vec<String> =
-        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PC'")
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(|e| e.to_string())?;
-    let max = rows
-        .iter()
+/// Số lớn nhất trong danh sách số phiếu (bỏ ký tự không phải số ở đuôi).
+fn max_voucher_seq(rows: &[String]) -> i64 {
+    rows.iter()
         .filter_map(|v| {
             let digits: String = v
                 .chars()
@@ -427,8 +431,66 @@ async fn next_pc_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
             digits.parse::<i64>().ok()
         })
         .max()
-        .unwrap_or(0);
-    Ok(format!("PC{:03}", max + 1))
+        .unwrap_or(0)
+}
+
+/// Số phiếu kế tiếp theo loại chứng từ (PN0001 / PX001 / PT001 / PC001).
+///
+/// Sinh từ CƠ SỞ DỮ LIỆU chứ không đoán ở màn hình: danh sách trên UI có thể
+/// đang lọc (tìm kiếm / khoảng ngày) nên suy ra số từ danh sách hiển thị sẽ
+/// đụng số phiếu đang tồn tại.
+pub(crate) async fn next_voucher_no_core(
+    pool: &SqlitePool,
+    entry_type: &str,
+) -> Result<String, String> {
+    let (rows, prefix, pad): (Vec<String>, &str, usize) = match entry_type {
+        "PN" => (
+            sqlx::query_scalar!("SELECT voucher_no FROM inbound_voucher")
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?,
+            "PN",
+            4,
+        ),
+        "PX" | "PT" | "PC" => (
+            sqlx::query_scalar!(
+                "SELECT voucher_no FROM journal_entry WHERE entry_type = ?",
+                entry_type
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?,
+            match entry_type {
+                "PX" => "PX",
+                "PT" => "PT",
+                _ => "PC",
+            },
+            3,
+        ),
+        other => return Err(format!("Loại chứng từ '{other}' không sinh số phiếu được")),
+    };
+    let next = max_voucher_seq(&rows) + 1;
+    Ok(format!("{prefix}{next:0pad$}"))
+}
+
+#[tauri::command]
+pub(crate) async fn next_voucher_no(
+    state: State<'_, AppState>,
+    entry_type: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    next_voucher_no_core(&*state.pool.read().await, &entry_type).await
+}
+
+/// Số phiếu chi (PC) tiếp theo: lấy số lớn nhất đang có + 1 (PC001, PC002…).
+/// Khớp với quy ước gợi ý số phiếu ở màn Phiếu thu/chi.
+async fn next_pc_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
+    let rows: Vec<String> =
+        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PC'")
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(format!("PC{:03}", max_voucher_seq(&rows) + 1))
 }
 
 /// Kết quả lưu 1 phiếu xuất kho.
@@ -453,22 +515,7 @@ async fn next_pt_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
             .fetch_all(&mut **tx)
             .await
             .map_err(|e| e.to_string())?;
-    let max = rows
-        .iter()
-        .filter_map(|v| {
-            let digits: String = v
-                .chars()
-                .rev()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-            digits.parse::<i64>().ok()
-        })
-        .max()
-        .unwrap_or(0);
-    Ok(format!("PT{:03}", max + 1))
+    Ok(format!("PT{:03}", max_voucher_seq(&rows) + 1))
 }
 
 /// Lõi xuất kho (không phụ thuộc Tauri State → test trực tiếp):
@@ -497,6 +544,16 @@ pub(crate) async fn save_outbound_core(
 
     // Điều chỉnh GIẢM hóa đơn bán (khách trả lại / giảm doanh thu): ghi đảo doanh
     // thu và nhập lại hàng về kho, KHÔNG xuất FIFO và không tạo phiếu thu.
+    let voucher_no = voucher_no.trim();
+    if voucher_no.is_empty() {
+        return Err("Cần nhập số phiếu".into());
+    }
+    // Trùng số phiếu xuất = hai chứng tờ khác nhau cùng một số → sổ in ra bốn
+    // chứng từ trùng số, không tra cứu được. Chặn trước khi ghi bất kỳ dòng nào.
+    if voucher_no_taken(&mut tx, "PX", voucher_no).await? {
+        return Err(format!("Số phiếu xuất {voucher_no} đã tồn tại"));
+    }
+
     let is_adjust_down = outbound_type == "adjust" && adjust_dir == "down";
     // Hóa đơn bán hàng chỉ lập KÈM cho phiếu thực tăng doanh thu (bán thường /
     // điều chỉnh tăng); phiếu giảm (khách trả lại) chỉ ghi đảo doanh thu → không
@@ -2344,6 +2401,146 @@ mod tests {
     // MST khách hàng lấy từ danh mục; đủ dòng chi tiết với nhóm ngành + tỷ lệ thuế.
     /// Tìm phiếu theo số / mã hàng / khách và lọc khoảng ngày — danh sách sắp
     /// theo ngày nên phiếu cũ nằm giữa, phải có đường tìm nhanh.
+    /// Số phiếu nhập / xuất trùng thì chặn — trùng số là mất khả năng tra cứu
+    /// chứng từ (và với phiếu nhập còn khiến HĐĐT neo nhầm vào phiếu cũ).
+    #[tokio::test]
+    async fn so_phieu_nhap_xuat_trung_thi_bao_loi() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "SP-VN", "Hàng", 0.01).await;
+        let w = seed_warehouse(&pool, "W-VN", "Kho số phiếu").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+        let items_in = [InboundItemInput {
+            product_code: "SP-VN".into(),
+            quantity: 2.0,
+            unit_price: 1000.0,
+            discount: 0.0,
+        }];
+        let items_out = [OutboundItemInput {
+            product_code: "SP-VN".into(),
+            quantity: 1.0,
+            unit_price: 1000.0,
+            discount: 0.0,
+            industry_code: "PPHH".into(),
+            warehouse_code: "W-VN".into(),
+        }];
+
+        save_inbound_core(
+            &pool,
+            "2026-09-01",
+            "PN9100",
+            "Phiếu nhập",
+            "",
+            "W-VN",
+            "HKD",
+            &items_in,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "",
+            "",
+            false,
+            "up",
+        )
+        .await
+        .unwrap();
+        let err = save_inbound_core(
+            &pool,
+            "2026-09-02",
+            "PN9100",
+            "Phiếu nhập lần 2",
+            "",
+            "W-VN",
+            "HKD",
+            &items_in,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "",
+            "",
+            false,
+            "up",
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Số phiếu nhập PN9100 đã tồn tại"), "{err}");
+        // Khác hoa/thường cũng là trùng số.
+        let err = save_inbound_core(
+            &pool,
+            "2026-09-02",
+            "pn9100",
+            "Phiếu nhập lần 3",
+            "",
+            "W-VN",
+            "HKD",
+            &items_in,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "",
+            "",
+            false,
+            "up",
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("đã tồn tại"), "{err}");
+
+        save_outbound_core(
+            &pool,
+            "2026-09-03",
+            "PX9100",
+            "Phiếu xuất",
+            "",
+            "HKD",
+            &items_out,
+            "",
+            false,
+            "sale",
+            "up",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .unwrap();
+        let err = save_outbound_core(
+            &pool,
+            "2026-09-04",
+            "PX9100",
+            "Phiếu xuất lần 2",
+            "",
+            "HKD",
+            &items_out,
+            "",
+            false,
+            "sale",
+            "up",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Số phiếu xuất PX9100 đã tồn tại"), "{err}");
+
+        // Phiếu xuất lưu 2 dòng bút toán — lần lưu trùng phải rollback trọn vẹn,
+        // tồn kho không bị trừ thêm lần nữa.
+        let qty: f64 = sqlx::query_scalar!(
+            "SELECT quantity FROM stock_lot WHERE product_id = ? AND depleted = 0",
+            p
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(qty, 19.0);
+        let n: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) as \"n!: i64\" FROM journal_entry WHERE entry_type = 'PX' AND voucher_no = 'PX9100'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(n, 1, "chỉ có 1 dòng Nợ 131 của phiếu PX9100");
+    }
+
     #[tokio::test]
     async fn tim_phieu_theo_tu_khoa_va_loc_ngay() {
         let pool = test_pool().await;

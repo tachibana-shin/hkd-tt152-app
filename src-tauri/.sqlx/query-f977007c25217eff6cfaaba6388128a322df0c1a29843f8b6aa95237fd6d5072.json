@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\" FROM journal_entry WHERE entry_type = ? AND voucher_no = ? COLLATE NOCASE LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f977007c25217eff6cfaaba6388128a322df0c1a29843f8b6aa95237fd6d5072"
+}

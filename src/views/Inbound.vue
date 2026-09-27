@@ -157,13 +157,9 @@ const form = reactive({
   pay_now: true,
 });
 
-function nextVoucherNo() {
-  const nums = entries.value
-    .filter((e) => e.entry_type === "PN")
-    .map((e) => parseInt(e.voucher_no.replace(/\D/g, ""), 10))
-    .filter((n) => !isNaN(n));
-  const next = nums.length ? Math.max(...nums) + 1 : 1;
-  form.voucher_no = `PN${String(next).padStart(3, "0")}`;
+/** Số phiếu do backend sinh (PN0001…) — không đoán từ danh sách đang lọc. */
+async function nextVoucherNo() {
+  form.voucher_no = await api.nextVoucherNo("PN");
 }
 
 function openCreate() {
@@ -182,8 +178,9 @@ function openCreate() {
     adjust_dir: "up",
     pay_now: true,
   });
-  nextVoucherNo();
   dialog.value = true;
+  // Điền số phiếu sau khi mở hộp thoại: lệnh sinh số là bất đồng bộ.
+  void nextVoucherNo();
 }
 
 function addRow() {
@@ -405,8 +402,8 @@ useKeepAliveRefresh(reload);
             class="w-full"
           />
         </FormField>
-        <FormField label="Số phiếu">
-          <InputText v-model="form.voucher_no" disabled size="small" />
+        <FormField label="Số phiếu" input-id="inbound-voucher-no">
+          <InputText :id="'inbound-voucher-no'" v-model="form.voucher_no" disabled size="small" />
         </FormField>
         <FormField label="Kho nhập">
           <Select

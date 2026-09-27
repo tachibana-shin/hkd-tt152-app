@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"n!: i64\" FROM journal_entry WHERE entry_type = 'PX' AND voucher_no = 'PX9100'",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d5f9c2d112df99fd8249d38c3f2604c1d5ca3b316f8a5a54c873f862b58a20cf"
+}

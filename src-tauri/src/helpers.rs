@@ -144,6 +144,39 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+/// Số chứng từ đã dùng chưa — mọi phiếu đều đánh số theo ký hiệu riêng (PN, PX,
+/// PT, PC) và số đó là định danh để tra cứu / in / đối chiếu với cơ quan thuế,
+/// nên trùng số là dữ liệu sai.
+///
+/// Phiếu nhập có bảng đầu riêng (`inbound_voucher`, đã có UNIQUE); các phiếu
+/// còn lại chỉ tồn tại trên sổ nhật ký nên tra theo `journal_entry`.
+pub(crate) async fn voucher_no_taken(
+    tx: &mut SqliteTransaction<'_>,
+    entry_type: &str,
+    voucher_no: &str,
+) -> Result<bool, String> {
+    let voucher_no = voucher_no.trim();
+    let found: Option<i64> = if entry_type == "PN" {
+        sqlx::query_scalar!(
+            "SELECT id as \"id!\" FROM inbound_voucher WHERE voucher_no = ? COLLATE NOCASE",
+            voucher_no
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?
+    } else {
+        sqlx::query_scalar!(
+            "SELECT id as \"id!\" FROM journal_entry WHERE entry_type = ? AND voucher_no = ? COLLATE NOCASE LIMIT 1",
+            entry_type,
+            voucher_no
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?
+    };
+    Ok(found.is_some())
+}
+
 /// Kiểm tra vai trò của người dùng hiện tại cho thao tác ghi.
 /// Trả lỗi nếu chưa đăng nhập hoặc vai trò không nằm trong danh sách cho phép.
 pub(crate) async fn require_role(

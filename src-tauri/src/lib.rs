@@ -128,6 +128,7 @@ pub fn run() {
             commands::invoice::create_invoice_outbound,
             commands::invoice::replace_invoice,
             commands::invoice::invoice_duplicate_numbers,
+            commands::stock::next_voucher_no,
             commands::invoice_export::invoice_export_pack,
             commands::invoice_export::invoice_mark_exported,
             commands::invoice_export::invoice_queue,

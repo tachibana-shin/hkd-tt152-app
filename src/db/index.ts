@@ -562,6 +562,9 @@ export const api = {
   /** Lập phiếu xuất cho hóa đơn chưa có phiếu (trừ tồn + ghi Nợ 131/Có 511). */
   createInvoiceOutbound: (invoiceId: number) =>
     call<string>("create_invoice_outbound", { invoiceId }),
+  /** Số phiếu kế tiếp do backend sinh (không đoán từ danh sách đang lọc). */
+  nextVoucherNo: (entryType: "PN" | "PX" | "PT" | "PC") =>
+    call<string>("next_voucher_no", { entryType }),
   /** Số hóa đơn bị trùng (sinh ra khi bấm Lập nhiều lần) — app không tự sửa. */
   invoiceDuplicateNumbers: async () =>
     parse<InvoiceDuplicateNumber[]>(await call<string>("invoice_duplicate_numbers", {})),

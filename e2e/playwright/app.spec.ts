@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BASE_URL, MOCK_PORTAL_URL } from "./constants";
@@ -670,6 +671,156 @@ test("Ghi nhận HĐĐT: tự lập phiếu xuất để doanh thu vào sổ", a
   await expect(row2.getByRole("button", { name: "Lập phiếu xuất từ hóa đơn" })).toHaveCount(0);
 });
 
+test("Nhap/Xuat kho: chặn số phiếu trùng, số phiếu mới không đụng số đang lọc", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PN9900",
+      description: "Nhập tồn cho test số phiếu trùng",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 50, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
+
+  // API chặn số phiếu trùng (mọi đường vào, không riêng thao tác trên UI).
+  const dup = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-21",
+      voucher_no: "PN9900",
+      description: "Lặp lại số phiếu",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 1, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(dup.status(), "phải chặn số phiếu nhập trùng").toBe(400);
+  expect(await dup.text()).toContain("PN9900");
+
+  const dupPx = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-20",
+      voucher_no: "PX9900",
+      description: "Phiếu xuất đầu",
+      customer_code: "",
+      unit_code: "HKD",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 15000,
+          industry_code: "PPHH",
+          warehouse_code: "",
+        },
+      ],
+      note: "",
+      receive_now: false,
+      outbound_type: "sale",
+      adjust_dir: "down",
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+    },
+  });
+  expect(dupPx.ok(), `save_outbound failed ${dupPx.status()}`).toBe(true);
+  const again = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-21",
+      voucher_no: "PX9900",
+      description: "Phiếu xuất lặp số",
+      customer_code: "",
+      unit_code: "HKD",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 15000,
+          industry_code: "PPHH",
+          warehouse_code: "",
+        },
+      ],
+      note: "",
+      receive_now: false,
+      outbound_type: "sale",
+      adjust_dir: "down",
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+    },
+  });
+  expect(again.status(), "phải chặn số phiếu xuất trùng").toBe(400);
+  expect(await again.text()).toContain("PX9900");
+
+  // Số phiếu gợi ý lấy từ CƠ SỞ DỮ LIỆU: lọc danh sách chỉ còn vài phiếu cũ rồi
+  // mở hộp thoại tạo phiếu — số ra vẫn phải chưa dùng, khớp số backend sinh.
+  const allPx = (await (
+    await request.post("/api/get_journal_entries", {
+      data: { entryType: "PX", fromDate: "", toDate: "", search: "" },
+    })
+  ).json()) as Array<{ voucher_no: string }>;
+  expect(Array.isArray(allPx), "get_journal_entries phải trả về danh sách").toBe(true);
+  const usedNo = new Set(allPx.map((e) => e.voucher_no));
+
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
+  // Thu hẹp danh sách về khoảng ngày cũ: màn chỉ nạp được vài phiếu nhỏ số.
+  await page.getByPlaceholder("Từ ngày").fill("01/09/2026");
+  await page.getByPlaceholder("Từ ngày").press("Enter");
+  await page.getByPlaceholder("Đến ngày").fill("02/09/2026");
+  await page.getByPlaceholder("Đến ngày").press("Enter");
+
+  await page.getByRole("button", { name: "Tạo phiếu xuất" }).click();
+  const dlg = page.getByRole("dialog");
+  const numberInput = dlg.getByLabel("Số phiếu");
+  await expect(numberInput).toHaveValue(/^PX\d{3,}$/);
+  const suggested = await numberInput.inputValue();
+  const fromApi = await (
+    await request.post("/api/next_voucher_no", { data: { entryType: "PX" } })
+  ).text();
+  expect(suggested, "số phiếu phải do backend sinh, không đoán từ danh sách đang lọc").toBe(
+    fromApi,
+  );
+  expect(usedNo.has(suggested), `số ${suggested} đã dùng mà vẫn được gợi ý`).toBe(false);
+  await dlg.getByRole("button", { name: "Hủy" }).click();
+
+  // Lưu phiếu với số gợi ý → hộp thoại đóng, phiếu mới xuất hiện trong danh sách.
+  await page.getByRole("button", { name: "Tạo phiếu xuất" }).click();
+  const dlg2 = page.getByRole("dialog");
+  const line = dlg2.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  await page
+    .getByRole("option", { name: /Bottled water/ })
+    .first()
+    .click();
+  await dlg2.getByRole("button", { name: "Lưu phiếu" }).click();
+  await expect(dlg2).toBeHidden();
+  await expect(page.locator("tr", { has: page.getByText(suggested, { exact: true }) })).toHaveCount(
+    1,
+  );
+});
+
 test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", async ({ page, request }) => {
   await ensureLoggedIn(page);
 
@@ -778,60 +929,21 @@ test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", asy
 test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ liệu", async ({ page, request }) => {
   await ensureLoggedIn(page);
 
-  const stockIn = await request.post("/api/save_inbound", {
-    data: {
-      posting_date: "2026-09-20",
-      voucher_no: "PN9700",
-      description: "Nhập tồn cho test số hóa đơn trùng",
-      supplier_code: "",
-      warehouse_code: "KHO-CHINH",
-      unit_code: "HKD",
-      items: [{ product_code: "SP001", quantity: 20, unit_price: 10000, discount: 0 }],
-      note: "",
-      inbound_type: "purchase",
-      reference_no: "",
-      vat_rate: 0,
-      debit_account: "152",
-      credit_account: "331",
-      pay_now: false,
-      adjust_dir: "up",
-    },
-  });
-  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
+  // Dựng dữ liệu trùng số như thời trước khi app có chặn: ghi thẳng vào file
+  // SQLite của phiên E2E (app đang mở, WAL nên ghi song song được). Chỉ đụng
+  // DB tạm của test — không bao giờ đụng dữ liệu thật của hộ.
+  const dupNo = "HD9750";
+  const dataDir = readFileSync("/tmp/hkd-e2e-dir", "utf8").trim();
+  const dbPath = `${dataDir}/profiles/default/hkd.db`;
+  execFileSync("sqlite3", [
+    dbPath,
+    `INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount, status)
+     VALUES ('${dupNo}', '2026-09-20', 'Khách Trùng Số', '0100000000', 10000, 0, 'draft');
+     INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount, status)
+     VALUES ('${dupNo}', '2026-09-20', 'Khách Trùng Số', '0100000000', 10000, 0, 'draft');`,
+  ]);
 
-  // Dựng cặp hóa đơn trùng số như dữ liệu lỡ có sẵn: lập phiếu xuất kèm hóa đơn
-  // hai lần với cùng số phiếu (đường này không qua chặn trùng của app).
-  const dupNo = "PX9700";
-  for (let i = 0; i < 2; i++) {
-    const res = await request.post("/api/save_outbound", {
-      data: {
-        posting_date: "2026-09-20",
-        voucher_no: dupNo,
-        description: "Lập trùng số hóa đơn để test cảnh báo",
-        customer_code: "",
-        unit_code: "HKD",
-        items: [
-          {
-            product_code: "SP001",
-            quantity: 1,
-            unit_price: 10000,
-            industry_code: "PPHH",
-            warehouse_code: "",
-          },
-        ],
-        note: "",
-        receive_now: false,
-        outbound_type: "sale",
-        adjust_dir: "down",
-        create_invoice: true,
-        invoice: { number: dupNo, eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
-      },
-    });
-    expect(res.ok(), `save_outbound lần ${i + 1} failed ${res.status()}: ${await res.text()}`).toBe(
-      true,
-    );
-  }
-
+  await page.reload();
   await sidebarButton(page, "Hóa đơn").click();
   await expect(page.locator("header h2")).toHaveText("Hóa đơn");
 
@@ -1183,7 +1295,7 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-21",
-      voucher_no: "PN9300",
+      voucher_no: "PN9350",
       description: "Nhập tồn cho test bấm nhiều lần",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",

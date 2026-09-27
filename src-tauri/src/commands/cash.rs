@@ -66,6 +66,20 @@ pub(crate) async fn save_cash_entry(
     }
 
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Số phiếu thu/chi là định danh chứng từ — trùng số thì báo lỗi thay vì gộp
+    // hai khoản tiền vào một số.
+    if voucher_no_taken(&mut tx, &input.entry_type, &input.voucher_no).await? {
+        let loai = if input.entry_type == "PT" {
+            "phiếu thu"
+        } else {
+            "phiếu chi"
+        };
+        return Err(format!(
+            "Số {} {} đã tồn tại",
+            loai,
+            input.voucher_no.trim()
+        ));
+    }
     insert_journal_entry(
         &mut tx,
         &input.posting_date,

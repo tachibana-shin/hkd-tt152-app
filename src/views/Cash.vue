@@ -63,20 +63,16 @@ const objectCode = computed({
   },
 });
 
-function suggestVoucherNo(type: string) {
-  const nums = entries.value
-    .filter((e) => e.entry_type === type)
-    .map((e) => parseInt(e.voucher_no.replace(/\D/g, ""), 10))
-    .filter((n) => !isNaN(n));
-  const next = nums.length ? Math.max(...nums) + 1 : 1;
-  return `${type}${String(next).padStart(3, "0")}`;
+/** Số phiếu do backend sinh (PT001 / PC001) — danh sách trên UI có thể đang lọc. */
+async function suggestVoucherNo(type: "PT" | "PC") {
+  form.voucher_no = await api.nextVoucherNo(type);
 }
 
 function resetForm(type: "PT" | "PC") {
   Object.assign(form, {
     entry_type: type,
     posting_date: new Date(),
-    voucher_no: suggestVoucherNo(type),
+    voucher_no: "",
     description: type === "PT" ? "Thu tiền mặt" : "Chi tiền mặt",
     customer_code: "",
     supplier_code: "",
@@ -90,6 +86,7 @@ function resetForm(type: "PT" | "PC") {
 function openCreate() {
   resetForm("PT");
   dialog.value = true;
+  void suggestVoucherNo("PT");
 }
 
 function onTypeChange() {
@@ -98,7 +95,7 @@ function onTypeChange() {
   form.supplier_code = "";
   form.debit_account = t === "PT" ? "111" : "642";
   form.credit_account = t === "PT" ? "511" : "111";
-  form.voucher_no = suggestVoucherNo(t);
+  void suggestVoucherNo(t);
 }
 
 async function loadEntries() {
