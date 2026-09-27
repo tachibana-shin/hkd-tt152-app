@@ -926,7 +926,7 @@ test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", asy
   await expect(page.locator("tr", { hasText: "PN9800" }).first()).toBeVisible();
 });
 
-test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ liệu", async ({ page, request }) => {
+test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ liệu", async ({ page }) => {
   await ensureLoggedIn(page);
 
   // Dựng dữ liệu trùng số như thời trước khi app có chặn: ghi thẳng vào file
