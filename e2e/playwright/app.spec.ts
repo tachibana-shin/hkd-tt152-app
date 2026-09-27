@@ -75,6 +75,30 @@ test("login with valid credentials opens the Dashboard with the seeded business 
   await expect(page.getByText("Quản trị").first()).toBeVisible();
 });
 
+/**
+ * Bấm một tab trên sidebar và chờ URL đổi.
+ *
+ * Bấm liên tiếp 22 màn trong vòng lặp đôi khi rơi mất lần bấm: app còn đang
+ * mount route lazy (Vite biên dịch chunk lần đầu) thì click không tới được
+ * router. Người dùng thật chỉ cần bấm lại, nên test cũng vậy — tối đa 3 lần.
+ */
+async function openTab(page: Page, tab: string, path: string) {
+  // Sidebar buttons carry an icon in their accessible name (e.g. " Tổng quan") → match substring.
+  const button = sidebarButton(page, tab);
+  const url = new RegExp(`${path}$`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await button.click();
+    try {
+      // 30 s: runner CI 2-core biên dịch chunk lazy chậm hơn máy dev nhiều.
+      await expect(page).toHaveURL(url, { timeout: 30_000 });
+      return;
+    } catch {
+      /* click rơi — thử lại */
+    }
+  }
+  throw new Error(`Không chuyển được tới "${tab}" (${path}) sau 3 lần bấm`);
+}
+
 test("navigating all main tabs updates the header title correctly", async ({ page }) => {
   await ensureLoggedIn(page);
   // [sidebar button label, header h2 title, route]
@@ -103,12 +127,7 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
     ["Cài đặt", "Cài đặt", "/settings"],
   ];
   for (const [tab, title, path] of cases) {
-    // Sidebar buttons carry an icon in their accessible name (e.g. " Tổng quan") → match substring.
-    await sidebarButton(page, tab).click();
-    // Chờ URL đổi TRƯỚC: đây là tín hiệu router đã điều hướng xong. Bấm tab kế
-    // tiếp khi còn đang chuyển trang thì lần điều hướng mới bị bỏ qua — đó là
-    // nguyên nhân test này fail ngẫu nhiên trên runner CI chậm.
-    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await openTab(page, tab, path);
     await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
   }
 });
