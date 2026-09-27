@@ -105,7 +105,11 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
   for (const [tab, title] of cases) {
     // Sidebar buttons carry an icon in their accessible name (e.g. " Tổng quan") → match substring.
     await sidebarButton(page, tab).click();
-    await expect(page.locator("header h2")).toHaveText(title, { timeout: 15_000 });
+    // 30 s: runner CI chậm, mỗi lần đổi tab còn nạp lại dữ liệu (KeepAlive).
+    await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
+    // Chờ app rảnh trước khi bấm tab kế tiếp: bấm khi router còn đang chuyển trang
+    // thì lần điều hướng bị bỏ qua và test fail ngẫu nhiên.
+    await page.waitForLoadState("networkidle");
   }
 });
 
