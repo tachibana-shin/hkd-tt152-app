@@ -45,7 +45,10 @@ jobs:
         uses: cycjimmy/semantic-release-action@v4
         with:
           branch: main
-          tagFormat: "v${version}"
+          # Đúng tên input của action (snake_case). Mặc định `unset_gha_env: true`
+          # khiến action KHÔNG xuất `version`/`release_id` → job đóng gói bị bỏ qua.
+          tag_format: "v${version}"
+          unset_gha_env: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -133,7 +136,22 @@ jobs:
           CERT_ID=$(echo "$CERT_INFO" | head -1 | awk -F'"' '{print $2}')
           echo "CERT_ID=$CERT_ID" >> "$GITHUB_ENV"
 
+      # `createUpdaterArtifacts: true` khiến `tauri build` FAIL nếu không có khoá
+      # ký → bỏ qua đóng gói thay vì đốt 20 phút runner rồi đỏ.
+      - name: Kiểm tra khoá ký OTA
+        id: updaterkey
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Chưa có secret TAURI_SIGNING_PRIVATE_KEY — bỏ qua đóng gói. Thêm secret rồi chạy lại workflow Release."
+          fi
+
       - name: Build & phát hành
+        if: steps.updaterkey.outputs.available == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
