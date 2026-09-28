@@ -1,3 +1,10 @@
+## [0.6.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.6.0...v0.6.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **release:** skip packaging when there is nothing new to ship ([b48a14c](https://github.com/tachibana-shin/hkd-tt152-app/commit/b48a14c450ed326da34f50270500295a0e868c59))
+
 # Changelog
 
 Nhật ký thay đổi của HKD Kế Toán. Mỗi mục tương ứng một bản phát hành;
