@@ -1,3 +1,18 @@
+# [0.6.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.5.0...v0.6.0) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ci:** format the files the formatter was rejecting ([aa8b0d0](https://github.com/tachibana-shin/hkd-tt152-app/commit/aa8b0d05918cbe5a7e3bd52c97b0763fa9ffab7d))
+* **release:** make the version bump survive Windows and CI runners ([166bdf8](https://github.com/tachibana-shin/hkd-tt152-app/commit/166bdf803730007aea99b641021f3ffad6231b22))
+* **release:** stop notarizing macOS builds when no Apple credentials exist ([2cc95be](https://github.com/tachibana-shin/hkd-tt152-app/commit/2cc95be1744570c8621177bbab6e2e44af9214a5))
+
+
+### Features
+
+* **release:** bump the version from the tag and keep a changelog ([74f6c0f](https://github.com/tachibana-shin/hkd-tt152-app/commit/74f6c0fc195f0d8260f7fd2a101bd7f8a03d9784))
+* **release:** let semantic-release bump the version and keep a changelog ([61bcde3](https://github.com/tachibana-shin/hkd-tt152-app/commit/61bcde3d2d94843b2317fa9f186575a1914ac3d1))
+
 # Changelog
 
 Nhật ký thay đổi của HKD Kế Toán. Mỗi mục tương ứng một bản phát hành;
