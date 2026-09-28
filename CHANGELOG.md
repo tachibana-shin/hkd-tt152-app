@@ -1,5 +1,11 @@
 # Changelog
 
+# [0.7.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.6.1...v0.7.0) (2026-09-28)
+
+
+### Features
+
+* **accounting:** default the report dates to the household's tax period ([363bbda](https://github.com/tachibana-shin/hkd-tt152-app/commit/363bbda50999762489675e6747a58bfa1191341c))
 
 Nhật ký thay đổi của HKD Kế Toán. Mỗi mục tương ứng một bản phát hành;
 phiên bản được [semantic-release](https://github.com/semantic-release/semantic-release)
