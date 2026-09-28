@@ -34,7 +34,13 @@
         }
       }
     ],
-    ["@semantic-release/changelog", { "changelogFile": "CHANGELOG.md" }],
+    [
+      "@semantic-release/changelog",
+      {
+        "changelogFile": "CHANGELOG.md",
+        "changelogTitle": "# Changelog"
+      }
+    ],
     [
       "@semantic-release/exec",
       { "prepareCmd": "node scripts/set-version.mjs ${nextRelease.version}" }

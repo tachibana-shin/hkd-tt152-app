@@ -1,17 +1,11 @@
-## [0.6.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.6.0...v0.6.1) (2026-09-28)
-
-
-### Bug Fixes
-
-* **release:** skip packaging when there is nothing new to ship ([b48a14c](https://github.com/tachibana-shin/hkd-tt152-app/commit/b48a14c450ed326da34f50270500295a0e868c59))
-
 # Changelog
+
 
 Nhật ký thay đổi của HKD Kế Toán. Mỗi mục tương ứng một bản phát hành;
 phiên bản được [semantic-release](https://github.com/semantic-release/semantic-release)
 tính tự động từ commit trước đó (`feat` → minor, `fix` → patch, kèm `!` → major).
 
-# [0.6.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.5.0...v0.6.0) (2026-09-28)
+## [0.6.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.5.0...v0.6.0) (2026-09-28)
 
 
 ### Bug Fixes
@@ -25,6 +19,14 @@ tính tự động từ commit trước đó (`feat` → minor, `fix` → patch,
 
 * **release:** bump the version from the tag and keep a changelog ([74f6c0f](https://github.com/tachibana-shin/hkd-tt152-app/commit/74f6c0fc195f0d8260f7fd2a101bd7f8a03d9784))
 * **release:** let semantic-release bump the version and keep a changelog ([61bcde3](https://github.com/tachibana-shin/hkd-tt152-app/commit/61bcde3d2d94843b2317fa9f186575a1914ac3d1))
+
+
+## [0.6.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.6.0...v0.6.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **release:** skip packaging when there is nothing new to ship ([b48a14c](https://github.com/tachibana-shin/hkd-tt152-app/commit/b48a14c450ed326da34f50270500295a0e868c59))
 
 ## [0.3.0](https://github.com/tachibana-shin/hkd-tt152-app/tags/v0.3.0) (2026-09-27)
 

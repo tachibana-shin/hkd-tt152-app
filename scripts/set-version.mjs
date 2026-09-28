@@ -126,8 +126,7 @@ if (check) {
   const [only] = [...versions];
   console.log(`Phiên bản trong repo: ${only}`);
 
-  // Nếu đọc được remote thì so với tag v* mới nhất — tag là nguồn sự thật của
-  // bản phát hành. Không có remote/tag thì bỏ qua (ví dụ checkout sâu).
+  // Nếu đọc được remote thì báo mốc với tag v* mới nhất.
   let tag = null;
   try {
     tag = execFileSync("git", ["ls-remote", "--tags", "origin", "v*"], {
@@ -144,16 +143,18 @@ if (check) {
     /* không có git hoặc không có remote — bỏ qua bước so với tag */
   }
   if (tag) {
-    if (tag !== only) {
-      console.error(
-        `::error::Tag mới nhất trên remote là v${tag} nhưng repo đang ghi ${only}. ` +
-          "Chạy `node scripts/set-version.mjs " +
-          tag +
-          "` rồi commit.",
-      );
-      process.exit(1);
+    // KHÔNG so bằng phép bằng: tag được tạo SAU commit đã push, nên commit kích
+    // hoạt release luôn thấy version thấp hơn tag mới nhất — chuyện bình thường,
+    // không phải lỗi (chính CI chạy trên đúng commit đó). Lỗi thật là 4 file lệch
+    // nhau, đã kiểm ở trên.
+    const cmp = only.localeCompare(tag, undefined, { numeric: true });
+    if (cmp === 0) {
+      console.log(`Khớp tag v${tag} trên remote.`);
+    } else if (cmp < 0) {
+      console.log(`Thấp hơn tag v${tag} trên remote — bình thường (tag vừa tạo sau commit này).`);
+    } else {
+      console.warn(`::warning::Repo ghi ${only} nhưng tag mới nhất là v${tag}.`);
     }
-    console.log(`Khớp tag v${tag} trên remote.`);
   }
   process.exit(0);
 }
