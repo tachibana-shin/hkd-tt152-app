@@ -266,8 +266,13 @@ mới rồi build 6 target trong một Release nháp:
 - Linux x64 (AppImage + .deb), Linux ARM64 (AppImage)
 
 Cách tính phiên bản: `feat:` → minor, `fix:` → patch, `!` trong tiêu đề hoặc
-`BREAKING CHANGE` → major, commit không ghi kiểu → patch. Nhãn bản phải theo
+`BREAKING CHANGE` → major. Nhãn bản phải theo
 [Conventional Commits](https://www.conventionalcommits.org/).
+
+> `docs:`, `chore:`, `test:` **không** kích hoạt bản mới — workflow sẽ chạy
+> semantic-release rồi bỏ qua luôn bước đóng gói, nên những commit đó không tốn
+> runner nào. Commit **không ghi kiểu** (kiểu `"Update README"`) vẫn ra patch theo
+> `releaseRules` trong [`.releaserc.json`](.releaserc.json).
 
 **Mỗi lần release, semantic-release tự động:**
 

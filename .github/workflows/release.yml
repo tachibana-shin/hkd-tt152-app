@@ -45,6 +45,8 @@ jobs:
       # clippy` → cần system dep (webkit/gtk) mà runner này không có, job đỏ
       # sau khi đã tính xong phiên bản. Code đã qua job `frontend` + `rust` ở CI.
       HUSKY: "0"
+    outputs:
+      released: ${{ steps.result.outputs.released }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -61,20 +63,38 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      # Tag mới nhất TRƯỚC khi semantic-release chạy — để biết nó có tạo bản mới
+      # hay không (commit kiểu docs/chore/test không kích hoạt release).
+      - name: Tag trước khi phát hành
+        id: before
+        run: echo "tag=$(git tag --list 'v*' --sort=-v:refname | head -1)" >> "$GITHUB_OUTPUT"
       - name: semantic-release
         # Cài đặt của 7 plugin trong .releaserc.json nằm trong devDependencies
         # nên bước `bun install` trên là đủ — không cài bằng action bên thứ ba.
         run: npx --no-install semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # semantic-release đẩy tag lên remote nên phải fetch về mới thấy.
+      - name: Có bản phát hành mới không
+        id: result
+        run: |
+          git fetch --tags --force --quiet
+          newest=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          echo "Bản mới nhất: $newest (trước đó: ${{ steps.before.outputs.tag }})"
+          if [ -z "$newest" ] || [ "$newest" = "${{ steps.before.outputs.tag }}" ]; then
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Không có thay đổi nào đáng phát hành (chỉ docs/chore/test) — bỏ qua đóng gói."
+          else
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          fi
 
   package:
     name: ${{ matrix.label }}
     needs: semantic
-    # Luôn chạy: phiên bản lấy ở bước dưới — từ input khi chạy tay, nếu không
-    # thì từ tag v* mới nhất do semantic-release vừa đẩy lên (nguồn sự thật,
-    # không phụ thuộc output của action).
-    if: ${{ always() }}
+    # Chạy khi có bản mới (semantic-release vừa tạo tag) hoặc khi chạy tay chỉ định
+    # version. Commit chỉ đổi docs/chore/test sẽ KHÔNG đóng gói lại — không có gì
+    # để phát hành thì đốt 6 runner là phí phạm.
+    if: ${{ always() && (inputs.version != '' || needs.semantic.outputs.released == 'true') }}
     strategy:
       fail-fast: false
       matrix:
