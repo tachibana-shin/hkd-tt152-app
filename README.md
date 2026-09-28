@@ -1,10 +1,7 @@
 # 🧾 Phần mềm Kế toán Hộ kinh doanh — TT 152/2021/TT-BTC
 
-> Ứng dụng desktop kế toán cho **Hộ kinh doanh / Cá nhân kinh doanh**, bám theo Thông tư
-> 152/2021/TT-BTC và bộ mẫu Excel HKD (nhật ký chung, sổ quỹ, NXT, bảng lương, chấm công,
-> tờ khai thuế GTGT/TNCN, bảng kê giảm thuế GTGT, phiếu nhập/xuất kho, hóa đơn điện tử).
->
-> **Phiên bản:** `0.3.0` · **Nền tảng:** Tauri 2 (Rust + sqlx + SQLite) · **Giao diện:** Vue 3 + TypeScript (PrimeVue + Tailwind CSS)
+Ứng dụng desktop kế toán cho **Hộ kinh doanh / Cá nhân kinh doanh**, bám theo Thông tư
+152/2021/TT-BTC và bộ mẫu Excel HKD (nhật ký chung, sổ quỹ, NXT, bảng lương, chấm công, tờ khai thuế GTGT/TNCN, bảng kê giảm thuế GTGT, phiếu nhập/xuất kho, hóa đơn điện tử).
 
 > [!WARNING]
 > **⚠️ Read this before using or reusing the code.**
