@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.8.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.7.0...v0.8.0) (2026-09-28)
+
+
+### Features
+
+* **tax:** keep the household group in the business profile and pre-fill it ([8504424](https://github.com/tachibana-shin/hkd-tt152-app/commit/8504424bc0692a6d8ed54edd95939dcb767c0591))
+
 # [0.7.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.6.1...v0.7.0) (2026-09-28)
 
 
