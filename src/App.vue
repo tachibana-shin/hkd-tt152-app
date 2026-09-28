@@ -311,7 +311,7 @@ onUnmounted(() => {
         class="px-5 py-5 border-b border-gray-700 flex items-center gap-3"
         :class="sidebarCompact ? 'justify-center px-2' : ''"
       >
-        <i class="pi pi-calculator text-2xl text-primary-400 shrink-0"></i>
+        <img src="/app-icon.png" alt="" class="h-8 w-8 shrink-0" />
         <div v-if="!sidebarCompact" class="leading-tight">
           <h1 class="text-lg font-bold tracking-wide">HKD Kế Toán</h1>
           <p class="text-xs text-gray-400 mt-0.5">TT 152/2025</p>

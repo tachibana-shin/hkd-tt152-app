@@ -31,12 +31,12 @@ const AVATAR_COLORS = [
   >
     <div class="text-center px-6 py-10">
       <div class="text-white mb-8">
-        <i class="pi pi-calculator text-4xl text-primary-400"></i>
+        <img src="/app-icon.png" alt="" class="mx-auto h-16 w-16" />
         <h1 class="text-2xl font-bold mt-3 tracking-wide">HKD Kế Toán</h1>
         <p class="text-sm text-gray-400 mt-1">Chọn hồ sơ để tiếp tục</p>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 gap-5 justify-items-center">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 justify-items-center">
         <button
           v-for="(p, i) in profiles"
           :key="p.key"

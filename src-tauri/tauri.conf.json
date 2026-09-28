@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "hkd-tt152-app",
+  "productName": "HKD Ke Toan",
   "version": "0.3.0",
   "identifier": "git.shin.hdk-tt152-app",
   "build": {
