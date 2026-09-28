@@ -47,14 +47,24 @@ function jsonVersion(file) {
   return m[1];
 }
 
+/**
+ * Regex tìm khối `[[package]]` của crate trong Cargo.lock — 3 nhóm bắt: tiền tố,
+ * phiên bản, hậu tố.
+ * Phải chấp nhận CRLF: runner Windows checkout với core.autocrlf=true nên file
+ * bị đổi hết sang \r\n — regex chỉ khớp \n sẽ không tìm thấy gói nào.
+ */
+function lockPackagePattern() {
+  return new RegExp(
+    `(\\[\\[package\\]\\]\\r?\\nname = "${crateName()}"\\r?\\nversion = ")([^"]*)(")`,
+  );
+}
+
 /** Phiên bản trong khối [[package]] của crate trong Cargo.lock. */
 function lockVersion() {
   const text = readFileSync(LOCK, "utf8");
-  const block = text.match(
-    new RegExp(`\\[\\[package\\]\\]\\nname = "${crateName()}"\\nversion = "([^"]*)"`),
-  );
+  const block = text.match(lockPackagePattern());
   if (!block) throw new Error(`Không tìm thấy gói ${crateName()} trong src-tauri/Cargo.lock`);
-  return block[1];
+  return block[2];
 }
 
 /** Phiên bản trong [package].version của Cargo.toml. */
@@ -93,13 +103,11 @@ function setCargoVersion(value) {
 // Không sửa thì `cargo build --locked` và Tauri CLI sẽ thấy lockfile lệch.
 function setLockVersion(value) {
   const text = readFileSync(LOCK, "utf8");
-  const pattern = new RegExp(
-    `(\\[\\[package\\]\\]\\nname = "${crateName()}"\\nversion = ")[^"]*(")`,
-  );
+  const pattern = lockPackagePattern();
   if (!pattern.test(text)) {
     throw new Error(`Không tìm thấy gói ${crateName()} trong src-tauri/Cargo.lock`);
   }
-  writeFileSync(LOCK, text.replace(pattern, `$1${value}$2`));
+  writeFileSync(LOCK, text.replace(pattern, `$1${value}$3`));
   console.log(`src-tauri/Cargo.lock: ${crateName()} = ${value}`);
 }
 

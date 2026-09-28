@@ -40,6 +40,11 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    env:
+      # Tắt hook husky: commit của semantic-release chạy pre-commit → `cargo
+      # clippy` → cần system dep (webkit/gtk) mà runner này không có, job đỏ
+      # sau khi đã tính xong phiên bản. Code đã qua job `frontend` + `rust` ở CI.
+      HUSKY: "0"
     steps:
       - uses: actions/checkout@v5
         with:
