@@ -245,7 +245,7 @@ async function save() {
     @update:visible="emit('update:visible', $event)"
     @action="save"
   >
-    <div class="grid grid-cols-2 gap-4 py-2">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
       <FormField label="Tên hộ kinh doanh" required class="col-span-2">
         <InputText v-model="form.name" placeholder="Ví dụ: Hộ kinh doanh Nguyễn Văn A" />
       </FormField>

@@ -4,6 +4,7 @@ import { useProfileStore } from "@/stores/profile";
 import { useBusinessStore } from "@/stores/business";
 import { useThemeStore } from "@/stores/theme";
 import { usePortalSession } from "@/composables/usePortalSession";
+import { useViewport } from "@/composables/useViewport";
 import LoginView from "@/views/LoginView.vue";
 
 const route = useRoute();
@@ -15,6 +16,34 @@ const theme = useThemeStore();
 const toast = useToast();
 const portal = usePortalSession();
 const pageTitle = computed(() => route.meta?.title || "HKD Kế Toán");
+
+// ─── Responsive ───
+// • Cửa sổ desktop bị thu nhỏ: sidebar còn nằm tại chỗ nhưng thu gọn thành thanh
+//   icon để nhường chỗ cho bảng dữ liệu.
+// • Điện thoại/tablet thật: sidebar thành ngăn kéo trượt, mở bằng nút hamburger,
+//   bấm mục hoặc vùng phủ thì đóng lại.
+const { isNarrow, coarsePointer } = useViewport();
+/** Chỉ dùng ngăn kéo khi màn hẹp VÀ thiết bị cảm ứng — desktop thu nhỏ giữ sidebar tại chỗ. */
+const drawerMode = computed(() => isNarrow.value && coarsePointer.value);
+const sidebarOpen = ref(false);
+
+const sidebarClass = computed(() => {
+  if (drawerMode.value) {
+    return (
+      "w-64 fixed inset-y-0 left-0 z-40 transition-transform duration-200 " +
+      (sidebarOpen.value ? "translate-x-0" : "-translate-x-full")
+    );
+  }
+  return isNarrow.value
+    ? "w-16 transition-[width] duration-200"
+    : "w-64 transition-[width] duration-200";
+});
+/** Ẩn chữ khi sidebar thu gọn (desktop thu nhỏ) hoặc trong ngăn kéo hẹp. */
+const sidebarCompact = computed(() => !drawerMode.value && isNarrow.value);
+
+function closeSidebar() {
+  if (drawerMode.value) sidebarOpen.value = false;
+}
 
 // Luồng khởi động: nạp hồ sơ + prefs → thử auto-login → chọn hồ sơ (nhiều hồ sơ)
 // → màn hình đăng nhập. `bootstrapped` giữ màn chờ cho tới khi hoàn tất.
@@ -235,6 +264,13 @@ onMounted(() => {
   bootstrap();
 });
 
+// Mở rộng cửa sổ trở lại → không giữ ngăn kéo mở.
+watch(isNarrow, (narrow) => {
+  if (!narrow) sidebarOpen.value = false;
+});
+// Bấm mục trên điện thoại thì đóng ngăn kéo để thấy màn vừa mở.
+watch(() => route.fullPath, closeSidebar);
+
 onUnmounted(() => {
   portal.stopHeartbeat();
 });
@@ -261,12 +297,22 @@ onUnmounted(() => {
   <LoginView v-else-if="!auth.isLoggedIn" />
 
   <div v-else class="flex h-screen overflow-hidden bg-gray-50">
+    <!-- Lớp phủ khi mở ngăn kéo (điện thoại/tablet) -->
+    <div
+      v-if="drawerMode && sidebarOpen"
+      class="fixed inset-0 z-30 bg-black/40"
+      @click="sidebarOpen = false"
+    />
+
     <!-- Sidebar -->
-    <aside class="w-64 bg-gray-900 text-white flex flex-col shadow-xl">
+    <aside :class="[sidebarClass, 'bg-gray-900 text-white flex flex-col shadow-xl shrink-0']">
       <!-- Logo -->
-      <div class="px-5 py-5 border-b border-gray-700 flex items-center gap-3">
+      <div
+        class="px-5 py-5 border-b border-gray-700 flex items-center gap-3"
+        :class="sidebarCompact ? 'justify-center px-2' : ''"
+      >
         <i class="pi pi-calculator text-2xl text-primary-400 shrink-0"></i>
-        <div class="leading-tight">
+        <div v-if="!sidebarCompact" class="leading-tight">
           <h1 class="text-lg font-bold tracking-wide">HKD Kế Toán</h1>
           <p class="text-xs text-gray-400 mt-0.5">TT 152/2025</p>
         </div>
@@ -278,30 +324,46 @@ onUnmounted(() => {
           v-for="item in visibleMenu"
           :key="item.to"
           @click="router.push(item.to)"
+          :title="sidebarCompact ? item.label : undefined"
+          :aria-label="item.label"
           class="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition-all duration-150"
-          :class="
+          :class="[
+            sidebarCompact ? 'justify-center px-2' : '',
             isActive(item.to)
               ? 'bg-primary-500 text-white font-medium shadow-md'
-              : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-          "
+              : 'text-gray-300 hover:bg-gray-800 hover:text-white',
+          ]"
         >
-          <i :class="item.icon" class="text-base"></i>
-          <span>{{ item.label }}</span>
+          <i :class="item.icon" class="text-base shrink-0"></i>
+          <span v-if="!sidebarCompact" class="truncate">{{ item.label }}</span>
         </button>
       </nav>
 
       <!-- Footer -->
-      <div class="px-4 py-3 border-t border-gray-700 text-xs text-gray-500">v0.3.0 · SQLite</div>
+      <div v-if="!sidebarCompact" class="px-4 py-3 border-t border-gray-700 text-xs text-gray-500">
+        v0.3.0 · SQLite
+      </div>
     </aside>
 
     <!-- Main content -->
     <main class="flex-1 flex flex-col overflow-hidden">
       <!-- Header -->
       <header
-        class="bg-white border-b border-gray-200 px-6 py-3 shadow-sm flex items-center justify-between"
+        class="bg-white border-b border-gray-200 shadow-sm flex items-center justify-between gap-2 px-3 sm:px-6 py-3"
       >
-        <h2 class="text-xl font-semibold text-gray-800">{{ pageTitle }}</h2>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 min-w-0">
+          <!-- Mở ngăn kéo (chỉ ở chế độ ngăn kéo) -->
+          <Button
+            v-if="drawerMode"
+            icon="pi pi-bars"
+            text
+            rounded
+            aria-label="Mở menu"
+            @click="sidebarOpen = !sidebarOpen"
+          />
+          <h2 class="text-lg sm:text-xl font-semibold text-gray-800 truncate">{{ pageTitle }}</h2>
+        </div>
+        <div class="flex items-center gap-2 sm:gap-3 shrink-0">
           <!-- Bật/tắt giao diện sáng-tối -->
           <Button
             :icon="theme.dark ? 'pi pi-sun' : 'pi pi-moon'"
@@ -313,7 +375,7 @@ onUnmounted(() => {
           <!-- HKD đang đăng nhập → tên + MST; nhấn để quản lý/chuyển hồ sơ -->
           <button
             @click="router.push('/profiles')"
-            class="flex flex-col items-end leading-tight hover:opacity-80 transition-opacity"
+            class="hidden md:flex flex-col items-end leading-tight hover:opacity-80 transition-opacity"
             v-tooltip.bottom="'Quản lý / chuyển hồ sơ hộ kinh doanh'"
           >
             <span class="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
@@ -326,8 +388,8 @@ onUnmounted(() => {
               MST: {{ business.config.tax_code }}
             </span>
           </button>
-          <Divider layout="vertical" />
-          <span class="text-sm text-gray-500">
+          <Divider layout="vertical" class="hidden md:flex" />
+          <span class="hidden sm:inline text-sm text-gray-500">
             {{ auth.currentUser?.display_name || auth.currentUser?.username }}
           </span>
           <Tag
@@ -359,7 +421,7 @@ onUnmounted(() => {
            đặt router-view thẳng trong keep-alive sẽ không cache (vue-router báo
            VUE_ROUTER_R0060). Màn in phiếu loại trừ: nó nạp dữ liệu theo
            route.params trong setup nên cache lại sẽ in nhầm chứng từ cũ. -->
-      <div class="flex-1 overflow-auto p-6">
+      <div class="flex-1 overflow-auto p-3 sm:p-4 lg:p-6">
         <router-view v-slot="{ Component }">
           <KeepAlive :exclude="['PrintVoucher']">
             <component :is="Component" />

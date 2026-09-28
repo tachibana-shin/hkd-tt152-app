@@ -122,3 +122,14 @@ body {
 .dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]) {
   border-color: #4b5563;
 }
+
+/* ─── Responsive dùng chung ───
+   Thanh công cụ: nút hành động xuống dòng thay vì tràn ra ngoài trên màn hẹp. */
+.p-toolbar {
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+}
+/* Bảng rộng hơn khung: cuộn ngang, giữ tiêu đề cột dính trên khi lướt dọc. */
+.p-datatable-table-container {
+  overflow-x: auto;
+}

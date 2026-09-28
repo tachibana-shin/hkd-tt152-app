@@ -130,7 +130,7 @@ useKeepAliveRefresh(reload);
     </Toolbar>
 
     <!-- Thẻ tóm tắt -->
-    <div class="grid grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <Card>
         <template #content>
           <div class="text-sm text-gray-500">Tổng tồn (số lượng)</div>
@@ -260,7 +260,7 @@ useKeepAliveRefresh(reload);
       :show-action="auth.canStock"
       @action="saveCount"
     >
-      <div class="grid grid-cols-2 gap-4 py-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
         <FormField label="Ngày kiểm kê">
           <DatePicker v-model="countForm.date" dateFormat="dd/mm/yy" class="w-full" />
         </FormField>

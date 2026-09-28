@@ -91,7 +91,7 @@ watch(
         <span class="text-base font-semibold">{{ first.voucher_no }}</span>
       </div>
 
-      <div class="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm md:grid-cols-4">
         <div>
           <div class="text-gray-500">Ngày lập phiếu</div>
           <div class="font-medium">{{ postingDate || "—" }}</div>

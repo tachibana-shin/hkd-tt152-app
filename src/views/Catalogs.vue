@@ -495,7 +495,7 @@ useKeepAliveRefresh(reload);
       :show-action="auth.canAccounting"
       @action="saveIg"
     >
-      <div class="grid grid-cols-2 gap-4 py-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
         <FormField label="Mã" required>
           <InputText v-model="igForm.code" :disabled="igEditing" placeholder="PPHH" />
         </FormField>

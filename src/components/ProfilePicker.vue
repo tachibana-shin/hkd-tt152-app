@@ -36,7 +36,7 @@ const AVATAR_COLORS = [
         <p class="text-sm text-gray-400 mt-1">Chọn hồ sơ để tiếp tục</p>
       </div>
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-5 justify-items-center">
+      <div class="grid grid-cols-1 sm:grid-cols-2 sm:grid-cols-3 gap-5 justify-items-center">
         <button
           v-for="(p, i) in profiles"
           :key="p.key"

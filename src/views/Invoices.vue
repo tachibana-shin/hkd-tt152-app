@@ -420,7 +420,7 @@ useKeepAliveRefresh(reload);
       :show-action="false"
     >
       <template v-if="detail">
-        <div class="grid grid-cols-2 gap-3 text-sm mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
           <div>
             <span class="text-gray-500">Số HĐ:</span>
             <b>{{ detail.invoice.number }}</b>

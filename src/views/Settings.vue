@@ -231,7 +231,7 @@ useKeepAliveRefresh(reload);
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
               <i class="pi pi-tag text-primary-500" /> Mã sản phẩm tự sinh
             </h4>
-            <div class="grid grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <FormField label="Tiền tố">
                 <InputText v-model="st.product_code_prefix" placeholder="SP" class="w-full" />
               </FormField>
@@ -261,7 +261,7 @@ useKeepAliveRefresh(reload);
               cho hộ). HKD không xuất VAT khi bán ra — thuế bán ra theo tỷ lệ nhóm ngành trên doanh
               thu.
             </p>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField label="Danh sách lựa chọn (cách nhau bởi dấu phẩy)">
                 <InputText v-model="st.vat_options_text" class="w-full" />
               </FormField>
@@ -278,7 +278,7 @@ useKeepAliveRefresh(reload);
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
               <i class="pi pi-box text-primary-500" /> Thuế nhập khẩu (%) — hàng nhập về
             </h4>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField label="Danh sách lựa chọn (cách nhau bởi dấu phẩy)">
                 <InputText v-model="st.import_options_text" class="w-full" />
               </FormField>
@@ -295,7 +295,7 @@ useKeepAliveRefresh(reload);
             <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
               <i class="pi pi-sliders-h text-primary-500" /> Mặc định khác
             </h4>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField label="Đơn vị tính">
                 <InputText v-model="st.product_unit" placeholder="Cái" class="w-full" />
               </FormField>

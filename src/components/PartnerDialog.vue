@@ -247,7 +247,7 @@ async function save() {
     @update:visible="emit('update:visible', $event)"
     @action="save"
   >
-    <div class="grid grid-cols-2 gap-4 py-2">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
       <FormField :label="kind === 'warehouse' ? 'Mã kho' : 'Mã'" required>
         <InputText v-model="form.code" :placeholder="codePlaceholder" :disabled="editing" />
       </FormField>

@@ -383,7 +383,7 @@ useKeepAliveRefresh(reload);
     <!-- Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 -->
     <SectionCard title="Tổng hợp thuế phải nộp (NĐ 68/2026, NĐ 141/2026)">
       <template #icon><i-mdi-calculator-variant class="text-indigo-500" /></template>
-      <div v-if="overview" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div v-if="overview" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
           <span class="text-gray-500 block text-xs mb-1">Nhóm hộ kinh doanh</span>
           <b>{{ groupLabel }}</b>
@@ -603,7 +603,7 @@ useKeepAliveRefresh(reload);
       </p>
     </SectionCard>
 
-    <div class="grid grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <!-- Tổng hợp doanh thu - chi phí -->
       <SectionCard title="Tổng hợp doanh thu - chi phí">
         <template #icon><i-mdi-chart-box class="text-emerald-500" /></template>
@@ -646,7 +646,7 @@ useKeepAliveRefresh(reload);
       <!-- Sổ sách (mẫu TT 152) -->
       <SectionCard title="Sổ sách theo mẫu TT 152/2025">
         <template #icon><i-mdi-book-open-page-variant class="text-sky-500" /></template>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Button
             label="Sổ S2a-HKD"
             icon="pi pi-book"

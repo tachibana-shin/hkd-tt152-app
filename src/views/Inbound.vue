@@ -372,7 +372,7 @@ useKeepAliveRefresh(reload);
       :show-action="auth.canStock"
       @action="save"
     >
-      <div class="grid grid-cols-3 gap-4 py-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-2">
         <FormField label="Loại nhập">
           <Select
             v-model="form.inbound_type"

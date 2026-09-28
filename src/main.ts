@@ -9,6 +9,7 @@ import Tooltip from "primevue/tooltip";
 import router from "./router";
 import App from "./App.vue";
 import { applyInitialTheme } from "./stores/theme";
+import { startViewportWatch } from "./composables/useViewport";
 import "primeicons/primeicons.css";
 import "./style.css";
 
@@ -45,5 +46,6 @@ app.use(ToastService);
 app.use(ConfirmationService);
 app.directive("tooltip", Tooltip);
 
+startViewportWatch(); // đo viewport một lần, dùng chung cho các màn responsive
 applyInitialTheme(); // áp theme (sáng/tối) trước khi mount — tránh chớp trắng
 app.mount("#app");

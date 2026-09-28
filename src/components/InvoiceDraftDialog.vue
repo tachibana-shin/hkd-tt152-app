@@ -178,7 +178,7 @@ async function save() {
     :show-action="auth.canAccounting"
     @action="save"
   >
-    <div class="grid grid-cols-3 gap-4 py-2">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-2">
       <FormField label="Số hóa đơn">
         <!-- Lập mới tự sinh số; sửa thì người dùng được sửa lại. -->
         <InputText v-model="form.number" :disabled="!isEdit" size="small" />

@@ -38,6 +38,7 @@ import DataTable from "primevue/datatable";
 import IconField from "primevue/iconfield";
 import InputIcon from "primevue/inputicon";
 import InputText from "primevue/inputtext";
+import { useViewport } from "@/composables/useViewport";
 
 // ---------------------------------------------------------------------------
 // Engine resize: làm cho kéo cột hoạt động đúng trong WebKitGTK
@@ -130,6 +131,7 @@ export default defineComponent({
   },
   emits: ["update:selection", "cell-save", "search"],
   setup(props, { slots, attrs, emit }) {
+    const { isCardMode } = useViewport();
     const hasActionsSlot = !!slots.actions;
     const forwardedSlots = Object.keys(slots).filter(
       (n) => n !== "default" && n !== "actions" && n !== "header",
@@ -344,6 +346,95 @@ export default defineComponent({
       });
     }
 
+    // ─── Chế độ THẺ (điện thoại/tablet thật) ───
+    // Bảng 8–10 cột là vô dụng trên màn 390px, nên khi `isCardMode` (thiết bị
+    // cảm ứng + màn hẹp) mỗi dòng dựng thành một thẻ: mỗi cột là một hàng
+    // "nhãn … giá trị". Ô có template #body vẫn render đúng như trong bảng, nên
+    // KHÔNG phải sửa từng màn — thẻ tự sinh ra từ chính các <Column> đã khai.
+    interface ColumnMeta {
+      header: string;
+      field: string;
+      body: ((sp: any) => unknown) | null;
+    }
+    const columnMeta = computed<ColumnMeta[]>(() => {
+      const init = slots.default ? slots.default() : [];
+      return init
+        .filter((vnode: any) => vnode?.type === Column)
+        .map((vnode: any) => {
+          const vp = vnode.props || {};
+          const children: any = vnode.children;
+          return {
+            header: String(vp.header ?? vp.field ?? ""),
+            field: String(vp.field ?? vp.columnKey ?? ""),
+            body: (children?.body as (sp: any) => unknown) ?? null,
+          };
+        })
+        .filter((c) => c.header);
+    });
+
+    /** Giá trị hiển thị của một ô (template #body nếu có, không thì lấy field). */
+    function cellNodes(col: ColumnMeta, row: any): unknown {
+      if (col.body) {
+        const out = col.body({ data: row, field: col.field, rowData: row });
+        return Array.isArray(out) ? out : [out];
+      }
+      const raw = col.field ? row?.[col.field] : null;
+      if (raw == null || raw === "") return ["\u2014"];
+      return [String(raw)];
+    }
+
+    /** Lọc client-side theo từ khoá (DataTable tự lọc khi hiện bảng, thẻ thì tự lọc). */
+    const cardRows = computed<any[]>(() => {
+      const rows = (attrs.value as unknown[]) ?? [];
+      const q = search.value.trim().toLowerCase();
+      if (!q) return rows;
+      return rows.filter((row) =>
+        Object.values(row ?? {}).some(
+          (v) =>
+            typeof v !== "object" &&
+            String(v ?? "")
+              .toLowerCase()
+              .includes(q),
+        ),
+      );
+    });
+
+    function cardList() {
+      return h(
+        "div",
+        { class: "flex flex-col gap-2 p-2" },
+        cardRows.value.length
+          ? cardRows.value.map((row) =>
+              h("div", { class: "rounded-lg border border-gray-200 bg-white p-3" }, [
+                ...columnMeta.value.map((col) =>
+                  h("div", { class: "flex items-start justify-between gap-3 py-1 text-sm" }, [
+                    h("span", { class: "text-gray-500 shrink-0" }, col.header),
+                    h(
+                      "div",
+                      { class: "text-right min-w-0 break-words" },
+                      cellNodes(col, row) as any,
+                    ),
+                  ]),
+                ),
+                hasActionsSlot
+                  ? h(
+                      "div",
+                      { class: "mt-2 pt-2 border-t border-gray-100 flex justify-end gap-1" },
+                      slots.actions?.({ data: row }) as any,
+                    )
+                  : null,
+              ]),
+            )
+          : [
+              h(
+                "div",
+                { class: "p-6 text-center text-sm text-gray-500" },
+                search.value ? "Không có dòng nào khớp từ khoá." : "Chưa có dữ liệu.",
+              ),
+            ],
+      );
+    }
+
     // ─── Header: nút bộ lọc + ô tìm kiếm + header của màn hình ───
     function headerContent() {
       const screenHeader = slots.header ? slots.header() : [];
@@ -375,8 +466,15 @@ export default defineComponent({
       return h("div", { class: "flex flex-wrap items-center gap-2" }, children);
     }
 
-    return () =>
-      h(
+    return () => {
+      // Điện thoại/tablet thật: thẻ thay bảng (giữ nguyên ô tìm kiếm ở trên).
+      if (isCardMode.value) {
+        return h("div", {}, [
+          props.filterToggle ? h("div", { class: "px-2 pt-2" }, [headerContent()]) : null,
+          cardList(),
+        ]);
+      }
+      return h(
         DataTable,
         {
           ...attrs,
@@ -391,6 +489,9 @@ export default defineComponent({
           // là server-side → lazy + paginator; bảng client-side (`:value=`) thì
           // để DataTable tự lọc/phân trang client-side. selectionMode chỉ bật khi
           // màn có bind selection (v-model:selection).
+          // Cửa sổ hẹp (desktop thu nhỏ): bảng cuộn ngang thay vì bóp chữ.
+          scrollable: true,
+          scrollHeight: "flex",
           lazy: !!attrs.onPage,
           paginator: !!attrs.onPage || !!attrs.paginator,
           selectionMode: props.selection != null ? "multiple" : undefined,
@@ -421,6 +522,7 @@ export default defineComponent({
           ...Object.fromEntries(forwardedSlots.map((n) => [n, slots[n]])),
         },
       );
+    };
   },
 });
 </script>

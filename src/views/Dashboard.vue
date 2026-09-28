@@ -73,7 +73,7 @@ useKeepAliveRefresh(reload);
     </div>
 
     <!-- Quick links -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
       <router-link
         to="/inbound"
         class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"

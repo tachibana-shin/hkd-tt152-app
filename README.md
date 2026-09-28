@@ -65,6 +65,25 @@
 
 ---
 
+## 📱 Giao diện thích ứng (responsive)
+
+App dùng được cả trên cửa sổ nhỏ lẫn trên điện thoại/tablet (mở bằng trình duyệt
+cùng mạng LAN — xem mục _Dữ liệu & tài khoản mặc định_). Hai tình huống được xử lý
+khác nhau, phân biệt bằng **loại con trỏ** chứ không chỉ độ rộng màn hình
+(`src/composables/useViewport.ts`):
+
+| Tình huống                                                 | Sidebar                | Bảng dữ liệu                                                 | Form / hộp thoại                  |
+| ---------------------------------------------------------- | ---------------------- | ------------------------------------------------------------ | --------------------------------- |
+| **Cửa sổ desktop bị thu nhỏ**                              | Thu gọn thành icon     | **Giữ nguyên bảng**, cuộn ngang                              | Lưới 2–4 cột, hộp thoại như cũ    |
+| **Điện thoại / tablet thật** (`pointer: coarse` + màn hẹp) | Ngăn kéo trượt, nút ☰ | **Chuyển thành thẻ**: mỗi dòng một thẻ, cột → nhãn + giá trị | 1 cột, hộp thoại gần hết màn hình |
+
+Thẻ được **sinh tự động từ chính các `<Column>`** mà màn hình đã khai báo
+(`AppDataTable`), nên không phải viết lại từng màn: ô có template `#body` vẫn hiển thị
+đúng, và nút thao tác của dòng chuyển xuống cuối thẻ. Lưu ý: sửa ô trực tiếp bằng
+double-tap là tính năng của bảng, nên trên điện thoại hãy dùng nút **Sửa** trên thẻ.
+
+---
+
 ## 🏗️ Kiến trúc & công nghệ
 
 ```

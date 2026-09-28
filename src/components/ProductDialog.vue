@@ -171,7 +171,7 @@ async function save() {
     @update:visible="emit('update:visible', $event)"
     @action="save"
   >
-    <div class="grid grid-cols-2 gap-4 py-2">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
       <FormField label="Mã sản phẩm" required>
         <InputText size="small" v-model="form.code" placeholder="SP001" :disabled="!!product" />
       </FormField>

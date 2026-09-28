@@ -130,7 +130,7 @@ async function save() {
         </div>
       </Message>
 
-      <div class="grid grid-cols-2 gap-3 text-sm">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <FormField
           :label="isReplace ? 'Lý do phải thay thế' : 'Lý do bị sửa'"
           required

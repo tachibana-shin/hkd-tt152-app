@@ -208,7 +208,9 @@ async function markExported() {
       </div>
 
       <!-- Thông tin người mua -->
-      <div class="grid grid-cols-2 gap-3 rounded border border-gray-200 p-3 text-sm md:grid-cols-4">
+      <div
+        class="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded border border-gray-200 p-3 text-sm md:grid-cols-4"
+      >
         <div>
           <div class="text-gray-500">Người mua</div>
           <div class="font-medium">{{ pack.header.customer || "—" }}</div>

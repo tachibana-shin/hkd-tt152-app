@@ -378,7 +378,7 @@ useKeepAliveRefresh(reload);
       :show-action="auth.canStock"
       @action="save"
     >
-      <div class="grid grid-cols-3 gap-4 py-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-2">
         <FormField label="Loại xuất">
           <Select
             v-model="form.outbound_type"
@@ -475,7 +475,10 @@ useKeepAliveRefresh(reload);
             aria-hidden="true"
           />
         </label>
-        <div v-if="form.create_invoice" class="grid grid-cols-4 gap-3">
+        <div
+          v-if="form.create_invoice"
+          class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+        >
           <FormField label="Số hóa đơn">
             <InputText :model-value="form.voucher_no" disabled size="small" />
           </FormField>

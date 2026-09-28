@@ -1921,3 +1921,71 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
     firstRow.getByText(new RegExp(`MST người bán:\\s*${mstRe.source}`)).first(),
   ).toBeVisible();
 });
+
+test("Responsive: điện thoại thì sidebar thành ngăn kéo và bảng thành thẻ", async ({ browser }) => {
+  // hasTouch + màn 390px = điện thoại/tablet THẬT → bảng thành thẻ. Khác hẳn cửa
+  // sổ desktop thu nhỏ (con trỏ chuột), vốn vẫn giữ nguyên bảng.
+  const ctx = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+  const page = await ctx.newPage();
+  try {
+    await page.goto("/");
+    const username = page.getByTestId("login-username");
+    if (await username.isVisible()) {
+      await username.fill(ADMIN.username);
+      await page.getByTestId("login-password").fill(ADMIN.password);
+      await page.getByRole("button", { name: "Đăng nhập" }).click();
+    }
+    await expect(page.locator("header h2")).toHaveText("Tổng quan", { timeout: 20_000 });
+
+    // Dựng 1 phiếu nhập (dùng ctx.request để dùng chung phiên cookie context này).
+    const stockIn = await ctx.request.post("/api/save_inbound", {
+      data: {
+        posting_date: "2026-09-22",
+        // Có chữ: số phiếu gợi ý của app luôn là "PN"+4 số nên không thể trùng.
+        voucher_no: "PN-TEST1",
+        description: "Nhập tồn cho test responsive",
+        supplier_code: "",
+        warehouse_code: "KHO-CHINH",
+        unit_code: "HKD",
+        items: [{ product_code: "SP001", quantity: 12, unit_price: 10000, discount: 0 }],
+        note: "",
+        inbound_type: "purchase",
+        reference_no: "",
+        vat_rate: 0,
+        debit_account: "152",
+        credit_account: "331",
+        pay_now: false,
+        adjust_dir: "up",
+      },
+    });
+    expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+      true,
+    );
+
+    // Sidebar trượt ra ngoài màn hình, mở lại bằng nút hamburger. (Đóng kiểm theo
+    // vị trí thật: ngăn kéo dùng translate nên vẫn "visible" về mặt DOM.)
+    const drawer = page.locator("aside").first();
+    await expect(page.getByRole("button", { name: "Mở menu" })).toBeVisible();
+    expect((await drawer.boundingBox())!.x).toBeLessThan(0);
+    await page.getByRole("button", { name: "Mở menu" }).click();
+    await expect.poll(async () => (await drawer.boundingBox())!.x).toBeGreaterThanOrEqual(0);
+    await page.getByRole("button", { name: "Nhập kho", exact: true }).click();
+
+    // Bảng dữ liệu chuyển thành thẻ: nhãn cột hiện cạnh giá trị của dòng.
+    await expect(page.locator("header h2")).toHaveText("Nhập kho", { timeout: 20_000 });
+    await expect(page.getByText("PN-TEST1", { exact: true })).toBeVisible();
+    await expect(page.getByText("Số phiếu", { exact: true }).first()).toBeVisible();
+    await expect(page.locator(".p-datatable")).toHaveCount(0);
+
+    // Nút trong thẻ vẫn dùng được, hộp thoại chiếm gần hết màn hình.
+    await page.getByRole("button", { name: "Xem phiếu" }).first().click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.locator(".p-dialog-title")).toContainText("PHIẾU NHẬP KHO");
+  } finally {
+    await ctx.close();
+  }
+});
