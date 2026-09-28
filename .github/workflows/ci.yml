@@ -29,6 +29,11 @@ jobs:
         run: bunx oxlint
       - name: Định dạng (oxfmt)
         run: bunx oxfmt --check
+      # semantic-release ghi phiên bản vào cả 4 file manifest rồi commit; bước này
+      # chặn trường hợp ai đó sửa tay một file (hoặc quên commit) làm bundle lệch
+      # với tag đã phát hành.
+      - name: Phiên bản khớp tag
+        run: node scripts/set-version.mjs --check
       - name: Build
         run: bun run vite build
 

@@ -238,17 +238,18 @@ trực tiếp, hoặc mở trace trong `bun run test:e2e:report`.
 
 Mỗi lần push/PR chạy 4 việc song song:
 
-| Job        | Kiểm tra                                                                               |
-| ---------- | -------------------------------------------------------------------------------------- |
-| `frontend` | `vue-tsc` (kiểu dữ liệu) · `oxlint` · `oxfmt --check` · build Vite                     |
-| `rust`     | `cargo fmt --check` · `cargo clippy --all-targets -- -D warnings` · `cargo test --lib` |
-| `sqlx`     | bộ cache truy vấn `.sqlx` còn khớp code (`cargo sqlx prepare --check`)                 |
-| `e2e`      | Playwright offline đầy đủ (dựng app dưới Xvfb)                                         |
+| Job        | Kiểm tra                                                                                |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `frontend` | `vue-tsc` (kiểu dữ liệu) · `oxlint` · `oxfmt --check` · phiên bản khớp tag · build Vite |
+| `rust`     | `cargo fmt --check` · `cargo clippy --all-targets -- -D warnings` · `cargo test --lib`  |
+| `sqlx`     | bộ cache truy vấn `.sqlx` còn khớp code (`cargo sqlx prepare --check`)                  |
+| `e2e`      | Playwright offline đầy đủ (dựng app dưới Xvfb)                                          |
 
 Chạy đúng bộ kiểm tra đó ngay trên máy:
 
 ```bash
-bun run ci          # fmt + lint + typecheck + test Rust + check sqlx
+bun run ci             # fmt + lint + typecheck + test Rust + check sqlx
+bun run version:check  # 4 file manifest cùng phiên bản và khớp tag v* mới nhất
 bunx playwright test
 ```
 
@@ -266,9 +267,30 @@ mới rồi build 6 target trong một Release nháp:
 
 Cách tính phiên bản: `feat:` → minor, `fix:` → patch, `!` trong tiêu đề hoặc
 `BREAKING CHANGE` → major, commit không ghi kiểu → patch. Nhãn bản phải theo
-[Conventional Commits](https://www.conventionalcommits.org/); lần release đầu tiên
-lấy mốc `initialVersion` là `0.3.0` (đồng bộ `package.json`, `tauri.conf.json`,
-`Cargo.toml` — workflow ghi tự động bằng `scripts/set-version.mjs`).
+[Conventional Commits](https://www.conventionalcommits.org/).
+
+**Mỗi lần release, semantic-release tự động:**
+
+1. tạo tag `v<phiên bản>` và commit `chore(release): <phiên bản> [skip ci]`;
+2. ghi phiên bản vào **cả 4 file manifest** — `package.json`,
+   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`
+   (script `scripts/set-version.mjs`) nên bundle luôn khớp tag;
+3. cập nhật [`CHANGELOG.md`](CHANGELOG.md) bằng ghi chú tiếng Việt theo từng nhóm
+   commit (Tính năng mới / Sửa lỗi / Hiệu năng / Tài liệu / …);
+4. tạo Release ở trạng thái **draft** kèm ghi chú trên.
+
+Sau đó 6 job đóng gói gắn asset vào release đó, và job `publish` mới **công khai**
+nó (kèm mục tương ứng trong `CHANGELOG.md` trong phần mô tả). Nếu một target hỏng
+thì release **vẫn ở dạng nháp** — người dùng và updater không nhìn thấy bản thiếu
+file; sửa xong chạy lại workflow là tiếp.
+
+Cấu hình nằm ở [`.releaserc.json`](.releaserc.json); 7 plugin đã khai báo trong
+`devDependencies` nên CI cài đúng phiên bản đã ghim.
+
+> ⚠️ Tên file cấu hình phải là `.releaserc.json` (**có dấu chấm ở đầu**).
+> semantic-release 25 dùng cosmiconfig nên không đọc `releaserc.json`; đặt sai
+> tên thì nó âm thầm nạp plugin mặc định (`@semantic-release/npm`) và cố phát
+> hành lên npm thay vì GitHub. Kiểm tra cấu hình bằng `bun run release:dry`.
 
 > ⚠️ Job Windows ARM64 và Linux ARM64 cần runner `windows-11-arm` /
 > `ubuntu-24.04-arm` (GitHub-hosted ARM). Nếu tài khoản chưa bật loại runner này thì
