@@ -1989,3 +1989,72 @@ test("Responsive: điện thoại thì sidebar thành ngăn kéo và bảng thà
     await ctx.close();
   }
 });
+
+test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/tháng/năm)", async ({ page }) => {
+  await ensureLoggedIn(page);
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  // DatePicker hiển thị dd/MM/yyyy (4 chữ số năm).
+  const dmy = (d: Date) => `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  const quarterStart = new Date(y, Math.floor(m / 3) * 3, 1);
+  const quarterEnd = new Date(y, Math.floor(m / 3) * 3 + 2 + 1, 0);
+  const monthStart = new Date(y, m, 1);
+  const monthEnd = new Date(y, m + 1, 0);
+
+  const datePicker = (label: string) =>
+    page.locator(`label:text-is("${label}") + .p-datepicker input`);
+
+  /** Đọc khoảng ngày app đang đặt (chờ nó gán xong vì đọc cấu hình qua API). */
+  async function currentRange() {
+    const from = datePicker("Từ ngày");
+    const to = datePicker("Đến ngày");
+    await expect(from).not.toHaveValue("");
+    await expect(to).not.toHaveValue("");
+    await expect(page.getByText("Đang xem:")).toBeVisible();
+    return {
+      from: await from.inputValue(),
+      to: await to.inputValue(),
+      label: (await page.getByText("Đang xem:").innerText()).trim(),
+    };
+  }
+
+  /** Đổi kỳ khai qua hộp thoại "Cấu hình thuế" — đúng đường người dùng đi. */
+  async function setTaxPeriod(optionText: RegExp) {
+    await page.getByRole("button", { name: "Cấu hình thuế" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator(".p-select").first().click();
+    await page.locator(".p-select-option", { hasText: optionText }).first().click();
+    await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+    await expect(dialog).toBeHidden();
+  }
+
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+
+  // Mặc định của hộ là khai theo quý → mở màn thấy đúng quý đang chạy.
+  const q = await currentRange();
+  expect(q.from, "ngày đầu phải là ngày 01 của quý hiện tại").toBe(dmy(quarterStart));
+  expect(q.to, "ngày cuối phải là ngày cuối của quý hiện tại").toBe(dmy(quarterEnd));
+  expect(q.label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
+
+  // Đổi sang khai theo tháng → khoảng ngày báo cáo theo tháng hiện tại.
+  await setTaxPeriod(/^Theo tháng/);
+  const mo = await currentRange();
+  expect(mo.from).toBe(dmy(monthStart));
+  expect(mo.to).toBe(dmy(monthEnd));
+  expect(mo.label).toContain(`Tháng ${m + 1}/${y}`);
+
+  // Đổi sang khai theo năm → cả năm.
+  await setTaxPeriod(/^Theo năm/);
+  const yr = await currentRange();
+  expect(yr.from).toBe(`01/01/${y}`);
+  expect(yr.to).toBe(`31/12/${y}`);
+  expect(yr.label).toContain(`Năm ${y}`);
+
+  // Trả lại mặc định để không ảnh hưởng test sau.
+  await setTaxPeriod(/^Theo quý/);
+  expect((await currentRange()).label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
+});

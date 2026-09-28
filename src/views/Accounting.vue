@@ -12,6 +12,7 @@ import type {
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtVnd, toIsoDate } from "@/utils/format";
+import { describeRange, taxPeriodRange } from "@/utils/period";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const business = useBusinessStore();
@@ -229,9 +230,27 @@ function openTaxConfig() {
   taxDialog.value = true;
 }
 
+/**
+ * Đặt khoảng ngày xem báo cáo theo kỳ khai của hộ, tính từ hôm nay: khai theo
+ * quý thì mở màn ra thấy đúng quý hiện tại, theo tháng thì tháng hiện tại, theo
+ * năm/từng lần phát sinh thì cả năm. Gọi đúng một lần khi mở màn (không chạy
+ * mỗi lần quay lại) để không mất khoảng ngày người dùng đã chọn.
+ */
+function applyReportPeriod() {
+  const { from, to } = taxPeriodRange(taxPeriod.value);
+  fromDate.value = from;
+  toDate.value = to;
+}
+
+/** Nhãn kỳ đang xem, để khỏi tự nhẩy từ hai ô ngày. */
+const reportPeriodLabel = computed(() => describeRange(fromDate.value, toDate.value));
+
 async function onTaxConfigSaved(payload: { period: string; method: string }) {
   taxPeriod.value = payload.period;
   taxMethod.value = payload.method;
+  // Đổi kỳ khai thì kỳ xem báo cáo cũng theo, nếu không người dùng phải tự
+  // chỉnh lại khoảng ngào.
+  applyReportPeriod();
   toast.add({
     severity: "success",
     summary: "Đã lưu cấu hình thuế",
@@ -278,6 +297,7 @@ void (async () => {
     if (declPeriod.value === "quarter") declPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
     else if (declPeriod.value === "month") declPeriodNo.value = now.getMonth() + 1;
   }
+  applyReportPeriod();
   await reload();
 })();
 
@@ -333,8 +353,8 @@ useKeepAliveRefresh(reload);
             <i class="pi pi-calendar mr-1" />Kỳ khai thuế: <b>{{ taxPeriodLabel }}</b> • TNCN:
             <b>{{ taxMethodLabel }}</b>
             <span class="mx-1 text-gray-300">|</span>
-            Năm hiện tại:
-            <b>{{ new Date().getFullYear() }}</b>
+            Đang xem:
+            <b class="text-primary-600">{{ reportPeriodLabel }}</b>
           </span>
         </div>
       </template>
