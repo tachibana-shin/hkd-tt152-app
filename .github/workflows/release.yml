@@ -176,8 +176,26 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTARY_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          NOTARY_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
+          # KHÔNG định nghĩa sẵn APPLE_ID/APPLE_TEAM_ID/APPLE_PASSWORD ở step build:
+          # tauri-bundler kiểm `var_os(...)` — biến rỗng vẫn là Some("") nên nó vẫn
+          # thử notarize rồi fail "Team ID must be at least 3 characters". Chỉ xuất
+          # chúng ra GITHUB_ENV khi đủ cả 3 (không rỗng).
+          if [ -n "$NOTARY_ID" ] && [ -n "$NOTARY_PASSWORD" ] && [ -n "$NOTARY_TEAM" ]; then
+            {
+              echo "APPLE_ID=$NOTARY_ID"
+              echo "APPLE_PASSWORD=$NOTARY_PASSWORD"
+              echo "APPLE_TEAM_ID=$NOTARY_TEAM"
+            } >> "$GITHUB_ENV"
+            echo "Sẽ notarize .dmg sau khi build."
+          else
+            echo "::notice::Không đủ APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID — bỏ qua notarize (app vẫn chạy được, Gatekeeper có thể phải bấm 'Mở')."
+          fi
+
           # Không có chứng thư → ký ad-hoc (identity "-"). Truyền chuỗi rỗng cho
           # APPLE_SIGNING_IDENTITY sẽ khiến codesign tìm identity rỗng và fail.
           if [ -z "$APPLE_CERTIFICATE" ]; then
@@ -225,9 +243,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_ID / APPLE_TEAM_ID / APPLE_PASSWORD cố ý KHÔNG khai báo ở đây:
+          # step "Nạp chứng thư Apple" chỉ xuất chúng ra GITHUB_ENV khi có thật.
         with:
           tagName: v${{ steps.ver.outputs.version }}
           # Rỗng khi chạy tay với bản mới; có sẵn thì gắn asset vào release do
