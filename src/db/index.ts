@@ -72,6 +72,7 @@ import type {
   AttendanceWorkDay,
   TaxDeclarationRow,
   TaxOverview,
+  TaxGroupInfo,
   VoucherRow,
   CurrentUser,
   AppUser,
@@ -175,6 +176,8 @@ export const api = {
       email: cfg.email ?? "",
       hddtStartDate: cfg.hddt_start_date ?? "",
       hddtSymbol: cfg.hddt_symbol ?? "",
+      // undefined = để app tự xếp nhóm theo doanh thu; 1–4 = người dùng chốt.
+      taxGroup: cfg.tax_group ?? null,
     }),
 
   // ─── CÀI ĐẶT MẶC ĐỊNH ───
@@ -807,6 +810,9 @@ export const api = {
   // Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)
   getTaxOverview: async (year: number, period: string, periodNo: number) =>
     parse<TaxOverview>(await call<string>("get_tax_overview", { year, period, periodNo })),
+  /** Nhóm hộ hiện hành + doanh thu cả năm dùng xếp nhóm (hộp cấu hình HKD tự điền). */
+  getTaxGroup: async (year: number) =>
+    parse<TaxGroupInfo>(await call<string>("get_tax_group", { year })),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───
   getVoucher: async (voucherNo: string) =>

@@ -34,6 +34,9 @@ export async function seedApp(baseURL: string) {
         hddtStartDate: "2026-01-01",
         // Tuỳ chọn — ký hiệu HĐĐT của hộ (mặc định khi liên kết HĐĐT).
         hddtSymbol: "1C26TT152",
+        // Nhóm hộ: null = để app tự xếp theo doanh thu. Phải gửi kèm — server
+        // bắt buộc đủ tham số cho mọi trường của lệnh này.
+        taxGroup: null,
       },
     });
     if (!biz.ok()) {

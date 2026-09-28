@@ -206,6 +206,14 @@ pub(crate) fn tax_group(total_revenue_year: f64) -> i64 {
     }
 }
 
+/// Nhóm hộ dùng cho tờ khai: nhóm đã chốt trong hồ sơ HKD được ưu tiên, hộ
+/// chưa chốt (NULL) thì tự xếp theo doanh thu cả năm như trước.
+pub(crate) fn effective_tax_group(stored: Option<i64>, total_revenue_year: f64) -> i64 {
+    stored
+        .filter(|g| (1..=4).contains(g))
+        .unwrap_or_else(|| tax_group(total_revenue_year))
+}
+
 /// Thuế suất TNCN theo lợi nhuận theo nhóm hộ (15% / 17% / 20%).
 pub(crate) fn profit_tncn_rate(group: i64) -> f64 {
     match group {
@@ -213,6 +221,14 @@ pub(crate) fn profit_tncn_rate(group: i64) -> f64 {
         3 => 0.17,
         _ => 0.20,
     }
+}
+
+/// Nhóm hộ đã chốt trong hồ sơ HKD (NULL = chưa chốt → tự xếp theo doanh thu).
+pub(crate) async fn load_stored_tax_group(pool: &SqlitePool) -> Result<Option<i64>, String> {
+    sqlx::query_scalar!("SELECT tax_group FROM business WHERE id = 1")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Đọc cấu hình kê khai thuế từ app_setting: (kỳ khai, phương pháp TNCN).
@@ -313,10 +329,12 @@ pub(crate) async fn get_tax_declaration(
     let pool = state.pool.read().await;
     let (_, method) = load_tax_settings(&pool).await?;
     let (from_m, to_m) = period_range(&period, period_no)?;
-    // Nhóm hộ xác định theo tổng doanh thu CẢ NĂM (không phụ thuộc kỳ khai).
+    // Nhóm hộ: đã chốt trong hồ sơ thì lấy, không thì xếp theo tổng doanh thu CẢ
+    // NĂM (không phụ thuộc kỳ khai đang xem).
     let group = {
         let year_rows = load_tax_agg(&pool, year, 0).await?;
-        tax_group(
+        effective_tax_group(
+            load_stored_tax_group(&pool).await?,
             year_rows
                 .iter()
                 .map(|r| r.revenue_up - r.revenue_down)
@@ -326,6 +344,27 @@ pub(crate) async fn get_tax_declaration(
     let rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
     let out = build_tax_declaration(rows, &method, group);
     Ok(serde_json::to_string(&out).unwrap_or_default())
+}
+
+/// Nhóm hộ hiện hành + doanh thu cả năm dùng để xếp nhóm: hộp thoại cấu hình
+/// HKD dùng để tự điền sẵn (và cho sửa tay nếu cơ quan thuế xếp khác).
+#[tauri::command]
+pub(crate) async fn get_tax_group(state: State<'_, AppState>, year: i64) -> Result<String, String> {
+    let pool = state.pool.read().await;
+    let stored = load_stored_tax_group(&pool).await?;
+    let year_rows = load_tax_agg(&pool, year, 0).await?;
+    let revenue_year: f64 = year_rows
+        .iter()
+        .map(|r| r.revenue_up - r.revenue_down)
+        .sum();
+    let auto = tax_group(revenue_year);
+    let out = json!({
+        "group": effective_tax_group(stored, revenue_year),
+        "auto_group": auto,
+        "revenue_year": revenue_year,
+        "confirmed": stored.is_some(),
+    });
+    Ok(out.to_string())
 }
 
 /// Tổng hợp thuế phải nộp theo quy định 2026 cho kỳ khai đã chọn:
@@ -350,7 +389,7 @@ pub(crate) async fn get_tax_overview(
         .iter()
         .map(|r| r.revenue_up - r.revenue_down)
         .sum();
-    let group = tax_group(year_revenue);
+    let group = effective_tax_group(load_stored_tax_group(&pool).await?, year_revenue);
 
     let period_rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
     let period_revenue: f64 = period_rows
@@ -562,6 +601,19 @@ mod tests {
         assert_eq!(tax_group(3_000_000_000.01), 3);
         assert_eq!(tax_group(50_000_000_000.0), 3);
         assert_eq!(tax_group(50_000_000_000.01), 4);
+    }
+
+    #[test]
+    fn nhom_ho_da_luu_thang_doanh_thu() {
+        // Chưa chốt trong hồ sơ (NULL) → tự xếp như trước.
+        assert_eq!(effective_tax_group(None, 500_000_000.0), 1);
+        assert_eq!(effective_tax_group(None, 5_000_000_000.0), 3);
+        // Đã chốt → hồ sơ thắng, kể cả khi doanh thu chưa tới ngưỡng.
+        assert_eq!(effective_tax_group(Some(3), 500_000_000.0), 3);
+        assert_eq!(effective_tax_group(Some(1), 60_000_000_000.0), 1);
+        // Giá trị ngoài 1–4 coi như chưa chốt thay vì tin vào.
+        assert_eq!(effective_tax_group(Some(0), 60_000_000_000.0), 4);
+        assert_eq!(effective_tax_group(Some(7), 500_000_000.0), 1);
     }
 
     #[test]

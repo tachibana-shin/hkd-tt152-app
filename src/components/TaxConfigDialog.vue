@@ -10,6 +10,8 @@ const props = defineProps<{
   visible: boolean;
   period: string; // year | quarter | month | per_occurrence
   method: string; // revenue | profit
+  /** Nhóm hộ hiện hành (1–4) — dùng gợi ý kỳ khai hợp lý. */
+  group?: number | null;
 }>();
 const emit = defineEmits<{
   (e: "update:visible", value: boolean): void;
@@ -36,12 +38,32 @@ const form = reactive({
   method: props.method,
 });
 
+/** Kỳ khai hợp lý theo nhóm hộ (NĐ 68/2026): 1 → năm, 2–3 → quý, 4 → tháng. */
+const suggestedPeriod = computed(() => {
+  switch (props.group) {
+    case 1:
+      return "year";
+    case 4:
+      return "month";
+    case 2:
+    case 3:
+      return "quarter";
+    default:
+      return "";
+  }
+});
+const suggestedLabel = computed(
+  () => periodOptions.find((o) => o.value === suggestedPeriod.value)?.label ?? "",
+);
+
 watch(
   () => props.visible,
   (open) => {
     if (!open) return;
-    form.period = props.period;
     form.method = props.method;
+    // Mở hộp thoại thì chọn sẵn kỳ hợp lý theo nhóm hộ; người dùng vẫn đổi
+    // được, và chỉ ghi lại khi bấm "Lưu cấu hình".
+    form.period = suggestedPeriod.value || props.period;
   },
 );
 
@@ -83,13 +105,19 @@ async function save() {
   >
     <div class="space-y-4 py-2">
       <FormField label="Kỳ khai thuế của hộ" required>
-        <Select
-          v-model="form.period"
-          :options="periodOptions"
-          optionLabel="label"
-          optionValue="value"
-          class="w-full"
-        />
+        <div data-testid="tax-period" class="w-full">
+          <Select
+            v-model="form.period"
+            :options="periodOptions"
+            optionLabel="label"
+            optionValue="value"
+            class="w-full"
+            aria-label="Kỳ khai thuế của hộ"
+          />
+        </div>
+        <p v-if="suggestedLabel" class="mt-1 text-xs text-gray-500">
+          Gợi ý cho <b>Nhóm {{ group }}</b> của hộ: {{ suggestedLabel }}.
+        </p>
       </FormField>
       <FormField label="Phương pháp tính thuế TNCN" required>
         <Select

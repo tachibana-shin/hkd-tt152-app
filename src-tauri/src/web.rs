@@ -248,7 +248,8 @@ pub async fn api_invoke(
             phone: String,
             email: String,
             hddt_start_date: String,
-            hddt_symbol: String
+            hddt_symbol: String,
+            tax_group: Option<i64>
         ),
         "get_app_settings" => mx!(commands::settings::get_app_settings, body),
         "save_app_settings" => mx!(
@@ -621,6 +622,7 @@ pub async fn api_invoke(
             period: String,
             period_no: i64
         ),
+        "get_tax_group" => mx!(commands::accounting::get_tax_group, body, year: i64),
         "get_revenue_expense" => mx!(
             commands::accounting::get_revenue_expense,
             body,

@@ -15,6 +15,9 @@ dist-ssr
 # Rust / Tauri
 src-tauri/target
 src-tauri/dev.db
+# DB tạm cho `cargo sqlx prepare` (check:sqlx dựng lại từ migrations mỗi lần
+# chạy nên file này đổi nội dung liên tục — không phải đồ cần lưu).
+src-tauri/sqlx-prep.db
 
 # Editor directories and files
 .vscode/*

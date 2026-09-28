@@ -715,13 +715,15 @@ useKeepAliveRefresh(reload);
     </div>
 
     <!-- Dialog cấu hình -->
-    <BusinessConfigDialog v-model:visible="configDialog" :config="config" @saved="loadReports" />
+    <!-- @saved: reload — nhóm hộ vừa đổi nên tổng hợp thuế phải tính lại. -->
+    <BusinessConfigDialog v-model:visible="configDialog" :config="config" @saved="reload" />
 
     <!-- Dialog cấu hình kê khai thuế -->
     <TaxConfigDialog
       v-model:visible="taxDialog"
       :period="taxPeriod"
       :method="taxMethod"
+      :group="overview?.group ?? null"
       @saved="onTaxConfigSaved"
     />
 

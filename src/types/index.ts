@@ -513,6 +513,23 @@ export interface BusinessConfig {
    * và được cập nhật theo lần dùng gần nhất.
    */
   hddt_symbol: string;
+  /**
+   * Nhóm hộ kinh doanh do người dùng xác nhận trong cấu hình HKD (1–4).
+   * `null` = chưa chốt → app tự xếp theo tổng doanh thu cả năm.
+   */
+  tax_group: number | null;
+}
+
+/** Nhóm hộ hiện hành + doanh thu cả năm dùng để xếp nhóm. */
+export interface TaxGroupInfo {
+  /** Nhóm đang áp dụng (đã chốt trong hồ sơ, không thì tự xếp). */
+  group: number;
+  /** Nhóm app tự xếp từ doanh thu. */
+  auto_group: number;
+  /** Tổng doanh thu cả năm tính từ dữ liệu kế toán. */
+  revenue_year: number;
+  /** true = người dùng đã chốt trong hồ sơ HKD. */
+  confirmed: boolean;
 }
 
 // ─── Cài đặt mặc định (bảng app_setting) ───

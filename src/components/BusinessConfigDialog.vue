@@ -42,6 +42,9 @@ const form = reactive({
   hddt_symbol: "",
   // Công tắc khấu trừ GTGT đầu vào — mặc định TẮT (hộ nộp thuế theo doanh thu).
   vat_deduct: false,
+  // Nhóm hộ 1–4: mở hộp thoại sẽ tự điền nhóm app xếp theo doanh thu, người
+  // dùng xác nhận hoặc sửa tay nếu cơ quan thuế đã xếp khác.
+  tax_group: null as number | null,
 });
 
 /** yyyy-mm-dd — DatePicker trả Date, DB lưu chuỗi ngày ISO. */
@@ -60,26 +63,33 @@ function parseDate(s: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// Nhóm hộ theo NĐ 68/2026 + NĐ 141/2026 — app tự xếp nhóm từ tổng doanh thu cả năm.
-const taxGroup = ref<number | null>(null);
+// Nhóm hộ theo NĐ 68/2026 + NĐ 141/2026 — app tự xếp từ tổng doanh thu cả năm,
+// rồi tự điền vào ô chọn bên dưới để người dùng xác nhận/sửa tay.
+const groupOptions = [
+  { label: "Nhóm 1 — doanh thu ≤ 1 tỷ (miễn thuế GTGT + TNCN)", value: 1 },
+  { label: "Nhóm 2 — doanh thu > 1 tỷ đến 3 tỷ", value: 2 },
+  { label: "Nhóm 3 — doanh thu > 3 tỷ đến 50 tỷ", value: 3 },
+  { label: "Nhóm 4 — doanh thu > 50 tỷ (khai theo tháng)", value: 4 },
+];
+const autoGroup = ref<number | null>(null);
+const groupConfirmed = ref(false);
 const yearRevenue = ref(0);
 const loadingGroup = ref(false);
 
-function loadGroup() {
-  taxGroup.value = null;
+async function loadGroup(stored: number | null) {
   loadingGroup.value = true;
-  api
-    .getTaxOverview(new Date().getFullYear(), "year", 0)
-    .then((ov) => {
-      taxGroup.value = ov.group;
-      yearRevenue.value = ov.year_revenue;
-    })
-    .catch(() => {
-      taxGroup.value = null;
-    })
-    .finally(() => {
-      loadingGroup.value = false;
-    });
+  try {
+    const info = await api.getTaxGroup(new Date().getFullYear());
+    autoGroup.value = info.auto_group;
+    groupConfirmed.value = info.confirmed;
+    yearRevenue.value = info.revenue_year;
+    // Ưu tiên nhóm đã chốt trong hồ sơ; hộ mới/chưa chốt thì lấy nhóm tự xếp.
+    form.tax_group = stored ?? info.group;
+  } catch {
+    form.tax_group = stored;
+  } finally {
+    loadingGroup.value = false;
+  }
 }
 
 async function fillVatSetting() {
@@ -114,7 +124,7 @@ watch(
     lookupResults.value = [];
     lookupSelectedUrl.value = "";
     void fillVatSetting();
-    void loadGroup();
+    void loadGroup(c.tax_group ?? null);
   },
 );
 
@@ -283,6 +293,36 @@ async function save() {
       <FormField label="Loại hình">
         <InputText v-model="form.ownership" />
       </FormField>
+      <div class="col-span-2">
+        <FormField label="Nhóm hộ kinh doanh" class="w-full">
+          <div data-testid="hkd-tax-group" class="w-full">
+            <Select
+              v-model="form.tax_group"
+              :options="groupOptions"
+              optionLabel="label"
+              optionValue="value"
+              class="w-full"
+              aria-label="Nhóm hộ kinh doanh"
+              :disabled="loadingGroup"
+            />
+          </div>
+          <p class="mt-1 text-xs text-gray-500">
+            <template v-if="loadingGroup"> Đang xếp nhóm theo doanh thu… </template>
+            <template v-else>
+              Doanh thu cả năm <b>{{ fmtVnd(yearRevenue) }}</b> → app xếp <b>Nhóm {{ autoGroup }}</b
+              >.
+              <template v-if="form.tax_group !== autoGroup">
+                Đang dùng <b>Nhóm {{ form.tax_group }}</b> theo lựa chọn của bạn.
+              </template>
+              <template v-else-if="!groupConfirmed">
+                Chưa chốt — lưu cấu hình để ghi nhóm này vào hồ sơ hộ.
+              </template>
+              <template v-else> Đã chốt trong hồ sơ hộ.</template>
+              Sửa tay ở đây khi cơ quan thuế đã xếp khác (NĐ 68/2026 + NĐ 141/2026).
+            </template>
+          </p>
+        </FormField>
+      </div>
       <FormField label="Tỉnh/TP">
         <InputText v-model="form.province" />
       </FormField>
@@ -332,25 +372,6 @@ async function save() {
           </p>
         </div>
         <ToggleSwitch v-model="form.vat_deduct" class="shrink-0" />
-      </div>
-      <div class="flex items-center justify-between gap-4 border-t border-gray-200 pt-3">
-        <div>
-          <p class="text-sm font-semibold text-gray-800">Nhóm hộ kinh doanh</p>
-          <p class="text-xs text-gray-500">
-            Xếp tự động theo tổng doanh thu cả năm (NĐ 68/2026 + NĐ 141/2026): nhóm 1 ≤ 1 tỷ (miễn
-            thuế) · nhóm 2 &gt; 1–3 tỷ · nhóm 3 &gt; 3–50 tỷ · nhóm 4 &gt; 50 tỷ.
-          </p>
-        </div>
-        <div class="shrink-0 text-right">
-          <template v-if="loadingGroup">
-            <i class="pi pi-spin pi-spinner text-gray-400" />
-          </template>
-          <template v-else-if="taxGroup">
-            <p class="text-lg font-bold text-blue-600">Nhóm {{ taxGroup }}</p>
-            <p class="text-xs text-gray-500">{{ fmtVnd(yearRevenue) }} / năm</p>
-          </template>
-          <template v-else><p class="text-xs text-gray-400">—</p></template>
-        </div>
       </div>
     </div>
   </AppDialog>

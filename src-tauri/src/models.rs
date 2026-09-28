@@ -64,6 +64,9 @@ pub(crate) struct BusinessConfigRow {
     /// Ký hiệu (mẫu số) HĐĐT của hộ, tuỳ chọn — mặc định cho hộp thoại liên
     /// kết HĐĐT và được cập nhật theo lần dùng gần nhất.
     pub(crate) hddt_symbol: String,
+    /// Nhóm hộ kinh doanh (1–4) do người dùng xác nhận trong cấu hình HKD.
+    /// `None` = chưa chốt → app tự xếp theo doanh thu cả năm.
+    pub(crate) tax_group: Option<i64>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

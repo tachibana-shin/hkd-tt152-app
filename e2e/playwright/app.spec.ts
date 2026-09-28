@@ -2058,3 +2058,56 @@ test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/t
   await setTaxPeriod(/^Theo quý/);
   expect((await currentRange()).label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
 });
+
+test("Cấu hình HKD: nhóm hộ tự điền theo doanh thu, lưu lại và tờ khai theo nhóm đó", async ({
+  page,
+}) => {
+  await ensureLoggedIn(page);
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await expect(page.getByText("Đang xem:")).toBeVisible();
+
+  // Chưa chốt nhóm: app tự xếp nhóm 1 vì E2E chưa có doanh thu.
+  // Nhãn nhóm xuất hiện ở cả thẻ tổng hợp và thẻ Tag → lấy phần tử đầu.
+  await expect(page.getByText("Nhóm 1 — doanh thu ≤ 1 tỷ").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Cấu hình hộ KD" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  // Ô nhóm phải tự điền sẵn (không để trống) và có gợi ý doanh thu.
+  const groupSelect = dialog.getByTestId("hkd-tax-group").locator(".p-select");
+  await expect(groupSelect).toContainText("Nhóm 1");
+  await expect(dialog.getByText(/app xếp/)).toBeVisible();
+
+  // Ghi đè tay sang nhóm 3 (cơ quan thuế xếp khác) → lưu.
+  await groupSelect.click();
+  await page
+    .locator(".p-select-option", { hasText: /^Nhóm 3/ })
+    .first()
+    .click();
+  await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(dialog).toBeHidden();
+
+  // Tổng hợp thuế phải nộp phải theo nhóm vừa lưu, không tự tính lại.
+  await expect(page.getByText("Nhóm 3 — doanh thu > 3 tỷ đến 50 tỷ").first()).toBeVisible();
+
+  // Hộp cấu hình thuế gợi ý kỳ khai theo nhóm 3 → theo quý.
+  await page.getByRole("button", { name: "Cấu hình thuế" }).click();
+  const taxDialog = page.getByRole("dialog");
+  await expect(taxDialog.getByTestId("tax-period").locator(".p-select")).toContainText("Theo quý");
+  await expect(taxDialog.getByText(/Gợi ý cho Nhóm 3/)).toBeVisible();
+  await taxDialog.getByRole("button", { name: "Hủy" }).click();
+  await expect(taxDialog).toBeHidden();
+
+  // Trả lại nhóm 1 để không ảnh hưởng test sau.
+  await page.getByRole("button", { name: "Cấu hình hộ KD" }).click();
+  await expect(dialog).toBeVisible();
+  await groupSelect.click();
+  await page
+    .locator(".p-select-option", { hasText: /^Nhóm 1/ })
+    .first()
+    .click();
+  await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("Nhóm 1 — doanh thu ≤ 1 tỷ").first()).toBeVisible();
+});
