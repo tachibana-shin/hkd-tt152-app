@@ -1,3 +1,9 @@
+# Changelog
+
+Nhật ký thay đổi của HKD Kế Toán. Mỗi mục tương ứng một bản phát hành;
+phiên bản được [semantic-release](https://github.com/semantic-release/semantic-release)
+tính tự động từ commit trước đó (`feat` → minor, `fix` → patch, kèm `!` → major).
+
 # [0.6.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.5.0...v0.6.0) (2026-09-28)
 
 
@@ -12,12 +18,6 @@
 
 * **release:** bump the version from the tag and keep a changelog ([74f6c0f](https://github.com/tachibana-shin/hkd-tt152-app/commit/74f6c0fc195f0d8260f7fd2a101bd7f8a03d9784))
 * **release:** let semantic-release bump the version and keep a changelog ([61bcde3](https://github.com/tachibana-shin/hkd-tt152-app/commit/61bcde3d2d94843b2317fa9f186575a1914ac3d1))
-
-# Changelog
-
-Nhật ký thay đổi của HKD Kế Toán. Mỗi mục tương ứng một bản phát hành;
-phiên bản được [semantic-release](https://github.com/semantic-release/semantic-release)
-tính tự động từ commit trước đó (`feat` → minor, `fix` → patch, kèm `!` → major).
 
 ## [0.3.0](https://github.com/tachibana-shin/hkd-tt152-app/tags/v0.3.0) (2026-09-27)
 
