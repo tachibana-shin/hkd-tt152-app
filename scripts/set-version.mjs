@@ -139,7 +139,9 @@ if (check) {
     if (tag !== only) {
       console.error(
         `::error::Tag mới nhất trên remote là v${tag} nhưng repo đang ghi ${only}. ` +
-          "Chạy `node scripts/set-version.mjs " + tag + "` rồi commit.",
+          "Chạy `node scripts/set-version.mjs " +
+          tag +
+          "` rồi commit.",
       );
       process.exit(1);
     }

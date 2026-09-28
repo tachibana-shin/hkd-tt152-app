@@ -23,8 +23,7 @@ const pluginConfig = (name) => {
   return Array.isArray(found) ? found[1] : undefined;
 };
 
-const git = (...args) =>
-  execFileSync("git", args, { cwd: root, encoding: "utf8" }).trimEnd();
+const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trimEnd();
 
 const repositoryUrl = git("config", "--get", "remote.origin.url")
   .replace(/^git@github\.com:/, "https://github.com/")
@@ -39,9 +38,7 @@ const repositoryUrl = git("config", "--get", "remote.origin.url")
  */
 function commitsBetween(from, to) {
   const range = from ? `${from}..${to}` : to;
-  const hashes = git("log", "--reverse", "--format=%H", range)
-    .split("\n")
-    .filter(Boolean);
+  const hashes = git("log", "--reverse", "--format=%H", range).split("\n").filter(Boolean);
   return hashes.map((hash) => {
     const message = git("log", "-1", "--format=%B", hash).trimEnd();
     return { message, longMessage: message, hash, commit: { message, longMessage: message, hash } };
