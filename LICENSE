@@ -1,0 +1,81 @@
+# HKD Kế Toán (`hkd-tt152-app`) — Source-Available Licence
+
+**This is NOT an open-source licence.** The software in this repository is published so
+that others can read it, report problems and contribute improvements. It grants none of
+the rights that an OSI-approved licence grants (MIT, Apache-2.0, GPL, …), and no
+permission is granted by implication or by any other licence.
+
+Copyright © 2026 Tachibana Shin. All rights reserved.
+
+## 1. Scope
+
+This licence covers everything in this repository — source code, build scripts,
+workflow definitions and documentation — and any build artefact produced from them.
+
+## 2. What you MAY do
+
+- Read and study the source code.
+- Fork or clone this repository.
+- Run the documented development commands (installing dependencies, running linters,
+  type checks, unit tests and a local development build) **solely to prepare, review
+  or submit a contribution** — an issue or a pull request.
+- Submit contributions. Contributions are accepted under these same terms.
+
+## 3. What you MUST NOT do
+
+- **Compile or package a distributable.** No installer, setup executable, MSI, DMG,
+  AppImage, DEB, RPM or any other binary intended to be installed, sold or passed on
+  to end users may be produced, except where such a build is an unavoidable
+  by-product of the contribution workflow in section 2.
+- **Reverse engineer the software.** No decompiling, disassembling, deobfuscating,
+  reverse translation, or any other attempt to recover its source, structure or logic
+  from a binary or from any obfuscated part of the source.
+- **Redistribute or republish it, in any form**, modified or unmodified: no copying,
+  mirroring, reposting, publishing a fork publicly, sublicensing, selling, bundling
+  into another product, or otherwise making the source code or any binary available
+  to third parties.
+- Remove, obscure or alter the copyright, licence or authorship notices.
+- Use the project's name, logo or branding in a way that implies endorsement.
+
+## 4. Third-party components
+
+This project builds on third-party open-source components (Rust crates, npm packages
+and other libraries) that remain under their own licences. This licence governs only
+this project's own code and grants no rights in those components.
+
+## 5. No warranty; limitation of liability
+
+The software is provided "as is", without warranty of any kind, express or implied,
+including but not limited to the warranties of merchantability, fitness for a
+particular purpose and non-infringement. To the maximum extent permitted by law, the
+author is not liable for any claim, damages or other liability arising from the
+software or its use.
+
+## 6. Regulatory notice
+
+This application is a bookkeeping tool intended to help Vietnamese household
+businesses (hộ kinh doanh / cá nhân kinh doanh) meet the record-keeping, invoicing
+and tax-reporting requirements of the Ministry of Finance's **Circular 152** (Thông tư
+152), including the household accounting template set (bộ mẫu Excel HKD) and the
+periodic VAT and personal income tax declarations.
+
+It is an independent tool. It is not affiliated with, endorsed by, or a substitute for
+any decision of the Ministry of Finance, the General Department of Taxation, or any
+e-invoice service provider, and it makes no guarantee that any particular business is
+compliant. Users remain responsible for the accuracy of their records and for
+compliance with applicable Vietnamese law and tax deadlines.
+
+## 7. Termination
+
+Any breach of section 3 terminates the permissions granted by this licence
+automatically. Permissions may also be withdrawn at the copyright holder's discretion.
+
+## 8. Contact
+
+For questions about this licence, open an issue in this repository or contact the
+copyright holder.
+
+---
+
+*These terms were drafted by the author for this project. They are the author's own
+work product and have not been reviewed by a lawyer.*

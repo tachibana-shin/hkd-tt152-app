@@ -6,6 +6,22 @@
 >
 > **Phiên bản:** `0.3.0` · **Nền tảng:** Tauri 2 (Rust + sqlx + SQLite) · **Giao diện:** Vue 3 + TypeScript (PrimeVue + Tailwind CSS)
 
+> [!WARNING]
+> **⚠️ Read this before using or reusing the code.**
+>
+> **Regulatory scope.** This application implements the record-keeping, e-invoice and
+> tax-reporting requirements of the Ministry of Finance's **Circular 152** (Vietnam) for
+> household businesses (hộ kinh doanh / cá nhân kinh doanh). It is an independent tool —
+> it is not affiliated with, endorsed by, or a substitute for any decision of the
+> Ministry of Finance, the General Department of Taxation or any e-invoice service
+> provider, and it does not guarantee that a particular business is compliant. You stay
+> responsible for the accuracy of your records and for meeting Vietnamese tax deadlines.
+>
+> **Not open source.** The code here is **source-available** and published for
+> transparency and contributions only. You may read it, fork/clone it, and run the
+> development commands to submit a contribution. You may **not** build distributable
+> installers, reverse engineer it, or redistribute it in any form. See [LICENSE](LICENSE).
+
 ---
 
 ## ✨ Tổng quan
