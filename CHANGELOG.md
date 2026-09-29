@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.10.0...v0.10.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **tax:** a household confirmed as group 2 owes tax even below the revenue threshold ([5725901](https://github.com/tachibana-shin/hkd-tt152-app/commit/57259013fd352486aabd23ee047ffaebca223ee8))
+
 # [0.10.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.3...v0.10.0) (2026-09-29)
 
 
