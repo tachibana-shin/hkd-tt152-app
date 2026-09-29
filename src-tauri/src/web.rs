@@ -316,10 +316,16 @@ pub async fn api_invoke(
             mx!(commands::catalog::delete_industry_group, body, code: String)
         }
         "get_warehouses" => mx!(commands::catalog::get_warehouses, body),
+        "get_warehouses_page" => {
+            mx!(commands::catalog::get_warehouses_page, body, lazy_event: String)
+        }
         "save_warehouse" => {
             mx!(commands::catalog::save_warehouse, body, code: String, name: String)
         }
         "get_suppliers" => mx!(commands::catalog::get_suppliers, body),
+        "get_suppliers_page" => {
+            mx!(commands::catalog::get_suppliers_page, body, lazy_event: String)
+        }
         "save_supplier" => mx!(
             commands::catalog::save_supplier,
             body,
@@ -330,6 +336,9 @@ pub async fn api_invoke(
             phone: String
         ),
         "get_customers" => mx!(commands::catalog::get_customers, body),
+        "get_customers_page" => {
+            mx!(commands::catalog::get_customers_page, body, lazy_event: String)
+        }
         "save_customer" => mx!(
             commands::catalog::save_customer,
             body,
@@ -416,6 +425,14 @@ pub async fn api_invoke(
             paste_sep: String
         ),
         "invoice_queue" => mx!(commands::invoice_export::invoice_queue, body),
+        "invoice_queue_page" => mx!(
+            commands::invoice_export::invoice_queue_page,
+            body,
+            lazy_event: String,
+            status: String,
+            from_date: String,
+            to_date: String
+        ),
         "invoice_events" => mx!(commands::invoice_export::invoice_events, body, invoice_id: i64),
         "invoice_set_status" => mx!(
             commands::invoice_export::invoice_set_status,
@@ -437,6 +454,14 @@ pub async fn api_invoke(
             from_date: String,
             to_date: String,
             search: String
+        ),
+        "get_journal_entries_page" => mx!(
+            commands::stock::get_journal_entries_page,
+            body,
+            lazy_event: String,
+            entry_type: String,
+            from_date: String,
+            to_date: String
         ),
         "get_voucher" => mx!(commands::stock::get_voucher, body, voucher_no: String),
         "get_stock_lots" => mx!(commands::stock::get_stock_lots, body, product_code: String),
@@ -460,6 +485,12 @@ pub async fn api_invoke(
 
         // ── Hóa đơn ──
         "get_invoices" => mx!(commands::invoice::get_invoices, body),
+        "get_invoices_page" => mx!(
+            commands::invoice::get_invoices_page,
+            body,
+            lazy_event: String,
+            only_duplicates: bool
+        ),
         "delete_invoice" => mx!(commands::invoice::delete_invoice, body, id: i64),
         "create_invoice_outbound" => mx!(
             commands::invoice::create_invoice_outbound,
@@ -595,6 +626,14 @@ pub async fn api_invoke(
             from_date: String,
             to_date: String
         ),
+        "get_ledger_page" => mx!(
+            commands::accounting::get_ledger_page,
+            body,
+            lazy_event: String,
+            from_date: String,
+            to_date: String,
+            entry_type: String
+        ),
         "get_trial_balance" => mx!(
             commands::accounting::get_trial_balance,
             body,
@@ -639,6 +678,7 @@ pub async fn api_invoke(
             detail: String
         ),
         "get_audit_log" => mx!(commands::audit::get_audit_log, body, limit: i64),
+        "get_audit_log_page" => mx!(commands::audit::get_audit_log_page, body, lazy_event: String),
         "create_backup" => mx_state_app!(commands::admin::create_backup, body),
         "list_backups" => mx_state_app!(commands::admin::list_backups, body),
         "restore_backup" => {

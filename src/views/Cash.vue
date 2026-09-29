@@ -6,6 +6,7 @@ import { api } from "@/db";
 import type { JournalEntryRow, Account } from "@/types";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -49,10 +50,6 @@ const form = reactive({
   credit_account: "511",
   note: "",
 });
-
-const filteredEntries = computed(() =>
-  typeFilter.value ? entries.value.filter((e) => e.entry_type === typeFilter.value) : entries.value,
-);
 
 const objectCode = computed({
   get: () => (form.entry_type === "PT" ? form.customer_code : form.supplier_code),
@@ -98,15 +95,16 @@ function onTypeChange() {
   void suggestVoucherNo(t);
 }
 
-async function loadEntries() {
+// Phiếu thu/chi tích luỹ theo thời gian và màn không lọc theo ngày nên trước đây
+// tải toàn bộ PT + PC về client rồi lọc/cắt trang. Giờ phân trang server-side:
+// entryType rỗng = cả hai loại, có giá trị = lọc đúng loại đó.
+const total = ref(0);
+async function loadEntries(lazy: Record<string, unknown>) {
   loading.value = true;
   try {
-    const [pt, pc] = await Promise.all([api.getJournalEntries("PT"), api.getJournalEntries("PC")]);
-    entries.value = [...pt, ...pc].sort((a, b) =>
-      a.posting_date === b.posting_date
-        ? a.voucher_no.localeCompare(b.voucher_no)
-        : b.posting_date.localeCompare(a.posting_date),
-    );
+    const res = await api.getJournalEntriesPage(lazy, typeFilter.value, "", "");
+    entries.value = res.rows;
+    total.value = res.total;
   } catch (e) {
     toast.add({
       severity: "error",
@@ -116,6 +114,13 @@ async function loadEntries() {
   } finally {
     loading.value = false;
   }
+}
+
+const page = useLazyPage(loadEntries);
+
+/** Đổi bộ lọc loại phiếu → lọc ở server nên phải nạp lại trang đầu. */
+function applyTypeFilter() {
+  void page.setExtra({});
 }
 
 async function save() {
@@ -178,7 +183,7 @@ async function save() {
     });
     dialog.value = false;
     resetForm(form.entry_type);
-    await loadEntries();
+    await page.reload();
   } catch (e) {
     toast.add({
       severity: "error",
@@ -193,7 +198,7 @@ async function save() {
 async function reload() {
   await Promise.all([
     catalog.loadAll(),
-    loadEntries(),
+    page.reload(),
     api.getAccounts().then((a) => (accounts.value = a)),
   ]);
 }
@@ -220,7 +225,9 @@ useKeepAliveRefresh(reload);
     <Card>
       <template #content>
         <div class="mb-3 flex items-center justify-between gap-3">
-          <span class="text-sm text-gray-500">Tổng số phiếu: {{ entries.length }}</span>
+          <span class="text-sm text-gray-500">
+            Tổng <b>{{ total.toLocaleString("vi-VN") }}</b> phiếu
+          </span>
           <div class="flex items-center gap-2">
             <i class="pi pi-filter text-gray-400" />
             <Select
@@ -229,12 +236,29 @@ useKeepAliveRefresh(reload);
               optionLabel="label"
               optionValue="value"
               class="w-56"
+              @change="applyTypeFilter()"
             />
           </div>
         </div>
-        <AppDataTable :value="filteredEntries" :loading="loading" stripedRows paginator :rows="10">
-          <Column field="posting_date" header="Ngày" />
-          <Column field="voucher_no" header="Số phiếu" />
+        <AppDataTable
+          :value="entries"
+          :loading="loading"
+          :totalRecords="total"
+          :first="page.first.value"
+          :rows="page.rowsPerPage.value"
+          :rows-per-page-options="page.pageSizes"
+          data-key="id"
+          sort-mode="single"
+          removable-sort
+          filter-toggle
+          :global-filter-fields="['voucher_no', 'description', 'product_code', 'note']"
+          stripedRows
+          @page="page.onPage"
+          @sort="page.onSort"
+          @search="page.onSearch"
+        >
+          <Column field="posting_date" header="Ngày" sortable />
+          <Column field="voucher_no" header="Số phiếu" sortable />
           <Column field="entry_type" header="Loại">
             <template #body="{ data }">
               <Tag :value="data.entry_type" :severity="tagSeverity[data.entry_type]" />

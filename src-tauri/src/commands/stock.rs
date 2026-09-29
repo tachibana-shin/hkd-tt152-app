@@ -1164,6 +1164,93 @@ pub(crate) async fn get_journal_entries(
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Phiếu thu/chi — phân trang server-side (màn Thu/Chi không lọc theo ngày nên
+/// danh sách phình to theo thời gian).
+#[tauri::command]
+pub(crate) async fn get_journal_entries_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+    entry_type: String,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    // Ô tìm kiếm toàn cục của bảng đóng vai trò `search` của bản get_journal_entries.
+    let search = ev.global_keyword().unwrap_or_default();
+    let rows = get_journal_entries_page_core(
+        &*state.pool.read().await,
+        &entry_type,
+        &from_date,
+        &to_date,
+        &search,
+        page.size,
+        page.offset,
+    )
+    .await?;
+    let total = count_journal_entries(
+        &*state.pool.read().await,
+        &entry_type,
+        &from_date,
+        &to_date,
+        &search,
+    )
+    .await?;
+    Ok(
+        serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
+            .unwrap_or_default(),
+    )
+}
+
+/// Đếm số dòng khớp bộ lọc — để bảng tính tổng số trang.
+pub(crate) async fn count_journal_entries(
+    pool: &SqlitePool,
+    entry_type: &str,
+    from_date: &str,
+    to_date: &str,
+    search: &str,
+) -> Result<i64, String> {
+    let search = search.trim();
+    let like = format!("%{search}%");
+    let total = sqlx::query_scalar!(
+        "SELECT COUNT(*)
+         FROM journal_entry je
+         LEFT JOIN supplier s ON s.code = je.supplier_code
+         LEFT JOIN customer c ON c.code = je.customer_code
+         LEFT JOIN product pr ON pr.code = je.product_code
+         WHERE (? = '' OR je.entry_type = ?)
+           AND (? = '' OR je.posting_date >= ?)
+           AND (? = '' OR je.posting_date <= ?)
+           AND (? = ''
+                OR je.voucher_no LIKE ? COLLATE NOCASE
+                OR je.product_code LIKE ? COLLATE NOCASE
+                OR je.description LIKE ? COLLATE NOCASE
+                OR je.note LIKE ? COLLATE NOCASE
+                OR COALESCE(s.name, '') LIKE ? COLLATE NOCASE
+                OR COALESCE(c.name, '') LIKE ? COLLATE NOCASE
+                OR COALESCE(pr.name, '') LIKE ? COLLATE NOCASE)",
+        entry_type,
+        entry_type,
+        from_date,
+        from_date,
+        to_date,
+        to_date,
+        search,
+        like,
+        like,
+        like,
+        like,
+        like,
+        like,
+        like
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(total)
+}
+
 /// Sổ nhật ký theo bộ lọc — tách riêng để test trực tiếp (không cần tauri::State).
 ///
 /// Từ khoá tìm khớp trên số phiếu / mã hàng / tên khách, nhà cung cấp / diễn
@@ -1215,6 +1302,65 @@ pub(crate) async fn get_journal_entries_core(
         like,
         like,
         like
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Bản phân trang của `get_journal_entries_core`: cùng bộ lọc, thêm LIMIT/OFFSET
+/// và sắp xếp theo yêu cầu của bảng (mặc định mới nhất trước).
+pub(crate) async fn get_journal_entries_page_core(
+    pool: &SqlitePool,
+    entry_type: &str,
+    from_date: &str,
+    to_date: &str,
+    search: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<JournalEntryRow>, String> {
+    let search = search.trim();
+    let like = format!("%{search}%");
+    let rows: Vec<JournalEntryRow> = sqlx::query_as!(
+        JournalEntryRow,
+        "SELECT je.id, je.posting_date, je.voucher_no, je.entry_type, je.description,
+                je.product_code, je.quantity, je.unit_price, je.amount,
+                s.name AS supplier_name, c.name AS customer_name,
+                je.industry_code, je.adjust_code, je.note
+         FROM journal_entry je
+         LEFT JOIN supplier s ON s.code = je.supplier_code
+         LEFT JOIN customer c ON c.code = je.customer_code
+         LEFT JOIN product pr ON pr.code = je.product_code
+         WHERE (? = '' OR je.entry_type = ?)
+           AND (? = '' OR je.posting_date >= ?)
+           AND (? = '' OR je.posting_date <= ?)
+           AND (? = ''
+                OR je.voucher_no LIKE ? COLLATE NOCASE
+                OR je.product_code LIKE ? COLLATE NOCASE
+                OR je.description LIKE ? COLLATE NOCASE
+                OR je.note LIKE ? COLLATE NOCASE
+                OR COALESCE(s.name, '') LIKE ? COLLATE NOCASE
+                OR COALESCE(c.name, '') LIKE ? COLLATE NOCASE
+                OR COALESCE(pr.name, '') LIKE ? COLLATE NOCASE)
+         ORDER BY je.posting_date DESC, je.id DESC
+         LIMIT ? OFFSET ?",
+        entry_type,
+        entry_type,
+        from_date,
+        from_date,
+        to_date,
+        to_date,
+        search,
+        like,
+        like,
+        like,
+        like,
+        like,
+        like,
+        like,
+        limit,
+        offset
     )
     .fetch_all(pool)
     .await

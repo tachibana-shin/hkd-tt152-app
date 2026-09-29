@@ -18,6 +18,7 @@ import SelectButton from "primevue/selectbutton";
 import type { Invoice, InvoiceQueueItem } from "@/types";
 import { fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const auth = useAuthStore();
 const toast = useToast();
@@ -31,39 +32,21 @@ const from = ref<Date | null>(null);
 const to = ref<Date | null>(null);
 const selectedId = ref<number | null>(null);
 
-const filtered = computed(() => {
-  const kw = keyword.value.trim().toLowerCase();
-  const f = toIsoDate(from.value);
-  const t = toIsoDate(to.value);
-  return items.value.filter((it) => {
-    const inv = it.invoice;
-    if (statusFilter.value !== "all" && inv.status !== statusFilter.value) return false;
-    if (f && inv.date < f) return false;
-    if (t && inv.date > t) return false;
-    if (
-      kw &&
-      ![inv.number, inv.customer, inv.customer_tax_code].join(" ").toLowerCase().includes(kw)
-    )
-      return false;
-    return true;
-  });
-});
-
-const blockedCount = computed(() => filtered.value.filter((i) => i.error_count > 0).length);
-const readyCount = computed(() => filtered.value.filter((i) => i.error_count === 0).length);
-const copiedCount = computed(() => filtered.value.filter((i) => i.copied).length);
+// Các bộ đếm chạy trên dữ liệu đang hiển thị (trang hiện tại) — server đã lọc
+// theo từ khoá/trạng thái/ngày rồi, không còn lọc client.
+const blockedCount = computed(() => items.value.filter((i) => i.error_count > 0).length);
+const readyCount = computed(() => items.value.filter((i) => i.error_count === 0).length);
+const copiedCount = computed(() => items.value.filter((i) => i.copied).length);
 
 const statusText: Record<string, string> = {
   draft: "Nháp",
   exported: "Đã chép — chờ phát hành",
 };
 
-const selected = computed(
-  () => filtered.value.find((i) => i.invoice.id === selectedId.value) ?? null,
-);
+const selected = computed(() => items.value.find((i) => i.invoice.id === selectedId.value) ?? null);
 
 /** Màn này thao tác bằng phím tắt nên luôn có 1 dòng được chọn sẵn. */
-watch(filtered, (rows) => {
+watch(items, (rows) => {
   if (selectedId.value && rows.some((r) => r.invoice.id === selectedId.value)) return;
   // Ưu tiên dòng chưa chép, không còn lỗi — việc cần làm gấp nhất.
   selectedId.value =
@@ -109,10 +92,20 @@ function removeItem(inv: Invoice) {
   });
 }
 
-async function load() {
+// Hàng chờ xuất phình theo thời gian (hóa đơn nháp chưa xuất, hóa đơn đã xuất
+// chờ xử lý) → phân trang server-side, mỗi lần đổi trang/lọc chỉ lấy đúng trang.
+const total = ref(0);
+const page = useLazyPage(async (lazy) => {
   loading.value = true;
   try {
-    items.value = await api.invoiceQueue();
+    const res = await api.invoiceQueuePage(
+      lazy,
+      statusFilter.value === "all" ? "" : statusFilter.value,
+      toIsoDate(from.value),
+      toIsoDate(to.value),
+    );
+    items.value = res.rows;
+    total.value = res.total;
     // Giữ dòng đang chọn nếu vẫn còn trong danh sách.
     if (selectedId.value && !items.value.some((i) => i.invoice.id === selectedId.value)) {
       selectedId.value = null;
@@ -123,7 +116,22 @@ async function load() {
   } finally {
     loading.value = false;
   }
+});
+
+/**
+ * Bộ lọc riêng của màn (từ khoá + trạng thái + khoảng ngày) — trước đây lọc ở
+ * client trên toàn bộ hàng chờ, giờ server lọc nên đổi điều kiện phải nạp lại.
+ */
+function applyFilters() {
+  void page.setExtra({});
 }
+
+/** Ô tìm kiếm riêng của màn → đưa từ khoá vào bộ lọc chung rồi nạp lại. */
+function searchNow() {
+  void page.setKeyword(keyword.value);
+}
+
+const load = () => page.reload();
 
 void load();
 
@@ -183,6 +191,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               v-model="keyword"
               placeholder="Số hóa đơn, khách hàng, MST…"
               size="small"
+              @keyup.enter="searchNow()"
               class="w-64"
             />
           </IconField>
@@ -190,6 +199,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <label class="mb-1 block text-xs text-gray-500">Trạng thái</label>
             <SelectButton
               v-model="statusFilter"
+              @change="applyFilters()"
               :options="[
                 { label: 'Tất cả', value: 'all' },
                 { label: 'Nháp', value: 'draft' },
@@ -203,17 +213,36 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-500">Từ ngày</label>
-            <DatePicker v-model="from" dateFormat="dd/mm/yy" size="small" show-icon />
+            <DatePicker
+              v-model="from"
+              dateFormat="dd/mm/yy"
+              size="small"
+              show-icon
+              @date-select="applyFilters()"
+            />
           </div>
           <div>
             <label class="mb-1 block text-xs text-gray-500">Đến ngày</label>
-            <DatePicker v-model="to" dateFormat="dd/mm/yy" size="small" show-icon />
+            <DatePicker
+              v-model="to"
+              dateFormat="dd/mm/yy"
+              size="small"
+              show-icon
+              @date-select="applyFilters()"
+            />
           </div>
         </div>
 
         <DataTable
-          :value="filtered"
+          :value="items"
           :loading="loading"
+          :lazy="true"
+          :paginator="true"
+          :rows="page.rowsPerPage.value"
+          :first="page.first.value"
+          :totalRecords="total"
+          :rows-per-page-options="page.pageSizes"
+          @page="page.onPage"
           data-key="invoice.id"
           size="small"
           striped-rows

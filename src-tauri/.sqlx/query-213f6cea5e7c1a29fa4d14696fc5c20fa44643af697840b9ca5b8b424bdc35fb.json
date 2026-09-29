@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*)\n         FROM journal_entry je\n         LEFT JOIN supplier s ON s.code = je.supplier_code\n         LEFT JOIN customer c ON c.code = je.customer_code\n         LEFT JOIN product pr ON pr.code = je.product_code\n         WHERE (? = '' OR je.entry_type = ?)\n           AND (? = '' OR je.posting_date >= ?)\n           AND (? = '' OR je.posting_date <= ?)\n           AND (? = ''\n                OR je.voucher_no LIKE ? COLLATE NOCASE\n                OR je.product_code LIKE ? COLLATE NOCASE\n                OR je.description LIKE ? COLLATE NOCASE\n                OR je.note LIKE ? COLLATE NOCASE\n                OR COALESCE(s.name, '') LIKE ? COLLATE NOCASE\n                OR COALESCE(c.name, '') LIKE ? COLLATE NOCASE\n                OR COALESCE(pr.name, '') LIKE ? COLLATE NOCASE)",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "213f6cea5e7c1a29fa4d14696fc5c20fa44643af697840b9ca5b8b424bdc35fb"
+}

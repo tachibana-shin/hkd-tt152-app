@@ -160,6 +160,12 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
 }
 
 // ─── INFO / CONFIG ───
+/** Kiểu trả về chung của các lệnh phân trang server-side (`*_page`). */
+export interface PageResult<T> {
+  rows: T[];
+  total: number;
+}
+
 export const api = {
   getBusinessInfo: () => call<string>("get_business_info"),
   getBusinessConfig: async () => parse<BusinessConfig>(await call<string>("get_business_config")),
@@ -238,12 +244,20 @@ export const api = {
       pitRate: g.pit_rate,
     }),
   deleteIndustryGroup: (code: string) => call<string>("delete_industry_group", { code }),
+  getWarehousesPage: async (lazyEvent: unknown) =>
+    parse<PageResult<Warehouse[]>>(
+      await call<string>("get_warehouses_page", { lazyEvent: JSON.stringify(lazyEvent) }),
+    ),
   getWarehouses: async () => parse<Warehouse[]>(await call<string>("get_warehouses")),
   saveWarehouse: (code: string, name: string) => call<string>("save_warehouse", { code, name }),
   nextWarehouseCode: () => call<string>("next_warehouse_code"),
   nextCustomerCode: () => call<string>("next_customer_code"),
   nextSupplierCode: () => call<string>("next_supplier_code"),
   nextEmployeeCode: () => call<string>("next_employee_code"),
+  getSuppliersPage: async (lazyEvent: unknown) =>
+    parse<PageResult<Supplier[]>>(
+      await call<string>("get_suppliers_page", { lazyEvent: JSON.stringify(lazyEvent) }),
+    ),
   getSuppliers: async () => parse<Supplier[]>(await call<string>("get_suppliers")),
   saveSupplier: (s: Partial<Supplier>) =>
     call<string>("save_supplier", {
@@ -253,6 +267,10 @@ export const api = {
       taxCode: s.tax_code ?? "",
       phone: s.phone ?? "",
     }),
+  getCustomersPage: async (lazyEvent: unknown) =>
+    parse<PageResult<Customer[]>>(
+      await call<string>("get_customers_page", { lazyEvent: JSON.stringify(lazyEvent) }),
+    ),
   getCustomers: async () => parse<Customer[]>(await call<string>("get_customers")),
   saveCustomer: (c: Partial<Customer>) =>
     call<string>("save_customer", {
@@ -409,6 +427,20 @@ export const api = {
       },
     }),
 
+  getJournalEntriesPage: async (
+    lazyEvent: unknown,
+    entryType: string,
+    fromDate: string,
+    toDate: string,
+  ) =>
+    parse<PageResult<JournalEntryRow>>(
+      await call<string>("get_journal_entries_page", {
+        lazyEvent: JSON.stringify(lazyEvent),
+        entryType,
+        fromDate,
+        toDate,
+      }),
+    ),
   getJournalEntries: (entryType = "", fromDate = "", toDate = "", search = "") =>
     call<string>("get_journal_entries", {
       entryType,
@@ -460,6 +492,13 @@ export const api = {
     parse<InventoryRow[]>(await call<string>("get_inventory_summary")),
 
   // ─── INVOICES ───
+  getInvoicesPage: async (lazyEvent: unknown, onlyDuplicates = false) =>
+    parse<PageResult<Invoice>>(
+      await call<string>("get_invoices_page", {
+        lazyEvent: JSON.stringify(lazyEvent),
+        onlyDuplicates,
+      }),
+    ),
   getInvoices: async () => parse<Invoice[]>(await call<string>("get_invoices")),
   deleteInvoice: (id: number) => call<string>("delete_invoice", { id }),
   updateInvoice: (args: {
@@ -536,6 +575,16 @@ export const api = {
     parse<TrialBalanceRow[]>(await call<string>("get_trial_balance", { fromDate, toDate })),
 
   // ─── SỔ SÁCH ───
+  /** Sổ nhật ký: thêm `total_amount` = tổng tiền CẢ kỳ lọc (server tính). */
+  getLedgerPage: async (lazyEvent: unknown, fromDate: string, toDate: string, entryType: string) =>
+    parse<PageResult<LedgerRow> & { total_amount: number }>(
+      await call<string>("get_ledger_page", {
+        lazyEvent: JSON.stringify(lazyEvent),
+        fromDate,
+        toDate,
+        entryType,
+      }),
+    ),
   getLedger: async (fromDate: string, toDate: string) =>
     parse<LedgerRow[]>(await call<string>("get_ledger", { fromDate, toDate })),
 
@@ -559,6 +608,15 @@ export const api = {
         invoiceId,
         pasteLayout: args.pasteLayout,
         pasteSep: args.pasteSep,
+      }),
+    ),
+  invoiceQueuePage: async (lazyEvent: unknown, status = "", fromDate = "", toDate = "") =>
+    parse<PageResult<InvoiceQueueItem>>(
+      await call<string>("invoice_queue_page", {
+        lazyEvent: JSON.stringify(lazyEvent),
+        status,
+        fromDate,
+        toDate,
       }),
     ),
   invoiceQueue: async () => parse<InvoiceQueueItem[]>(await call<string>("invoice_queue", {})),
@@ -729,6 +787,11 @@ export const api = {
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>
     parse<AuditEntry[]>(await call<string>("get_audit_log", { limit })),
+  /** Phân trang server-side (mỗi lần đổi trang/lọc chỉ lấy đúng trang đó). */
+  getAuditLogPage: async (lazyEvent: unknown) =>
+    parse<PageResult<AuditEntry>>(
+      await call<string>("get_audit_log_page", { lazyEvent: JSON.stringify(lazyEvent) }),
+    ),
 
   // ─── IMPORT KHỐI NHAP LIEU ───
   importNhapLieu: async (

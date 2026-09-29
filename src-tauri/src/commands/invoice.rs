@@ -22,6 +22,61 @@ pub(crate) async fn get_invoices(state: State<'_, AppState>) -> Result<String, S
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Hóa đơn — phân trang server-side (màn Hóa đơn không lọc theo ngày nên danh
+/// sách phình to theo thời gian; kéo hết về client rồi cắt trang là đơ).
+#[tauri::command]
+pub(crate) async fn get_invoices_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+    only_duplicates: bool,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    let (mut where_sql, params) = crate::commands::page::global_where(
+        ev.global_keyword(),
+        &["number", "customer", "voucher_no", "e_invoice_no"],
+    );
+    // Nút "Chỉ hiện hóa đơn trùng số" — lọc ở server để không bỏ sót bản trùng
+    // nằm ở trang khác (trước đây lọc client trên toàn bộ danh sách đã tải).
+    if only_duplicates {
+        where_sql.push_str(
+            " AND number IN (SELECT number FROM invoice GROUP BY number HAVING COUNT(*) > 1)",
+        );
+    }
+    let order = crate::commands::page::order_by(
+        &[
+            ("id", "id"),
+            ("date", "date"),
+            ("number", "number"),
+            ("customer", "customer"),
+        ],
+        &ev,
+        "date DESC, id DESC",
+    );
+    let sql = format!(
+        "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
+                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
+                exported_at, replace_reason, adjust_reason, ref_invoice, adjust_voucher_no,
+                replaces_invoice_id
+         FROM invoice{} ORDER BY {} LIMIT ? OFFSET ?",
+        where_sql, order
+    );
+    let count_sql = format!("SELECT COUNT(*) FROM invoice{where_sql}");
+    let (rows, total): (Vec<InvoiceRow>, i64) = crate::commands::page::fetch_page(
+        &*state.pool.read().await,
+        &sql,
+        &count_sql,
+        &params,
+        &page,
+    )
+    .await?;
+    Ok(
+        serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
+            .unwrap_or_default(),
+    )
+}
+
 #[tauri::command]
 pub(crate) async fn get_invoice_detail(
     state: State<'_, AppState>,

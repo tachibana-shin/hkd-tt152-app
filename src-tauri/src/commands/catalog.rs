@@ -174,6 +174,46 @@ pub(crate) async fn get_warehouses(state: State<'_, AppState>) -> Result<String,
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// get_warehouses — phân trang server-side (danh sách dài theo thời gian).
+#[tauri::command]
+pub(crate) async fn get_warehouses_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    // Ô tìm kiếm toàn cục + hàng lọc theo cột (các điều kiện AND với nhau).
+    let (mut where_sql, params) =
+        crate::commands::page::global_where(ev.global_keyword(), &["name", "code"]);
+    let (extra_sql, extra_params) = crate::commands::page::column_where(&ev, &["name", "code"]);
+    where_sql.push_str(&extra_sql);
+    let mut params = params;
+    params.extend(extra_params);
+    let order = crate::commands::page::order_by(
+        &[("id", "id"), ("code", "code"), ("name", "name")],
+        &ev,
+        "code ASC",
+    );
+    let sql = format!(
+        "SELECT id, code, name FROM warehouse{} ORDER BY {} LIMIT ? OFFSET ?",
+        where_sql, order
+    );
+    let count_sql = format!("SELECT COUNT(*) FROM warehouse{where_sql}");
+    let (rows, total): (Vec<SupplierRow>, i64) = crate::commands::page::fetch_page(
+        &*state.pool.read().await,
+        &sql,
+        &count_sql,
+        &params,
+        &page,
+    )
+    .await?;
+    Ok(
+        serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
+            .unwrap_or_default(),
+    )
+}
+
 #[tauri::command]
 pub(crate) async fn save_warehouse(
     state: State<'_, AppState>,
@@ -204,6 +244,49 @@ pub(crate) async fn get_suppliers(state: State<'_, AppState>) -> Result<String, 
     .await
     .map_err(|e| e.to_string())?;
     Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
+/// get_suppliers — phân trang server-side (danh sách dài theo thời gian).
+#[tauri::command]
+pub(crate) async fn get_suppliers_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    // Ô tìm kiếm toàn cục + hàng lọc theo cột (các điều kiện AND với nhau).
+    let (mut where_sql, params) = crate::commands::page::global_where(
+        ev.global_keyword(),
+        &["name", "code", "address", "tax_code", "phone"],
+    );
+    let (extra_sql, extra_params) =
+        crate::commands::page::column_where(&ev, &["name", "code", "address", "tax_code", "phone"]);
+    where_sql.push_str(&extra_sql);
+    let mut params = params;
+    params.extend(extra_params);
+    let order = crate::commands::page::order_by(
+        &[("id", "id"), ("code", "code"), ("name", "name")],
+        &ev,
+        "code ASC",
+    );
+    let sql = format!(
+        "SELECT id, code, name, address, tax_code, phone FROM supplier{} ORDER BY {} LIMIT ? OFFSET ?",
+        where_sql, order
+    );
+    let count_sql = format!("SELECT COUNT(*) FROM supplier{where_sql}");
+    let (rows, total): (Vec<CustomerRow>, i64) = crate::commands::page::fetch_page(
+        &*state.pool.read().await,
+        &sql,
+        &count_sql,
+        &params,
+        &page,
+    )
+    .await?;
+    Ok(
+        serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
+            .unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -244,6 +327,49 @@ pub(crate) async fn get_customers(state: State<'_, AppState>) -> Result<String, 
     .await
     .map_err(|e| e.to_string())?;
     Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
+/// get_customers — phân trang server-side (danh sách dài theo thời gian).
+#[tauri::command]
+pub(crate) async fn get_customers_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    // Ô tìm kiếm toàn cục + hàng lọc theo cột (các điều kiện AND với nhau).
+    let (mut where_sql, params) = crate::commands::page::global_where(
+        ev.global_keyword(),
+        &["name", "code", "address", "tax_code", "phone"],
+    );
+    let (extra_sql, extra_params) =
+        crate::commands::page::column_where(&ev, &["name", "code", "address", "tax_code", "phone"]);
+    where_sql.push_str(&extra_sql);
+    let mut params = params;
+    params.extend(extra_params);
+    let order = crate::commands::page::order_by(
+        &[("id", "id"), ("code", "code"), ("name", "name")],
+        &ev,
+        "code ASC",
+    );
+    let sql = format!(
+        "SELECT id, code, name, address, tax_code, phone FROM customer{} ORDER BY {} LIMIT ? OFFSET ?",
+        where_sql, order
+    );
+    let count_sql = format!("SELECT COUNT(*) FROM customer{where_sql}");
+    let (rows, total): (Vec<CustomerRow>, i64) = crate::commands::page::fetch_page(
+        &*state.pool.read().await,
+        &sql,
+        &count_sql,
+        &params,
+        &page,
+    )
+    .await?;
+    Ok(
+        serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
+            .unwrap_or_default(),
+    )
 }
 
 #[tauri::command]

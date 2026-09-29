@@ -27,7 +27,7 @@
 use crate::helpers::*;
 use crate::models::*;
 use serde_json::json;
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 use tauri::State;
 
 /// Chuẩn hoá chuỗi để so khớp/tìm kiếm: bỏ dấu tiếng Việt, hạ chữ thường,
@@ -796,6 +796,8 @@ pub(crate) struct QueueItem {
 /// Gom bằng 3 truy vấn cho cả danh sách (hóa đơn · dòng hàng · bản chốt gần nhất)
 /// thay vì dựng gói chép riêng cho từng hóa đơn — màn này chỉ cần biết "có chép
 /// được không", không cần dựng khối dán.
+/// Danh sách hóa đơn của hàng chờ xuất (chưa giới hạn) — dùng cho export và
+/// cho màn hàng chờ khi dữ liệu nhỏ.
 pub(crate) async fn queue_items(pool: &SqlitePool) -> Result<Vec<QueueItem>, String> {
     let invoices: Vec<InvoiceRow> = sqlx::query_as!(
         InvoiceRow,
@@ -813,51 +815,89 @@ pub(crate) async fn queue_items(pool: &SqlitePool) -> Result<Vec<QueueItem>, Str
     if invoices.is_empty() {
         return Ok(Vec::new());
     }
+    assemble_queue_items(pool, invoices).await
+}
+
+/// Ghép dòng hàng + bản chốt + cờ "sửa sau khi xuất" cho một tập hóa đơn.
+///
+/// Tách riêng khỏi `queue_items` để màn hàng chờ phân trang: chỉ truy vấn dữ liệu
+/// phụ cho đúng các hóa đơn của trang đang xem, thay vì toàn bộ hàng chờ.
+async fn assemble_queue_items(
+    pool: &SqlitePool,
+    invoices: Vec<InvoiceRow>,
+) -> Result<Vec<QueueItem>, String> {
+    if invoices.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Danh sách id của trang, dùng để giới hạn 3 truy vấn phụ bên dưới.
+    let ids: Vec<i64> = invoices.iter().filter_map(|i| i.id).collect();
 
     let groups = load_industry_groups(pool).await?;
-    let items: Vec<RawItem> = sqlx::query_as!(
-        RawItem,
-        r#"SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,
-                  ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
-             FROM invoice_item ii
-             JOIN product p ON p.id = ii.product_id
-             JOIN invoice i ON i.id = ii.invoice_id
-            WHERE i.status IN ('draft', 'exported')
-            ORDER BY ii.invoice_id, ii.id"#
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
 
-    // Bản chốt gần nhất của mỗi hóa đơn (1 truy vấn cho cả danh sách).
-    let snapshots: Vec<(i64, f64, String)> = sqlx::query!(
-        r#"SELECT ie.invoice_id, ie.total, ie.payload_json
-             FROM invoice_export ie
-             JOIN (SELECT invoice_id, MAX(id) AS mid FROM invoice_export GROUP BY invoice_id) m
-               ON m.mid = ie.id"#
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?
-    .into_iter()
-    .map(|r| (r.invoice_id, r.total, r.payload_json))
-    .collect();
+    // Ba truy vấn phụ dưới đây dùng QueryBuilder vì danh sách id của trang là
+    // động — mọi giá trị đều được bind, không ghép chuỗi SQL.
+    let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,
+                ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
+           FROM invoice_item ii
+           JOIN product p ON p.id = ii.product_id
+           JOIN invoice i ON i.id = ii.invoice_id
+          WHERE i.id IN (",
+    );
+    {
+        let mut sep = qb.separated(", ");
+        for id in &ids {
+            sep.push_bind(id);
+        }
+    }
+    qb.push(") ORDER BY ii.invoice_id, ii.id");
+    let items: Vec<RawItem> = qb
+        .build_query_as::<RawItem>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // (mã hàng, SL, đơn giá) hiện tại của các hóa đơn trong hàng chờ.
-    let now_pairs: Vec<(i64, String, f64, f64)> = sqlx::query!(
-        r#"SELECT ii.invoice_id, p.code, ii.quantity, ii.unit_price
-             FROM invoice_item ii
-             JOIN product p ON p.id = ii.product_id
-             JOIN invoice i ON i.id = ii.invoice_id
-            WHERE i.status IN ('draft', 'exported')
-            ORDER BY ii.invoice_id, ii.id"#
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?
-    .into_iter()
-    .map(|r| (r.invoice_id, r.code, r.quantity, r.unit_price))
-    .collect();
+    // Bản chốt gần nhất của mỗi hóa đơn trong trang.
+    let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT ie.invoice_id, ie.total, ie.payload_json
+           FROM invoice_export ie
+           JOIN (SELECT invoice_id, MAX(id) AS mid FROM invoice_export GROUP BY invoice_id) m
+             ON m.mid = ie.id
+          WHERE ie.invoice_id IN (",
+    );
+    {
+        let mut sep = qb.separated(", ");
+        for id in &ids {
+            sep.push_bind(id);
+        }
+    }
+    qb.push(")");
+    let snapshots: Vec<(i64, f64, String)> = qb
+        .build_query_as::<(i64, f64, String)>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // (mã hàng, SL, đơn giá) hiện tại của các hóa đơn trong trang.
+    let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT ii.invoice_id, p.code, ii.quantity, ii.unit_price
+           FROM invoice_item ii
+           JOIN product p ON p.id = ii.product_id
+           JOIN invoice i ON i.id = ii.invoice_id
+          WHERE i.id IN (",
+    );
+    {
+        let mut sep = qb.separated(", ");
+        for id in &ids {
+            sep.push_bind(id);
+        }
+    }
+    qb.push(") ORDER BY ii.invoice_id, ii.id");
+    let now_pairs: Vec<(i64, String, f64, f64)> = qb
+        .build_query_as::<(i64, String, f64, f64)>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut out = Vec::with_capacity(invoices.len());
     for inv in invoices {
@@ -918,6 +958,75 @@ pub(crate) async fn invoice_queue(state: State<'_, AppState>) -> Result<String, 
     require_role(&state, &["admin", "ketoan"]).await?;
     let items = queue_items(&*state.pool.read().await).await?;
     Ok(serde_json::to_string(&items).unwrap_or_default())
+}
+
+/// Chờ xuất HĐĐT — phân trang server-side (hóa đơn nháp + đã xuất chờ xử lý).
+///
+/// Trang hóa đơn lấy trước (có lọc + LIMIT/OFFSET), rồi mới ghép dòng hàng và bản
+/// chốt CHO ĐÚNG các hóa đơn của trang — không kéo dữ liệu của cả hàng chờ về.
+#[tauri::command]
+pub(crate) async fn invoice_queue_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+    status: String,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    // Hàng chờ chỉ gồm hóa đơn nháp + đã xuất chờ xử lý: đây là điều kiện gốc, nối
+    // thêm điều kiện khác sau (điều kiện gốc phải có mệnh đề WHERE riêng, không
+    // phụ thuộc việc có từ khoá hay không).
+    let (filter_sql, mut params) = crate::commands::page::global_where(
+        ev.global_keyword(),
+        &["number", "customer", "voucher_no", "e_invoice_no"],
+    );
+    let mut where_sql = String::from(" WHERE status IN ('draft', 'exported')");
+    if let Some(rest) = filter_sql.strip_prefix(" WHERE ") {
+        where_sql.push_str(" AND (");
+        where_sql.push_str(rest);
+        where_sql.push(')');
+    }
+    if !status.is_empty() {
+        where_sql.push_str(" AND status = ?");
+        params.push(crate::commands::page::BindVal(status));
+    }
+    if !from_date.is_empty() {
+        where_sql.push_str(" AND date >= ?");
+        params.push(crate::commands::page::BindVal(from_date));
+    }
+    if !to_date.is_empty() {
+        where_sql.push_str(" AND date <= ?");
+        params.push(crate::commands::page::BindVal(to_date));
+    }
+    let order = crate::commands::page::order_by(
+        &[
+            ("id", "id"),
+            ("date", "date"),
+            ("number", "number"),
+            ("customer", "customer"),
+        ],
+        &ev,
+        "date ASC, id ASC",
+    );
+    let sql = format!(
+        "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
+                status, e_invoice_no, e_invoice_symbol, e_invoice_date, voucher_no,
+                exported_at, replace_reason, adjust_reason, ref_invoice, adjust_voucher_no,
+                replaces_invoice_id
+         FROM invoice{} ORDER BY {} LIMIT ? OFFSET ?",
+        where_sql, order
+    );
+    let count_sql = format!("SELECT COUNT(*) FROM invoice{where_sql}");
+    let pool = state.pool.read().await;
+    let (invoices, total): (Vec<InvoiceRow>, i64) =
+        crate::commands::page::fetch_page(&pool, &sql, &count_sql, &params, &page).await?;
+    let items = assemble_queue_items(&pool, invoices).await?;
+    Ok(
+        serde_json::to_string(&crate::commands::audit::PageResult { rows: items, total })
+            .unwrap_or_default(),
+    )
 }
 
 /// Lịch sử trạng thái của 1 hóa đơn (đối chiếu lại với bên kia).

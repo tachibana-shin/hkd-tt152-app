@@ -81,6 +81,31 @@ double-tap là tính năng của bảng, nên trên điện thoại hãy dùng n
 
 ---
 
+## ⚡ Phân trang server-side
+
+Dữ liệu dài theo thời gian (nhật ký thao tác, sổ nhật ký, hóa đơn, đối tác, hàng
+chờ xuất, phiếu thu/chi) **không** được kéo hết về client rồi mới chia trang — mỗi
+lần đổi trang chỉ gọi API lấy đúng trang đó, kèm tổng số dòng:
+
+| Màn           | Lệnh                       | Lọc chạy ở server                                     |
+| ------------- | -------------------------- | ----------------------------------------------------- |
+| Nhật ký HĐ    | `get_audit_log_page`       | từ khoá toàn cục, sắp xếp theo cột                    |
+| Sổ nhật ký    | `get_ledger_page`          | khoảng ngày, loại phiếu, từ khoá; trả tổng tiền cả kỳ |
+| Hóa đơn       | `get_invoices_page`        | từ khoá, chỉ hiện hóa đơn trùng số                    |
+| Đối tác & Kho | `get_*_page`               | từ khoá + hàng lọc theo từng cột                      |
+| Chờ xuất HĐĐT | `invoice_queue_page`       | từ khoá, trạng thái, khoảng ngày                      |
+| Thu / Chi     | `get_journal_entries_page` | loại phiếu, từ khoá                                   |
+
+Cơ chế chung nằm ở `src-tauri/src/commands/page.rs` (nhận `lazyEvent` của DataTable,
+ghép `WHERE`/`ORDER BY`, `LIMIT/OFFSET` + `COUNT(*)`) và `src/composables/useLazyPage.ts`
+(trạng thái trang bên frontend). Tên cột sắp xếp chỉ nhận trong danh sách cho phép
+và mọi giá trị đều bind — không ghép chuỗi vào SQL. Hàng chờ xuất chỉ ghép dòng hàng
+và bản chốt **cho đúng các hóa đơn của trang đang xem**, không phải cả hàng chờ.
+
+Màn Sản phẩm đã dùng kiểu này từ trước và giờ dùng chung cùng một cách viết.
+
+---
+
 ## 🏗️ Kiến trúc & công nghệ
 
 ```

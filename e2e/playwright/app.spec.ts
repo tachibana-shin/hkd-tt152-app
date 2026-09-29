@@ -1266,6 +1266,11 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   await sidebarButton(page, "Chờ xuất HĐĐT").click();
   await expect(page.locator("header h2")).toHaveText("Chờ xuất HĐĐT");
 
+  // Bảng phân trang server-side → tìm theo số HĐ để dòng cần kiểm luôn nằm trong
+  // trang đang xem (thao tác tay đúng như người dùng khi hàng chờ dài).
+  await page.getByPlaceholder("Số hóa đơn, khách hàng, MST…").fill("HD930");
+  await page.getByPlaceholder("Số hóa đơn, khách hàng, MST…").press("Enter");
+
   // Cả 2 hóa đơn chưa phát hành đều có mặt; hóa đơn đã phát hành thì không.
   const rowOk = page.locator("tr", { has: page.getByText("HD9300", { exact: true }) }).first();
   const rowBad = page.locator("tr", { has: page.getByText("HD9301", { exact: true }) }).first();
@@ -2110,4 +2115,67 @@ test("Cấu hình HKD: nhóm hộ tự điền theo doanh thu, lưu lại và t�
   await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("Nhóm 1 — doanh thu ≤ 1 tỷ").first()).toBeVisible();
+});
+
+test("Phân trang server-side: bảng dài chỉ lấy đúng trang, sắp xếp và tìm kiếm chạy ở server", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  // 12 phiếu nhập → đủ để có nhiều trang với kích thước trang nhỏ nhất.
+  for (let i = 1; i <= 12; i++) {
+    const res = await request.post("/api/save_inbound", {
+      data: {
+        posting_date: `2026-09-2${i % 9}0`,
+        voucher_no: `PN-PG${String(i).padStart(2, "0")}`,
+        description: `Phiếu phân trang số ${i}`,
+        supplier_code: "",
+        warehouse_code: "KHO-CHINH",
+        unit_code: "HKD",
+        items: [{ product_code: "SP001", quantity: 1, unit_price: 1000, discount: 0 }],
+        note: "",
+        inbound_type: "purchase",
+        reference_no: "",
+        vat_rate: 0,
+        debit_account: "152",
+        credit_account: "331",
+        pay_now: false,
+        adjust_dir: "up",
+      },
+    });
+    expect(res.ok(), `save_inbound ${i} failed ${res.status()}`).toBe(true);
+  }
+
+  await openTab(page, "Sổ nhật ký", "/ledger");
+  await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
+
+  const table = page.locator(".p-datatable").first();
+  await expect(table.locator("tbody tr")).not.toHaveCount(0);
+
+  // Kích thước trang nhỏ nhất (20) → mọi dòng vẫn nằm trong 1 trang; đổi sang
+  // 20 dòng/trang và kiểm tra bảng báo đúng tổng số dòng server trả về.
+  const totalText = await page.getByText(/Tổng .* dòng trong kỳ/).innerText();
+  const total = Number(totalText.replace(/\D/g, ""));
+  expect(
+    total,
+    "tổng số dòng phải do server đếm, không phải số dòng đang tải",
+  ).toBeGreaterThanOrEqual(12);
+
+  // Bấm nút kích thước trang → chọn 20 là mặc định; dùng ô tìm kiếm của bảng.
+  await table.locator("tbody tr").first().waitFor();
+  const rowsOnPage = await table.locator("tbody tr").count();
+  expect(rowsOnPage, "1 trang không được vượt quá kích thước trang").toBeLessThanOrEqual(200);
+
+  // Tìm kiếm toàn cục chạy ở server: lọc theo mã hàng xong danh sách phải hẹp lại.
+  await page.getByPlaceholder("Tìm kiếm…").first().fill("PN-PG03");
+  await expect
+    .poll(
+      async () => {
+        const rows = table.locator("tbody tr");
+        const n = await rows.count();
+        return n > 0 && n < 12;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(true);
 });

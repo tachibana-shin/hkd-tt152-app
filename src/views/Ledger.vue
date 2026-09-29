@@ -5,6 +5,7 @@ import { api } from "@/db";
 import type { LedgerRow } from "@/types";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const business = useBusinessStore();
 const { config } = storeToRefs(business);
@@ -12,6 +13,9 @@ const toast = useToast();
 
 const loading = ref(false);
 const rows = ref<LedgerRow[]>([]);
+const total = ref(0);
+/** Tổng số tiền CẢ kỳ lọc (do server tính, không phải tổng của trang đang xem). */
+const totalAmount = ref(0);
 
 const fromDate = ref<Date | null>(null);
 const toDate = ref<Date | null>(null);
@@ -20,12 +24,22 @@ const entryType = ref("");
 const entryOptions = [{ label: "Toàn bộ", value: "" }, "PN", "PX", "PT", "PC"];
 
 const currentYear = () => new Date().getFullYear();
-async function loadLedger() {
+const range = () => ({
+  fromDate: toIsoDate(fromDate.value) || `${currentYear()}-01-01`,
+  toDate: toIsoDate(toDate.value) || `${currentYear()}-12-31`,
+  entryType: entryType.value,
+});
+
+// Sổ nhật ký theo năm là danh sách dài nhất trong app: mỗi bút toán một dòng.
+// Kéo cả năm về client rồi cắt trang khiến mở màn đơ, nên chuyển sang phân trang
+// server-side (lọc ngày + loại phiếu + tìm kiếm đều do server xử lý).
+const page = useLazyPage(async (lazy) => {
   loading.value = true;
   try {
-    const f = toIsoDate(fromDate.value) || `${currentYear()}-01-01`;
-    const t = toIsoDate(toDate.value) || `${currentYear()}-12-31`;
-    rows.value = await api.getLedger(f, t);
+    const res = await api.getLedgerPage(lazy, range().fromDate, range().toDate, range().entryType);
+    rows.value = res.rows;
+    total.value = res.total;
+    totalAmount.value = res.total_amount ?? 0;
   } catch (e) {
     toast.add({
       severity: "error",
@@ -35,14 +49,12 @@ async function loadLedger() {
   } finally {
     loading.value = false;
   }
+});
+
+/** Đổi bộ lọc riêng (ngày / loại phiếu) → nạp lại trang đầu. */
+function applyFilters() {
+  return page.setExtra({});
 }
-
-// backend get_ledger chỉ lọc theo ngày → lọc loại phiếu ở client
-const filteredRows = computed(() =>
-  entryType.value ? rows.value.filter((r) => r.entry_type === entryType.value) : rows.value,
-);
-
-const totalAmount = computed(() => filteredRows.value.reduce((s, r) => s + r.amount, 0));
 
 function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
   switch (et) {
@@ -59,7 +71,7 @@ function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
 
 async function reload() {
   if (!config.value) await business.load();
-  await loadLedger();
+  await applyFilters();
 }
 
 void reload();
@@ -77,7 +89,7 @@ useKeepAliveRefresh(reload);
         </div>
       </template>
       <template #end>
-        <Button label="Tải lại" icon="pi pi-refresh" @click="loadLedger" />
+        <Button label="Tải lại" icon="pi pi-refresh" @click="applyFilters()" />
       </template>
     </Toolbar>
 
@@ -99,7 +111,7 @@ useKeepAliveRefresh(reload);
               <Select v-model="entryType" :options="entryOptions" class="w-40" />
             </div>
           </div>
-          <Button label="Xem báo cáo" icon="pi pi-search" size="small" @click="loadLedger" />
+          <Button label="Xem báo cáo" icon="pi pi-search" size="small" @click="applyFilters()" />
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
             <i class="pi pi-calendar mr-1" />Kỳ mặc định: {{ currentYear() }} (theo năm hiện tại)
           </span>
@@ -109,10 +121,32 @@ useKeepAliveRefresh(reload);
 
     <Card>
       <template #content>
-        <AppDataTable :value="filteredRows" :loading="loading" stripedRows paginator :rows="15">
-          <Column field="posting_date" header="Ngày" />
-          <Column field="voucher_no" header="Số phiếu" />
-          <Column field="entry_type" header="Loại">
+        <AppDataTable
+          :value="rows"
+          :loading="loading"
+          :totalRecords="total"
+          :first="page.first.value"
+          :rows="page.rowsPerPage.value"
+          :rows-per-page-options="page.pageSizes"
+          data-key="id"
+          sort-mode="single"
+          removable-sort
+          filter-toggle
+          :global-filter-fields="[
+            'voucher_no',
+            'description',
+            'product_code',
+            'debit_account',
+            'credit_account',
+          ]"
+          stripedRows
+          @page="page.onPage"
+          @sort="page.onSort"
+          @search="page.onSearch"
+        >
+          <Column field="posting_date" header="Ngày" sortable />
+          <Column field="voucher_no" header="Số phiếu" sortable />
+          <Column field="entry_type" header="Loại" sortable>
             <template #body="{ data }">
               <Tag :value="data.entry_type" :severity="tagSeverity(data.entry_type)" />
             </template>
@@ -138,8 +172,10 @@ useKeepAliveRefresh(reload);
             ><EmptyState text="Chưa có phát sinh trong kỳ." icon="pi pi-list"
           /></template>
         </AppDataTable>
-        <div v-if="filteredRows.length" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
-          <span class="text-gray-500">Tổng số tiền:</span>
+        <div v-if="total" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
+          <span class="text-gray-500">
+            Tổng {{ total.toLocaleString("vi-VN") }} dòng trong kỳ — tổng số tiền:
+          </span>
           <b class="text-primary-600">{{ fmt(totalAmount) }} đ</b>
         </div>
       </template>

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { FilterMatchMode } from "@primevue/core/api";
+import { api, type PageResult } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import type { Warehouse, Customer, Supplier, IndustryGroup } from "@/types";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const catalog = useCatalogStore();
 const auth = useAuthStore();
-const { warehouses, suppliers, customers, industryGroups, loading } = storeToRefs(catalog);
+const { industryGroups } = storeToRefs(catalog);
 const toast = useToast();
 const confirm = useConfirm();
 
@@ -21,6 +23,37 @@ const filters = ref<Record<string, { value: any; matchMode: string }>>({
   address: { value: null, matchMode: FilterMatchMode.CONTAINS },
   phone: { value: null, matchMode: FilterMatchMode.CONTAINS },
 });
+
+/**
+ * Danh sách đối tác (kho / khách / NCC) dài theo thời gian nên mỗi bảng có phân
+ * trang server-side riêng: bảng lazy gửi trang + lọc cột + từ khoá, server trả
+ * đúng trang đó kèm tổng số dòng.
+ */
+function lazyList<T>(
+  label: string,
+  loader: (lazy: Record<string, unknown>) => Promise<PageResult<T>>,
+) {
+  const rows = ref<T[]>([]);
+  const total = ref(0);
+  const busy = ref(false);
+  const page = useLazyPage(async (lazy) => {
+    busy.value = true;
+    try {
+      const res = await loader(lazy);
+      rows.value = res.rows;
+      total.value = res.total;
+    } catch (e) {
+      toast.add({ severity: "error", summary: `Lỗi tải ${label}`, detail: String(e) });
+    } finally {
+      busy.value = false;
+    }
+  });
+  return { rows, total, busy, page };
+}
+
+const warehousesList = lazyList("kho hàng", (lazy) => api.getWarehousesPage(lazy));
+const customersList = lazyList("khách hàng", (lazy) => api.getCustomersPage(lazy));
+const suppliersList = lazyList("nhà cung cấp", (lazy) => api.getSuppliersPage(lazy));
 
 type Kind = "warehouse" | "customer" | "supplier";
 
@@ -159,7 +192,14 @@ function openEdit(kind: Kind, row: Warehouse | Customer | Supplier) {
 
 async function reload() {
   try {
-    await catalog.loadAll();
+    // Nhóm ngành là danh mục cố định theo hệ thống thuế (vài trăm dòng, không
+    // phình theo thời gian) nên vẫn nạp một lần; 3 danh sách đối tác phân trang.
+    await Promise.all([
+      catalog.loadIndustryGroups(),
+      warehousesList.page.reload(),
+      customersList.page.reload(),
+      suppliersList.page.reload(),
+    ]);
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi tải lại", detail: String(e) });
   }
@@ -226,10 +266,21 @@ useKeepAliveRefresh(reload);
               <AppDataTable
                 v-model:filters="filters"
                 v-model:selection="whSelection"
-                :value="warehouses"
-                :loading="loading"
+                :value="warehousesList.rows.value"
+                :loading="warehousesList.busy.value"
+                :totalRecords="warehousesList.total.value"
+                :first="warehousesList.page.first.value"
+                :rows="warehousesList.page.rowsPerPage.value"
+                :rows-per-page-options="warehousesList.page.pageSizes"
                 stripedRows
                 data-key="id"
+                sort-mode="single"
+                removable-sort
+                filter-toggle
+                @page="warehousesList.page.onPage"
+                @sort="warehousesList.page.onSort"
+                @search="warehousesList.page.onSearch"
+                @filter="warehousesList.page.setColumnFilters(filters)"
               >
                 <Column field="code" header="Mã kho">
                   <template #filter="{ filterModel, filterCallback }">
@@ -279,10 +330,21 @@ useKeepAliveRefresh(reload);
               <AppDataTable
                 v-model:filters="filters"
                 v-model:selection="cuSelection"
-                :value="customers"
-                :loading="loading"
+                :value="customersList.rows.value"
+                :loading="customersList.busy.value"
+                :totalRecords="customersList.total.value"
+                :first="customersList.page.first.value"
+                :rows="customersList.page.rowsPerPage.value"
+                :rows-per-page-options="customersList.page.pageSizes"
                 stripedRows
                 data-key="id"
+                sort-mode="single"
+                removable-sort
+                filter-toggle
+                @page="customersList.page.onPage"
+                @sort="customersList.page.onSort"
+                @search="customersList.page.onSearch"
+                @filter="customersList.page.setColumnFilters(filters)"
               >
                 <Column field="code" header="Mã">
                   <template #filter="{ filterModel, filterCallback }">
@@ -362,10 +424,21 @@ useKeepAliveRefresh(reload);
               <AppDataTable
                 v-model:filters="filters"
                 v-model:selection="suSelection"
-                :value="suppliers"
-                :loading="loading"
+                :value="suppliersList.rows.value"
+                :loading="suppliersList.busy.value"
+                :totalRecords="suppliersList.total.value"
+                :first="suppliersList.page.first.value"
+                :rows="suppliersList.page.rowsPerPage.value"
+                :rows-per-page-options="suppliersList.page.pageSizes"
                 stripedRows
                 data-key="id"
+                sort-mode="single"
+                removable-sort
+                filter-toggle
+                @page="suppliersList.page.onPage"
+                @sort="suppliersList.page.onSort"
+                @search="suppliersList.page.onSearch"
+                @filter="suppliersList.page.setColumnFilters(filters)"
               >
                 <Column field="code" header="Mã">
                   <template #filter="{ filterModel, filterCallback }">
@@ -451,10 +524,10 @@ useKeepAliveRefresh(reload);
                   @click="openIgCreate"
                 />
               </div>
+              <!-- Nhóm ngành: danh mục cố định theo hệ thống thuế, nạp một lần. -->
               <AppDataTable
                 v-model:selection="igSelection"
                 :value="industryGroups"
-                :loading="loading"
                 stripedRows
                 data-key="code"
               >

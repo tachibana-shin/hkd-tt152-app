@@ -7,13 +7,34 @@ import type { Invoice, InvoiceDuplicateNumber, InvoiceItem, InvoiceReplaceResult
 import { api } from "@/db";
 import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
 const { industryGroups } = storeToRefs(catalog);
-const { invoices, detail, loading } = storeToRefs(invoiceStore);
+const { detail } = storeToRefs(invoiceStore);
 const toast = useToast();
+
+// Danh sách hóa đơn không lọc theo ngày nên phình theo thời gian: phân trang
+// server-side, mỗi lần đổi trang/tìm kiếm chỉ lấy đúng trang đó.
+// `invoices` giờ là TRANG HIỆN TẠI (dùng cho các hộp thoại/mở phiếu), nên sau khi
+// đổi trạng thái hóa đơn phải nạp lại trang đang xem thay vì tìm trong store.
+const invoices = ref<Invoice[]>([]);
+const loading = ref(false);
+const total = ref(0);
+const page = useLazyPage(async (lazy) => {
+  loading.value = true;
+  try {
+    const res = await api.getInvoicesPage(lazy, onlyDuplicates.value);
+    invoices.value = res.rows;
+    total.value = res.total;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi tải hóa đơn", detail: String(e) });
+  } finally {
+    loading.value = false;
+  }
+});
 
 const draftDialog = ref(false);
 const detailDialog = ref(false);
@@ -160,24 +181,34 @@ async function showDetail(inv: Invoice) {
 }
 
 // Số hóa đơn trùng: app chỉ BÁO, không tự sửa dữ liệu — người dùng tự xoá bản
-// nháp thừa, bản đã phát hành thì xử lý bằng thay thế.
+// nháp thừa, bản đã phát hành thì xử lý bằng thay thế. Lọc "chỉ hiện trùng" chạy
+// ở server (xem get_invoices_page) nên không bỏ sót bản trùng ở trang khác.
 const duplicates = ref<InvoiceDuplicateNumber[]>([]);
 const onlyDuplicates = ref(false);
-
-const dupSet = computed(() => new Set(duplicates.value.map((d) => d.number)));
-const listed = computed(() =>
-  onlyDuplicates.value ? invoices.value.filter((i) => dupSet.value.has(i.number)) : invoices.value,
-);
 const dupTotal = computed(() => duplicates.value.reduce((s, d) => s + d.count, 0));
 
+/** Bật/tắt lọc "chỉ hiện hóa đơn trùng số" — lọc ở server nên phải nạp lại. */
+function toggleDuplicates() {
+  onlyDuplicates.value = !onlyDuplicates.value;
+  void page.setExtra({});
+}
+
 async function reload() {
-  const [, dups] = await Promise.all([
-    Promise.all([catalog.loadAll(), invoiceStore.loadInvoices()]),
-    api.invoiceDuplicateNumbers(),
-  ]);
-  duplicates.value = dups;
-  // Trùng số đã được dọn hết thì tự bỏ chế độ chỉ hiện trùng.
-  if (!dups.length) onlyDuplicates.value = false;
+  // Thứ tự quan trọng: phải biết còn hóa đơn trùng không, rồi mới tắt chế độ
+  // "chỉ hiện trùng" — nếu lấy trang chạy song song, nó dùng cờ cũ và bảng
+  // hiện sai (vừa dọn xong trùng thì vẫn ra danh sách đã lọc).
+  try {
+    const dups = await api.invoiceDuplicateNumbers();
+    duplicates.value = dups;
+    if (!dups.length) onlyDuplicates.value = false;
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không tải được cảnh báo trùng số",
+      detail: String(e),
+    });
+  }
+  await Promise.all([catalog.loadAll(), page.reload()]);
 }
 
 void reload();
@@ -221,7 +252,7 @@ useKeepAliveRefresh(reload);
           size="small"
           severity="warn"
           outlined
-          @click="onlyDuplicates = !onlyDuplicates"
+          @click="toggleDuplicates()"
         />
       </div>
     </Message>
@@ -229,13 +260,23 @@ useKeepAliveRefresh(reload);
     <Card>
       <template #content>
         <AppDataTable
-          :value="listed"
+          :value="invoices"
           :loading="loading"
+          :totalRecords="total"
+          :first="page.first.value"
+          :rows="page.rowsPerPage.value"
+          :rows-per-page-options="page.pageSizes"
+          data-key="id"
+          sort-mode="single"
+          removable-sort
+          filter-toggle
+          :global-filter-fields="['number', 'customer', 'voucher_no', 'e_invoice_no']"
           stripedRows
-          paginator
-          :rows="10"
           actions-header="Hành động"
           actions-width="190"
+          @page="page.onPage"
+          @sort="page.onSort"
+          @search="page.onSearch"
         >
           <Column field="number" header="Số HĐ">
             <template #body="{ data }">

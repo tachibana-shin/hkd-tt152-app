@@ -31,6 +31,80 @@ pub(crate) async fn get_ledger(
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Sổ nhật ký chung — phân trang server-side trong khoảng ngày đã chọn.
+///
+/// Cả năm một hộ nhập liệu dày đặc có thể vài nghìn bút toán; kéo hết về
+/// client rồi cắt trang khiến mở màn đơ rất lâu.
+#[tauri::command]
+pub(crate) async fn get_ledger_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+    from_date: String,
+    to_date: String,
+    entry_type: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    // Khoảng ngày là bộ lọc riêng của màn Sổ nhật ký, cộng thêm ô tìm kiếm
+    // toàn cục của bảng (mô tả, số phiếu, mã hàng, tài khoản).
+    let mut params: Vec<crate::commands::page::BindVal> = vec![
+        crate::commands::page::BindVal(entry_type.clone()),
+        crate::commands::page::BindVal(entry_type),
+        crate::commands::page::BindVal(from_date),
+        crate::commands::page::BindVal(to_date),
+    ];
+    let mut where_sql = String::from(
+        " WHERE (? = '' OR entry_type = ?) AND posting_date >= ? AND posting_date <= ?",
+    );
+    if let Some(kw) = ev.global_keyword() {
+        let like = format!("%{}%", kw.replace('%', "\\%").replace('_', "\\_"));
+        where_sql.push_str(
+            " AND (voucher_no LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR product_code LIKE ? ESCAPE '\\' OR debit_account LIKE ? ESCAPE '\\' OR credit_account LIKE ? ESCAPE '\\')",
+        );
+        for _ in 0..5 {
+            params.push(crate::commands::page::BindVal(like.clone()));
+        }
+    }
+    let order = crate::commands::page::order_by(
+        &[
+            ("id", "id"),
+            ("posting_date", "posting_date"),
+            ("voucher_no", "voucher_no"),
+            ("entry_type", "entry_type"),
+            ("debit_account", "debit_account"),
+            ("credit_account", "credit_account"),
+        ],
+        &ev,
+        "posting_date ASC, id ASC",
+    );
+    let sql = format!(
+        "SELECT posting_date, voucher_no, entry_type, description, product_code,
+                debit_account, credit_account, quantity, unit_price, amount
+         FROM journal_entry{} ORDER BY {} LIMIT ? OFFSET ?",
+        where_sql, order
+    );
+    let count_sql = format!("SELECT COUNT(*) FROM journal_entry{where_sql}");
+    let pool = state.pool.read().await;
+    let (rows, total): (Vec<LedgerRow>, i64) =
+        crate::commands::page::fetch_page(&pool, &sql, &count_sql, &params, &page).await?;
+    // CAST sang REAL: khi kỳ lọc không có dòng nào, COALESCE trả số nguyên 0 và
+    // sqlx từ chối decode INTEGER vào f64.
+    let sum_sql =
+        format!("SELECT CAST(COALESCE(SUM(amount), 0) AS REAL) FROM journal_entry{where_sql}");
+    let mut sum_q = sqlx::query_scalar::<_, f64>(&sum_sql);
+    for p in &params {
+        sum_q = sum_q.bind(p.0.clone());
+    }
+    let total_amount: f64 = sum_q.fetch_one(&*pool).await.map_err(|e| e.to_string())?;
+    Ok(serde_json::to_string(&json!({
+        "rows": rows,
+        "total": total,
+        "total_amount": total_amount,
+    }))
+    .unwrap_or_default())
+}
+
 /// Bảng cân đối số phát sinh: số dư đầu kỳ (từ DMTK) + phát sinh trong kỳ
 /// (từ journal_entry) + số dư cuối kỳ, nhóm theo từng tài khoản.
 #[tauri::command]

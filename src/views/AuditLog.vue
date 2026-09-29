@@ -2,23 +2,23 @@
 import { api } from "@/db";
 import type { AuditEntry } from "@/types";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const toast = useToast();
 
 const loading = ref(false);
 const entries = ref<AuditEntry[]>([]);
+const total = ref(0);
 
-const limit = ref(200);
-const limitOptions = [100, 200, 500, 1000].map((n) => ({
-  label: String(n),
-  value: n,
-}));
-const filterText = ref("");
-
-async function load() {
+// Nhật ký phình to dần theo thời gian (mỗi thao tác đều ghi 1 dòng, kèm nội
+// dung chi tiết). Trước đây màn kéo sẵn tới 1000 dòng về rồi cắt trang ở trình
+// duyệt nên bấm vào là đơ; giờ mỗi lần đổi trang/tìm kiếm chỉ lấy đúng trang đó.
+const page = useLazyPage(async (lazy) => {
   loading.value = true;
   try {
-    entries.value = await api.getAuditLog(limit.value);
+    const res = await api.getAuditLogPage(lazy);
+    entries.value = res.rows;
+    total.value = res.total;
   } catch (e) {
     toast.add({
       severity: "error",
@@ -28,22 +28,7 @@ async function load() {
   } finally {
     loading.value = false;
   }
-}
-
-// Lọc text client-side theo action/entity/detail
-const filteredEntries = computed(() => {
-  const q = filterText.value.trim().toLowerCase();
-  if (!q) return entries.value;
-  return entries.value.filter(
-    (e) =>
-      e.action.toLowerCase().includes(q) ||
-      e.entity.toLowerCase().includes(q) ||
-      e.detail.toLowerCase().includes(q) ||
-      (e.username || "").toLowerCase().includes(q),
-  );
 });
-
-// Backend đã trả mới nhất trước (ORDER BY id DESC) — giữ nguyên thứ tự.
 
 function actionSeverity(a: string): string {
   switch (a) {
@@ -98,10 +83,10 @@ function fmtTs(ts: string): string {
   return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
 }
 
-void load();
+void page.init();
 
 // Quay lại màn (KeepAlive giữ state) → nạp lại dữ liệu cho khỏi cũ.
-useKeepAliveRefresh(load);
+useKeepAliveRefresh(page.init);
 </script>
 
 <template>
@@ -114,41 +99,54 @@ useKeepAliveRefresh(load);
         </div>
       </template>
       <template #end>
-        <Button label="Tải lại" icon="pi pi-refresh" outlined :loading="loading" @click="load" />
+        <Button
+          label="Tải lại"
+          icon="pi pi-refresh"
+          outlined
+          :loading="loading"
+          @click="page.reload()"
+        />
       </template>
     </Toolbar>
 
     <Card>
       <template #content>
-        <div class="flex flex-wrap items-end gap-3">
-          <div>
-            <label class="text-xs text-gray-500 block mb-1">Số dòng</label>
-            <Select v-model="limit" :options="limitOptions" class="w-36" />
-          </div>
-          <div class="flex-1 min-w-52">
-            <label class="text-xs text-gray-500 block mb-1"
-              >Tìm theo thao tác / đối tượng / chi tiết</label
-            >
-            <InputText v-model="filterText" placeholder="Nhập chuỗi cần tìm..." class="w-full" />
-          </div>
-          <Button label="Xem" icon="pi pi-search" @click="load" />
-        </div>
+        <p class="text-sm text-gray-500">
+          Tổng <b>{{ total.toLocaleString("vi-VN") }}</b> dòng nhật ký · mỗi lần đổi trang chỉ nạp
+          đúng trang đó nên vẫn mở nhanh khi nhật ký dài ra.
+        </p>
       </template>
     </Card>
 
     <Card>
       <template #content>
-        <AppDataTable :value="filteredEntries" :loading="loading" stripedRows paginator :rows="20">
-          <Column field="ts" header="Thời gian">
+        <AppDataTable
+          :value="entries"
+          :loading="loading"
+          :totalRecords="total"
+          :first="page.first.value"
+          :rows="page.rowsPerPage.value"
+          :rows-per-page-options="page.pageSizes"
+          data-key="id"
+          sort-mode="single"
+          removable-sort
+          filter-toggle
+          :global-filter-fields="['action', 'entity', 'detail', 'username']"
+          stripedRows
+          @page="page.onPage"
+          @sort="page.onSort"
+          @search="page.onSearch"
+        >
+          <Column field="ts" header="Thời gian" sortable>
             <template #body="{ data }">{{ fmtTs(data.ts) }}</template>
           </Column>
-          <Column field="action" header="Thao tác">
+          <Column field="action" header="Thao tác" sortable>
             <template #body="{ data }">
               <Tag :value="actionLabel(data.action)" :severity="actionSeverity(data.action)" />
             </template>
           </Column>
-          <Column field="entity" header="Đối tượng" />
-          <Column field="username" header="Người dùng">
+          <Column field="entity" header="Đối tượng" sortable />
+          <Column field="username" header="Người dùng" sortable>
             <template #body="{ data }">
               <span v-if="data.username" class="text-sm">{{ data.username }}</span>
               <span v-else class="text-xs text-gray-400">—</span>
@@ -157,7 +155,7 @@ useKeepAliveRefresh(load);
           <Column field="detail" header="Chi tiết" />
           <template #empty>
             <EmptyState
-              :text="entries.length ? 'Không có dòng nào khớp bộ lọc.' : 'Chưa có hoạt động nào.'"
+              :text="total ? 'Không có dòng nào khớp bộ lọc.' : 'Chưa có hoạt động nào.'"
               icon="pi pi-history"
             />
           </template>
