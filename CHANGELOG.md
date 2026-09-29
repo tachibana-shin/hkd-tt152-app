@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.9.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.8.0...v0.9.0) (2026-09-29)
+
+
+### Features
+
+* paginate long lists on the server ([9462b3f](https://github.com/tachibana-shin/hkd-tt152-app/commit/9462b3f51a8398738c18a71a686feecf8e7a31df))
+
 # [0.8.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.7.0...v0.8.0) (2026-09-28)
 
 
