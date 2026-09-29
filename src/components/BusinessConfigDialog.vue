@@ -4,7 +4,7 @@ import { useBusinessStore } from "@/stores/business";
 import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import { api } from "@/db";
-import { fmtVnd } from "@/utils/format";
+import { fmtThreshold, fmtVnd } from "@/utils/format";
 import type { BusinessConfig, TaxInfo, TaxResult } from "@/types";
 
 const props = defineProps<{
@@ -65,58 +65,63 @@ function parseDate(s: string): Date | null {
 
 // Nhóm hộ theo NĐ 68/2026 + NĐ 141/2026 — app tự xếp từ tổng doanh thu cả năm,
 // rồi tự điền vào ô chọn bên dưới để người dùng xác nhận/sửa tay.
-const groupOptions = [
-  { label: "Nhóm 1 — doanh thu ≤ 1 tỷ (miễn thuế GTGT + TNCN)", value: 1 },
-  { label: "Nhóm 2 — doanh thu > 1 tỷ đến 3 tỷ", value: 2 },
-  { label: "Nhóm 3 — doanh thu > 3 tỷ đến 50 tỷ", value: 3 },
-  { label: "Nhóm 4 — doanh thu > 50 tỷ (khai theo tháng)", value: 4 },
-];
+/** Ngưỡng đang áp dụng (Cài đặt) — nhãn nhóm phải theo để không ghi sai mốc. */
+const taxTh = reactive({ exempt: 1_000_000_000, group3: 3_000_000_000, group4: 50_000_000_000 });
+const groupOptions = computed(() => {
+  const ex = fmtThreshold(taxTh.exempt);
+  const g3 = fmtThreshold(taxTh.group3);
+  const g4 = fmtThreshold(taxTh.group4);
+  return [
+    { label: `Nhóm 1 — doanh thu ≤ ${ex} (miễn thuế GTGT + TNCN)`, value: 1 },
+    { label: `Nhóm 2 — doanh thu > ${ex} đến ${g3}`, value: 2 },
+    { label: `Nhóm 3 — doanh thu > ${g3} đến ${g4}`, value: 3 },
+    { label: `Nhóm 4 — doanh thu > ${g4} (khai theo tháng)`, value: 4 },
+  ];
+});
 const autoGroup = ref<number | null>(null);
 const groupConfirmed = ref(false);
+/** Nhóm app đã ghim cho năm khi hộ vượt ngưỡng mà hồ sơ chưa chốt (nguyên tắc ổn định). */
+const frozenGroup = ref<number | null>(null);
 const yearRevenue = ref(0);
 const loadingGroup = ref(false);
 
-/**
- * Nhóm đang chốt trong hồ sơ khác nhóm app xếp từ doanh thu thực tế.
- *
- * Trường hợp này dễ gây nhầm: hộ để Nhóm 2 nhưng doanh thu chỉ 12 triệu thì tờ
- * khai vẫn tính thuế GTGT (vì không thuộc diện miễn) trong khi thuế TNCN theo
- * doanh thu bằng 0 (vì chưa vượt mức ngưỡng 01 tỷ) — hai con số trông trái ngược
- * nhau. Vì vậy cảnh báo ngay tại ô chọn, kèm nút bấm đồng bộ lại.
- */
+/** Nhóm đang chốt trong hồ sơ khác nhóm app xếp từ doanh thu tính đến hiện tại. */
 const groupMismatch = computed(() => form.tax_group != null && form.tax_group !== autoGroup.value);
 
-/** Vì sao lệch — nói rõ hệ quả, không chỉ "sai". */
+/**
+ * Ghi chú (KHÔNG phải cảnh báo) khi hồ sơ lệch với doanh thu hiện tại.
+ *
+ * Năm chưa kết thúc nên doanh thu còn tăng: hộ đang ở Nhóm 2, cuối năm vượt 03 tỷ
+ * thì kỳ tính thuế của năm đó vẫn giữ Nhóm 2, sang năm sau mới chuyển Nhóm 3
+ * (nguyên tắc ổn định — ý kiến chính thức của Thuế cơ sở trả lời báo Chính phủ).
+ * Nhóm trong hồ sơ luôn được tính cho mọi kỳ, nên lệch ở giữa năm là chuyện bình
+ * thường, chỉ cần nói rõ chứ không kêu sai.
+ */
 const groupMismatchHint = computed(() => {
   if (!groupMismatch.value) return "";
-  const used = form.tax_group as number;
   const auto = autoGroup.value as number;
   const revenue = fmtVnd(yearRevenue.value);
-  if (auto === 1) {
-    return `Doanh thu cả năm ${revenue} không vượt mức 01 tỷ đồng nên hộ thuộc Nhóm 1 — miễn thuế GTGT và thuế TNCN. Đang để Nhóm ${used} nên tờ khai vẫn tính thuế GTGT, còn thuế TNCN theo doanh thu bằng 0 (chưa vượt ngưỡng 01 tỷ).`;
+  if (auto > (form.tax_group as number)) {
+    return `Doanh thu ${revenue} hiện tại đã lên tới ${groupLabelFor(auto)}, nhưng theo nguyên tắc ổn định thì năm này vẫn giữ Nhóm ${form.tax_group}; sang năm sau mới chuyển. Không phải lỗi.`;
   }
-  if (used === 1) {
-    return `Doanh thu cả năm ${revenue} đã vượt mức 01 tỷ đồng nên hộ thuộc ${groupLabelFor(auto)} và không còn miễn thuế. Đang để Nhóm 1 nên tờ khai chưa tính thuế.`;
-  }
-  return `Doanh thu cả năm ${revenue} → app xếp ${groupLabelFor(auto)}, nhưng hồ sơ đang để Nhóm ${used}.`;
+  return `Doanh thu ${revenue} hiện tại chưa tới mốc của ${groupLabelFor(auto)}, nhưng năm chưa kết thúc nên chưa kết luận được. Theo nguyên tắc ổn định, hồ sơ vẫn dùng Nhóm ${form.tax_group} cho mọi kỳ; nếu cơ quan thuế không chỉ định nhóm khác thì giữ nguyên, sang năm sau app sẽ tự xếp lại.`;
 });
 
 /** "Nhóm 2 — doanh thu > 1 tỷ đến 3 tỷ" */
 function groupLabelFor(g: number): string {
-  return groupOptions.find((o) => o.value === g)?.label ?? `Nhóm ${g}`;
-}
-
-/** Bấm "Dùng nhóm app xếp" → đồng bộ nhóm theo doanh thu thực tế. */
-function useAutoGroup() {
-  if (autoGroup.value != null) form.tax_group = autoGroup.value;
+  return groupOptions.value.find((o) => o.value === g)?.label ?? `Nhóm ${g}`;
 }
 
 async function loadGroup(stored: number | null) {
   loadingGroup.value = true;
   try {
     const info = await api.getTaxGroup(new Date().getFullYear());
+    taxTh.exempt = info.threshold_exempt;
+    taxTh.group3 = info.threshold_group3;
+    taxTh.group4 = info.threshold_group4;
     autoGroup.value = info.auto_group;
     groupConfirmed.value = info.confirmed;
+    frozenGroup.value = info.frozen_group ?? null;
     yearRevenue.value = info.revenue_year;
     // Ưu tiên nhóm đã chốt trong hồ sơ; hộ mới/chưa chốt thì lấy nhóm tự xếp.
     form.tax_group = stored ?? info.group;
@@ -343,39 +348,29 @@ async function save() {
           </div>
           <div
             v-if="groupMismatch"
-            data-testid="tax-group-warning"
-            class="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800"
+            data-testid="tax-group-note"
+            class="mt-2 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600"
           >
-            <b>Nhóm đang để không khớp doanh thu thực tế.</b>
+            <b>Ghi chú — không phải lỗi.</b>
             {{ groupMismatchHint }}
-            <div class="mt-1.5 flex items-center gap-2">
-              <Button
-                label="Dùng nhóm app xếp"
-                icon="pi pi-refresh"
-                size="small"
-                outlined
-                severity="warn"
-                data-testid="tax-group-use-auto"
-                @click="useAutoGroup"
-              />
-              <span v-if="loadingGroup" class="text-xs text-amber-700">
-                Đang tự xếp nhóm theo doanh thu…
-              </span>
-            </div>
           </div>
           <p class="mt-1 text-xs text-gray-500">
             <template v-if="loadingGroup"> Đang xếp nhóm theo doanh thu… </template>
             <template v-else>
-              Doanh thu cả năm <b>{{ fmtVnd(yearRevenue) }}</b> → app xếp <b>Nhóm {{ autoGroup }}</b
+              Doanh thu năm tính đến hiện tại <b>{{ fmtVnd(yearRevenue) }}</b> → app xếp
+              <b>Nhóm {{ autoGroup }}</b
               >.
-              <template v-if="form.tax_group !== autoGroup">
-                Đang dùng <b>Nhóm {{ form.tax_group }}</b> theo lựa chọn của bạn.
+              <template v-if="frozenGroup">
+                Nhóm của năm đã chốt <b>Nhóm {{ frozenGroup }}</b> — không tự đổi giữa năm.
               </template>
-              <template v-else-if="!groupConfirmed">
-                Chưa chốt — lưu cấu hình để ghi nhóm này vào hồ sơ hộ.
+              <template v-else-if="groupConfirmed">
+                Đang dùng <b>Nhóm {{ form.tax_group }}</b> đã chốt trong hồ sơ hộ (cao nhất).
               </template>
-              <template v-else> Đã chốt trong hồ sơ hộ.</template>
-              Sửa tay ở đây khi cơ quan thuế đã xếp khác (NĐ 68/2026 + NĐ 141/2026).
+              <template v-else>
+                Chưa chốt — lưu cấu hình để ghi Nhóm {{ form.tax_group }} vào hồ sơ hộ.
+              </template>
+              Nhóm trong hồ sơ được tính cho mọi kỳ; sửa tay ở đây khi cơ quan thuế đã xếp khác (NĐ
+              68/2026 + NĐ 141/2026).
             </template>
           </p>
         </FormField>

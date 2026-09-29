@@ -2354,7 +2354,10 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
  * Trường hợp này dễ gây nhầm: để Nhóm 2 khi doanh thu chỉ 12 triệu thì GTGT vẫn
  * được tính, còn TNCN theo doanh thu bằng 0 — hai con số trông trái ngược nhau.
  */
-test("Cảnh báo khi nhóm hộ lệch với doanh thu thực tế", async ({ page, request }) => {
+test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa được ở Cài đặt", async ({
+  page,
+  request,
+}) => {
   await ensureLoggedIn(page);
 
   // Bán 10.000.000 → doanh thu năm < 1 tỷ, app xếp Nhóm 1.
@@ -2420,40 +2423,64 @@ test("Cảnh báo khi nhóm hộ lệch với doanh thu thực tế", async ({ p
     await page.waitForTimeout(900);
   };
 
-  // ── 1. Hồ sơ HKD: để Nhóm 2 (khác nhóm app xếp) → phải hiện cảnh báo + nút sửa
+  // ── 1. Hồ sơ HKD: để Nhóm 2 (khác nhóm app xếp) → chỉ hiện GHI CHÚ, không cảnh báo
   await sidebarButton(page, "Kế toán HKD").click();
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
   await openProfileDialog();
   await pickGroup("Nhóm 2");
   await saveProfile();
   await openProfileDialog();
-  await expect(page.getByTestId("tax-group-warning")).toBeVisible();
-  await expect(page.getByTestId("tax-group-warning")).toContainText("không khớp doanh thu thực tế");
-  // Cảnh báo phải nêu hệ quả, không chỉ bảo "sai".
-  await expect(page.getByTestId("tax-group-warning")).toContainText("Nhóm 1");
-  await expect(page.getByTestId("tax-group-warning")).toContainText("miễn thuế");
-
-  // Bấm "Dùng nhóm app xếp" → cảnh báo biến mất ngay (chưa cần bấm Lưu).
-  await page.getByTestId("tax-group-use-auto").click();
+  await expect(page.getByTestId("tax-group-note")).toBeVisible();
+  await expect(page.getByTestId("tax-group-note")).toContainText("không phải lỗi");
+  await expect(page.getByTestId("tax-group-note")).toContainText("ổn định");
   await expect(page.getByTestId("tax-group-warning")).toHaveCount(0);
 
-  // ── 2. Để lại Nhóm 2 rồi xem thẻ tổng hợp thuế có ghi chú giải thích
-  await pickGroup("Nhóm 2");
-  await saveProfile();
+  // ── 2. Nhóm 2 trong hồ sơ mà doanh thu chưa vượt ngưỡng → KHÔNG phát sinh thuế
+  // (Điều 8 khoản 1a). Nhãn nhóm trong hồ sơ không tạo ra thuế giả.
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(600);
-  await expect(page.getByTestId("tax-group-mismatch-note")).toBeVisible();
-  await expect(page.getByTestId("tax-group-mismatch-note")).toContainText(
-    "GTGT vẫn được tính theo tỷ lệ ngành",
+  await page.waitForTimeout(800);
+  await expect(page.getByTestId("tax-group-source-note")).toBeVisible();
+  await expect(page.getByTestId("tax-group-source-note")).toContainText("hồ sơ HKD");
+  const textG2 = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(textG2, "hồ sơ Nhóm 2 + DT chưa vượt ngưỡng: tổng thuế GTGT = 0").toContain(
+    "Tổng thuế GTGT: 0 đ",
+  );
+  expect(textG2, "hồ sơ Nhóm 2 + DT chưa vượt ngưỡng: tổng thuế TNCN = 0").toContain(
+    "Tổng thuế TNCN: 0 đ",
   );
 
-  // ── 3. Dọn lại: để Nhóm 1 (đúng theo doanh thu) → cả hai loại thuế bằng 0
+  // ── 3. Cài đặt: hạ ngưỡng xuống 5.000.000 → doanh thu 10.000.000 đã vượt ngưỡng
+  // → phải phát sinh thuế dù hồ sơ vẫn ghi Nhóm 2.
+  await openTab(page, "Cài đặt", "/settings");
+  await expect(page.getByTestId("tax-threshold-preview")).toBeVisible();
+  await page.getByTestId("tax-threshold-exempt").locator("input").fill("5000000");
+  await page.keyboard.press("Tab");
+  await page.getByRole("button", { name: "Lưu cài đặt" }).click();
+  await page.waitForTimeout(1200);
+
+  await sidebarButton(page, "Kế toán HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await page.waitForTimeout(1200);
+  const textLow = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(textLow, "vượt ngưỡng do người dùng đặt: thuế GTGT > 0").not.toContain(
+    "Tổng thuế GTGT: 0 đ",
+  );
+  await expect(page.getByTestId("tax-group-source-note")).toContainText("đã bị vượt trong năm");
+
+  // ── 4. Trả ngưỡng về 01 tỷ → thuế lại bằng 0, rồi dọn hồ sơ về Nhóm 1
+  await openTab(page, "Cài đặt", "/settings");
+  await page.getByTestId("tax-threshold-exempt").locator("input").fill("1000000000");
+  await page.keyboard.press("Tab");
+  await page.getByRole("button", { name: "Lưu cài đặt" }).click();
+  await page.waitForTimeout(1200);
+
+  await sidebarButton(page, "Kế toán HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
   await openProfileDialog();
   await pickGroup("Nhóm 1");
   await saveProfile();
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(900);
-  await expect(page.getByTestId("tax-group-mismatch-note")).toHaveCount(0);
+  await page.waitForTimeout(1200);
   const text = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   expect(text, "hộ nhóm 1: tổng thuế GTGT = 0").toContain("Tổng thuế GTGT: 0 đ");
   expect(text, "hộ nhóm 1: tổng thuế TNCN = 0").toContain("Tổng thuế TNCN: 0 đ");

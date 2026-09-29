@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key as \"key!\", value FROM app_setting\n            WHERE key IN ('tax_period', 'tax_method', 'pit_exempt_alloc',\n                          'tax_threshold_exempt', 'tax_threshold_group3',\n                          'tax_threshold_group4', 'tax_group_by_year')",
+  "describe": {
+    "columns": [
+      {
+        "name": "key!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "value",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "298ea4b610a51f8bff248ee2f1491070c5c783f3fa03e9a726712e74a9bcffb9"
+}

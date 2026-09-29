@@ -12,7 +12,7 @@ import type {
   TaxSettlement,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
-import { fmtInt as fmt, fmtPct as pct, fmtVnd, toIsoDate } from "@/utils/format";
+import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
 import { describeRange, taxPeriodRange } from "@/utils/period";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
@@ -81,6 +81,13 @@ async function loadReports() {
 const declRows = ref<TaxDeclarationRow[]>([]);
 const declLoading = ref(false);
 const overview = ref<TaxOverview | null>(null);
+/** Nhóm hộ đang dùng lấy từ đâu — nói rõ để người dùng tin con số. */
+function groupSourceText(o: TaxOverview): string {
+  if (o.group_from_profile) return "lấy từ hồ sơ HKD (bạn đã chốt, dùng cho mọi kỳ).";
+  if (o.frozen_group != null)
+    return `đã chốt cho năm ${o.year} theo doanh thu khi vượt ngưỡng, giữ nguyên cả năm.`;
+  return "app tự xếp từ doanh thu năm.";
+}
 const declYear = ref(new Date().getFullYear());
 // Bộ chọn kỳ để XEM tờ khai: quý / tháng / năm (mặc định theo kỳ khai đã cấu hình)
 const declPeriod = ref<"year" | "quarter" | "month">("quarter");
@@ -120,16 +127,23 @@ const taxPeriodLabel = computed(() => {
 const taxMethodLabel = computed(() =>
   taxMethod.value === "profit" ? "Theo lợi nhuận" : "Theo doanh thu",
 );
+/** Ngưỡng đang áp dụng — đọc từ Cài đặt, không gắn cứng 01 tỷ trong chữ. */
+const thExempt = computed(() => overview.value?.exempt_threshold ?? 1_000_000_000);
+const thGroup3 = computed(() => overview.value?.group3_threshold ?? 3_000_000_000);
+const thGroup4 = computed(() => overview.value?.group4_threshold ?? 50_000_000_000);
 const groupLabel = computed(() => {
+  const ex = fmtThreshold(thExempt.value);
+  const g3 = fmtThreshold(thGroup3.value);
+  const g4 = fmtThreshold(thGroup4.value);
   switch (overview.value?.group) {
     case 1:
-      return "Nhóm 1 — doanh thu ≤ 1 tỷ: miễn thuế";
+      return `Nhóm 1 — doanh thu ≤ ${ex}: miễn thuế`;
     case 2:
-      return "Nhóm 2 — doanh thu > 1 tỷ đến 3 tỷ";
+      return `Nhóm 2 — doanh thu > ${ex} đến ${g3}`;
     case 3:
-      return "Nhóm 3 — doanh thu > 3 tỷ đến 50 tỷ";
+      return `Nhóm 3 — doanh thu > ${g3} đến ${g4}`;
     default:
-      return "Nhóm 4 — doanh thu > 50 tỷ";
+      return `Nhóm 4 — doanh thu > ${g4}`;
   }
 });
 // ─── Sổ kế toán theo mẫu TT 152/2025/TT-BTC + tạm nộp & quyết toán năm ───
@@ -430,7 +444,7 @@ useKeepAliveRefresh(reload);
       <template #icon><i-mdi-file-certificate class="text-rose-500" /></template>
       <p class="mb-3 text-xs text-gray-500">
         Khoảng ngày đang chọn ở thanh công cụ. Số thuế đã tính theo nhóm hộ và phương pháp TNCN đã
-        cấu hình — nhóm 1 (doanh thu cả năm ≤ 1 tỷ) luôn bằng 0.
+        cấu hình — doanh thu chưa vượt ngưỡng thì thuế bằng 0.
       </p>
       <AppDataTable :value="taxRows" :loading="loading" stripedRows>
         <Column field="industry_code" header="Mã ngành" />
@@ -553,18 +567,22 @@ useKeepAliveRefresh(reload);
           Thu/Chi nếu thực tế được trừ (Điều 6 Nghị định 68/2026).
         </p>
       </div>
+      <!-- Ghi chú nhóm hộ, KHÔNG phải cảnh báo: năm chưa kết thúc nên doanh thu còn
+           tăng; theo nguyên tắc ổn định nhóm của năm không tự đổi giữa chừng. -->
       <div
-        v-if="overview?.group_from_profile"
-        data-testid="tax-group-mismatch-note"
-        class="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800"
+        v-if="overview"
+        data-testid="tax-group-source-note"
+        class="mt-3 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600"
       >
-        <b>Nhóm hộ đang dùng không khớp doanh thu thực tế.</b>
-        Doanh thu cả năm {{ fmt(overview.year_revenue) }} đ → theo NĐ 68/2026 + NĐ 141/2026 hộ thuộc
-        <b>Nhóm {{ overview.auto_group }}</b
-        >, nhưng hồ sơ đang để <b>Nhóm {{ overview.group }}</b
-        >. Vì vậy thuế GTGT vẫn được tính theo tỷ lệ ngành, còn thuế TNCN theo doanh thu tính thuế
-        bằng 0 khi doanh thu chưa vượt mức ngưỡng 01 tỷ đồng. Sửa ở màn
-        <b>Hồ sơ HKD → Nhóm hộ kinh doanh</b> nếu nhóm này không phải do cơ quan thuế chỉ định.
+        <b>Nhóm hộ: Nhóm {{ overview.group }}</b> — {{ groupSourceText(overview) }} Doanh thu cả năm
+        hiện tại {{ fmt(overview.year_revenue) }} đ (doanh thu năm chưa kết thúc nên mức này còn
+        tăng).
+        {{
+          overview.taxable_period
+            ? `Ngưỡng ${fmt(overview.exempt_threshold)} đ đã bị vượt trong năm nên từ kỳ vượt ngưỡng hộ phải nộp thuế.`
+            : `Chưa vượt ngưỡng ${fmt(overview.exempt_threshold)} đ/năm nên kỳ này chưa phát sinh thuế.`
+        }}
+        Muốn đổi ngưỡng: màn <b>Cài đặt</b>.
       </div>
       <p
         v-if="overview && !overview.group && !overview.taxable_period"
@@ -574,15 +592,16 @@ useKeepAliveRefresh(reload);
         {{ fmt(overview.exempt_threshold) }} đ/năm, nên theo Điều 8 khoản 1a Nghị định 68/2026 hộ
         khai, nộp thuế kể từ kỳ phát sinh doanh thu vượt ngưỡng.
       </p>
-      <p v-if="overview?.group === 1" class="mt-3 text-xs text-emerald-600">
-        Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ cần thông báo
-        doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm sau).
+      <p v-if="overview && !overview.taxable_period" class="mt-3 text-xs text-emerald-600">
+        Hộ có doanh thu cả năm không quá mức ngưỡng
+        {{ fmt(overview.exempt_threshold) }} đồng được miễn thuế GTGT và thuế TNCN — chỉ cần thông
+        báo doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm sau).
       </p>
       <p v-else class="mt-3 text-xs text-gray-400">
         Căn cứ: Nghị định 68/2026/NĐ-CP (bãi bỏ thuế khoán, chuyển sang kê khai), Nghị định
-        141/2026/NĐ-CP (ngưỡng miễn thuế 1 tỷ đồng/năm), Luật Thuế GTGT 2024, Luật Thuế TNCN 2025.
-        Nhóm hộ xếp theo tổng doanh thu cả năm; TNCN nhóm 2 theo doanh thu × tỷ lệ ngành hoặc lợi
-        nhuận × 15%; nhóm 3/4 theo lợi nhuận × 17%/20%.
+        141/2026/NĐ-CP (ngưỡng miễn thuế 01 tỷ đồng/năm — sửa được ở màn Cài đặt), Luật Thuế GTGT
+        2024, Luật Thuế TNCN 2025. Nhóm hộ xếp theo tổng doanh thu cả năm; TNCN nhóm 2 theo doanh
+        thu × tỷ lệ ngành hoặc lợi nhuận × 15%; nhóm 3/4 theo lợi nhuận × 17%/20%.
       </p>
     </SectionCard>
 

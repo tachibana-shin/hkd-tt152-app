@@ -117,6 +117,9 @@ const SETTING_DEFAULTS: AppSettings = {
   tax_method: "revenue", // Phương pháp TNCN: revenue (theo doanh thu) | profit (theo lợi nhuận)
   vat_deduct: false, // Khấu trừ GTGT đầu vào — mặc định TẮT (theo doanh thu)
   pit_exempt_alloc: "", // Mức trừ ngưỡng theo nhóm ngành — rỗng = chia theo tỷ lệ DT
+  tax_threshold_exempt: 1_000_000_000, // Ngưỡng DT năm không phải nộp GTGT + TNCN
+  tax_threshold_group3: 3_000_000_000, // Mốc Nhóm 3 (TNCN theo thu nhập 17%)
+  tax_threshold_group4: 50_000_000_000, // Mốc Nhóm 4 (TNCN theo thu nhập 20%)
 };
 
 // Backend lưu mọi thứ dưới dạng chuỗi → chuẩn hóa về kiểu AppSettings.
@@ -125,6 +128,7 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     const n = Number(raw[k]);
     return Number.isFinite(n) ? n : d;
   };
+  const positive = (v: number, d: number): number => (v > 0 ? v : d);
   const list = (k: keyof AppSettings, d: number[]): number[] => {
     try {
       const a: unknown = JSON.parse(raw[k] ?? "[]");
@@ -133,6 +137,18 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
       return d;
     }
   };
+  const exempt = positive(
+    num("tax_threshold_exempt", SETTING_DEFAULTS.tax_threshold_exempt),
+    SETTING_DEFAULTS.tax_threshold_exempt,
+  );
+  const group3 = Math.max(
+    exempt,
+    positive(num("tax_threshold_group3", SETTING_DEFAULTS.tax_threshold_group3), 0),
+  );
+  const group4 = Math.max(
+    group3,
+    positive(num("tax_threshold_group4", SETTING_DEFAULTS.tax_threshold_group4), 0),
+  );
   return {
     product_code_prefix: raw.product_code_prefix ?? SETTING_DEFAULTS.product_code_prefix,
     product_code_start: num("product_code_start", SETTING_DEFAULTS.product_code_start),
@@ -159,6 +175,11 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     tax_method: raw.tax_method || SETTING_DEFAULTS.tax_method,
     vat_deduct: raw.vat_deduct === "1",
     pit_exempt_alloc: raw.pit_exempt_alloc ?? SETTING_DEFAULTS.pit_exempt_alloc,
+    // Ba mốc doanh thu: rác/số ≤ 0 thì lấy mặc định, và luôn giữ thứ tự tăng dần
+    // để nhóm hộ xếp không bị lộn xộn (backend cũng chốt lại như vậy).
+    tax_threshold_exempt: exempt,
+    tax_threshold_group3: group3,
+    tax_threshold_group4: group4,
   };
 }
 

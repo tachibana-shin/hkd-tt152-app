@@ -520,11 +520,15 @@ export interface TaxGroupInfo {
   /** true = người dùng đã chốt trong hồ sơ HKD. */
   confirmed: boolean;
   /**
-   * true = nhóm đã chốt trong hồ sơ KHÁC nhóm app xếp từ doanh thu thực tế.
-   * Trường hợp này làm số thuế trên tờ khai khó hiểu (GTGT vẫn tính vì không
-   * thuộc diện miễn, còn TNCN theo doanh thu bằng 0 vì chưa vượt ngưỡng 1 tỷ)
-   * nên UI cần cảnh báo rõ.
+   * Nhóm app đã ghim cho năm khi hộ vượt ngưỡng mà hồ sơ chưa chốt — nhóm của
+   * năm giữ nguyên, vượt mốc giữa năm không chuyển sang nhóm kế tiếp.
    */
+  frozen_group?: number | null;
+  /** Ba mốc doanh thu đang áp dụng (sửa được ở màn Cài đặt). */
+  threshold_exempt: number;
+  threshold_group3: number;
+  threshold_group4: number;
+  /** Nhóm đã chốt trong hồ sơ lệch với nhóm app xếp — chỉ để UI ghi chú. */
   mismatch?: boolean;
 }
 
@@ -557,6 +561,16 @@ export interface AppSettings {
    * tỷ lệ doanh thu.
    */
   pit_exempt_alloc?: string;
+  /**
+   * Ngưỡng doanh thu năm không phải nộp thuế GTGT và TNCN. Mặc định 1.000.000.000
+   * (NĐ 141/2026/NĐ-CP nâng từ 500 triệu lên 01 tỷ, hiệu lực 01/01/2026).
+   * Sửa được ở màn Cài đặt vì ngưỡng đã nhảy nhiều lần qua các văn bản.
+   */
+  tax_threshold_exempt: number;
+  /** Mốc doanh thu năm của Nhóm 3 (thuế suất TNCN theo thu nhập 17%). Mặc định 3 tỷ. */
+  tax_threshold_group3: number;
+  /** Mốc doanh thu năm của Nhóm 4 (thuế suất TNCN theo thu nhập 20%). Mặc định 50 tỷ. */
+  tax_threshold_group4: number;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───
@@ -679,8 +693,10 @@ export interface TaxOverview {
   group: number;
   /** Nhóm app tự xếp từ doanh thu cả năm (để so với nhóm đang áp dụng). */
   auto_group?: number;
-  /** true = nhóm đang dùng lấy từ hồ sơ và khác nhóm app xếp. */
+  /** true = nhóm đang dùng lấy từ hồ sơ HKD (đã chốt, không tự xếp lại). */
   group_from_profile?: boolean;
+  /** Nhóm app đã ghim cho năm này (đã vượt ngưỡng mà hồ sơ chưa chốt nhóm). */
+  frozen_group?: number | null;
   /** Phương pháp TNCN đang áp dụng: "revenue" | "profit" */
   method: string;
   period_revenue: number; // doanh thu kỳ khai
@@ -688,6 +704,9 @@ export interface TaxOverview {
   taxable_revenue: number;
   /** Mức trừ ngưỡng áp dụng cho năm (01 tỷ đồng — NĐ 141/2026/NĐ-CP). */
   exempt_threshold: number;
+  /** Mốc Nhóm 3 / Nhóm 4 đang áp dụng (sửa được ở màn Cài đặt). */
+  group3_threshold?: number;
+  group4_threshold?: number;
   /**
    * false = doanh thu lũy kế tới cuối kỳ vẫn chưa vượt mức ngưỡng 01 tỷ nên kỳ
    * này chưa phát sinh thuế — khai, nộp thuế kể từ kỳ phát sinh (Điều 8 khoản 1a

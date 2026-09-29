@@ -5,7 +5,7 @@
 // Căn cứ: NĐ 68/2026/NĐ-CP, NĐ 141/2026/NĐ-CP (ngưỡng miễn thuế 1 tỷ, áp dụng từ 01/01/2026).
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
-import { fmtVnd } from "@/utils/format";
+import { fmtThreshold, fmtVnd } from "@/utils/format";
 
 const props = defineProps<{
   visible: boolean;
@@ -55,7 +55,8 @@ const allocRows = ref<
   { industry_code: string; industry_name: string; revenue: number; alloc: number | null }[]
 >([]);
 const allocTotal = computed(() => allocRows.value.reduce((sum, r) => sum + (r.alloc ?? 0), 0));
-const EXEMPT_THRESHOLD = 1_000_000_000;
+/** Ngưỡng đang áp dụng — đọc từ Cài đặt để bảng phân bổ khớp với ngưỡng app dùng. */
+const exemptThreshold = ref(1_000_000_000);
 
 /** Nạp doanh thu năm theo nhóm ngành + mức trừ đang lưu trong app_setting. */
 async function loadAlloc(year: number) {
@@ -64,6 +65,7 @@ async function loadAlloc(year: number) {
       api.getTaxDeclaration(year, "year", 0),
       api.getAppSettings(),
     ]);
+    exemptThreshold.value = settings.tax_threshold_exempt;
     const saved: Record<string, number> = (() => {
       try {
         const raw = settings.pit_exempt_alloc?.trim();
@@ -116,11 +118,11 @@ watch(
 );
 
 async function save() {
-  if (allocTotal.value > EXEMPT_THRESHOLD) {
+  if (allocTotal.value > exemptThreshold.value) {
     toast.add({
       severity: "warn",
       summary: "Tổng mức trừ vượt ngưỡng",
-      detail: `Tổng ${fmtVnd(allocTotal.value)} đ > ${fmtVnd(EXEMPT_THRESHOLD)} đ/năm — phần vượt sẽ không được tính trừ.`,
+      detail: `Tổng ${fmtVnd(allocTotal.value)} đ > ${fmtVnd(exemptThreshold.value)} đ/năm — phần vượt sẽ không được tính trừ.`,
     });
   }
   saving.value = true;
@@ -195,13 +197,17 @@ async function save() {
         </div>
       </FormField>
 
-      <!-- Phân bổ mức trừ ngưỡng 01 tỷ cho từng nhóm ngành (Điều 4 khoản 3) -->
-      <FormField label="Phân bổ mức trừ ngưỡng 01 tỷ/năm theo nhóm ngành">
+      <!-- Phân bổ mức trừ ngưỡng (số tiền lấy từ Cài đặt) cho từng nhóm ngành —
+           Điều 4 khoản 3 NĐ 68/2026 -->
+      <FormField
+        :label="`Phân bổ mức trừ ngưỡng ${fmtThreshold(exemptThreshold)}/năm theo nhóm ngành`"
+      >
         <p class="mb-2 text-xs text-gray-500">
           Luật TNCN Điều 7 khoản 3 điểm a: doanh thu tính thuế là
-          <b>phần doanh thu vượt trên</b> mức 01 tỷ. Khi có nhiều nhóm ngành áp mức thuế suất khác
-          nhau, hộ được tự chọn nhóm nào được trừ theo phương án có lợi nhất — tổng mức trừ không
-          vượt quá {{ fmtVnd(EXEMPT_THRESHOLD) }} đ/năm. Để trống = app chia theo tỷ lệ doanh thu.
+          <b>phần doanh thu vượt trên</b> mức ngưỡng {{ fmtVnd(exemptThreshold) }}. Khi có nhiều
+          nhóm ngành áp mức thuế suất khác nhau, hộ được tự chọn nhóm nào được trừ theo phương án có
+          lợi nhất — tổng mức trừ không vượt quá {{ fmtVnd(exemptThreshold) }} đ/năm. Để trống = app
+          chia theo tỷ lệ doanh thu.
         </p>
         <div v-if="allocRows.length" class="rounded border border-gray-200">
           <div
@@ -221,7 +227,7 @@ async function save() {
             <InputNumber
               v-model="r.alloc"
               :min="0"
-              :max="EXEMPT_THRESHOLD"
+              :max="exemptThreshold"
               :max-fraction-digits="0"
               placeholder="Chia theo tỷ lệ"
               show-buttons
@@ -231,10 +237,10 @@ async function save() {
           </div>
           <div
             class="flex justify-between bg-surface-50 px-2 py-1 text-xs font-medium"
-            :class="allocTotal > EXEMPT_THRESHOLD ? 'text-rose-600' : 'text-gray-600'"
+            :class="allocTotal > exemptThreshold ? 'text-rose-600' : 'text-gray-600'"
           >
             <span>Tổng mức trừ</span>
-            <span>{{ fmtVnd(allocTotal) }} / {{ fmtVnd(EXEMPT_THRESHOLD) }} đ</span>
+            <span>{{ fmtVnd(allocTotal) }} / {{ fmtVnd(exemptThreshold) }} đ</span>
           </div>
         </div>
         <p v-else class="text-xs text-gray-400">Chưa có doanh thu trong năm để phân bổ.</p>

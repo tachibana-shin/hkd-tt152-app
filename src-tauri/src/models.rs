@@ -613,8 +613,11 @@ pub(crate) struct TaxOverview {
     pub(crate) group: i64,
     /// Nhóm app tự xếp từ doanh thu cả năm
     pub(crate) auto_group: i64,
-    /// true = nhóm đang dùng lấy từ hồ sơ HKD và khác nhóm app xếp
+    /// true = nhóm đang dùng lấy từ hồ sơ HKD (đã chốt, không tự xếp lại)
     pub(crate) group_from_profile: bool,
+    /// Nhóm app đã ghim cho năm này khi hộ vượt ngưỡng mà hồ sơ chưa chốt nhóm —
+    /// nhóm của năm giữ nguyên, vượt mốc giữa năm không chuyển sang nhóm kế tiếp.
+    pub(crate) frozen_group: Option<i64>,
     /// Phương pháp tính TNCN đang áp dụng: "revenue" | "profit"
     pub(crate) method: String,
     /// Doanh thu trong kỳ khai
@@ -622,8 +625,13 @@ pub(crate) struct TaxOverview {
     /// Doanh thu tính thuế TNCN của kỳ = doanh thu kỳ − phần trừ ngưỡng 01 tỷ
     /// (Luật TNCN Điều 7 khoản 3 điểm a); bằng 0 trước kỳ vượt ngưỡng.
     pub(crate) taxable_revenue: f64,
-    /// Mức trừ ngưỡng áp dụng cho năm (01 tỷ đồng — NĐ 141/2026/NĐ-CP)
+    /// Mức trừ ngưỡng áp dụng cho năm (mặc định 01 tỷ đồng — NĐ 141/2026/NĐ-CP,
+    /// sửa được ở màn Cài đặt)
     pub(crate) exempt_threshold: f64,
+    /// Mốc Nhóm 3 (thuế suất TNCN theo thu nhập 17%) đang áp dụng.
+    pub(crate) group3_threshold: f64,
+    /// Mốc Nhóm 4 (thuế suất TNCN theo thu nhập 20%) đang áp dụng.
+    pub(crate) group4_threshold: f64,
     /// Giá vốn FIFO tính từ phiếu nhập (Điều 6 khoản 1 điểm a NĐ 68/2026)
     pub(crate) cogs: f64,
     /// Khoản chi khác được trừ (phiếu chi đủ điều kiện)

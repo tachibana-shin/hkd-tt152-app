@@ -225,8 +225,11 @@ pub(crate) async fn get_tax_summary(
     let taxable = taxable_by_period(&cum, &period, &ctx.alloc)
         .into_iter()
         .collect();
-    let taxable_period =
-        period_is_taxable(cum.values().sum(), period.values().sum(), THRESHOLD_EXEMPT);
+    let taxable_period = period_is_taxable(
+        cum.values().sum(),
+        period.values().sum(),
+        ctx.settings.thresholds.exempt,
+    );
     let out = build_tax_declaration(
         rows,
         &ctx.settings.method,
@@ -344,9 +347,10 @@ pub(crate) async fn load_tax_agg_range(
 //   • Luật Thuế GTGT 48/2024/QH15 — Điều 12 (tỷ lệ % trên doanh thu)
 //   • TT 152/2025/TT-BTC — mẫu sổ S1a/S2a/S2b–S2e/S3a-HKD
 
-/// Ngưỡng doanh thu năm không phải nộp thuế GTGT và TNCN: 01 tỷ đồng.
+/// Ngưỡng doanh thu năm không phải nộp thuế GTGT và TNCN: 01 tỷ đồng
+/// (NĐ 141/2026/NĐ-CP sửa NĐ 68/2026/NĐ-CP).
 pub(crate) const THRESHOLD_EXEMPT: f64 = 1_000_000_000.0;
-/// Mốc doanh thu năm: trên ngưỡng → xuống tới 3 tỷ (thuế suất TNCN 15%).
+/// Mốc doanh thu năm: trên ngưỡng → tới 3 tỷ (thuế suất TNCN 15%).
 pub(crate) const THRESHOLD_GROUP3: f64 = 3_000_000_000.0;
 /// Mốc doanh thu năm: trên 3 tỷ → tới 50 tỷ (thuế suất TNCN 17%).
 pub(crate) const THRESHOLD_GROUP4: f64 = 50_000_000_000.0;
@@ -354,13 +358,60 @@ pub(crate) const THRESHOLD_GROUP4: f64 = 50_000_000_000.0;
 /// thì mới được trừ khi tính thu nhập tính thuế (NĐ 68/2026 Điều 6 khoản 1).
 pub(crate) const NON_CASH_PAYMENT_LIMIT: f64 = 5_000_000.0;
 
+/// Ba mốc doanh thu quyết định nhóm hộ, cho phép sửa ở màn Cài đặt.
+///
+/// Ngưỡng đã nhảy nhiều lần qua các văn bản (100 triệu → 500 triệu → 01 tỷ) và
+/// còn có thể đổi tiếp, nên không gắn cứng trong code: người dùng sửa được ở
+/// Cài đặt, app lấy theo khi tính thuế.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TaxThresholds {
+    /// Doanh thu năm từ mức này trở xuống: không phải nộp GTGT và TNCN.
+    pub(crate) exempt: f64,
+    /// Mốc nhóm 3 (thuế suất TNCN theo thu nhập 17%).
+    pub(crate) group3: f64,
+    /// Mốc nhóm 4 (thuế suất TNCN theo thu nhập 20%).
+    pub(crate) group4: f64,
+}
+
+impl Default for TaxThresholds {
+    fn default() -> Self {
+        Self {
+            exempt: THRESHOLD_EXEMPT,
+            group3: THRESHOLD_GROUP3,
+            group4: THRESHOLD_GROUP4,
+        }
+    }
+}
+
+impl TaxThresholds {
+    /// Đọc từ `app_setting`, bỏ qua giá trị rác (0, âm hoặc không đọc được) và
+    /// giữ mốc tăng dần để nhóm xếp không bị lộn xộn.
+    pub(crate) fn from_settings(raw: &std::collections::HashMap<String, String>) -> Self {
+        let num = |key: &str, default: f64| match raw.get(key).map(|v| v.trim().parse::<f64>()) {
+            Some(Ok(v)) if v > 0.0 => v,
+            _ => default,
+        };
+        let exempt = num("tax_threshold_exempt", THRESHOLD_EXEMPT);
+        let mut group3 = num("tax_threshold_group3", THRESHOLD_GROUP3).max(exempt);
+        let mut group4 = num("tax_threshold_group4", THRESHOLD_GROUP4).max(group3);
+        // Các mốc phải tăng dần: group3 ≥ ngưỡng, group4 ≥ group3.
+        group3 = group3.max(exempt);
+        group4 = group4.max(group3);
+        Self {
+            exempt,
+            group3,
+            group4,
+        }
+    }
+}
+
 /// Xếp nhóm hộ theo tổng doanh thu cả năm (Điều 7 khoản 2 Luật TNCN + Điều 10 khoản 1).
-pub(crate) fn tax_group(total_revenue_year: f64) -> i64 {
-    if total_revenue_year <= THRESHOLD_EXEMPT {
+pub(crate) fn tax_group_with(total_revenue_year: f64, th: &TaxThresholds) -> i64 {
+    if total_revenue_year <= th.exempt {
         1
-    } else if total_revenue_year <= THRESHOLD_GROUP3 {
+    } else if total_revenue_year <= th.group3 {
         2
-    } else if total_revenue_year <= THRESHOLD_GROUP4 {
+    } else if total_revenue_year <= th.group4 {
         3
     } else {
         4
@@ -378,12 +429,15 @@ pub(crate) fn group_mismatch(stored: Option<i64>, auto_group: i64) -> bool {
         .is_some_and(|g| g != auto_group)
 }
 
-/// Nhóm hộ dùng cho tờ khai: nhóm đã chốt trong hồ sơ HKD được ưu tiên, hộ
-/// chưa chốt (NULL) thì tự xếp theo doanh thu cả năm.
-pub(crate) fn effective_tax_group(stored: Option<i64>, total_revenue_year: f64) -> i64 {
+/// Nhóm hộ dùng cho tờ khai, theo thứ tự ưu tiên:
+///   1. nhóm đã chốt trong hồ sơ HKD (cao nhất — người dùng/cơ quan thuế chỉ định),
+///   2. nhóm app đã ghim cho năm tính thuế này (đóng băng theo năm),
+///   3. nhóm xếp từ doanh thu cả năm khi hộ chưa chốt nhóm nào.
+pub(crate) fn effective_tax_group(stored: Option<i64>, frozen: Option<i64>, auto: i64) -> i64 {
     stored
         .filter(|g| (1..=4).contains(g))
-        .unwrap_or_else(|| tax_group(total_revenue_year))
+        .or(frozen.filter(|g| (1..=4).contains(g)))
+        .unwrap_or(auto)
 }
 
 /// Thuế suất TNCN theo thu nhập (Điều 7 khoản 2 Luật TNCN 109/2025).
@@ -635,6 +689,58 @@ pub(crate) struct TaxSettings {
     /// Hộ tự chọn cách phân bổ mức trừ ngưỡng 01 tỷ cho các nhóm ngành
     /// (NĐ 68/2026 Điều 4 khoản 3).
     pub(crate) exempt_choice: TaxableExemptChoice,
+    /// Ba mốc doanh thu (sửa được ở màn Cài đặt).
+    pub(crate) thresholds: TaxThresholds,
+    /// Nhóm hộ đã chốt riêng cho từng năm — xem `FrozenGroups`.
+    pub(crate) group_by_year: FrozenGroups,
+}
+
+/// Nhóm hộ đã "chốt" cho từng năm tính thuế, lưu dạng JSON `{"2026": 2}`.
+///
+/// Nguyên tắc ổn định: khi doanh thu giữa năm vượt sang nhóm kế tiếp (ví dụ đang
+/// Nhóm 2 mà vượt 03 tỷ) thì kỳ tính thuế của năm đó **vẫn giữ nhóm cũ**, từ năm
+/// sau mới chuyển — đúng như ý kiến chính thức của Thuế cơ sở Tây Ninh trả lời
+/// báo Chính phủ về trường hợp vượt 03 tỷ trong năm (dẫn điểm d khoản 5 Điều 4
+/// NĐ 68/2026). Nhờ vậy nhóm tính thuế không bị đổi giữa chừng khi doanh thu tăng
+/// vượt mốc.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct FrozenGroups(pub(crate) std::collections::HashMap<i64, i64>);
+
+impl FrozenGroups {
+    /// JSON sai kiểu thì coi như chưa chốt gì — không làm hỏng tờ khai.
+    pub(crate) fn from_json(raw: Option<&String>) -> Self {
+        let Some(raw) = raw.map(|v| v.trim().to_string()) else {
+            return Self::default();
+        };
+        if raw.is_empty() || raw == "{}" {
+            return Self::default();
+        }
+        let parsed: std::collections::HashMap<String, f64> =
+            serde_json::from_str(&raw).unwrap_or_default();
+        let map = parsed
+            .into_iter()
+            .filter_map(|(k, v)| k.trim().parse::<i64>().ok().map(|y| (y, v as i64)))
+            .filter(|(_, g)| (1..=4).contains(g))
+            .collect();
+        Self(map)
+    }
+
+    pub(crate) fn get(&self, year: i64) -> Option<i64> {
+        self.0.get(&year).copied()
+    }
+
+    /// Thêm nhóm đã chốt của một năm (bỏ qua năm đã có để không ghi đè).
+    pub(crate) fn set_if_absent(&mut self, year: i64, group: i64) -> bool {
+        if self.0.contains_key(&year) || !(1..=4).contains(&group) {
+            return false;
+        }
+        self.0.insert(year, group);
+        true
+    }
+
+    pub(crate) fn to_json(&self) -> String {
+        serde_json::to_string(&self.0).unwrap_or_else(|_| "{}".to_string())
+    }
 }
 
 /// Đọc cấu hình kê khai thuế: (kỳ khai, phương pháp TNCN, cách phân bổ mức trừ).
@@ -642,7 +748,9 @@ pub(crate) struct TaxSettings {
 pub(crate) async fn load_tax_settings(pool: &SqlitePool) -> Result<TaxSettings, String> {
     let rows: Vec<(String, String)> = sqlx::query!(
         r#"SELECT key as "key!", value FROM app_setting
-            WHERE key IN ('tax_period', 'tax_method', 'pit_exempt_alloc')"#
+            WHERE key IN ('tax_period', 'tax_method', 'pit_exempt_alloc',
+                          'tax_threshold_exempt', 'tax_threshold_group3',
+                          'tax_threshold_group4', 'tax_group_by_year')"#
     )
     .fetch_all(pool)
     .await
@@ -653,18 +761,24 @@ pub(crate) async fn load_tax_settings(pool: &SqlitePool) -> Result<TaxSettings, 
     let mut period = "quarter".to_string();
     let mut method = "revenue".to_string();
     let mut alloc = String::new();
+    let mut raw_settings: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for (k, v) in rows {
         match k.as_str() {
             "tax_period" => period = v,
             "tax_method" => method = v,
             "pit_exempt_alloc" => alloc = v,
-            _ => {}
+            other => {
+                raw_settings.insert(other.to_string(), v);
+            }
         }
     }
     Ok(TaxSettings {
         period,
         method,
         exempt_choice: TaxableExemptChoice::from_json(&alloc),
+        thresholds: TaxThresholds::from_settings(&raw_settings),
+        group_by_year: FrozenGroups::from_json(raw_settings.get("tax_group_by_year")),
     })
 }
 
@@ -882,7 +996,11 @@ pub(crate) fn build_tax_declaration(
     // (Điều 8 khoản 1a) dù hộ đã thuộc nhóm 2.
     taxable_period: bool,
 ) -> Vec<TaxDeclarationRow> {
-    let exempt = group == 1 || !taxable_period;
+    // Miễn thuế do NGƯỠNG doanh thu quyết định, không do nhãn nhóm: hộ ghi Nhóm 2
+    // trong hồ sơ mà doanh thu chưa vượt ngưỡng vẫn không phát sinh thuế trong kỳ
+    // (Điều 8 khoản 1a), và ngược lại hộ ghi Nhóm 1 vẫn phải nộp thuế cho phần
+    // doanh thu vượt ngưỡng của các kỳ sau.
+    let exempt = !taxable_period;
     rows.into_iter()
         .map(|r| {
             let base = net_revenue(&r);
@@ -902,7 +1020,7 @@ pub(crate) fn build_tax_declaration(
             };
             // TNCN theo thu nhập tính thuế không tính ở bảng tờ khai theo ngành —
             // số thuế đó tính ở thẻ tổng hợp (và tạm nộp theo tỷ lệ % doanh thu).
-            let pit_tax = if exempt || group != 2 || method != "revenue" {
+            let pit_tax = if exempt || group > 2 || method != "revenue" {
                 0.0
             } else {
                 round2(taxable_rev * r.pit_rate)
@@ -930,28 +1048,53 @@ pub(crate) struct TaxContext {
     pub(crate) group: i64,
     /// Nhóm app tự xếp từ doanh thu cả năm.
     pub(crate) auto_group: i64,
-    /// true = nhóm đang dùng lấy từ hồ sơ HKD và KHÁC nhóm app xếp — tức là
-    /// cấu hình đang lệch với doanh thu thực tế (cần cảnh báo cho người dùng).
+    /// true = nhóm đang dùng lấy từ hồ sơ HKD (người dùng/cơ quan thuế đã chốt),
+    /// tức là không tự xếp lại theo doanh thu nữa.
     pub(crate) group_from_profile: bool,
+    /// Nhóm app đã ghim cho năm tính thuế này (đã vượt ngưỡng nhưng hồ sơ chưa
+    /// chốt) — dùng để hiển thị "nhóm của năm đã chốt, không đổi giữa năm".
+    pub(crate) frozen_group: Option<i64>,
     pub(crate) year_revenue: f64,
     pub(crate) alloc: Vec<(String, f64)>,
 }
 
 pub(crate) async fn load_tax_context(pool: &SqlitePool, year: i64) -> Result<TaxContext, String> {
-    let settings = load_tax_settings(pool).await?;
+    let mut settings = load_tax_settings(pool).await?;
     let year_rows = load_tax_agg(pool, year, 0).await?;
     let year_revenue = year_revenue(&year_rows);
     let stored = load_stored_tax_group(pool)
         .await?
         .filter(|g| (1..=4).contains(g));
-    let auto_group = tax_group(year_revenue);
-    let group = effective_tax_group(stored, year_revenue);
-    let alloc = exempt_alloc(&year_rows, THRESHOLD_EXEMPT, &settings.exempt_choice);
+    let thresholds = settings.thresholds;
+    let auto_group = tax_group_with(year_revenue, &thresholds);
+    // Nhóm của năm: hồ sơ HKD (cơ quan thuế chỉ định) > nhóm đã chốt cho năm này >
+    // nhóm xếp từ doanh thu. Vượt mốc giữa năm không đổi nhóm của năm đó.
+    let mut frozen = settings.group_by_year.get(year);
+    let group = effective_tax_group(stored, frozen, auto_group);
+    // Hộ đã vượt ngưỡng mà hồ sơ chưa chốt nhóm: ghim nhóm của năm lại để các kỳ
+    // trong năm dùng chung một nhóm (nguyên tắc ổn định). Chỉ ghim khi đã vượt
+    // ngưỡng — lúc đó nhóm mới có ý nghĩa; chưa vượt thì để Nhóm 1 cho tới lúc.
+    if stored.is_none()
+        && frozen.is_none()
+        && year_revenue > thresholds.exempt
+        && settings.group_by_year.set_if_absent(year, auto_group)
+    {
+        let _ = sqlx::query(
+            "INSERT INTO app_setting(key, value) VALUES('tax_group_by_year', ?) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(settings.group_by_year.to_json())
+        .execute(pool)
+        .await;
+        frozen = settings.group_by_year.get(year);
+    }
+    let alloc = exempt_alloc(&year_rows, thresholds.exempt, &settings.exempt_choice);
     Ok(TaxContext {
         settings,
         group,
         auto_group,
-        group_from_profile: group_mismatch(stored, auto_group),
+        group_from_profile: stored.is_some(),
+        frozen_group: frozen,
         year_revenue,
         alloc,
     })
@@ -995,7 +1138,7 @@ pub(crate) async fn get_tax_declaration(
     let taxable_period = period_is_taxable(
         cum_before.values().sum(),
         period_map.values().sum(),
-        THRESHOLD_EXEMPT,
+        ctx.settings.thresholds.exempt,
     );
     let out = build_tax_declaration(
         rows,
@@ -1018,15 +1161,23 @@ pub(crate) async fn get_tax_group(state: State<'_, AppState>, year: i64) -> Resu
         .iter()
         .map(|r| r.revenue_up - r.revenue_down)
         .sum();
-    let auto = tax_group(revenue_year);
+    let settings = load_tax_settings(&pool).await?;
+    let th = settings.thresholds;
+    let auto = tax_group_with(revenue_year, &th);
     let confirmed = stored.filter(|g| (1..=4).contains(g));
+    let frozen = settings.group_by_year.get(year);
     let out = json!({
-        "group": effective_tax_group(confirmed, revenue_year),
+        "group": effective_tax_group(confirmed, frozen, auto),
         "auto_group": auto,
         "revenue_year": revenue_year,
         "confirmed": confirmed.is_some(),
-        // Nhóm đã chốt khác nhóm app xếp từ doanh thu → cấu hình lệch, UI cảnh báo.
+        "frozen_group": frozen,
+        // Hồ sơ ghi khác doanh thu thực tế: KHÔNG phải lỗi (năm chưa kết thúc,
+        // nguyên tắc ổn định) nên UI chỉ hiện ghi chú, không cảnh báo đỏ.
         "mismatch": group_mismatch(confirmed, auto),
+        "threshold_exempt": th.exempt,
+        "threshold_group3": th.group3,
+        "threshold_group4": th.group4,
     });
     Ok(out.to_string())
 }
@@ -1078,13 +1229,13 @@ pub(crate) async fn get_tax_overview(
     let taxable_period = period_is_taxable(
         cum_before.values().sum(),
         period_map.values().sum(),
-        THRESHOLD_EXEMPT,
+        ctx.settings.thresholds.exempt,
     );
 
     // Thuế GTGT phải nộp: tổng tiền ghi trên hóa đơn × tỷ lệ ngành (Điều 12
     // khoản 2 Luật GTGT) — hóa đơn HKD không tách thuế nên chính doanh thu là
     // cơ sở tính. Nhóm 1 thì miễn.
-    let vat_payable: f64 = if ctx.group == 1 || !taxable_period {
+    let vat_payable: f64 = if !taxable_period {
         0.0
     } else {
         period_rows
@@ -1096,9 +1247,9 @@ pub(crate) async fn get_tax_overview(
     // Thuế TNCN (Điều 7 Luật TNCN + Điều 10 khoản 2 NĐ 68/2026):
     //   Nhóm 2 + phương pháp doanh thu → doanh thu TÍNH THUẾ (đã trừ ngưỡng) × tỷ lệ ngành
     //   Còn lại → thu nhập tính thuế (DT − CP được trừ) × 15%/17%/20%
-    let pit_tax: f64 = if ctx.group == 1 || !taxable_period {
+    let pit_tax: f64 = if !taxable_period {
         0.0
-    } else if ctx.group == 2 && ctx.settings.method == "revenue" {
+    } else if ctx.group <= 2 && ctx.settings.method == "revenue" {
         period_rows
             .iter()
             .map(|r| {
@@ -1110,8 +1261,8 @@ pub(crate) async fn get_tax_overview(
         round2(profit.max(0.0) * profit_tncn_rate(ctx.group))
     };
 
-    let profit_rate = if ctx.group == 2 {
-        if ctx.settings.method == "profit" {
+    let profit_rate = if ctx.group <= 2 {
+        if ctx.settings.method == "profit" && ctx.group >= 2 {
             0.15
         } else {
             0.0
@@ -1126,20 +1277,18 @@ pub(crate) async fn get_tax_overview(
 
     // Số tạm nộp theo Điều 10 khoản 2 điểm b: hộ nộp TNCN theo thu nhập tính
     // thuế thì tạm nộp theo tỷ lệ % × doanh thu của kỳ, rồi quyết toán cả năm.
-    let pit_provisional: f64 = if ctx.group == 1
-        || !taxable_period
-        || (ctx.group == 2 && ctx.settings.method == "revenue")
-    {
-        pit_tax
-    } else {
-        period_rows
-            .iter()
-            .map(|r| {
-                let t = taxable.get(&r.industry_code).copied().unwrap_or(0.0);
-                round2(t * r.pit_rate)
-            })
-            .sum()
-    };
+    let pit_provisional: f64 =
+        if !taxable_period || (ctx.group <= 2 && ctx.settings.method == "revenue") {
+            pit_tax
+        } else {
+            period_rows
+                .iter()
+                .map(|r| {
+                    let t = taxable.get(&r.industry_code).copied().unwrap_or(0.0);
+                    round2(t * r.pit_rate)
+                })
+                .sum()
+        };
 
     let overview = TaxOverview {
         year,
@@ -1147,10 +1296,13 @@ pub(crate) async fn get_tax_overview(
         group: ctx.group,
         auto_group: ctx.auto_group,
         group_from_profile: ctx.group_from_profile,
+        frozen_group: ctx.frozen_group,
         method: ctx.settings.method.clone(),
         period_revenue: round2(period_revenue),
         taxable_revenue: round2(taxable_revenue),
-        exempt_threshold: THRESHOLD_EXEMPT,
+        exempt_threshold: ctx.settings.thresholds.exempt,
+        group3_threshold: ctx.settings.thresholds.group3,
+        group4_threshold: ctx.settings.thresholds.group4,
         cogs,
         other_expense: cost_ok,
         expense,
@@ -1247,18 +1399,24 @@ pub(crate) async fn get_tax_settlement(
     let revenue = ctx.year_revenue;
     let expense = round2(cogs + cost_ok);
     let income = round2(revenue - expense);
-    let rate = if ctx.group == 1 {
-        0.0
-    } else {
+    // Quyết toán cả năm chỉ có nghĩa khi hộ thuộc diện tính thuế (Điều 8 khoản 1a);
+    // hộ cả năm không vượt ngưỡng thì tổng thuế bằng 0 dù hồ sơ ghi nhóm nào.
+    let year_taxable = ctx.year_revenue > ctx.settings.thresholds.exempt;
+    let rate = if year_taxable {
         profit_tncn_rate(ctx.group)
-    };
-    let final_tax = if ctx.group == 1 {
-        0.0
     } else {
+        0.0
+    };
+    let final_tax = if year_taxable {
         round2(income.max(0.0) * rate)
+    } else {
+        0.0
     };
     // Hộ nộp theo tỷ lệ % doanh thu thì số phải nộp chính là tổng tạm nộp.
-    let by_revenue = ctx.group == 2 && ctx.settings.method == "revenue";
+    // Hộ vượt ngưỡng mà hồ sơ đang ghi Nhóm 1 thì không có mức thuế suất theo
+    // thu nhập để áp, nên TNCN vẫn tính theo tỷ lệ % doanh thu cho tới khi hộ
+    // xác nhận lại nhóm (nguyên tắc ổn định: nhóm của năm không tự đổi giữa chừng).
+    let by_revenue = ctx.group <= 2 && ctx.settings.method == "revenue";
     let difference = if by_revenue {
         0.0
     } else {
@@ -1271,7 +1429,11 @@ pub(crate) async fn get_tax_settlement(
         let rows_m = load_tax_agg_range(&pool, year, m as i64, m as i64).await?;
         cum[m] = cum[m - 1] + year_revenue(&rows_m);
     }
-    let first = first_taxable_period(&cum, THRESHOLD_EXEMPT, months_per_period(period_kind));
+    let first = first_taxable_period(
+        &cum,
+        ctx.settings.thresholds.exempt,
+        months_per_period(period_kind),
+    );
 
     let out = json!({
         "year": year,
@@ -1758,21 +1920,40 @@ mod tests {
     }
 
     #[test]
-    fn nhom1_doanh_thu_duoi_1_ty_mien_thue() {
-        // Nhóm 1 (≤ 1 tỷ/năm): miễn GTGT + TNCN kể cả khi có doanh thu trong kỳ
+    fn chua_vuot_nguong_khong_phat_sinh_thue_du_nhom_trong_ho_sao_la_2() {
+        // Hồ sơ ghi Nhóm 2 nhưng doanh thu mới 12,4 triệu → kỳ chưa vượt ngưỡng
+        // nên KHÔNG phát sinh thuế (Điều 8 khoản 1a). Nhãn nhóm trong hồ sơ không
+        // tạo ra thuế giả, tránh tờ khai "GTGT có, TNCN không" gây khó hiểu.
         let out = build_tax_declaration(
-            vec![agg(800_000_000.0, 0.0)],
+            vec![agg(12_401_999.0, 0.0)],
             "revenue",
-            1,
+            2,
             &full("PPHH", 0.0),
-            true,
+            false,
         );
         let r = &out[0];
         assert_eq!(r.vat_tax, 0.0);
         assert_eq!(r.vat_payable, 0.0);
         assert_eq!(r.pit_tax, 0.0);
         // Doanh thu vẫn hiển thị để theo dõi ngưỡng
-        assert_eq!(r.revenue_up, 800_000_000.0);
+        assert_eq!(r.revenue_up, 12_401_999.0);
+    }
+
+    #[test]
+    fn vuot_nguong_thi_phai_nop_thue_du_nhom_trong_ho_sao_la_1() {
+        // Ngược lại: hồ sơ ghi Nhóm 1 nhưng kỳ đã vượt ngưỡng → phải nộp thuế,
+        // không được miễn chỉ vì nhãn nhóm trong hồ sơ.
+        let out = build_tax_declaration(
+            vec![agg(1_200_000_000.0, 0.0)],
+            "revenue",
+            1,
+            &full("PPHH", 200_000_000.0),
+            true,
+        );
+        let r = &out[0];
+        assert_eq!(r.vat_tax, 12_000_000.0); // 1,2 tỷ x 1%
+        assert_eq!(r.pit_tax, 1_000_000.0); // 200tr x 0,5%
+        assert_eq!(r.revenue_taxable, 200_000_000.0);
     }
 
     #[test]
@@ -1807,26 +1988,102 @@ mod tests {
     #[test]
     fn xep_nhom_theo_tong_doanh_thu_nam() {
         // Ngưỡng: ≤ 1 tỷ = nhóm 1 (miễn); > 1–3 tỷ = 2; > 3–50 tỷ = 3; > 50 tỷ = 4
-        assert_eq!(tax_group(500_000_000.0), 1);
-        assert_eq!(tax_group(1_000_000_000.0), 1); // 1 tỷ (bằng ngưỡng) → miễn
-        assert_eq!(tax_group(1_000_000_000.01), 2);
-        assert_eq!(tax_group(3_000_000_000.0), 2);
-        assert_eq!(tax_group(3_000_000_000.01), 3);
-        assert_eq!(tax_group(50_000_000_000.0), 3);
-        assert_eq!(tax_group(50_000_000_000.01), 4);
+        assert_eq!(tax_group_with(500_000_000.0, &TaxThresholds::default()), 1);
+        assert_eq!(
+            tax_group_with(1_000_000_000.0, &TaxThresholds::default()),
+            1
+        ); // 1 tỷ (bằng ngưỡng) → miễn
+        assert_eq!(
+            tax_group_with(1_000_000_000.01, &TaxThresholds::default()),
+            2
+        );
+        assert_eq!(
+            tax_group_with(3_000_000_000.0, &TaxThresholds::default()),
+            2
+        );
+        assert_eq!(
+            tax_group_with(3_000_000_000.01, &TaxThresholds::default()),
+            3
+        );
+        assert_eq!(
+            tax_group_with(50_000_000_000.0, &TaxThresholds::default()),
+            3
+        );
+        assert_eq!(
+            tax_group_with(50_000_000_000.01, &TaxThresholds::default()),
+            4
+        );
     }
 
     #[test]
-    fn nhom_ho_da_luu_thang_doanh_thu() {
-        // Chưa chốt trong hồ sơ (NULL) → tự xếp như trước.
-        assert_eq!(effective_tax_group(None, 500_000_000.0), 1);
-        assert_eq!(effective_tax_group(None, 5_000_000_000.0), 3);
-        // Đã chốt → hồ sơ thắng, kể cả khi doanh thu chưa tới ngưỡng.
-        assert_eq!(effective_tax_group(Some(3), 500_000_000.0), 3);
-        assert_eq!(effective_tax_group(Some(1), 60_000_000_000.0), 1);
+    fn nhom_ho_ua_tien_hon_hom_so() {
+        // Chưa chốt ở đâu cả → dùng nhóm app xếp từ doanh thu.
+        assert_eq!(effective_tax_group(None, None, 1), 1);
+        assert_eq!(effective_tax_group(None, None, 3), 3);
+        // Nhóm đã ghim cho năm (hộ vượt ngưỡng, hồ sơ chưa chốt) → giữ nguyên cả năm,
+        // doanh thu tăng tiếp cũng không tự lên nhóm kế tiếp (nguyên tắc ổn định).
+        assert_eq!(effective_tax_group(None, Some(2), 3), 2);
+        // Hồ sơ HKD chốt → thắng tuyệt đối, kể cả khi lệch với doanh thu thực tế.
+        assert_eq!(effective_tax_group(Some(3), Some(2), 1), 3);
+        assert_eq!(effective_tax_group(Some(1), None, 4), 1);
         // Giá trị ngoài 1–4 coi như chưa chốt thay vì tin vào.
-        assert_eq!(effective_tax_group(Some(0), 60_000_000_000.0), 4);
-        assert_eq!(effective_tax_group(Some(7), 500_000_000.0), 1);
+        assert_eq!(effective_tax_group(Some(0), None, 4), 4);
+        assert_eq!(effective_tax_group(Some(7), None, 1), 1);
+    }
+
+    #[test]
+    fn nguong_toi_da_duoc_chinh() {
+        let raw = std::collections::HashMap::from([
+            ("tax_threshold_exempt".to_string(), "1500000000".to_string()),
+            ("tax_threshold_group3".to_string(), "4000000000".to_string()),
+            (
+                "tax_threshold_group4".to_string(),
+                "60000000000".to_string(),
+            ),
+        ]);
+        let th = TaxThresholds::from_settings(&raw);
+        assert_eq!(th.exempt, 1_500_000_000.0);
+        assert_eq!(th.group3, 4_000_000_000.0);
+        assert_eq!(th.group4, 60_000_000_000.0);
+        assert_eq!(tax_group_with(1_500_000_000.0, &th), 1);
+        assert_eq!(tax_group_with(1_500_000_001.0, &th), 2);
+        assert_eq!(tax_group_with(4_000_000_001.0, &th), 3);
+        assert_eq!(tax_group_with(60_000_000_001.0, &th), 4);
+    }
+
+    #[test]
+    fn nguong_rac_hoi_thi_giu_nguong_mac_dinh() {
+        // Rác (không đọc được, số âm, 0) và thứ tự lộn xộn đều không làm hỏng tờ khai.
+        let raw = std::collections::HashMap::from([
+            ("tax_threshold_exempt".to_string(), "abc".to_string()),
+            ("tax_threshold_group3".to_string(), "-5".to_string()),
+            ("tax_threshold_group4".to_string(), "1000000000".to_string()),
+        ]);
+        let th = TaxThresholds::from_settings(&raw);
+        assert_eq!(th.exempt, THRESHOLD_EXEMPT);
+        assert_eq!(th.group3, THRESHOLD_GROUP3);
+        // group4 nhỏ hơn group3 → bị nâng lên bằng group3 để nhóm xếp không lộn xộn.
+        assert_eq!(th.group4, th.group3);
+    }
+
+    #[test]
+    fn nhom_ghim_theo_nam_luu_va_doc_lai() {
+        let mut g = FrozenGroups::default();
+        assert_eq!(g.get(2026), None);
+        assert!(g.set_if_absent(2026, 2));
+        assert!(!g.set_if_absent(2026, 3), "không ghi đè nhóm đã chốt");
+        assert!(g.set_if_absent(2027, 1));
+        assert!(!g.set_if_absent(2028, 9), "nhóm ngoài 1–4 bị bỏ");
+        let back = FrozenGroups::from_json(Some(&g.to_json()));
+        assert_eq!(back.get(2026), Some(2));
+        assert_eq!(back.get(2027), Some(1));
+        assert_eq!(back.get(2028), None);
+        // JSON rác → coi như chưa chốt gì, không làm hỏng tờ khai.
+        assert_eq!(
+            FrozenGroups::from_json(Some(&"{oops".to_string())),
+            FrozenGroups::default()
+        );
+        assert_eq!(FrozenGroups::from_json(None), FrozenGroups::default());
     }
 
     #[test]
@@ -2021,13 +2278,31 @@ mod tax_rules_tests {
     #[test]
     fn xep_nhom_theo_doanh_thu_nam_dung_moc_luat() {
         // Điều 7 khoản 2 Luật TNCN: 15% / 17% / 20% theo các mốc 3 tỷ, 50 tỷ.
-        assert_eq!(tax_group(0.0), 1);
-        assert_eq!(tax_group(THRESHOLD_EXEMPT), 1);
-        assert_eq!(tax_group(THRESHOLD_EXEMPT + 1.0), 2);
-        assert_eq!(tax_group(THRESHOLD_GROUP3), 2);
-        assert_eq!(tax_group(THRESHOLD_GROUP3 + 1.0), 3);
-        assert_eq!(tax_group(THRESHOLD_GROUP4), 3);
-        assert_eq!(tax_group(THRESHOLD_GROUP4 + 1.0), 4);
+        assert_eq!(tax_group_with(0.0, &TaxThresholds::default()), 1);
+        assert_eq!(
+            tax_group_with(THRESHOLD_EXEMPT, &TaxThresholds::default()),
+            1
+        );
+        assert_eq!(
+            tax_group_with(THRESHOLD_EXEMPT + 1.0, &TaxThresholds::default()),
+            2
+        );
+        assert_eq!(
+            tax_group_with(THRESHOLD_GROUP3, &TaxThresholds::default()),
+            2
+        );
+        assert_eq!(
+            tax_group_with(THRESHOLD_GROUP3 + 1.0, &TaxThresholds::default()),
+            3
+        );
+        assert_eq!(
+            tax_group_with(THRESHOLD_GROUP4, &TaxThresholds::default()),
+            3
+        );
+        assert_eq!(
+            tax_group_with(THRESHOLD_GROUP4 + 1.0, &TaxThresholds::default()),
+            4
+        );
         assert_eq!(profit_tncn_rate(2), 0.15);
         assert_eq!(profit_tncn_rate(3), 0.17);
         assert_eq!(profit_tncn_rate(4), 0.20);
@@ -2059,7 +2334,10 @@ mod tax_rules_tests {
         // Đúng 01 tỷ → khoản 1 Điều 7 Luật TNCN 109/2025: "từ mức 01 tỷ trở xuống
         // không phải nộp" → hộ thuộc NHÓM 1, doanh thu tính thuế = 0, TNCN = 0.
         let rows = vec![row("PPHH", THRESHOLD_EXEMPT, 0.0, 0.005)];
-        assert_eq!(tax_group(year_revenue(&rows)), 1);
+        assert_eq!(
+            tax_group_with(year_revenue(&rows), &TaxThresholds::default()),
+            1
+        );
         let alloc = exempt_alloc(&rows, THRESHOLD_EXEMPT, &TaxableExemptChoice::Auto);
         let taxable = taxable_by_period(
             &Default::default(),
@@ -2077,7 +2355,10 @@ mod tax_rules_tests {
         // 01 tỷ + 1 đồng → vượt ngưỡng: thuộc nhóm 2 và CHỈ 1 đồng đó chịu thuế
         // (điểm a khoản 3 Điều 7: doanh thu tính thuế = phần vượt trên mức khoản 1).
         let rows2 = vec![row("PPHH", THRESHOLD_EXEMPT + 1.0, 0.0, 0.005)];
-        assert_eq!(tax_group(year_revenue(&rows2)), 2);
+        assert_eq!(
+            tax_group_with(year_revenue(&rows2), &TaxThresholds::default()),
+            2
+        );
         let alloc2 = exempt_alloc(&rows2, THRESHOLD_EXEMPT, &TaxableExemptChoice::Auto);
         let taxable2 = taxable_by_period(
             &Default::default(),

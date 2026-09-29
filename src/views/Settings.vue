@@ -17,6 +17,11 @@ const st = reactive({
   import_default: 0,
   product_unit: "Cái",
   product_min_stock: 0,
+  // Ba mốc doanh thu quyết định nhóm hộ (sửa được vì ngưỡng đã nhảy nhiều lần
+  // qua các văn bản: 100 triệu → 500 triệu → 01 tỷ).
+  tax_exempt: 1_000_000_000,
+  tax_group3: 3_000_000_000,
+  tax_group4: 50_000_000_000,
 });
 
 const saving = ref(false);
@@ -71,6 +76,9 @@ async function load() {
     st.import_default = s.product_import_tax_default;
     st.product_unit = s.product_unit;
     st.product_min_stock = s.product_min_stock;
+    st.tax_exempt = s.tax_threshold_exempt;
+    st.tax_group3 = s.tax_threshold_group3;
+    st.tax_group4 = s.tax_threshold_group4;
   } finally {
     loading.value = false;
   }
@@ -89,6 +97,9 @@ async function save() {
       product_import_tax_default: String(Math.max(0, Math.round(st.import_default))),
       product_unit: st.product_unit.trim() || "Cái",
       product_min_stock: String(Math.max(0, st.product_min_stock)),
+      tax_threshold_exempt: String(taxThresholds.value.exempt),
+      tax_threshold_group3: String(taxThresholds.value.group3),
+      tax_threshold_group4: String(taxThresholds.value.group4),
     });
     toast.add({
       severity: "success",
@@ -109,6 +120,54 @@ const previewCode = computed(() => {
     "0",
   );
   return `${st.product_code_prefix.trim() || "SP"}${n}`;
+});
+
+// ─── Ngưỡng doanh thu quyết định nhóm hộ ───
+/** Bắt buộc tăng dần: mốc sau không thấp hơn mốc trước, ngưỡng ≤ 0 thì lấy mặc định. */
+const taxThresholds = computed(() => {
+  const exempt = st.tax_exempt > 0 ? Math.round(st.tax_exempt) : 1_000_000_000;
+  const group3 = Math.max(exempt, st.tax_group3 > 0 ? Math.round(st.tax_group3) : 0);
+  const group4 = Math.max(group3, st.tax_group4 > 0 ? Math.round(st.tax_group4) : 0);
+  return { exempt, group3, group4 };
+});
+/** Mốc phải tăng dần — báo ngay khi người dùng nhập lộn để không lưu nhầm. */
+const taxThresholdWarning = computed(() => {
+  if (st.tax_exempt <= 0) return "Ngưỡng phải lớn hơn 0.";
+  if (st.tax_group3 < st.tax_exempt)
+    return "Mốc Nhóm 3 phải ≥ ngưỡng miễn thuế — sẽ lưu bằng ngưỡng miễn thuế.";
+  if (st.tax_group4 < st.tax_group3)
+    return "Mốc Nhóm 4 phải ≥ mốc Nhóm 3 — sẽ lưu bằng mốc Nhóm 3.";
+  return "";
+});
+/** Chọn nhanh ngưỡng theo các mốc từng có hiệu lực để dò kịch bản. */
+function setTaxExempt(value: number) {
+  st.tax_exempt = value;
+  if (st.tax_group3 <= value) st.tax_group3 = Math.max(value * 3, 3_000_000_000);
+}
+const formatVnd = (v: number) =>
+  new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(v);
+
+/** Xem thử: mức thuế TNCN theo doanh thu dự kiến cuối năm (tỷ lệ ngành 0,5%). */
+const taxPreview = computed(() => {
+  const { exempt, group3, group4 } = taxThresholds.value;
+  const rates = [
+    { label: "500 triệu", revenue: 500_000_000 },
+    { label: "1 tỷ", revenue: 1_000_000_000 },
+    { label: "1,2 tỷ", revenue: 1_200_000_000 },
+    { label: "1,5 tỷ", revenue: 1_500_000_000 },
+    { label: "3 tỷ", revenue: 3_000_000_000 },
+    { label: "3,5 tỷ", revenue: 3_500_000_000 },
+  ];
+  return rates.map((r) => {
+    const taxable = Math.max(0, r.revenue - exempt);
+    return {
+      ...r,
+      group: r.revenue <= exempt ? 1 : r.revenue <= group3 ? 2 : r.revenue <= group4 ? 3 : 4,
+      taxable,
+      vat: Math.round(r.revenue * 0.01),
+      pit: Math.round(taxable * 0.005),
+    };
+  });
 });
 
 // ─── Web server (dùng app qua trình duyệt) — production mặc định TẮT ───
@@ -305,6 +364,110 @@ useKeepAliveRefresh(reload);
             </div>
           </section>
         </div>
+      </template>
+    </Card>
+
+    <!-- Ngưỡng doanh thu: quyết định nhóm hộ + khoản miễn thuế, nên cho sửa
+         ở đây thay vì gắn cứng trong app (ngưỡng đã nhảy 100tr → 500tr → 1 tỷ). -->
+    <Card>
+      <template #content>
+        <section>
+          <h4 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <i class="pi pi-percentage" /> Ngưỡng doanh thu quyết định nhóm hộ
+          </h4>
+          <p class="text-sm text-gray-600 mb-4">
+            Mặc định theo NĐ 141/2026/NĐ-CP (hiệu lực 01/01/2026): doanh thu năm từ
+            <b>01 tỷ</b> trở lên phải nộp thuế. Sửa ở đây khi luật đổi mốc, hoặc để dò xem thử kịch
+            bản doanh thu cuối năm. Nhóm trong hồ sơ HKD vẫn được tính cho mọi kỳ; vượt mốc giữa năm
+            thì năm đó giữ nguyên nhóm, năm sau mới chuyển.
+          </p>
+          <div class="grid gap-4 md:grid-cols-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">
+                Ngưỡng không phải nộp thuế (đồng)
+              </label>
+              <InputNumber
+                v-model="st.tax_exempt"
+                :min="0"
+                :step="50_000_000"
+                :use-grouping="true"
+                class="w-full"
+                data-testid="tax-threshold-exempt"
+              />
+              <div class="mt-2 flex flex-wrap gap-2">
+                <Button label="500 triệu" size="small" text @click="setTaxExempt(500_000_000)" />
+                <Button label="1 tỷ" size="small" text @click="setTaxExempt(1_000_000_000)" />
+                <Button label="1,5 tỷ" size="small" text @click="setTaxExempt(1_500_000_000)" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">
+                Mốc Nhóm 3 — thuế suất TNCN 17% (đồng)
+              </label>
+              <InputNumber
+                v-model="st.tax_group3"
+                :min="0"
+                :step="1_000_000_000"
+                :use-grouping="true"
+                class="w-full"
+                data-testid="tax-threshold-group3"
+              />
+              <p class="mt-2 text-xs text-gray-500">
+                Doanh thu năm vượt ngưỡng và tới mốc này: Nhóm 2 (15%).
+              </p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">
+                Mốc Nhóm 4 — thuế suất TNCN 20% (đồng)
+              </label>
+              <InputNumber
+                v-model="st.tax_group4"
+                :min="0"
+                :step="10_000_000_000"
+                :use-grouping="true"
+                class="w-full"
+                data-testid="tax-threshold-group4"
+              />
+              <p class="mt-2 text-xs text-gray-500">
+                Vượt mốc Nhóm 3: Nhóm 3 (17%); vượt mốc này: Nhóm 4 (20%).
+              </p>
+            </div>
+          </div>
+          <p v-if="taxThresholdWarning" class="mt-3 text-sm text-amber-600">
+            {{ taxThresholdWarning }}
+          </p>
+
+          <!-- Xem thử: bảng thuế theo doanh thu dự kiến cuối năm, giả sử tỷ lệ
+               ngành 1% GTGT + 0,5% TNCN (đổi ở Cài đặt mặc định sản phẩm). -->
+          <div class="mt-5">
+            <h5 class="font-medium text-gray-700 mb-2">Xem thử theo doanh thu cuối năm</h5>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm" data-testid="tax-threshold-preview">
+                <thead>
+                  <tr class="border-b border-gray-200 text-left">
+                    <th class="py-2 pr-3">Doanh thu năm</th>
+                    <th class="py-2 pr-3">Nhóm</th>
+                    <th class="py-2 pr-3">DT tính thuế TNCN</th>
+                    <th class="py-2 pr-3">Thuế GTGT</th>
+                    <th class="py-2">Thuế TNCN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in taxPreview" :key="r.label" class="border-b border-gray-100">
+                    <td class="py-1.5 pr-3">{{ r.label }}</td>
+                    <td class="py-1.5 pr-3">Nhóm {{ r.group }}</td>
+                    <td class="py-1.5 pr-3">{{ formatVnd(r.taxable) }} đ</td>
+                    <td class="py-1.5 pr-3">{{ formatVnd(r.vat) }} đ</td>
+                    <td class="py-1.5">{{ formatVnd(r.pit) }} đ</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">
+              Bảng chỉ để dò kịch bản; thuế thật lấy từ số liệu từng kỳ ở màn Kế toán → Thuế.
+            </p>
+          </div>
+        </section>
       </template>
     </Card>
 

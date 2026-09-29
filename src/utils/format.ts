@@ -12,6 +12,27 @@ export const fmtDec = (n: number | null | undefined): string => NF_DEC.format(n 
 /** Tiền VND kèm ký hiệu (vd `1.234.567 đ`). */
 export const fmtVnd = (n: number | null | undefined): string => `${NF_INT.format(n ?? 0)} đ`;
 
+/**
+ * Mốc tiền rút gọn cho nhãn: `1.000.000.000` → `1 tỷ`, `500.000.000` → `500 triệu`.
+ *
+ * Ngưỡng thuế giờ sửa được ở Cài đặt nên nhãn phải đọc theo giá trị đang áp dụng,
+ * nhưng viết "1.000.000.000 đ" trong nhãn nhóm hộ thì khó đọc hơn "1 tỷ".
+ */
+export const fmtThreshold = (n: number | null | undefined): string => {
+  const v = n ?? 0;
+  if (v >= 1_000_000_000) {
+    const t = v / 1_000_000_000;
+    const txt = Number.isInteger(t) ? String(t) : NF_DEC.format(t);
+    return `${txt} tỷ`;
+  }
+  if (v >= 1_000_000) {
+    const tr = v / 1_000_000;
+    const txt = Number.isInteger(tr) ? String(tr) : NF_DEC.format(tr);
+    return `${txt} triệu`;
+  }
+  return NF_INT.format(v);
+};
+
 /** Tỷ lệ phần trăm (vd `1%` hoặc `1,5%`). */
 export const fmtPct = (n: number | null | undefined): string =>
   `${((n ?? 0) * 100).toFixed(1).replace(/\.0$/, "")}%`;
