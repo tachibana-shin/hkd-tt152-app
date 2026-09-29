@@ -18,16 +18,16 @@ export function useInheritedRange(fallback = "/accounting") {
   const one = (v: unknown): Date | null => (typeof v === "string" ? parseIsoDate(v) : null);
   const from = one(route.query.from);
   const to = one(route.query.to);
+  // Chỉ nhận đường dẫn nội bộ bắt đầu bằng "/" và không phải "//" (URL ngoài).
+  const back = typeof route.query.back === "string" ? route.query.back : "";
+  const safeBack = /^\/(?!\/)/.test(back) ? back : "";
 
   return {
     /** Khoảng ngày màn trước truyền sang (null nếu không có hoặc sai định dạng). */
     inheritedFrom: from,
     inheritedTo: to && (!from || to >= from) ? to : null,
-    /** Đường dẫn quay lại màn trước, rỗng nếu vào thẳng từ thanh công cụ. */
-    backTo: typeof route.query.back === "string" ? route.query.back : "",
     /** Nút "Quay lại": về đúng màn trước, không có thì về màn dự phòng. */
-    goBack: () =>
-      router.push((typeof route.query.back === "string" && route.query.back) || fallback),
+    goBack: () => router.push(safeBack || fallback),
     /** Tên hiển thị trên nút quay lại (lấy từ `backLabel` do màn trước truyền). */
     backLabel:
       typeof route.query.backLabel === "string" && route.query.backLabel.trim()
