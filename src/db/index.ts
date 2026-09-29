@@ -53,7 +53,6 @@ import type {
   Warehouse,
   Supplier,
   Customer,
-  TaxSummaryRow,
   RevenueExpenseRow,
   TrialBalanceRow,
   InventoryRow,
@@ -70,8 +69,10 @@ import type {
   ImportResult,
   AttendanceRow,
   AttendanceWorkDay,
+  TaxBook,
   TaxDeclarationRow,
   TaxOverview,
+  TaxSettlement,
   TaxGroupInfo,
   VoucherRow,
   CurrentUser,
@@ -115,6 +116,7 @@ const SETTING_DEFAULTS: AppSettings = {
   tax_period: "quarter", // Kỳ khai thuế: year | quarter | month | per_occurrence
   tax_method: "revenue", // Phương pháp TNCN: revenue (theo doanh thu) | profit (theo lợi nhuận)
   vat_deduct: false, // Khấu trừ GTGT đầu vào — mặc định TẮT (theo doanh thu)
+  pit_exempt_alloc: "", // Mức trừ ngưỡng theo nhóm ngành — rỗng = chia theo tỷ lệ DT
 };
 
 // Backend lưu mọi thứ dưới dạng chuỗi → chuẩn hóa về kiểu AppSettings.
@@ -156,6 +158,7 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     tax_period: raw.tax_period || SETTING_DEFAULTS.tax_period,
     tax_method: raw.tax_method || SETTING_DEFAULTS.tax_method,
     vat_deduct: raw.vat_deduct === "1",
+    pit_exempt_alloc: raw.pit_exempt_alloc ?? SETTING_DEFAULTS.pit_exempt_alloc,
   };
 }
 
@@ -465,6 +468,11 @@ export const api = {
     pit_rate: number;
     unit_code: string;
     note: string;
+    /** Chứng từ thanh toán không dùng tiền mặt (tài khoản / mã giao dịch). */
+    bank_code?: string;
+    /** false = khoản chi không được trừ khi tính thu nhập tính thuế (Điều 6 khoản 2). */
+    deductible?: boolean;
+    non_deductible_reason?: string;
   }) =>
     call<string>("save_cash_entry", {
       input: {
@@ -482,6 +490,9 @@ export const api = {
         pitRate: input.pit_rate,
         unitCode: input.unit_code,
         note: input.note,
+        bankCode: input.bank_code ?? "",
+        deductible: input.deductible ?? true,
+        nonDeductibleReason: input.non_deductible_reason ?? "",
       },
     }),
 
@@ -567,8 +578,15 @@ export const api = {
     }),
 
   // ─── REPORTS ───
+  /**
+   * Tờ khai thuế theo nhóm ngành trong khoảng ngày đang chọn.
+   * Dùng chung quy tắc với `getTaxDeclaration` (đã xét nhóm hộ + phương pháp
+   * TNCN + mức trừ ngưỡng 01 tỷ) nên hai thẻ trên màn Kế toán không mâu thuẫn nhau.
+   */
   getTaxSummary: async (fromDate: string, toDate: string, unitCode: string) =>
-    parse<TaxSummaryRow[]>(await call<string>("get_tax_summary", { fromDate, toDate, unitCode })),
+    parse<TaxDeclarationRow[]>(
+      await call<string>("get_tax_summary", { fromDate, toDate, unitCode }),
+    ),
   getRevenueExpense: async (fromDate: string, toDate: string) =>
     parse<RevenueExpenseRow>(await call<string>("get_revenue_expense", { fromDate, toDate })),
   getTrialBalance: async (fromDate: string, toDate: string) =>
@@ -876,6 +894,17 @@ export const api = {
   /** Nhóm hộ hiện hành + doanh thu cả năm dùng xếp nhóm (hộp cấu hình HKD tự điền). */
   getTaxGroup: async (year: number) =>
     parse<TaxGroupInfo>(await call<string>("get_tax_group", { year })),
+
+  /**
+   * Tạm nộp TNCN theo kỳ + quyết toán cả năm (Điều 10 khoản 2 NĐ 68/2026).
+   * Hộ nộp theo tỷ lệ % doanh thu thì khai theo kỳ, không có quyết toán năm riêng.
+   */
+  getTaxSettlement: async (year: number) =>
+    parse<TaxSettlement>(await call<string>("get_tax_settlement", { year })),
+
+  /** Nội dung 1 mẫu sổ kế toán theo TT 152/2025/TT-BTC (S1a | S2a | S2b | S2c | S2d | S2e). */
+  getTaxBooks: async (year: number, period: string, periodNo: number, book: string) =>
+    parse<TaxBook>(await call<string>("get_tax_books", { year, period, periodNo, book })),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───
   getVoucher: async (voucherNo: string) =>

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT key as \"key!\", value FROM app_setting WHERE key IN ('tax_period', 'tax_method')",
+  "query": "SELECT key as \"key!\", value FROM app_setting\n            WHERE key IN ('tax_period', 'tax_method', 'pit_exempt_alloc')",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "cf167368508ed44d9c8a67c8b3cbf650185e1a3e857c62ecfba292f661d14541"
+  "hash": "2843cb046ae9b501ff7fde291a0feed729cddcf2b6784583a276fbd3a7ee08d5"
 }

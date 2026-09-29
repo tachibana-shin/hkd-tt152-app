@@ -106,6 +106,34 @@ Màn Sản phẩm đã dùng kiểu này từ trước và giờ dùng chung cù
 
 ---
 
+## 🧾 Tờ khai thuế hộ kinh doanh (đúng quy định 2026)
+
+Màn **Kế toán HKD** tính thuế theo đúng các văn bản đang có hiệu lực:
+
+| Nội dung                                                                         | Căn cứ                                                                            | Cách app xử lý                                                                                             |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Ngưỡng không phải nộp thuế **01 tỷ đồng/năm**                                    | NĐ 141/2026/NĐ-CP sửa NĐ 68/2026/NĐ-CP (500 triệu → 01 tỷ, áp dụng từ 01/01/2026) | Nhóm 1: miễn cả GTGT lẫn TNCN, chỉ thông báo doanh thu, hạn **31/01** năm sau                              |
+| Nhóm hộ & thuế suất TNCN 15% / 17% / 20%                                         | Luật Thuế TNCN 109/2025/QH15 — Điều 7 khoản 2                                     | Xếp theo doanh thu cả năm: ≤1 tỷ · ≤3 tỷ · ≤50 tỷ · >50 tỷ                                                 |
+| Tỷ lệ TNCN theo nhóm ngành 0,5% / 1,5% / 2%                                      | Luật TNCN 109/2025 — Điều 7 khoản 3                                               | Gắn theo nhóm ngành của từng dòng bán ra                                                                   |
+| Tỷ lệ GTGT 1% / 3% / 5% (+2% cho "hoạt động khác")                               | Luật Thuế GTGT 48/2024/QH15 — Điều 12 khoản 2                                     | Hóa đơn HKD không tách thuế nên tổng tiền hóa đơn = cơ sở tính thuế                                        |
+| **Trừ mức ngưỡng 01 tỷ** khi tính TNCN theo doanh thu                            | Luật TNCN Điều 7 khoản 3 điểm a                                                   | Doanh thu tính thuế = phần doanh thu **vượt trên** 01 tỷ, trừ lũy kế theo kỳ                               |
+| Hộ chọn phân bổ mức trừ giữa các nhóm ngành                                      | NĐ 68/2026 Điều 4 khoản 3                                                         | Ô nhập trong hộp _Cấu hình thuế_; bỏ trống = chia theo tỷ lệ doanh thu                                     |
+| Khi vượt ngưỡng giữa năm thì tính từ kỳ phát sinh                                | NĐ 68/2026 Điều 8 khoản 1a                                                        | Mức trừ dùng dần theo doanh thu lũy kế → kỳ trước ngưỡng bằng 0                                            |
+| Chi phí được trừ: hàng hóa (giá vốn), dịch vụ, tiền lương…                       | NĐ 68/2026 Điều 6 khoản 1                                                         | **Giá vốn FIFO tính từ phiếu nhập** + khoản chi được trừ của phiếu chi                                     |
+| Khoản chi ≥ 5 triệu trả tiền mặt không có chứng tờ chuyển khoản → không được trừ | NĐ 68/2026 Điều 6 khoản 1                                                         | Tự loại khỏi chi phí và liệt kê cảnh báo kèm lý do                                                         |
+| Lương chủ hộ, chi cá nhân – gia đình, chi thiếu chứng từ → không được trừ        | NĐ 68/2026 Điều 6 khoản 2                                                         | Ô "Không được trừ" + chọn lý do ngay trên phiếu chi                                                        |
+| Kỳ khai: quý (DT ≤ 50 tỷ) / tháng (DT > 50 tỷ)                                   | NĐ 68/2026 Điều 10 khoản 1                                                        | Gợi ý theo nhóm hộ, hạn nộp hiển thị ngay trên tờ khai                                                     |
+| Tạm nộp theo kỳ + quyết toán cả năm (hạn 31/03)                                  | NĐ 68/2026 Điều 10 khoản 2b, khoản 3c                                             | Thẻ _Tạm nộp & quyết toán_: bảng từng kỳ + số phải nộp khi quyết toán, chênh lệch nộp bổ sung / nộp thừa   |
+| Sổ kế toán theo mẫu bắt buộc S1a / S2a / S2b / S2c / S2d / S2e-HKD               | TT 152/2025/TT-BTC (thay TT 88/2021)                                              | Mục _Sổ kế toán_, ghi **theo từng chứng từ** (A số hiệu, B ngày tháng, C diễn giải, D số tiền), xuất Excel |
+
+Mẫu sổ nào dùng cho hộ còn tùy phương pháp tính thuế: hộ nhóm 1 dùng **S1a**; hộ nộp thuế theo tỷ lệ
+% doanh thu dùng **S2a**; hộ nộp TNCN theo thu nhập tính thuế dùng **S2b–S2e**.
+
+Hộ có doanh thu năm **trên 01 tỷ** còn bắt buộc dùng **hóa đơn điện tử có mã của cơ quan
+thuế** (NĐ 141/2026 sửa khoản 5 Điều 8 NĐ 68/2026).
+
+---
+
 ## 🏗️ Kiến trúc & công nghệ
 
 ```

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.industry_code AS \"industry_code!\", je.adjust_code AS \"adjust_code!\",\n                  je.amount\n             FROM journal_entry je\n            WHERE je.entry_type = 'PX'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n              AND je.industry_code <> ''",
+  "describe": {
+    "columns": [
+      {
+        "name": "industry_code!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "adjust_code!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d44474a835284d0540f4c13f28488f1b60ce458d32ff7d137fbee8100ddab52f"
+}

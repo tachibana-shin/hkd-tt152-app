@@ -661,6 +661,19 @@ pub async fn api_invoke(
             period: String,
             period_no: i64
         ),
+        "get_tax_settlement" => mx!(
+            commands::accounting::get_tax_settlement,
+            body,
+            year: i64
+        ),
+        "get_tax_books" => mx!(
+            commands::accounting::get_tax_books,
+            body,
+            year: i64,
+            period: String,
+            period_no: i64,
+            book: String
+        ),
         "get_tax_group" => mx!(commands::accounting::get_tax_group, body, year: i64),
         "get_revenue_expense" => mx!(
             commands::accounting::get_revenue_expense,

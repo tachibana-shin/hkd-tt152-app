@@ -2179,3 +2179,168 @@ test("Phân trang server-side: bảng dài chỉ lấy đúng trang, sắp xếp
     )
     .toBe(true);
 });
+
+/**
+ * Tờ khai thuế HKD — kiểm chứng các quy tắc NĐ 68/2026 (sửa 09/2026):
+ *   1. Hộ nhóm 1 (DT ≤ 1 tỷ) KHÔNG phải nộp thuế: hai thẻ "Tờ khai thuế" và
+ *      "Tổng hợp thuế" phải cùng bằng 0 (trước đây thẻ tờ khai hiện thuế).
+ *   2. Giá vốn FIFO từ phiếu nhập được trừ khi tính thu nhập tính thuế.
+ *   3. Chi từ 5 triệu trả tiền mặt không có chứng từ chuyển khoản bị loại.
+ *   4. Có hạn nộp + sổ kế toán TT 152/2025 + bảng tạm nộp/quyết toán.
+ */
+test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thiếu chứng từ, hạn nộp, sổ TT 152", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Nhập 10 giá × 1.000.000 = 10.000.000 (giá vốn của lô nhập)
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-01",
+      voucher_no: "PN-TAX01",
+      description: "Nhập hàng kiểm tra tờ khai thuế",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 10, unit_price: 1_000_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound: ${await stockIn.text()}`).toBe(true);
+
+  // Bán 4 giá × 3.000.000 = 12.000.000 doanh thu, giá vốn FIFO = 4.000.000
+  const out = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-02",
+      voucher_no: "PX-TAX01",
+      description: "Bán hàng kiểm tra tờ khai thuế",
+      customer_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      outbound_type: "sale",
+      adjust_dir: "up",
+      receive_now: false,
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 4,
+          unit_price: 3_000_000,
+          discount: 0,
+          industry_code: "PPHH",
+        },
+      ],
+      note: "",
+    },
+  });
+  expect(out.ok(), `save_outbound: ${await out.text()}`).toBe(true);
+
+  // Phiếu chi 7.000.000 trả tiền mặt, KHÔNG có chứng từ chuyển khoản →
+  // không được trừ (Điều 6 khoản 1).
+  const cash = await request.post("/api/save_cash_entry", {
+    data: {
+      input: {
+        entryType: "PC",
+        postingDate: "2026-09-03",
+        voucherNo: "PC-TAX01",
+        description: "Chi tiền mặt 7 triệu không chứng từ chuyển khoản",
+        customerCode: "",
+        supplierCode: "",
+        amount: 7_000_000,
+        debitAccount: "642",
+        creditAccount: "111",
+        industryCode: "",
+        vatRate: 0,
+        pitRate: 0,
+        unitCode: "HKD",
+        note: "",
+        bankCode: "",
+        deductible: true,
+        nonDeductibleReason: "",
+      },
+    },
+  });
+  expect(cash.ok(), `save_cash_entry: ${await cash.text()}`).toBe(true);
+
+  await sidebarButton(page, "Kế toán HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await page.waitForTimeout(1200);
+
+  // ── 1. Nhóm 1 (DT cả năm < 1 tỷ): cả hai thẻ tờ khai đều phải bằng 0.
+  //      Kiểm tra đúng số tiền của từng thẻ, không so chuỗi số tiền chung vì các
+  //      test trước đó đã để lại dữ liệu trong cùng cơ sở dữ liệu E2E.
+  const summaryText = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(summaryText, "phải có thẻ tờ khai theo nhóm ngành nghề").toContain(
+    "Tờ khai thuế theo nhóm ngành nghề",
+  );
+  expect(summaryText, "hộ nhóm 1: tổng thuế GTGT phải bằng 0").toContain("Tổng thuế GTGT: 0 đ");
+  expect(summaryText, "hộ nhóm 1: tổng thuế TNCN phải bằng 0").toContain("Tổng thuế TNCN: 0 đ");
+  expect(summaryText, "phải xếp đúng nhóm 1").toContain("Nhóm 1 — doanh thu ≤ 1 tỷ: miễn thuế");
+  expect(summaryText, "kỳ nhóm 1 phải hiện hạn nộp tờ khai").toContain("Hạn nộp tờ khai");
+
+  // ── 2. Chuyển sang phương pháp theo lợi nhuận: thấy giá vốn FIFO và chi bị loại
+  await page.getByRole("button", { name: "Cấu hình thuế" }).click();
+  await expect(page.getByText("Cấu hình kê khai thuế").first()).toBeVisible();
+  await page.getByTestId("tax-method").click();
+  await page
+    .getByRole("option", { name: /Theo lợi nhuận/ })
+    .or(page.locator(".p-select-option", { hasText: "Theo lợi nhuận" }))
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(page.getByText("Đã lưu cấu hình thuế").first()).toBeVisible();
+  await page.waitForTimeout(1200);
+
+  const after = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  // Giá vốn tính FIFO từ phiếu nhập (trước đây chi phí chỉ lấy phiếu chi nên
+  // thiếu hẳn giá vốn → thu nhập tính thuế bị thổi phình).
+  expect(after, "phải tính giá vốn FIFO từ phiếu nhập").toContain("Giá vốn FIFO");
+  // Khoản chi 7 triệu trả tiền mặt không chứng từ chuyển khoản bị loại.
+  expect(after, "phải cảnh báo khoản chi không được trừ").toContain("PC-TAX01");
+  expect(after, "phải nêu lý do loại chi").toContain(
+    "không có chứng từ thanh toán không dùng tiền mặt",
+  );
+
+  // ── 3. Sổ kế toán TT 152/2025: mặc định S2a ghi DOANH THU THEO TỪNG CHỨNG TỪ
+  //      (cột A số hiệu, B ngày tháng, C diễn giải, D số tiền) như mẫu sổ.
+  const s2a = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(s2a, "sổ S2a phải ghi từng dòng chứng từ").toContain("PX-TAX01");
+  expect(s2a, "sổ S2a phải ghi theo nhóm ngành").toContain("PPHH");
+  expect(s2a, "sổ của hộ nhóm 1 không ghi thuế").toContain("không phát sinh thuế");
+
+  // Đổi sang S2c: sổ chi tiết doanh thu, chi phí (gốc tính thu nhập tính thuế)
+  await page.getByTestId("tax-book").click();
+  await page.locator(".p-select-option", { hasText: "S2c-HKD" }).first().click();
+  await expect(page.getByText("SỔ CHI TIẾT DOANH THU, CHI PHÍ").first()).toBeVisible();
+  await page.waitForTimeout(600);
+  const bookText = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(bookText, "sổ S2c phải ghi dòng doanh thu theo nhóm ngành").toContain(
+    "Doanh thu bán hàng hóa, dịch vụ",
+  );
+
+  // ── 4. Bảng tạm nộp theo kỳ + quyết toán cả năm
+  expect(bookText, "phải có bảng tạm nộp theo kỳ").toContain("Tổng TNCN tạm nộp");
+  expect(bookText, "phải có số phải nộp khi quyết toán").toContain("Số phải nộp khi quyết toán");
+  expect(bookText, "phải nhắc hạn quyết toán 31/03 năm sau").toContain("31/03/2027");
+  expect(bookText, "bảng tạm nộp phải có hạn nộp từng kỳ").toContain("31/10/2026");
+
+  // ── 5. Trả lại cấu hình gốc (theo doanh thu) để không ảnh hưởng test sau
+  await page.getByRole("button", { name: "Cấu hình thuế" }).click();
+  await page.getByTestId("tax-method").click();
+  await page
+    .getByRole("option", { name: /Theo doanh thu × tỷ lệ ngành/ })
+    .or(page.locator(".p-select-option", { hasText: "Theo doanh thu" }))
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(page.getByText("Đã lưu cấu hình thuế").first()).toBeVisible();
+});

@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.posting_date AS \"posting_date!\", je.voucher_no AS \"voucher_no!\",\n                  je.description AS \"description!\", je.amount, je.bank_code AS \"bank_code!\",\n                  je.deductible,\n                  je.non_deductible_reason AS \"non_deductible_reason!\"\n             FROM journal_entry je\n            WHERE je.entry_type = 'PC'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n              AND COALESCE(je.adjust_code, '') != 'GiamCP'\n            ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "posting_date!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "bank_code!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "deductible",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "non_deductible_reason!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "71cf6ab947ab018e2687881c6b15c62959381cefc26dd1a416983a3ac72af160"
+}

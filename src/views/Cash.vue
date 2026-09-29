@@ -38,6 +38,22 @@ const tagSeverity: Record<string, "success" | "warn"> = {
   PC: "warn",
 };
 
+/** Lý do không được trừ theo Điều 6 khoản 2 NĐ 68/2026. */
+const nonDeductibleReasons = [
+  {
+    label: "Lương, thưởng của chủ hộ / thành viên hộ (trừ phần BHXH)",
+    value: "Lương chủ hộ/thành viên hộ",
+  },
+  { label: "Chi phí phục vụ nhu cầu cá nhân, gia đình", value: "Chi cá nhân, gia đình" },
+  { label: "Chi không có đủ hóa đơn, chứng từ", value: "Thiếu chứng từ" },
+  { label: "Tiền phạt vi phạm hành chính, bồi thường", value: "Phạt, bồi thường" },
+  {
+    label: "Tài sản phục vụ cá nhân (đất ở, ô tô, tài sản mang tên cá nhân)",
+    value: "Tài sản cá nhân",
+  },
+  { label: "Lý do khác", value: "Khác" },
+];
+
 const form = reactive({
   entry_type: "PT" as "PT" | "PC",
   posting_date: new Date(),
@@ -48,6 +64,11 @@ const form = reactive({
   amount: 0,
   debit_account: "111",
   credit_account: "511",
+  /** Chứng từ thanh toán không dùng tiền mặt — bắt buộc cho chi ≥ 5 triệu (Điều 6 khoản 1). */
+  bank_code: "",
+  /** Khoản chi không được trừ khi tính thu nhập tính thuế (Điều 6 khoản 2). */
+  deductible: true,
+  non_deductible_reason: "",
   note: "",
 });
 
@@ -76,6 +97,9 @@ function resetForm(type: "PT" | "PC") {
     amount: 0,
     debit_account: type === "PT" ? "111" : "642",
     credit_account: type === "PT" ? "511" : "111",
+    bank_code: "",
+    deductible: true,
+    non_deductible_reason: "",
     note: "",
   });
 }
@@ -175,6 +199,9 @@ async function save() {
       pit_rate: 0,
       unit_code: "HKD",
       note: form.note.trim(),
+      bank_code: form.entry_type === "PC" ? form.bank_code.trim() : "",
+      deductible: form.entry_type === "PC" ? form.deductible : true,
+      non_deductible_reason: form.entry_type === "PC" ? form.non_deductible_reason : "",
     });
     toast.add({
       severity: "success",
@@ -361,6 +388,43 @@ useKeepAliveRefresh(reload);
             option-value="code"
             filter
             class="w-full"
+          />
+        </FormField>
+        <FormField v-if="form.entry_type === 'PC'" label="Chứng từ chuyển khoản" class="col-span-3">
+          <InputText
+            v-model="form.bank_code"
+            placeholder="Số tài khoản / mã giao dịch (bỏ trống nếu trả tiền mặt)"
+          />
+          <p class="mt-1 text-xs text-amber-700">
+            Khoản chi từ 5.000.000 đồng trở lên mà không có chứng từ thanh toán không dùng tiền mặt
+            thì <b>không được trừ</b> khi tính thu nhập tính thuế (Điều 6 khoản 1 NĐ 68/2026).
+          </p>
+        </FormField>
+        <FormField
+          v-if="form.entry_type === 'PC'"
+          label="Không được trừ khi tính thuế"
+          class="col-span-3"
+        >
+          <div class="flex items-start gap-2">
+            <Checkbox v-model="form.deductible" binary input-id="cash-deductible" />
+            <div>
+              <label for="cash-deductible" class="text-sm">
+                Khoản chi này <b>được trừ</b> khi tính thu nhập tính thuế
+              </label>
+              <p class="text-xs text-gray-500">
+                Bỏ chọn khi chi lương chủ hộ, chi cá nhân - gia đình, chi không có chứng từ (Điều 6
+                khoản 2).
+              </p>
+            </div>
+          </div>
+          <Select
+            v-if="!form.deductible"
+            v-model="form.non_deductible_reason"
+            :options="nonDeductibleReasons"
+            option-label="label"
+            option-value="value"
+            placeholder="Chọn lý do"
+            class="mt-2 w-full"
           />
         </FormField>
         <FormField label="Ghi chú" class="col-span-3">

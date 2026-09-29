@@ -4,11 +4,12 @@ import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import { exportXlsx, type XlsxColumn } from "@/utils/excel";
 import type {
-  TaxSummaryRow,
   RevenueExpenseRow,
   TrialBalanceRow,
+  TaxBook,
   TaxDeclarationRow,
   TaxOverview,
+  TaxSettlement,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtVnd, toIsoDate } from "@/utils/format";
@@ -22,7 +23,7 @@ const toast = useToast();
 const router = useRouter();
 
 const loading = ref(false);
-const taxRows = ref<TaxSummaryRow[]>([]);
+const taxRows = ref<TaxDeclarationRow[]>([]);
 const tb = ref<TrialBalanceRow[]>([]);
 const re = ref<RevenueExpenseRow>({
   revenue_up: 0,
@@ -131,10 +132,69 @@ const groupLabel = computed(() => {
       return "Nhóm 4 — doanh thu > 50 tỷ";
   }
 });
+// ─── Sổ kế toán theo mẫu TT 152/2025/TT-BTC + tạm nộp & quyết toán năm ───
+const bookOptions = [
+  { label: "S1a-HKD · Sổ doanh thu (nhóm 1)", value: "S1a" },
+  { label: "S2a-HKD · Sổ doanh thu theo nhóm ngành (nộp theo % doanh thu)", value: "S2a" },
+  { label: "S2b-HKD · Sổ doanh thu (nộp GTGT theo %, TNCN theo thu nhập)", value: "S2b" },
+  { label: "S2c-HKD · Sổ chi tiết doanh thu, chi phí", value: "S2c" },
+  { label: "S2d-HKD · Sổ chi tiết vật liệu, hàng hóa", value: "S2d" },
+  { label: "S2e-HKD · Sổ chi tiết tiền", value: "S2e" },
+];
+const book = ref("S2a");
+const bookData = ref<TaxBook | null>(null);
+const bookLoading = ref(false);
+const settlement = ref<TaxSettlement | null>(null);
+const settleLoading = ref(false);
+
+async function loadBook() {
+  bookLoading.value = true;
+  try {
+    const no = declPeriod.value === "year" ? 0 : declPeriodNo.value;
+    bookData.value = await api.getTaxBooks(declYear.value, declPeriod.value, no, book.value);
+  } catch (e) {
+    bookData.value = null;
+    toast.add({ severity: "error", summary: "Lỗi tải sổ kế toán", detail: String(e) });
+  } finally {
+    bookLoading.value = false;
+  }
+}
+
+async function loadSettlement() {
+  settleLoading.value = true;
+  try {
+    settlement.value = await api.getTaxSettlement(declYear.value);
+  } catch (e) {
+    settlement.value = null;
+    toast.add({ severity: "error", summary: "Lỗi tải số tạm nộp", detail: String(e) });
+  } finally {
+    settleLoading.value = false;
+  }
+}
+
+function exportBookExcel() {
+  const b = bookData.value;
+  if (!b) return;
+  const cols: XlsxColumn[] = [
+    { header: "Nhóm ngành / Mã", key: "group" },
+    { header: "Số hiệu chứng từ", key: "doc_no" },
+    { header: "Ngày tháng", key: "doc_date" },
+    { header: "Diễn giải", key: "desc" },
+    { header: "Số lượng", key: "quantity" },
+    { header: "Số tiền", key: "amount" },
+  ];
+  exportXlsx(
+    `so-ke-toan-${b.book}-${declYear.value}`,
+    cols,
+    b.rows.map((r) => ({ ...r, group: r.group || "—" })),
+  );
+}
+
 const declTotals = computed(() => {
   const t = {
     revenue_up: 0,
     revenue_down: 0,
+    revenue_taxable: 0,
     vat_tax: 0,
     vat_payable: 0,
     pit_tax: 0,
@@ -142,6 +202,7 @@ const declTotals = computed(() => {
   for (const r of declRows.value) {
     t.revenue_up += r.revenue_up;
     t.revenue_down += r.revenue_down;
+    t.revenue_taxable += r.revenue_taxable;
     t.vat_tax += r.vat_tax;
     t.vat_payable += r.vat_payable;
     t.pit_tax += r.pit_tax;
@@ -187,6 +248,8 @@ async function loadDeclaration() {
     ]);
     declRows.value = rows;
     overview.value = ov;
+    // Sổ kế toán và số tạm nộp theo cùng kỳ/ký hiệu nên nạp kèm cho khỏi lệch.
+    await Promise.all([loadBook(), loadSettlement()]);
   } catch (e) {
     toast.add({
       severity: "error",
@@ -206,6 +269,7 @@ function exportDeclarationExcel() {
     { header: "Tỷ lệ TNCN %", key: "pit_percent" },
     { header: "DT tính thuế GTGT – Tăng", key: "revenue_up" },
     { header: "DT tính thuế GTGT – Giảm", key: "revenue_down" },
+    { header: "DT tính thuế TNCN (đã trừ ngưỡng 1 tỷ)", key: "revenue_taxable" },
     { header: "Thuế GTGT", key: "vat_tax" },
     { header: "Thuế GTGT phải nộp", key: "vat_payable" },
     { header: "Thuế TNCN phải nộp", key: "pit_tax" },
@@ -217,6 +281,7 @@ function exportDeclarationExcel() {
     pit_percent: r.pit_rate * 100,
     revenue_up: r.revenue_up,
     revenue_down: r.revenue_down,
+    revenue_taxable: r.revenue_taxable,
     vat_tax: r.vat_tax,
     vat_payable: r.vat_payable,
     pit_tax: r.pit_tax,
@@ -361,8 +426,12 @@ useKeepAliveRefresh(reload);
     </Card>
 
     <!-- Tờ khai thuế theo nhóm ngành -->
-    <SectionCard title="Tờ khai thuế (theo nhóm ngành - TT 152/2025)">
+    <SectionCard title="Tờ khai thuế theo nhóm ngành nghề (TT 152/2025)">
       <template #icon><i-mdi-file-certificate class="text-rose-500" /></template>
+      <p class="mb-3 text-xs text-gray-500">
+        Khoảng ngày đang chọn ở thanh công cụ. Số thuế đã tính theo nhóm hộ và phương pháp TNCN đã
+        cấu hình — nhóm 1 (doanh thu cả năm ≤ 1 tỷ) luôn bằng 0.
+      </p>
       <AppDataTable :value="taxRows" :loading="loading" stripedRows>
         <Column field="industry_code" header="Mã ngành" />
         <Column field="industry_name" header="Nhóm ngành nghề" />
@@ -377,6 +446,9 @@ useKeepAliveRefresh(reload);
         </Column>
         <Column field="revenue_down" header="Giảm trừ DT" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
+        </Column>
+        <Column field="revenue_taxable" header="DT tính thuế TNCN" align="right">
+          <template #body="{ data }">{{ fmtVnd(data.revenue_taxable) }}</template>
         </Column>
         <Column field="vat_tax" header="Thuế GTGT phải nộp" align="right">
           <template #body="{ data }">
@@ -414,11 +486,21 @@ useKeepAliveRefresh(reload);
           <b>{{ fmt(overview.period_revenue) }} đ</b>
         </div>
         <div>
-          <span class="text-gray-500 block text-xs mb-1">Chi phí kỳ</span>
-          <b>{{ fmt(overview.expense) }} đ</b>
+          <span class="text-gray-500 block text-xs mb-1">Doanh thu tính thuế TNCN</span>
+          <b>{{ fmt(overview.taxable_revenue) }} đ</b>
+          <div class="text-xs text-gray-400">
+            Đã trừ mức ngưỡng {{ fmt(overview.exempt_threshold) }} đ/năm
+          </div>
         </div>
         <div>
-          <span class="text-gray-500 block text-xs mb-1">Lợi nhuận kỳ</span>
+          <span class="text-gray-500 block text-xs mb-1">Chi phí kỳ (được trừ)</span>
+          <b>{{ fmt(overview.expense) }} đ</b>
+          <div class="text-xs text-gray-400">
+            Giá vốn FIFO {{ fmt(overview.cogs) }} đ + chi khác {{ fmt(overview.other_expense) }} đ
+          </div>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Thu nhập tính thuế</span>
           <b>{{ fmt(overview.profit) }} đ</b>
         </div>
         <div>
@@ -437,10 +519,39 @@ useKeepAliveRefresh(reload);
           </span>
           <b class="text-rose-600">{{ fmt(overview.pit_tax) }} đ</b>
         </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">Hạn nộp tờ khai</span>
+          <b>{{ overview.deadline || "—" }}</b>
+          <div class="text-xs text-gray-400">
+            {{ overview.group === 1 ? "Thông báo doanh thu năm" : "Cùng hạn kê khai GTGT" }}
+          </div>
+        </div>
+        <div>
+          <span class="text-gray-500 block text-xs mb-1">TNCN tạm nộp kỳ</span>
+          <b>{{ fmt(overview.pit_provisional) }} đ</b>
+          <div class="text-xs text-gray-400">Theo tỷ lệ % × doanh thu kỳ</div>
+        </div>
         <div class="col-span-2 md:col-span-2">
           <span class="text-gray-500 block text-xs mb-1">Tổng thuế phải nộp kỳ</span>
           <b class="text-primary-600 text-lg">{{ fmt(overview.total_tax) }} đ</b>
         </div>
+      </div>
+      <div
+        v-if="overview && overview.non_deductible > 0"
+        class="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-xs"
+      >
+        <b class="text-amber-800">
+          {{ fmt(overview.non_deductible) }} đ chi KHÔNG được trừ khi tính thu nhập tính thuế
+        </b>
+        <ul class="mt-1 list-disc pl-5 text-amber-700">
+          <li v-for="w in overview.cost_warnings" :key="w.voucher_no + w.posting_date">
+            {{ w.voucher_no }} ({{ w.posting_date }}) — {{ fmtVnd(w.amount) }} đ: {{ w.reason }}
+          </li>
+        </ul>
+        <p class="mt-1 text-amber-600">
+          Bổ sung chứng từ thanh toán không dùng tiền mặt, hoặc gỡ dấu "không được trừ" ở màn
+          Thu/Chi nếu thực tế được trừ (Điều 6 Nghị định 68/2026).
+        </p>
       </div>
       <p v-if="overview?.group === 1" class="mt-3 text-xs text-emerald-600">
         Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ cần thông báo
@@ -515,6 +626,12 @@ useKeepAliveRefresh(reload);
           v-if="overview"
           :value="groupLabel"
           :severity="overview.group === 1 ? 'success' : 'warning'"
+        />
+        <Tag
+          v-if="overview?.deadline"
+          :value="`Hạn nộp: ${overview.deadline}`"
+          severity="info"
+          icon="pi pi-calendar-clock"
           class="ml-auto"
         />
       </div>
@@ -538,6 +655,12 @@ useKeepAliveRefresh(reload);
         <Column header="DT tính thuế GTGT – Giảm" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
           <template #footer>{{ declRows.length ? fmtVnd(declTotals.revenue_down) : "" }}</template>
+        </Column>
+        <Column header="DT tính thuế TNCN (đã trừ ngưỡng)" align="right">
+          <template #body="{ data }">{{ fmtVnd(data.revenue_taxable) }}</template>
+          <template #footer>
+            {{ declRows.length ? fmtVnd(declTotals.revenue_taxable) : "" }}
+          </template>
         </Column>
         <Column header="Thuế GTGT" align="right">
           <template #body="{ data }">{{ fmtVnd(data.vat_tax) }}</template>
@@ -719,6 +842,180 @@ useKeepAliveRefresh(reload);
     <BusinessConfigDialog v-model:visible="configDialog" :config="config" @saved="reload" />
 
     <!-- Dialog cấu hình kê khai thuế -->
+    <!-- Tạm nộp & quyết toán thu nhập cá nhân theo năm (Điều 10 khoản 2 NĐ 68/2026) -->
+    <SectionCard>
+      <template #icon><i-mdi-scale-balance class="text-teal-500" /></template>
+      <template #title>
+        <span>Tạm nộp &amp; quyết toán thu nhập cá nhân năm {{ declYear }}</span>
+        <span class="text-xs font-normal text-gray-400">
+          {{
+            settlement?.by_revenue
+              ? "Hộ nộp theo tỷ lệ % doanh thu — khai theo kỳ"
+              : "Tạm nộp theo kỳ, quyết toán cả năm"
+          }}
+        </span>
+      </template>
+      <div v-if="settlement" class="text-sm">
+        <p v-if="settlement.by_revenue" class="mb-3 rounded bg-sky-50 p-2 text-xs text-sky-800">
+          Hộ chọn phương pháp <b>thuế suất × doanh thu tính thuế</b> nên khai thuế TNCN theo quý
+          cùng hạn kê khai GTGT; tổng tạm nộp trong năm là số phải nộp, không có bước quyết toán
+          riêng (Điều 10 khoản 2 điểm a).
+        </p>
+        <p v-else class="mb-3 rounded bg-teal-50 p-2 text-xs text-teal-800">
+          Hộ chọn phương pháp <b>thu nhập tính thuế × thuế suất</b>: trong năm tạm nộp theo tỷ lệ %
+          × doanh thu từng kỳ, kết thúc năm quyết toán (doanh thu − chi phí) ×
+          {{ (settlement.final_rate * 100).toFixed(0) }}% và nộp bổ sung hoặc xử lý nộp thừa; hạn
+          quyết toán <b>{{ settlement.settle_deadline }}</b
+          >.
+        </p>
+        <div class="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+          <div>
+            <span class="text-xs text-gray-500 block">Tổng TNCN tạm nộp</span>
+            <b class="text-teal-700">{{ fmt(settlement.provisional_total) }} đ</b>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 block">Doanh thu cả năm</span>
+            <b>{{ fmt(settlement.year_revenue) }} đ</b>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 block">Chi phí được trừ cả năm</span>
+            <b>{{ fmt(settlement.expense) }} đ</b>
+            <div class="text-xs text-gray-400">
+              Giá vốn FIFO {{ fmt(settlement.cogs) }} đ + chi khác
+              {{ fmt(settlement.other_expense) }} đ
+            </div>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 block">Thu nhập tính thuế</span>
+            <b>{{ fmt(settlement.taxable_income) }} đ</b>
+          </div>
+          <div>
+            <span class="text-xs text-gray-500 block">Số phải nộp khi quyết toán</span>
+            <b class="text-rose-600">{{ fmt(settlement.final_tax) }} đ</b>
+          </div>
+          <div class="col-span-1">
+            <span class="text-xs text-gray-500 block">Chênh lệch so với tạm nộp</span>
+            <b :class="settlement.difference > 0 ? 'text-rose-600' : 'text-emerald-600'">
+              {{
+                settlement.difference > 0
+                  ? "Nộp bổ sung "
+                  : settlement.difference < 0
+                    ? "Nộp thừa "
+                    : ""
+              }}{{ fmt(Math.abs(settlement.difference)) }} đ
+            </b>
+          </div>
+        </div>
+        <AppDataTable :value="settlement.periods" :loading="settleLoading" stripedRows>
+          <Column field="label" header="Kỳ" />
+          <Column header="Doanh thu" align="right">
+            <template #body="{ data }">{{ fmtVnd(data.revenue) }}</template>
+          </Column>
+          <Column header="Doanh thu tính thuế" align="right">
+            <template #body="{ data }">{{ fmtVnd(data.taxable_revenue) }}</template>
+          </Column>
+          <Column header="TNCN tạm nộp" align="right">
+            <template #body="{ data }"
+              ><b>{{ fmtVnd(data.pit_provisional) }} đ</b></template
+            >
+            <template #footer>{{ fmtVnd(settlement.provisional_total) }} đ</template>
+          </Column>
+          <Column header="Hạn nộp" align="center">
+            <template #body="{ data }">{{ data.deadline || "—" }}</template>
+          </Column>
+          <template #empty
+            ><EmptyState text="Chưa có kỳ khai nào trong năm." icon="pi pi-calendar"
+          /></template>
+        </AppDataTable>
+      </div>
+    </SectionCard>
+
+    <!-- Sổ kế toán theo mẫu TT 152/2025/TT-BTC -->
+    <SectionCard>
+      <template #icon><i-mdi-book-open-variant class="text-cyan-600" /></template>
+      <template #title>
+        <span>Sổ kế toán (mẫu TT 152/2025/TT-BTC)</span>
+        <span v-if="bookData" class="text-xs font-normal text-gray-400">
+          {{ bookData.period_label }}
+        </span>
+      </template>
+      <template #actions>
+        <Button
+          label="Xuất Excel"
+          icon="pi pi-file-excel"
+          size="small"
+          outlined
+          :disabled="!bookData?.rows.length"
+          @click="exportBookExcel"
+        />
+      </template>
+      <div class="mb-3 flex flex-wrap items-center gap-3">
+        <div class="min-w-96">
+          <label class="text-xs text-gray-500 block mb-1">Mẫu sổ</label>
+          <div data-testid="tax-book" class="w-full">
+            <Select
+              v-model="book"
+              :options="bookOptions"
+              option-label="label"
+              option-value="value"
+              class="w-full"
+              aria-label="Mẫu sổ"
+              @change="loadBook"
+            />
+          </div>
+        </div>
+        <Button
+          label="Xem sổ"
+          icon="pi pi-search"
+          size="small"
+          :loading="bookLoading"
+          class="mt-4"
+          @click="loadBook"
+        />
+      </div>
+      <template v-if="bookData">
+        <h4 class="mb-1 text-center text-sm font-semibold uppercase">{{ bookData.title }}</h4>
+        <p class="mb-2 text-center text-xs text-gray-500">
+          Hộ, cá nhân kinh doanh: ……………… Địa chỉ: ……………… Mã số thuế: ……………… · Kỳ
+          {{ bookData.period_label }}
+        </p>
+        <AppDataTable :value="bookData.rows" :loading="bookLoading" stripedRows>
+          <Column header="A · Số hiệu" style="width: 7rem">
+            <template #body="{ data }">{{ data.doc_no }}</template>
+          </Column>
+          <Column header="B · Ngày tháng" style="width: 7rem">
+            <template #body="{ data }">{{ data.doc_date }}</template>
+          </Column>
+          <Column field="group" header="Nhóm ngành" style="width: 8rem" />
+          <Column field="desc" header="C · Diễn giải" />
+          <Column header="SL" align="right" style="width: 5rem">
+            <template #body="{ data }">{{ data.quantity ? fmt(data.quantity) : "" }}</template>
+          </Column>
+          <Column header="D · Số tiền" align="right" style="width: 9rem">
+            <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
+            <template #footer>
+              <b>{{ fmtVnd(bookData.total_revenue) }} đ</b>
+            </template>
+          </Column>
+          <template #empty
+            ><EmptyState text="Kỳ này chưa có phát sinh nào để ghi sổ." icon="pi pi-book"
+          /></template>
+        </AppDataTable>
+        <p class="mt-2 text-xs text-gray-500">{{ bookData.notes }}</p>
+        <div
+          v-if="bookData.total_vat || bookData.total_pit"
+          class="mt-2 flex flex-wrap gap-6 text-sm"
+        >
+          <span class="text-gray-500"
+            >Tổng thuế GTGT: <b class="text-rose-600">{{ fmtVnd(bookData.total_vat) }} đ</b></span
+          >
+          <span class="text-gray-500"
+            >Tổng thuế TNCN: <b class="text-rose-600">{{ fmtVnd(bookData.total_pit) }} đ</b></span
+          >
+        </div>
+      </template>
+    </SectionCard>
+
     <TaxConfigDialog
       v-model:visible="taxDialog"
       :period="taxPeriod"

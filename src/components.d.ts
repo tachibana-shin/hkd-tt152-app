@@ -34,6 +34,7 @@ declare module 'vue' {
     IconField: typeof import('primevue/iconfield')['default']
     IMdiBank: typeof import('~icons/mdi/bank')['default']
     IMdiBookOpenPageVariant: typeof import('~icons/mdi/book-open-page-variant')['default']
+    IMdiBookOpenVariant: typeof import('~icons/mdi/book-open-variant')['default']
     IMdiCalculator: typeof import('~icons/mdi/calculator')['default']
     IMdiCalculatorVariant: typeof import('~icons/mdi/calculator-variant')['default']
     IMdiCalendarCheck: typeof import('~icons/mdi/calendar-check')['default']

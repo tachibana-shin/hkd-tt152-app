@@ -192,8 +192,10 @@ mod tests {
         assert!(tables >= 20, "chỉ có {tables} bảng — migration thiếu?");
 
         // Cấu hình + seed danh mục từ migration
+        // 5 nhóm ngành gốc + 3 nhóm bổ sung theo Luật GTGT 48/2024 Đ12.2 và
+        // Luật TNCN 109/2025 Đ7.3 (migration 20260929002).
         let groups = scalar_i64(&pool, "SELECT COUNT(*) FROM industry_group").await;
-        assert_eq!(groups, 5);
+        assert_eq!(groups, 8);
         assert_eq!(
             scalar_i64(&pool, "SELECT COUNT(*) FROM business_unit").await,
             1

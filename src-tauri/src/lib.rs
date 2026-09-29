@@ -88,6 +88,8 @@ pub fn run() {
             commands::accounting::get_tax_summary,
             commands::accounting::get_tax_declaration,
             commands::accounting::get_tax_overview,
+            commands::accounting::get_tax_settlement,
+            commands::accounting::get_tax_books,
             commands::accounting::get_tax_group,
             commands::accounting::get_revenue_expense,
             commands::accounting::get_inventory_summary,

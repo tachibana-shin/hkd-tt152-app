@@ -102,6 +102,27 @@ pub(crate) async fn save_cash_entry(
         &input.note,
     )
     .await?;
+    // Số phiếu là duy nhất theo từng loại (đã kiểm ở trên) nên cập nhật theo
+    // (entry_type, voucher_no) là đúng dòng vừa ghi — không cần đổi chữ ký
+    // `insert_journal_entry` (dùng chung cho nhiều nơi).
+    let bank_code = input.bank_code.trim().to_string();
+    let non_deductible_reason = input.non_deductible_reason.trim().to_string();
+    let entry_type = input.entry_type.clone();
+    let voucher_no = input.voucher_no.clone();
+    let deductible_flag: i64 = if input.deductible { 1 } else { 0 };
+    sqlx::query!(
+        r#"UPDATE journal_entry
+              SET bank_code = ?, deductible = ?, non_deductible_reason = ?
+            WHERE entry_type = ? AND voucher_no = ?"#,
+        bank_code,
+        deductible_flag,
+        non_deductible_reason,
+        entry_type,
+        voucher_no
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
     audit(
         &state,

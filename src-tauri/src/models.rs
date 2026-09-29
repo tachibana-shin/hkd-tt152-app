@@ -184,18 +184,6 @@ pub(crate) struct CustomerRow {
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
-pub(crate) struct TaxSummaryRow {
-    pub(crate) industry_code: String,
-    pub(crate) industry_name: String,
-    pub(crate) vat_rate: f64,
-    pub(crate) pit_rate: f64,
-    pub(crate) revenue_up: f64,
-    pub(crate) revenue_down: f64,
-    pub(crate) vat_tax: f64,
-    pub(crate) pit_tax: f64,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
 pub(crate) struct RevenueExpenseRow {
     pub(crate) revenue_up: f64,
     pub(crate) revenue_down: f64,
@@ -423,6 +411,24 @@ pub(crate) struct CashEntryInput {
     pub(crate) pit_rate: f64,
     pub(crate) unit_code: String,
     pub(crate) note: String,
+    /// Chứng từ thanh toán không dùng tiền mặt (tài khoản / mã giao dịch
+    /// chuyển khoản). NĐ 68/2026 Điều 6 khoản 1: khoản chi từ 05 triệu đồng
+    /// trở lên thanh toán bằng tiền mặt mà không có chứng từ này thì KHÔNG được
+    /// trừ khi tính thu nhập tính thuế.
+    #[serde(default)]
+    pub(crate) bank_code: String,
+    /// Người dùng đánh dấu khoản chi không được trừ (lương chủ hộ, chi cá nhân
+    /// - gia đình, chi không có chứng từ... — Điều 6 khoản 2).
+    #[serde(default = "default_true")]
+    pub(crate) deductible: bool,
+    #[serde(default)]
+    pub(crate) non_deductible_reason: String,
+}
+
+/// Mặc định `deductible = true` để client cũ (chưa gửi trường này) không làm
+/// mọi phiếu chi thành "không được trừ".
+fn default_true() -> bool {
+    true
 }
 
 // ─── LƯƠNG / NHÂN SỰ (sheet Nhan Vien / Bang Luong) ───
@@ -568,6 +574,18 @@ pub(crate) struct TaxAgg {
     pub(crate) revenue_down: f64, // DT tính thuế GTGT — Giảm trong kỳ (điều chỉnh giảm)
 }
 
+/// Một khoản chi bị loại khỏi chi phí khi tính thu nhập tính thuế — hiện ra
+/// cho người dùng biết cần bổ sung chứng từ (NĐ 68/2026 Điều 6).
+#[derive(serde::Serialize)]
+pub(crate) struct TaxCostWarning {
+    pub(crate) posting_date: String,
+    pub(crate) voucher_no: String,
+    pub(crate) description: String,
+    pub(crate) amount: f64,
+    /// Lý do không được trừ (rỗng = được trừ).
+    pub(crate) reason: String,
+}
+
 #[derive(serde::Serialize)]
 pub(crate) struct TaxDeclarationRow {
     pub(crate) industry_code: String,
@@ -576,6 +594,9 @@ pub(crate) struct TaxDeclarationRow {
     pub(crate) pit_rate: f64,
     pub(crate) revenue_up: f64,
     pub(crate) revenue_down: f64,
+    /// Doanh thu tính thuế TNCN của kỳ = (UP−DOWN) − phần trừ ngưỡng 01 tỷ
+    /// (Luật TNCN Điều 7 khoản 3 điểm a)
+    pub(crate) revenue_taxable: f64,
     pub(crate) vat_tax: f64,     // Số thuế GTGT = (UP-DOWN) x tỷ lệ ngành
     pub(crate) vat_payable: f64, // Thuế GTGT phải nộp = vat_tax
     pub(crate) pit_tax: f64, // Số thuế TNCN theo tỷ lệ doanh thu (chỉ nhóm 2, phương pháp doanh thu)
@@ -594,14 +615,34 @@ pub(crate) struct TaxOverview {
     pub(crate) method: String,
     /// Doanh thu trong kỳ khai
     pub(crate) period_revenue: f64,
-    /// Chi phí trong kỳ khai (phiếu PC)
+    /// Doanh thu tính thuế TNCN của kỳ = doanh thu kỳ − phần trừ ngưỡng 01 tỷ
+    /// (Luật TNCN Điều 7 khoản 3 điểm a); bằng 0 trước kỳ vượt ngưỡng.
+    pub(crate) taxable_revenue: f64,
+    /// Mức trừ ngưỡng áp dụng cho năm (01 tỷ đồng — NĐ 141/2026/NĐ-CP)
+    pub(crate) exempt_threshold: f64,
+    /// Giá vốn FIFO tính từ phiếu nhập (Điều 6 khoản 1 điểm a NĐ 68/2026)
+    pub(crate) cogs: f64,
+    /// Khoản chi khác được trừ (phiếu chi đủ điều kiện)
+    pub(crate) other_expense: f64,
+    /// Tổng chi phí được trừ = giá vốn + khoản chi được trừ
     pub(crate) expense: f64,
-    /// Lợi nhuận kỳ = doanh thu kỳ − chi phí kỳ
+    /// Tổng khoản chi KHÔNG được trừ (Điều 6 khoản 2, hoặc ≥ 5 triệu trả tiền
+    /// mặt không có chứng từ thanh toán không dùng tiền mặt — khoản 1)
+    pub(crate) non_deductible: f64,
+    /// Danh sách khoản chi bị loại khỏi chi phí, để người dùng xử lý chứng từ
+    pub(crate) cost_warnings: Vec<TaxCostWarning>,
+    /// Thu nhập tính thuế kỳ = doanh thu kỳ − chi phí được trừ
     pub(crate) profit: f64,
     /// Thuế suất TNCN theo lợi nhuận (15%/17%/20%) hoặc 0 nếu không áp dụng
     pub(crate) profit_rate: f64,
     pub(crate) vat_payable: f64,
     pub(crate) pit_tax: f64,
+    /// Số thuế TNCN tạm nộp theo tỷ lệ % × doanh thu kỳ (Điều 10 khoản 2 điểm b
+    /// NĐ 68/2026) — với hộ nộp theo thu nhập tính thuế thì quyết toán cả năm
+    /// mới là số chốt.
+    pub(crate) pit_provisional: f64,
+    /// Hạn nộp hồ sơ khai thuế của kỳ (dd/mm/yyyy), rỗng khi không xác định
+    pub(crate) deadline: Option<String>,
     pub(crate) total_tax: f64,
 }
 

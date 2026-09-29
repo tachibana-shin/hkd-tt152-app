@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE journal_entry\n              SET bank_code = ?, deductible = ?, non_deductible_reason = ?\n            WHERE entry_type = ? AND voucher_no = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "2636ba63a7bb9ade14e0662f62c4d462bf42c93330dbe3d1ef12cabaf6d46ca0"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.product_code AS \"product_code!\", je.quantity\n             FROM journal_entry je\n             JOIN product p ON p.code = je.product_code\n            WHERE je.entry_type = 'PX'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n              AND je.quantity > 0\n              AND COALESCE(p.is_service, 0) = 0\n            ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "product_code!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "b250303bf3be05797c49eb82ac2e0d9710302e9c2dd5d3a1aa151d97c81f118f"
+}

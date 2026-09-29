@@ -451,17 +451,6 @@ export interface CountItemRow {
 
 // ─── Báo cáo ───
 
-export interface TaxSummaryRow {
-  industry_code: string;
-  industry_name: string;
-  vat_rate: number;
-  pit_rate: number;
-  revenue_up: number;
-  revenue_down: number;
-  vat_tax: number;
-  pit_tax: number;
-}
-
 export interface RevenueExpenseRow {
   revenue_up: number;
   revenue_down: number;
@@ -555,6 +544,12 @@ export interface AppSettings {
   invoice_paste_layout?: string;
   /** Dấu tách cột của khối dán: "\t" | "," | ";" | "|" */
   invoice_paste_sep?: string;
+  /**
+   * Mức trừ ngưỡng 01 tỷ phân bổ theo nhóm ngành, JSON
+   * `{"PPHH": 800000000}` (NĐ 68/2026 Điều 4 khoản 3). Rỗng = app chia theo
+   * tỷ lệ doanh thu.
+   */
+  pit_exempt_alloc?: string;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───
@@ -593,9 +588,79 @@ export interface TaxDeclarationRow {
   pit_rate: number;
   revenue_up: number; // DT tính thuế GTGT — tăng trong kỳ
   revenue_down: number; // DT tính thuế GTGT — giảm trong kỳ
+  /**
+   * Doanh thu tính thuế TNCN của kỳ = (DT tăng − DT giảm) − phần trừ mức ngưỡng
+   * 01 tỷ (Luật TNCN 109/2025 Điều 7 khoản 3 điểm a). Trước kỳ vượt ngưỡng thì 0.
+   */
+  revenue_taxable: number;
   vat_tax: number; // Số thuế GTGT = doanh thu × tỷ lệ ngành
   vat_payable: number; // Thuế GTGT phải nộp
   pit_tax: number; // Số thuế TNCN phải nộp (theo tỷ lệ doanh thu — nhóm 2 p.pháp doanh thu)
+}
+
+/** Một khoản chi bị loại khỏi chi phí khi tính thu nhập tính thuế (NĐ 68/2026 Điều 6). */
+export interface TaxCostWarning {
+  posting_date: string;
+  voucher_no: string;
+  description: string;
+  amount: number;
+  reason: string;
+}
+
+/** Một kỳ trong bảng tạm nộp TNCN. */
+export interface TaxSettlementPeriod {
+  period: string;
+  no: number;
+  label: string;
+  revenue: number;
+  taxable_revenue: number;
+  pit_provisional: number;
+  deadline: string | null;
+}
+
+/**
+ * Tạm nộp + quyết toán thu nhập cá nhân theo năm.
+ * Hộ nộp theo thuế suất × doanh thu thì khai theo kỳ, không có quyết toán năm
+ * riêng (`by_revenue = true`, `difference = 0`).
+ */
+export interface TaxSettlement {
+  year: number;
+  group: number;
+  method: string;
+  by_revenue: boolean;
+  period_kind: string;
+  periods: TaxSettlementPeriod[];
+  provisional_total: number;
+  year_revenue: number;
+  cogs: number;
+  other_expense: number;
+  non_deductible: number;
+  expense: number;
+  taxable_income: number;
+  final_rate: number;
+  final_tax: number;
+  /** Quyết toán − tạm nộp: > 0 phải nộp bổ sung, < 0 xử lý nộp thừa. */
+  difference: number;
+  settle_deadline: string;
+}
+
+/** Nội dung 1 mẫu sổ kế toán theo TT 152/2025/TT-BTC. */
+export interface TaxBook {
+  book: string;
+  title: string;
+  period_label: string;
+  rows: {
+    group: string;
+    doc_no: string;
+    doc_date: string;
+    desc: string;
+    amount: number;
+    quantity: number;
+  }[];
+  total_revenue: number;
+  total_vat: number;
+  total_pit: number;
+  notes: string;
 }
 
 /** Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (Kế toán hộ KD). */
@@ -608,11 +673,27 @@ export interface TaxOverview {
   /** Phương pháp TNCN đang áp dụng: "revenue" | "profit" */
   method: string;
   period_revenue: number; // doanh thu kỳ khai
-  expense: number; // chi phí kỳ khai
-  profit: number; // lợi nhuận kỳ = DT − CP
+  /** Doanh thu tính thuế TNCN của kỳ (đã trừ phần mức ngưỡng 01 tỷ của năm). */
+  taxable_revenue: number;
+  /** Mức trừ ngưỡng áp dụng cho năm (01 tỷ đồng — NĐ 141/2026/NĐ-CP). */
+  exempt_threshold: number;
+  /** Giá vốn FIFO tính từ phiếu nhập. */
+  cogs: number;
+  /** Khoản chi khác được trừ (phiếu chi đủ chứng từ). */
+  other_expense: number;
+  expense: number; // tổng chi phí được trừ = cogs + other_expense
+  /** Tổng khoản chi KHÔNG được trừ (Điều 6 NĐ 68/2026). */
+  non_deductible: number;
+  /** Các khoản chi bị loại, để người dùng bổ sung chứng từ. */
+  cost_warnings: TaxCostWarning[];
+  profit: number; // thu nhập tính thuế = DT − CP
   profit_rate: number; // thuế suất TNCN theo lợi nhuận (15/17/20%) hoặc 0
   vat_payable: number;
   pit_tax: number;
+  /** Số TNCN tạm nộp theo tỷ lệ % × doanh thu kỳ (Điều 10 khoản 2b). */
+  pit_provisional: number;
+  /** Hạn nộp hồ sơ khai thuế của kỳ (dd/mm/yyyy). */
+  deadline: string | null;
   total_tax: number;
 }
 
