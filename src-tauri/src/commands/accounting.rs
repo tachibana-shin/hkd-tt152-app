@@ -587,9 +587,10 @@ pub(crate) struct CostItem {
 pub(crate) fn split_deductible_cost(items: &[CostItem]) -> (f64, f64) {
     items.iter().fold((0.0, 0.0), |(ok, no), it| {
         let amount = it.amount.max(0.0);
-        if !it.deductible {
-            (ok, no + amount)
-        } else if amount >= NON_CASH_PAYMENT_LIMIT && !it.has_bank_doc {
+        // Hai trường hợp không được trừ (đã đánh dấu bởi người dùng, hoặc từ 5 triệu
+        // trở lên trả tiền mặt không có chứng từ thanh toán không dùng tiền mặt) gộp
+        // chung để khớp với danh sách cảnh báo hiển thị trên tờ khai.
+        if !it.deductible || (amount >= NON_CASH_PAYMENT_LIMIT && !it.has_bank_doc) {
             (ok, no + amount)
         } else {
             (ok + amount, no)
@@ -1552,7 +1553,7 @@ fn fmt_thousands(v: f64) -> String {
     let digits = n.abs().to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push('.');
         }
         out.push(c);

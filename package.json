@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vue-tsc --noEmit && vite build",
     "check:sqlx": "cd src-tauri && rm -f sqlx-prep.db && for f in $(ls migrations/*.sql | sort); do sqlite3 sqlx-prep.db < \"$f\"; done && DATABASE_URL=sqlite:sqlx-prep.db SQLX_OFFLINE=false cargo sqlx prepare --workspace --check -- --all-targets",
-    "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test:rust && bun run check:sqlx",
+    "ci": "bun run fmt:check && bun run lint && bun run typecheck && bun run test:rust && bun run lint:rust && bun run check:sqlx",
     "version:check": "node scripts/set-version.mjs --check",
     "changelog": "node scripts/build-changelog.mjs",
     "release:dry": "semantic-release --dry-run",
@@ -24,6 +24,7 @@
     "test:e2e:report": "playwright show-report",
     "test:e2e:ui": "playwright test --ui",
     "test:rust": "cd src-tauri && SQLX_OFFLINE=true cargo test --lib",
+    "lint:rust": "cd src-tauri && SQLX_OFFLINE=true cargo clippy --all-targets -- -D warnings",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
