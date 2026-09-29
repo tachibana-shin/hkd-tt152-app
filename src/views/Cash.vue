@@ -7,6 +7,7 @@ import type { JournalEntryRow, Account } from "@/types";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
+import { useInheritedRange } from "@/composables/useInheritedRange";
 
 const auth = useAuthStore();
 const catalog = useCatalogStore();
@@ -27,6 +28,17 @@ const saving = ref(false);
 const loading = ref(false);
 const entries = ref<JournalEntryRow[]>([]);
 const typeFilter = ref("");
+// Khoảng ngày mở từ màn Kế toán HKD (query ?from=&to=) — S3a là sổ chi tiết tiền
+// nên phải lọc theo kỳ đang xem, không lấy cả năm.
+const { inheritedFrom, inheritedTo, backLabel, goBack } = useInheritedRange();
+const fromDate = ref<Date | null>(inheritedFrom);
+const toDate = ref<Date | null>(inheritedTo);
+const rangeInherited = computed(() => !!inheritedFrom || !!inheritedTo);
+/** true = chỉ lọc khi có ngày; để trống thì xem toàn bộ. */
+const range = () => ({
+  from: toIsoDate(fromDate.value),
+  to: toIsoDate(toDate.value),
+});
 
 const entryTypeOptions = [
   { label: "Phiếu thu (PT)", value: "PT" },
@@ -126,7 +138,7 @@ const total = ref(0);
 async function loadEntries(lazy: Record<string, unknown>) {
   loading.value = true;
   try {
-    const res = await api.getJournalEntriesPage(lazy, typeFilter.value, "", "");
+    const res = await api.getJournalEntriesPage(lazy, typeFilter.value, range().from, range().to);
     entries.value = res.rows;
     total.value = res.total;
   } catch (e) {
@@ -145,6 +157,18 @@ const page = useLazyPage(loadEntries);
 /** Đổi bộ lọc loại phiếu → lọc ở server nên phải nạp lại trang đầu. */
 function applyTypeFilter() {
   void page.setExtra({});
+}
+
+/** Đổi khoảng ngày → nạp lại trang đầu. */
+function applyRange() {
+  void page.setExtra({});
+}
+
+/** Bỏ khoảng ngày kế thừa → xem toàn bộ phiếu. */
+function clearInheritedRange() {
+  fromDate.value = null;
+  toDate.value = null;
+  applyRange();
 }
 
 async function save() {
@@ -245,7 +269,22 @@ useKeepAliveRefresh(reload);
         </div>
       </template>
       <template #end>
-        <Button v-if="auth.canAccounting" label="Tạo phiếu" icon="pi pi-plus" @click="openCreate" />
+        <div class="flex items-center gap-2">
+          <Button
+            :label="`Quay lại ${backLabel || 'màn trước'}`"
+            icon="pi pi-arrow-left"
+            severity="secondary"
+            outlined
+            data-testid="back-to-accounting"
+            @click="goBack()"
+          />
+          <Button
+            v-if="auth.canAccounting"
+            label="Tạo phiếu"
+            icon="pi pi-plus"
+            @click="openCreate"
+          />
+        </div>
       </template>
     </Toolbar>
 
@@ -255,7 +294,34 @@ useKeepAliveRefresh(reload);
           <span class="text-sm text-gray-500">
             Tổng <b>{{ total.toLocaleString("vi-VN") }}</b> phiếu
           </span>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <div>
+              <DatePicker
+                v-model="fromDate"
+                dateFormat="dd/mm/yy"
+                placeholder="Từ ngày"
+                class="w-36"
+                data-testid="cash-from"
+                @update:model-value="applyRange()"
+              />
+            </div>
+            <div>
+              <DatePicker
+                v-model="toDate"
+                dateFormat="dd/mm/yy"
+                placeholder="Đến ngày"
+                class="w-36"
+                data-testid="cash-to"
+                @update:model-value="applyRange()"
+              />
+            </div>
+            <Button
+              v-if="rangeInherited"
+              label="Xem toàn bộ"
+              size="small"
+              text
+              @click="clearInheritedRange()"
+            />
             <i class="pi pi-filter text-gray-400" />
             <Select
               v-model="typeFilter"

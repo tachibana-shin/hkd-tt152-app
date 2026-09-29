@@ -6,6 +6,7 @@ import type { LedgerRow } from "@/types";
 import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
+import { useInheritedRange } from "@/composables/useInheritedRange";
 
 const business = useBusinessStore();
 const { config } = storeToRefs(business);
@@ -17,9 +18,13 @@ const total = ref(0);
 /** Tổng số tiền CẢ kỳ lọc (do server tính, không phải tổng của trang đang xem). */
 const totalAmount = ref(0);
 
-const fromDate = ref<Date | null>(null);
-const toDate = ref<Date | null>(null);
+// Khoảng ngày mở từ màn Kế toán HKD (query ?from=&to=) — mở ra đúng kỳ đang xem.
+const { inheritedFrom, inheritedTo, backLabel, goBack } = useInheritedRange();
+const fromDate = ref<Date | null>(inheritedFrom);
+const toDate = ref<Date | null>(inheritedTo);
 const entryType = ref("");
+/** true = khoảng ngày đến từ màn khác, báo để người dùng biết vì sao sổ không cả năm. */
+const rangeInherited = computed(() => !!inheritedFrom || !!inheritedTo);
 
 const entryOptions = [{ label: "Toàn bộ", value: "" }, "PN", "PX", "PT", "PC"];
 
@@ -56,6 +61,13 @@ function applyFilters() {
   return page.setExtra({});
 }
 
+/** Bỏ khoảng ngày kế thừa → xem lại cả năm. */
+function clearInheritedRange() {
+  fromDate.value = null;
+  toDate.value = null;
+  return applyFilters();
+}
+
 function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
   switch (et) {
     case "PN":
@@ -89,7 +101,17 @@ useKeepAliveRefresh(reload);
         </div>
       </template>
       <template #end>
-        <Button label="Tải lại" icon="pi pi-refresh" @click="applyFilters()" />
+        <div class="flex items-center gap-2">
+          <Button
+            :label="`Quay lại ${backLabel || 'màn trước'}`"
+            icon="pi pi-arrow-left"
+            severity="secondary"
+            outlined
+            data-testid="back-to-accounting"
+            @click="goBack()"
+          />
+          <Button label="Tải lại" icon="pi pi-refresh" @click="applyFilters()" />
+        </div>
       </template>
     </Toolbar>
 
@@ -98,11 +120,29 @@ useKeepAliveRefresh(reload);
         <div class="flex flex-wrap items-end gap-3">
           <div>
             <label class="text-xs text-gray-500 block mb-1">Từ ngày</label>
-            <DatePicker v-model="fromDate" dateFormat="dd/mm/yy" class="w-44" />
+            <DatePicker
+              v-model="fromDate"
+              dateFormat="dd/mm/yy"
+              class="w-44"
+              @update:model-value="applyFilters()"
+            />
           </div>
           <div>
             <label class="text-xs text-gray-500 block mb-1">Đến ngày</label>
-            <DatePicker v-model="toDate" dateFormat="dd/mm/yy" class="w-44" />
+            <DatePicker
+              v-model="toDate"
+              dateFormat="dd/mm/yy"
+              class="w-44"
+              @update:model-value="applyFilters()"
+            />
+          </div>
+          <div v-if="rangeInherited" class="flex items-center gap-2 pb-1">
+            <Tag
+              value="Đang xem đúng khoảng ngày của màn trước"
+              severity="info"
+              data-testid="ledger-range-inherited"
+            />
+            <Button label="Xem cả năm" size="small" text @click="clearInheritedRange" />
           </div>
           <div>
             <label class="text-xs text-gray-500 block mb-1">Loại phiếu</label>

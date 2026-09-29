@@ -146,6 +146,27 @@ const groupLabel = computed(() => {
       return `Nhóm 4 — doanh thu > ${g4}`;
   }
 });
+/**
+ * Mở sổ kế toán sang màn chi tiết, giữ nguyên khoảng ngày đang xem.
+ *
+ * Truước đây bấm "Sổ S2a/S3a-HKD" chỉ đẩy route trần: màn nhật ký mở cả năm
+ * (không thấy đúng kỳ đang xem) và không có đường quay lại. Nay truyền kèm
+ * `from`/`to` và `back` để màn đích nạp đúng kỳ + có nút quay lại.
+ */
+function openBook(target: "ledger" | "cash") {
+  const from = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
+  const to = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
+  void router.push({
+    path: target === "ledger" ? "/ledger" : "/cash",
+    query: {
+      from,
+      to,
+      back: "/accounting",
+      backLabel: "Kế toán HKD",
+    },
+  });
+}
+
 // ─── Sổ kế toán theo mẫu TT 152/2025/TT-BTC + tạm nộp & quyết toán năm ───
 const bookOptions = [
   { label: "S1a-HKD · Sổ doanh thu (nhóm 1)", value: "S1a" },
@@ -835,21 +856,24 @@ useKeepAliveRefresh(reload);
             icon="pi pi-book"
             outlined
             class="justify-start"
-            @click="router.push('/ledger')"
+            data-testid="open-ledger"
+            @click="openBook('ledger')"
           />
           <Button
             label="Sổ S2b-HKD"
             icon="pi pi-book"
             outlined
             class="justify-start"
-            @click="router.push('/ledger')"
+            data-testid="open-ledger"
+            @click="openBook('ledger')"
           />
           <Button
             label="Sổ S3a-HKD"
             icon="pi pi-book"
             outlined
             class="justify-start"
-            @click="router.push('/cash')"
+            data-testid="open-cash"
+            @click="openBook('cash')"
           />
           <Button
             label="In báo cáo"

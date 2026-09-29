@@ -2066,6 +2066,43 @@ test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/t
   expect((await currentRange()).label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
 });
 
+test("Sổ kế toán kế thừa khoảng ngày của Kế toán HKD và có nút quay lại", async ({ page }) => {
+  await ensureLoggedIn(page);
+  const datePicker = (label: string) =>
+    page.locator(`label:text-is("${label}") + .p-datepicker input`);
+
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  // Chờ khoảng ngày mặc định (theo kỳ khai) được app gán xong.
+  const from = datePicker("Từ ngày");
+  const to = datePicker("Đến ngày");
+  await expect(from).not.toHaveValue("");
+  await expect(to).not.toHaveValue("");
+  const accountingRange = { from: await from.inputValue(), to: await to.inputValue() };
+
+  // Bấm "Sổ S2a-HKD" → sang sổ nhật ký, phải mở đúng khoảng ngày đang xem.
+  await page.getByTestId("open-ledger").first().click();
+  await expect(page).toHaveURL(/\/ledger\?/);
+  await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
+  await expect(datePicker("Từ ngày")).toHaveValue(accountingRange.from);
+  await expect(datePicker("Đến ngày")).toHaveValue(accountingRange.to);
+  await expect(page.getByTestId("ledger-range-inherited")).toBeVisible();
+
+  // Nút quay lại đưa về đúng màn Kế toán HKD, vẫn giữ khoảng ngày cũ.
+  await page.getByTestId("back-to-accounting").click();
+  await expect(page).toHaveURL(/\/accounting$/);
+  await expect(datePicker("Từ ngày")).toHaveValue(accountingRange.from);
+
+  // Bấm "Sổ S3a-HKD" → sổ chi tiết tiền cũng kế thừa ngày + có nút quay lại.
+  await page.getByTestId("open-cash").click();
+  await expect(page).toHaveURL(/\/cash\?/);
+  await expect(page.locator("header h2")).toHaveText("Phiếu thu / chi");
+  await expect(page.getByTestId("cash-from").locator("input")).toHaveValue(accountingRange.from);
+  await expect(page.getByTestId("cash-to").locator("input")).toHaveValue(accountingRange.to);
+  await page.getByTestId("back-to-accounting").click();
+  await expect(page).toHaveURL(/\/accounting$/);
+});
+
 test("Cấu hình HKD: nhóm hộ tự điền theo doanh thu, lưu lại và tờ khai theo nhóm đó", async ({
   page,
 }) => {
