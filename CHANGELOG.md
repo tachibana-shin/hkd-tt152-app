@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.0...v0.9.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **tax:** align the household tax return with the 2026 rules ([1354280](https://github.com/tachibana-shin/hkd-tt152-app/commit/135428071e2d6977cdbccea69a5b835cfe0709e3))
+
 # [0.9.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.8.0...v0.9.0) (2026-09-29)
 
 
