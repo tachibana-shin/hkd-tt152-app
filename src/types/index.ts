@@ -614,6 +614,12 @@ export interface TaxDeclarationRow {
    * 01 tỷ (Luật TNCN 109/2025 Điều 7 khoản 3 điểm a). Trước kỳ vượt ngưỡng thì 0.
    */
   revenue_taxable: number;
+  /**
+   * Mức trừ ngưỡng TNCN đã khấu cho nhóm ngành này trong kỳ (lũy kế các kỳ trước +
+   * kỳ này). Tờ khai ghi rõ để thấy doanh thu tính thuế đã trừ được bao nhiêu và vì
+   * sao còn lại là bao nhiêu.
+   */
+  pit_deduction: number;
   vat_tax: number; // Số thuế GTGT = doanh thu × tỷ lệ ngành
   vat_payable: number; // Thuế GTGT phải nộp
   pit_tax: number; // Số thuế TNCN phải nộp (theo tỷ lệ doanh thu — nhóm 2 p.pháp doanh thu)
@@ -707,6 +713,12 @@ export interface TaxOverview {
   period_revenue: number; // doanh thu kỳ khai
   /** Doanh thu tính thuế TNCN của kỳ (đã trừ phần mức ngưỡng 01 tỷ của năm). */
   taxable_revenue: number;
+  /** Tổng mức trừ đã dùng trong năm = min(ngưỡng, doanh thu cả năm). */
+  exempt_used?: number;
+  /** Hạn ngạch mức trừ còn lại = ngưỡng − đã dùng. */
+  exempt_remaining?: number;
+  /** Mức trừ đã khấu cho riêng kỳ đang xem. */
+  exempt_period?: number;
   /** Mức trừ ngưỡng áp dụng cho năm (01 tỷ đồng — NĐ 141/2026/NĐ-CP). */
   exempt_threshold: number;
   /** Mốc Nhóm 3 / Nhóm 4 đang áp dụng (sửa được ở màn Cài đặt). */

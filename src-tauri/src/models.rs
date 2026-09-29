@@ -597,6 +597,9 @@ pub(crate) struct TaxDeclarationRow {
     /// Doanh thu tính thuế TNCN của kỳ = (UP−DOWN) − phần trừ ngưỡng 01 tỷ
     /// (Luật TNCN Điều 7 khoản 3 điểm a)
     pub(crate) revenue_taxable: f64,
+    /// Mức trừ ngưỡng TNCN đã khấu trong kỳ này (lũy kế các kỳ trước + kỳ này),
+    /// để người dùng thấy rõ cơ sở tính thuế TNCN đã trừ được bao nhiêu.
+    pub(crate) pit_deduction: f64,
     pub(crate) vat_tax: f64,     // Số thuế GTGT = (UP-DOWN) x tỷ lệ ngành
     pub(crate) vat_payable: f64, // Thuế GTGT phải nộp = vat_tax
     pub(crate) pit_tax: f64, // Số thuế TNCN theo tỷ lệ doanh thu (chỉ nhóm 2, phương pháp doanh thu)
@@ -631,6 +634,12 @@ pub(crate) struct TaxOverview {
     /// Mức trừ ngưỡng áp dụng cho năm (mặc định 01 tỷ đồng — NĐ 141/2026/NĐ-CP,
     /// sửa được ở màn Cài đặt)
     pub(crate) exempt_threshold: f64,
+    /// Tổng mức trừ ngưỡng TNCN đã dùng trong năm = min(ngưỡng, doanh thu cả năm).
+    pub(crate) exempt_used: f64,
+    /// Hạn ngạch mức trừ còn lại = ngưỡng − đã dùng (0 khi đã dùng hết).
+    pub(crate) exempt_remaining: f64,
+    /// Mức trừ đã khấu cho riêng kỳ đang xem.
+    pub(crate) exempt_period: f64,
     /// Mốc Nhóm 3 (thuế suất TNCN theo thu nhập 17%) đang áp dụng.
     pub(crate) group3_threshold: f64,
     /// Mốc Nhóm 4 (thuế suất TNCN theo thu nhập 20%) đang áp dụng.

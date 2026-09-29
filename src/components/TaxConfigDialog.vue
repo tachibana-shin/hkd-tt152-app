@@ -5,7 +5,7 @@
 // Căn cứ: NĐ 68/2026/NĐ-CP, NĐ 141/2026/NĐ-CP (ngưỡng miễn thuế 1 tỷ, áp dụng từ 01/01/2026).
 import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
-import { fmtThreshold, fmtVnd } from "@/utils/format";
+import { fmtVnd } from "@/utils/format";
 
 const props = defineProps<{
   visible: boolean;
@@ -43,47 +43,23 @@ const form = reactive({
 });
 
 /**
- * Phân bổ mức trừ ngưỡng 01 tỷ/năm cho từng nhóm ngành (NĐ 68/2026 Điều 4 khoản 3).
+ * Ngưỡng doanh thu năm dùng làm mức trừ TNCN — chỉ để hiển thị cho người dùng đọc
+ * trước khi bấm lưu; số tiền thực tế luôn lấy từ Cài đặt (một nguồn duy nhất).
  *
- * Luật TNCN Điều 7 khoản 3 điểm a: doanh thu tính thuế = phần doanh thu VƯỢT trên
- * mức 01 tỷ. Khi có nhiều nhóm ngành áp mức thuế suất khác nhau, hộ được tự chọn
- * nhóm nào được trừ theo phương án có lợi nhất, tổng không vượt quá 01 tỷ/năm.
- * Để trống = app chia theo tỷ lệ doanh thu (mặc định hợp lý khi các nhóm cùng
- * tỷ lệ %), và tự bỏ trống ô nào không muốn trừ.
+ * Trước đây hộp thoại này có bảng phân bổ mức trừ theo từng nhóm ngành. Đã bỏ:
+ * mức trừ vốn là số tiền **một lần trong năm** và được khấu dần theo doanh thu
+ * lũy kế các kỳ trước + kỳ này, không phải chọn từng nhóm ngành. Chia theo tỷ lệ
+ * doanh thu (app tự làm) là cách duy nhất, và tổng các kỳ luôn bằng đúng một mức
+ * trừ — không thể "vượt" hay "thiếu" như bảng nhập tay.
  */
-const allocRows = ref<
-  { industry_code: string; industry_name: string; revenue: number; alloc: number | null }[]
->([]);
-const allocTotal = computed(() => allocRows.value.reduce((sum, r) => sum + (r.alloc ?? 0), 0));
-/** Ngưỡng đang áp dụng — đọc từ Cài đặt để bảng phân bổ khớp với ngưỡng app dùng. */
 const exemptThreshold = ref(1_000_000_000);
 
-/** Nạp doanh thu năm theo nhóm ngành + mức trừ đang lưu trong app_setting. */
-async function loadAlloc(year: number) {
+/** Nạp ngưỡng đang áp dụng từ Cài đặt. */
+async function loadThreshold() {
   try {
-    const [rows, settings] = await Promise.all([
-      api.getTaxDeclaration(year, "year", 0),
-      api.getAppSettings(),
-    ]);
-    exemptThreshold.value = settings.tax_threshold_exempt;
-    const saved: Record<string, number> = (() => {
-      try {
-        const raw = settings.pit_exempt_alloc?.trim();
-        return raw ? (JSON.parse(raw) as Record<string, number>) : {};
-      } catch {
-        return {};
-      }
-    })();
-    allocRows.value = rows
-      .filter((r) => r.revenue_up - r.revenue_down > 0)
-      .map((r) => ({
-        industry_code: r.industry_code,
-        industry_name: r.industry_name,
-        revenue: r.revenue_up - r.revenue_down,
-        alloc: saved[r.industry_code] ?? null,
-      }));
+    exemptThreshold.value = (await api.getAppSettings()).tax_threshold_exempt;
   } catch {
-    allocRows.value = [];
+    exemptThreshold.value = 1_000_000_000;
   }
 }
 
@@ -113,18 +89,11 @@ watch(
     // Mở hộp thoại thì chọn sẵn kỳ hợp lý theo nhóm hộ; người dùng vẫn đổi
     // được, và chỉ ghi lại khi bấm "Lưu cấu hình".
     form.period = suggestedPeriod.value || props.period;
-    void loadAlloc(new Date().getFullYear());
+    void loadThreshold();
   },
 );
 
 async function save() {
-  if (allocTotal.value > exemptThreshold.value) {
-    toast.add({
-      severity: "warn",
-      summary: "Tổng mức trừ vượt ngưỡng",
-      detail: `Tổng ${fmtVnd(allocTotal.value)} đ > ${fmtVnd(exemptThreshold.value)} đ/năm — phần vượt sẽ không được tính trừ.`,
-    });
-  }
   saving.value = true;
   try {
     await api.saveAppSettings({
@@ -133,14 +102,6 @@ async function save() {
       // Đồng bộ công tắc "Khấu trừ GTGT đầu vào": theo lợi nhuận → được khấu trừ
       // (mặc định BẬT), theo doanh thu → không khấu trừ (mặc định TẮT).
       vat_deduct: form.method === "profit" ? "1" : "0",
-      // Mức trừ ngưỡng theo nhóm ngành (bỏ ô trống = không trừ nhóm đó).
-      pit_exempt_alloc: JSON.stringify(
-        Object.fromEntries(
-          allocRows.value
-            .filter((r) => r.alloc && r.alloc > 0)
-            .map((r) => [r.industry_code, r.alloc as number]),
-        ),
-      ),
     });
     toast.add({
       severity: "success",
@@ -197,54 +158,24 @@ async function save() {
         </div>
       </FormField>
 
-      <!-- Phân bổ mức trừ ngưỡng (số tiền lấy từ Cài đặt) cho từng nhóm ngành —
-           Điều 4 khoản 3 NĐ 68/2026 -->
-      <FormField
-        :label="`Phân bổ mức trừ ngưỡng ${fmtThreshold(exemptThreshold)}/năm theo nhóm ngành`"
+      <!-- Mức trừ TNCN: app tự khấu dần theo doanh thu lũy kế, không cần chọn tay -->
+      <div
+        class="rounded-lg border border-gray-200 bg-surface-50 p-3 text-xs text-gray-600 space-y-1"
       >
-        <p class="mb-2 text-xs text-gray-500">
-          Luật TNCN Điều 7 khoản 3 điểm a: doanh thu tính thuế là
-          <b>phần doanh thu vượt trên</b> mức ngưỡng {{ fmtVnd(exemptThreshold) }}. Khi có nhiều
-          nhóm ngành áp mức thuế suất khác nhau, hộ được tự chọn nhóm nào được trừ theo phương án có
-          lợi nhất — tổng mức trừ không vượt quá {{ fmtVnd(exemptThreshold) }} đ/năm. Để trống = app
-          chia theo tỷ lệ doanh thu.
+        <p class="font-semibold text-gray-700">
+          Mức trừ doanh thu cho thuế TNCN: {{ fmtVnd(exemptThreshold) }} đ/năm
         </p>
-        <div v-if="allocRows.length" class="rounded border border-gray-200">
-          <div
-            class="grid grid-cols-[1fr_9rem_11rem] gap-2 border-b bg-surface-50 px-2 py-1 text-xs font-medium text-gray-500"
-          >
-            <span>Nhóm ngành nghề</span>
-            <span class="text-right">Doanh thu năm</span>
-            <span class="text-right">Mức trừ chọn</span>
-          </div>
-          <div
-            v-for="r in allocRows"
-            :key="r.industry_code"
-            class="grid grid-cols-[1fr_9rem_11rem] items-center gap-2 border-b px-2 py-1 text-sm last:border-b-0"
-          >
-            <span>{{ r.industry_name }}</span>
-            <span class="text-right text-gray-600">{{ fmtVnd(r.revenue) }}</span>
-            <InputNumber
-              v-model="r.alloc"
-              :min="0"
-              :max="exemptThreshold"
-              :max-fraction-digits="0"
-              placeholder="Chia theo tỷ lệ"
-              show-buttons
-              button-layout="horizontal"
-              class="w-full"
-            />
-          </div>
-          <div
-            class="flex justify-between bg-surface-50 px-2 py-1 text-xs font-medium"
-            :class="allocTotal > exemptThreshold ? 'text-rose-600' : 'text-gray-600'"
-          >
-            <span>Tổng mức trừ</span>
-            <span>{{ fmtVnd(allocTotal) }} / {{ fmtVnd(exemptThreshold) }} đ</span>
-          </div>
-        </div>
-        <p v-else class="text-xs text-gray-400">Chưa có doanh thu trong năm để phân bổ.</p>
-      </FormField>
+        <p>
+          Luật TNCN Điều 7 khoản 3 điểm a: <b>doanh thu tính thuế = phần doanh thu vượt mức trừ</b>
+          {{ fmtVnd(exemptThreshold) }}. App tự khấu dần: mỗi kỳ trừ tiếp phần mức trừ chưa dùng của
+          các kỳ trước (theo tỷ lệ doanh thu của các nhóm ngành), nên tổng cả năm luôn bằng đúng một
+          mức trừ và không bao giờ trừ quá doanh thu thật được.
+        </p>
+        <p>
+          Số còn lại của mức trừ và số đã trừ trong kỳ hiển thị ở màn
+          <b>Kế toán HKD → Tờ khai thuế</b>. Muốn đổi mức trừ: màn <b>Cài đặt</b>.
+        </p>
+      </div>
 
       <div class="rounded-lg bg-surface-50 p-3 text-xs text-gray-600 space-y-1">
         <p class="font-semibold text-gray-700">

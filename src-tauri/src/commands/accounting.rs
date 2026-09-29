@@ -222,9 +222,11 @@ pub(crate) async fn get_tax_summary(
         .iter()
         .map(|r| (r.industry_code.clone(), net_revenue(r)))
         .collect();
-    let taxable = taxable_by_period(&cum, &period, &ctx.alloc)
-        .into_iter()
-        .collect();
+    let split = split_by_period(&cum, &period, &ctx.alloc);
+    let taxable: std::collections::HashMap<String, f64> =
+        split.iter().map(|(c, v, _)| (c.clone(), *v)).collect();
+    let deducted: std::collections::HashMap<String, f64> =
+        split.iter().map(|(c, _, d)| (c.clone(), *d)).collect();
     let taxable_period = period_is_taxable(
         cum.values().sum(),
         period.values().sum(),
@@ -237,6 +239,7 @@ pub(crate) async fn get_tax_summary(
         ctx.group,
         &taxable,
         taxable_period,
+        &deducted,
     );
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
@@ -971,17 +974,18 @@ pub(crate) fn period_is_taxable(
     cum_before + in_period > threshold
 }
 
-/// Doanh thu tính thuế TNCN của từng nhóm ngành **trong kỳ**, theo phương pháp
-/// trừ ngưỡng lũy kế.
+/// Tách kỳ của một nhóm ngành thành `(doanh thu tính thuế, mức trừ đã dùng)`.
 ///
 /// NĐ 68/2026 Điều 8 khoản 1 điểm a: hộ vượt ngưỡng giữa năm thì "khai, nộp thuế
-/// kể từ quý phát sinh" → mức trừ 01 tỷ được dùng dần theo doanh thu lũy kế, và
-/// tổng các kỳ trong năm luôn bằng đúng mức trừ một lần.
-pub(crate) fn taxable_by_period(
+/// kể từ quý phát sinh" → mức trừ 01 tỷ được **dùng dần theo doanh thu lũy kế**:
+/// mỗi kỳ khấu trừ tiếp phần mức trừ chưa dùng của các kỳ trước, nên tổng các kỳ
+/// trong năm luôn bằng đúng mức trừ một lần (và không bao giờ trừ quá doanh thu
+/// thật). Trả về cả `deducted` để tờ khai ghi rõ kỳ này đã trừ được bao nhiêu.
+pub(crate) fn split_by_period(
     cum_before: &std::collections::HashMap<String, f64>,
     period: &std::collections::HashMap<String, f64>,
     alloc: &[(String, f64)],
-) -> Vec<(String, f64)> {
+) -> Vec<(String, f64, f64)> {
     period
         .iter()
         .map(|(code, in_period)| {
@@ -993,8 +997,24 @@ pub(crate) fn taxable_by_period(
             let before = cum_before.get(code).copied().unwrap_or(0.0);
             let end = (before + in_period - exempt).max(0.0);
             let start = (before - exempt).max(0.0);
-            (code.clone(), round2(end - start))
+            let taxable = end - start;
+            // Phần doanh thu của kỳ này bị mức trừ khấu đi.
+            let deducted = (in_period - taxable).max(0.0);
+            (code.clone(), round2(taxable), round2(deducted))
         })
+        .collect()
+}
+
+/// Rút cặp `(mã, doanh thu tính thuế)` từ `split_by_period` cho chỗ chỉ cần cơ sở
+/// tính thuế.
+pub(crate) fn taxable_by_period(
+    cum_before: &std::collections::HashMap<String, f64>,
+    period: &std::collections::HashMap<String, f64>,
+    alloc: &[(String, f64)],
+) -> Vec<(String, f64)> {
+    split_by_period(cum_before, period, alloc)
+        .into_iter()
+        .map(|(code, taxable, _)| (code, taxable))
         .collect()
 }
 
@@ -1013,6 +1033,8 @@ pub(crate) fn build_tax_declaration(
     // false = kỳ nằm trước khi hộ vượt ngưỡng 01 tỷ → chưa phát sinh thuế
     // (Điều 8 khoản 1a) dù hộ đã thuộc nhóm 2.
     taxable_period: bool,
+    // Mức trừ ngưỡng TNCN đã khấu trong kỳ của từng nhóm ngành (map theo mã).
+    deducted: &std::collections::HashMap<String, f64>,
 ) -> Vec<TaxDeclarationRow> {
     // Miễn thuế do NGƯỠNG doanh thu quyết định, không do nhãn nhóm: hộ ghi Nhóm 2
     // trong hồ sơ mà doanh thu chưa vượt ngưỡng vẫn không phát sinh thuế trong kỳ
@@ -1021,6 +1043,8 @@ pub(crate) fn build_tax_declaration(
     let exempt = !taxable_period;
     rows.into_iter()
         .map(|r| {
+            // Giữ mã nhóm ngành lại: dùng cho tra cơ sở tính thuế và mức trừ.
+            let code = r.industry_code.clone();
             let base = net_revenue(&r);
             let vat_tax = if exempt {
                 0.0
@@ -1030,11 +1054,7 @@ pub(crate) fn build_tax_declaration(
             let taxable_rev = if exempt {
                 0.0
             } else {
-                taxable
-                    .get(&r.industry_code)
-                    .copied()
-                    .unwrap_or(0.0)
-                    .max(0.0)
+                taxable.get(&code).copied().unwrap_or(0.0).max(0.0)
             };
             // TNCN theo thu nhập tính thuế không tính ở bảng tờ khai theo ngành —
             // số thuế đó tính ở thẻ tổng hợp (và tạm nộp theo tỷ lệ % doanh thu).
@@ -1051,6 +1071,9 @@ pub(crate) fn build_tax_declaration(
                 revenue_up: round2(r.revenue_up),
                 revenue_down: round2(r.revenue_down),
                 revenue_taxable: round2(taxable_rev),
+                // Mức trừ ngưỡng TNCN đã khấu cho nhóm ngành này trong kỳ — tờ khai
+                // cần ghi rõ để thấy doanh thu tính thuế đã trừ được bao nhiêu.
+                pit_deduction: round2(deducted.get(&code).copied().unwrap_or(0.0)),
                 vat_tax,
                 vat_payable: round2(vat_tax),
                 pit_tax,
@@ -1160,10 +1183,11 @@ pub(crate) async fn get_tax_declaration(
         .iter()
         .map(|r| (r.industry_code.clone(), net_revenue(r)))
         .collect();
+    let split = split_by_period(&cum_before, &period_map, &ctx.alloc);
     let taxable: std::collections::HashMap<String, f64> =
-        taxable_by_period(&cum_before, &period_map, &ctx.alloc)
-            .into_iter()
-            .collect();
+        split.iter().map(|(c, v, _)| (c.clone(), *v)).collect();
+    let deducted: std::collections::HashMap<String, f64> =
+        split.iter().map(|(c, _, d)| (c.clone(), *d)).collect();
     let taxable_period = period_is_taxable(
         cum_before.values().sum(),
         period_map.values().sum(),
@@ -1176,6 +1200,7 @@ pub(crate) async fn get_tax_declaration(
         ctx.group,
         &taxable,
         taxable_period,
+        &deducted,
     );
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
@@ -1241,11 +1266,16 @@ pub(crate) async fn get_tax_overview(
         .iter()
         .map(|r| (r.industry_code.clone(), net_revenue(r)))
         .collect();
+    let split = split_by_period(&cum_before, &period_map, &ctx.alloc);
     let taxable: std::collections::HashMap<String, f64> =
-        taxable_by_period(&cum_before, &period_map, &ctx.alloc)
-            .into_iter()
-            .collect();
+        split.iter().map(|(c, v, _)| (c.clone(), *v)).collect();
     let taxable_revenue: f64 = taxable.values().sum();
+    // Mức trừ ngưỡng TNCN: cả năm đã dùng bao nhiêu (không vượt doanh thu thật được)
+    // và hạn ngạch còn lại — để hộ biết khi nào doanh thu bắt đầu chịu TNCN.
+    let exempt_threshold = ctx.settings.thresholds.exempt;
+    let exempt_used = exempt_threshold.min(ctx.year_revenue.max(0.0));
+    let exempt_remaining = round2((exempt_threshold - exempt_used).max(0.0));
+    let exempt_period = round2(split.iter().map(|(_, _, d)| *d).sum());
 
     // Chi phí: giá vốn FIFO + khoản chi được trừ (Điều 6 khoản 1).
     let cogs = load_fifo_cogs(&pool, &from, &to).await?;
@@ -1332,7 +1362,10 @@ pub(crate) async fn get_tax_overview(
         method: ctx.settings.method.clone(),
         period_revenue: round2(period_revenue),
         taxable_revenue: round2(taxable_revenue),
-        exempt_threshold: ctx.settings.thresholds.exempt,
+        exempt_threshold,
+        exempt_used: round2(exempt_used),
+        exempt_remaining,
+        exempt_period,
         group3_threshold: ctx.settings.thresholds.group3,
         group4_threshold: ctx.settings.thresholds.group4,
         cogs,
@@ -1936,6 +1969,7 @@ mod tests {
             2,
             &full("PPHH", 100_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         let r = &out[0];
         assert_eq!(r.vat_tax, 1_000_000.0);
@@ -1952,6 +1986,7 @@ mod tests {
             2,
             &full("PPHH", 90_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         let r = &out[0];
         assert_eq!(r.revenue_up, 100_000_000.0);
@@ -1972,6 +2007,7 @@ mod tests {
             2,
             &full("PPHH", 0.0),
             false,
+            &std::collections::HashMap::new(),
         );
         let r = &out[0];
         assert_eq!(r.vat_tax, 0.0);
@@ -1991,6 +2027,7 @@ mod tests {
             1,
             &full("PPHH", 200_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         let r = &out[0];
         assert_eq!(r.vat_tax, 12_000_000.0); // 1,2 tỷ x 1%
@@ -2008,6 +2045,7 @@ mod tests {
             2,
             &full("PPHH", 0.0),
             true,
+            &std::collections::HashMap::new(),
         );
         assert_eq!(out[0].pit_tax, 0.0);
         assert_eq!(out[0].vat_tax, 20_000_000.0); // 2 tỷ x 1%
@@ -2022,6 +2060,7 @@ mod tests {
             3,
             &full("PPHH", 0.0),
             true,
+            &std::collections::HashMap::new(),
         );
         assert_eq!(out[0].pit_tax, 0.0);
         assert_eq!(out[0].vat_tax, 100_000_000.0); // 10 tỷ x 1%
@@ -2177,9 +2216,13 @@ mod tests {
 
         // Kỳ có doanh thu → phải chịu thuế dù lũy kế 12 triệu < 01 tỷ.
         let period_map = std::collections::HashMap::from([("PPHH".to_string(), 12_000_000.0)]);
-        let taxable = taxable_by_period(&Default::default(), &period_map, &ctx.alloc)
-            .into_iter()
-            .collect();
+        let split = split_by_period(&Default::default(), &period_map, &ctx.alloc);
+        let taxable: std::collections::HashMap<String, f64> =
+            split.iter().map(|(c, v, _)| (c.clone(), *v)).collect();
+        let deducted: std::collections::HashMap<String, f64> =
+            split.iter().map(|(c, _, d)| (c.clone(), *d)).collect();
+        // Cả năm mới 12 triệu → kỳ này bị trừ hết, cơ sở tính TNCN bằng 0.
+        assert_eq!(deducted.get("PPHH").copied(), Some(12_000_000.0));
         assert!(period_is_taxable(
             0.0,
             12_000_000.0,
@@ -2194,6 +2237,7 @@ mod tests {
             ctx.group,
             &taxable,
             period_is_taxable(0.0, 12_000_000.0, ctx.settings.thresholds.exempt, true),
+            &deducted,
         );
         // Tờ khai xếp theo mã nhóm ngành → lấy đúng dòng PPHH.
         let r = out
@@ -2262,6 +2306,7 @@ mod tests {
             2,
             &full("PPHH", 1_500_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         let pphh = out.iter().find(|r| r.industry_code == "PPHH").unwrap();
         assert_eq!(pphh.revenue_up, 1_500_000_000.0); // chỉ PX1 + PX2
@@ -2285,6 +2330,7 @@ mod tests {
             2,
             &full("PPHH", 1_600_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         let pphh_year = year.iter().find(|r| r.industry_code == "PPHH").unwrap();
         assert_eq!(pphh_year.revenue_up, 1_600_000_000.0);
@@ -2355,6 +2401,7 @@ mod tests {
             2,
             &full("PPHH", 300_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         let pphh = out.iter().find(|r| r.industry_code == "PPHH").unwrap();
         assert_eq!(pphh.revenue_up, 300_000_000.0);
@@ -2532,6 +2579,7 @@ mod tax_rules_tests {
             2,
             &full("PPHH", 0.0),
             false,
+            &std::collections::HashMap::new(),
         );
         assert_eq!(pre[0].vat_tax, 0.0);
         assert_eq!(pre[0].pit_tax, 0.0);
@@ -2542,6 +2590,7 @@ mod tax_rules_tests {
             2,
             &full("PPHH", 400_000_000.0),
             true,
+            &std::collections::HashMap::new(),
         );
         assert_eq!(post[0].vat_tax, 4_000_000.0); // 400tr x 1%
         assert_eq!(post[0].pit_tax, 2_000_000.0); // 400tr x 0,5%

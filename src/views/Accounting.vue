@@ -248,6 +248,7 @@ const declTotals = computed(() => {
     revenue_up: 0,
     revenue_down: 0,
     revenue_taxable: 0,
+    pit_deduction: 0,
     vat_tax: 0,
     vat_payable: 0,
     pit_tax: 0,
@@ -256,6 +257,7 @@ const declTotals = computed(() => {
     t.revenue_up += r.revenue_up;
     t.revenue_down += r.revenue_down;
     t.revenue_taxable += r.revenue_taxable;
+    t.pit_deduction += r.pit_deduction;
     t.vat_tax += r.vat_tax;
     t.vat_payable += r.vat_payable;
     t.pit_tax += r.pit_tax;
@@ -322,7 +324,8 @@ function exportDeclarationExcel() {
     { header: "Tỷ lệ TNCN %", key: "pit_percent" },
     { header: "DT tính thuế GTGT – Tăng", key: "revenue_up" },
     { header: "DT tính thuế GTGT – Giảm", key: "revenue_down" },
-    { header: "DT tính thuế TNCN (đã trừ ngưỡng 1 tỷ)", key: "revenue_taxable" },
+    { header: "Mức trừ TNCN đã dùng trong kỳ", key: "pit_deduction" },
+    { header: "DT tính thuế TNCN (đã trừ mức trừ)", key: "revenue_taxable" },
     { header: "Thuế GTGT", key: "vat_tax" },
     { header: "Thuế GTGT phải nộp", key: "vat_payable" },
     { header: "Thuế TNCN phải nộp", key: "pit_tax" },
@@ -334,6 +337,7 @@ function exportDeclarationExcel() {
     pit_percent: r.pit_rate * 100,
     revenue_up: r.revenue_up,
     revenue_down: r.revenue_down,
+    pit_deduction: r.pit_deduction,
     revenue_taxable: r.revenue_taxable,
     vat_tax: r.vat_tax,
     vat_payable: r.vat_payable,
@@ -500,6 +504,9 @@ useKeepAliveRefresh(reload);
         <Column field="revenue_down" header="Giảm trừ DT" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
         </Column>
+        <Column field="pit_deduction" header="Trừ mức trừ TNCN" align="right">
+          <template #body="{ data }">{{ fmtVnd(data.pit_deduction) }}</template>
+        </Column>
         <Column field="revenue_taxable" header="DT tính thuế TNCN" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_taxable) }}</template>
         </Column>
@@ -542,7 +549,21 @@ useKeepAliveRefresh(reload);
           <span class="text-gray-500 block text-xs mb-1">Doanh thu tính thuế TNCN</span>
           <b>{{ fmt(overview.taxable_revenue) }} đ</b>
           <div class="text-xs text-gray-400">
-            Đã trừ mức ngưỡng {{ fmt(overview.exempt_threshold) }} đ/năm
+            DT kỳ {{ fmt(overview.period_revenue) }} đ − trừ mức trừ
+            {{ fmt(overview.exempt_period) }} đ
+          </div>
+        </div>
+        <div data-testid="exempt-quota">
+          <span class="text-gray-500 block text-xs mb-1">Hạn ngạch mức trừ TNCN còn lại</span>
+          <b>{{ fmt(overview.exempt_remaining ?? 0) }} đ</b>
+          <div class="text-xs text-gray-400">
+            Mức trừ {{ fmt(overview.exempt_threshold) }} đ/năm − đã dùng
+            {{ fmt(overview.exempt_used ?? 0) }} đ
+            {{
+              (overview.exempt_remaining ?? 0) > 0
+                ? " → doanh thu năm chưa vượt mức trừ nên TNCN theo doanh thu còn bằng 0."
+                : " → đã dùng hết mức trừ, phần doanh thu vượt mức sẽ chịu thuế TNCN."
+            }}
           </div>
         </div>
         <div>
@@ -729,7 +750,11 @@ useKeepAliveRefresh(reload);
           <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
           <template #footer>{{ declRows.length ? fmtVnd(declTotals.revenue_down) : "" }}</template>
         </Column>
-        <Column header="DT tính thuế TNCN (đã trừ ngưỡng)" align="right">
+        <Column header="Trừ mức trừ TNCN" align="right">
+          <template #body="{ data }">{{ fmtVnd(data.pit_deduction) }}</template>
+          <template #footer>{{ declRows.length ? fmtVnd(declTotals.pit_deduction) : "" }}</template>
+        </Column>
+        <Column header="DT tính thuế TNCN (đã trừ mức trừ)" align="right">
           <template #body="{ data }">{{ fmtVnd(data.revenue_taxable) }}</template>
           <template #footer>
             {{ declRows.length ? fmtVnd(declTotals.revenue_taxable) : "" }}
