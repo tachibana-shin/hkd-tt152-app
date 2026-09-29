@@ -90,12 +90,13 @@ const overview = ref<TaxOverview | null>(null);
  * ngưỡng (Điều 8 khoản 1a).
  */
 function taxBasisText(o: TaxOverview): string {
+  const th = fmtThreshold(o.exempt_threshold);
   if (o.taxed_from_start) {
-    return `Hộ thuộc diện nộp thuế suốt năm (hồ sơ chốt Nhóm ${o.group}), nên thuế tính trên toàn bộ doanh thu của kỳ — không chờ doanh thu vượt ngưỡng ${fmtThreshold(o.exempt_threshold)}.`;
+    return `Hộ thuộc diện nộp thuế suốt năm (hồ sơ chốt Nhóm ${o.group}). Thuế GTGT tính trên toàn bộ doanh thu ghi trên hóa đơn; còn thuế TNCN tính trên phần doanh thu còn lại sau khi trừ mức trừ lũy kế ${th}/năm (trừ dần theo doanh thu các kỳ trước và kỳ này), nên ${o.taxable_revenue > 0 ? `kỳ này còn ${fmt(o.taxable_revenue)} đ chịu thuế.` : `khi doanh thu cả năm chưa vượt ${th} thì thuế TNCN bằng 0.`}`;
   }
   return o.taxable_period
-    ? `Ngưỡng ${fmtThreshold(o.exempt_threshold)} đã bị vượt trong năm nên từ kỳ vượt ngưỡng hộ phải nộp thuế.`
-    : `Chưa vượt ngưỡng ${fmtThreshold(o.exempt_threshold)}/năm nên kỳ này chưa phát sinh thuế.`;
+    ? `Ngưỡng ${th} đã bị vượt trong năm nên từ kỳ vượt ngưỡng hộ phải nộp thuế; thuế TNCN vẫn trừ mức trừ lũy kế ${th}/năm.`
+    : `Chưa vượt ngưỡng ${th}/năm nên kỳ này chưa phát sinh thuế.`;
 }
 
 /** Nhóm hộ đang dùng lấy từ đâu — nói rõ để người dùng tin con số. */

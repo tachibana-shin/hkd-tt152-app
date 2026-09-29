@@ -2479,8 +2479,10 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   await expect(page.getByTestId("tax-group-source-note")).toContainText("hồ sơ HKD");
   await expect(page.getByTestId("tax-group-source-note")).toContainText("nộp thuế suốt năm");
   const textG2 = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  // GTGT: 1% trên toàn bộ doanh thu ghi trên hóa đơn → có số.
   expect(textG2, "hồ sơ Nhóm 2: phải có thuế GTGT").not.toContain("Tổng thuế GTGT: 0 đ");
-  expect(textG2, "hồ sơ Nhóm 2: phải có thuế TNCN").not.toContain("Tổng thuế TNCN: 0 đ");
+  // TNCN: doanh thu mới 10.000.000 < mức trừ 01 tỷ → cơ sở tính thuế bằng 0.
+  expect(textG2, "hồ sơ Nhóm 2 + DT dưới mức trừ: thuế TNCN = 0").toContain("Tổng thuế TNCN: 0 đ");
 
   // ── 3. Cài đặt: hạ ngưỡng xuống 5.000.000 → doanh thu 10.000.000 đã vượt ngưỡng
   // → phải phát sinh thuế dù hồ sơ vẫn ghi Nhóm 2.

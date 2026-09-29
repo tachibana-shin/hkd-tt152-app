@@ -955,6 +955,10 @@ pub(crate) async fn load_period_costs(
 /// xác định): hộ đã thuộc diện nộp thuế cả năm nên kỳ nào có doanh thu là phải
 /// nộp, không chờ vượt ngưỡng. Ngược lại (hồ sơ để Nhóm 1 hoặc chưa chốt) thì
 /// áp dụng đúng Điều 8 khoản 1a: chỉ nộp từ kỳ doanh thu lũy kế vượt ngưỡng.
+///
+/// Lưu ý hàm này chỉ quyết định **có phát sinh nghĩa vụ khai hay không** (cổng
+/// GTGT). Mức trừ ngưỡng của TNCN là chuyện khác, do `exempt_alloc` +
+/// `taxable_by_period` xử lý theo doanh thu lũy kế của các kỳ trước + kỳ này.
 pub(crate) fn period_is_taxable(
     cum_before: f64,
     in_period: f64,
@@ -1069,7 +1073,8 @@ pub(crate) struct TaxContext {
     /// chốt) — dùng để hiển thị "nhóm của năm đã chốt, không đổi giữa năm".
     pub(crate) frozen_group: Option<i64>,
     /// true = hồ sơ HKD đã chốt Nhóm 2/3/4 → hộ thuộc diện nộp thuế suốt năm,
-    /// mọi kỳ có doanh thu đều phải nộp, không chờ doanh thu vượt ngưỡng.
+    /// mọi kỳ có doanh thu đều phải nộp GTGT, không chờ doanh thu vượt ngưỡng
+    /// (mức trừ ngưỡng của TNCN vẫn áp dụng như bình thường).
     pub(crate) taxed_from_start: bool,
     pub(crate) year_revenue: f64,
     pub(crate) alloc: Vec<(String, f64)>,
@@ -1105,15 +1110,13 @@ pub(crate) async fn load_tax_context(pool: &SqlitePool, year: i64) -> Result<Tax
         .await;
         frozen = settings.group_by_year.get(year);
     }
-    // Hồ sơ chốt Nhóm 2/3/4 = cơ quan thuế đã xác định hộ thuộc diện nộp thuế,
-    // nên nộp ngay từ kỳ có doanh thu và KHÔNG trừ mức ngưỡng (ngưỡng chỉ dùng để
-    // xác định nhóm, không phải khoản miễn cho hộ đã thuộc diện).
+    // Hồ sơ chốt Nhóm 2/3/4 = cơ quan thuế đã xác định hộ thuộc diện nộp thuế cả
+    // năm, nên mọi kỳ có doanh thu đều phải khai (không chờ vượt ngưỡng).
+    // Lưu ý: điều này KHÔNG đụng tới mức trừ ngưỡng của TNCN — GTGT tính trên toàn
+    // bộ doanh thu ghi trên hóa đơn, còn doanh thu tính thuế TNCN vẫn là phần doanh
+    // thu còn lại sau khi khấu trừ mức trừ lũy kế (xem `exempt_alloc`).
     let taxed_from_start = stored.is_some() && group >= 2;
-    let alloc = if taxed_from_start {
-        Vec::new()
-    } else {
-        exempt_alloc(&year_rows, thresholds.exempt, &settings.exempt_choice)
-    };
+    let alloc = exempt_alloc(&year_rows, thresholds.exempt, &settings.exempt_choice);
     Ok(TaxContext {
         settings,
         group,
@@ -2164,9 +2167,12 @@ mod tests {
             ctx.taxed_from_start,
             "chốt Nhóm 2 là thuộc diện nộp thuế cả năm"
         );
-        assert!(
-            ctx.alloc.is_empty(),
-            "hộ thuộc diện nộp thuế thì không trừ mức ngưỡng"
+        // Mức trừ vẫn còn, nhưng không bao giờ vượt doanh thu thật được: cả năm mới
+        // 12 triệu thì trừ hết 12 triệu → doanh thu tính thuế TNCN bằng 0.
+        assert_eq!(
+            ctx.alloc.iter().map(|(_, v)| *v).sum::<f64>(),
+            12_000_000.0,
+            "mức trừ bị giới hạn bởi doanh thu thật được"
         );
 
         // Kỳ có doanh thu → phải chịu thuế dù lũy kế 12 triệu < 01 tỷ.
@@ -2194,9 +2200,12 @@ mod tests {
             .iter()
             .find(|r| r.industry_code == "PPHH")
             .expect("dòng PPHH");
+        // GTGT: 1% × toàn bộ doanh thu ghi trên hóa đơn (ngưỡng không trừ cho GTGT).
         assert_eq!(r.vat_tax, 120_000.0, "12 triệu × 1%");
-        assert_eq!(r.pit_tax, 60_000.0, "12 triệu × 0,5%");
-        assert_eq!(r.revenue_taxable, 12_000_000.0, "không trừ mức ngưỡng");
+        // TNCN: doanh thu tính thuế = phần còn lại sau khi trừ mức trừ lũy kế 01 tỷ
+        // (12 triệu chưa vượt mức trừ nên bằng 0) → không phát sinh thuế TNCN.
+        assert_eq!(r.revenue_taxable, 0.0, "12 triệu < mức trừ 01 tỷ");
+        assert_eq!(r.pit_tax, 0.0);
     }
 
     #[tokio::test]
