@@ -1,5 +1,18 @@
 # Changelog
 
+# [0.10.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.3...v0.10.0) (2026-09-29)
+
+
+### Bug Fixes
+
+* **books:** ignore a crafted `back` query when returning from a book screen ([cd231fa](https://github.com/tachibana-shin/hkd-tt152-app/commit/cd231fae936cac4ead3f6a30d1afb00c41f18086))
+
+
+### Features
+
+* **books:** inherit the Kế toán HKD date range when opening a book and add a back button ([5539f6b](https://github.com/tachibana-shin/hkd-tt152-app/commit/5539f6b16bcd98504210328a8e79c82e4e2d8df7))
+* **tax:** make revenue thresholds configurable and stabilise the household group per year ([6464a43](https://github.com/tachibana-shin/hkd-tt152-app/commit/6464a4319418cb4f6c69edace8773a689a2be4e5))
+
 ## [0.9.3](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.2...v0.9.3) (2026-09-29)
 
 
