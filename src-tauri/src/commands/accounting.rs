@@ -229,6 +229,7 @@ pub(crate) async fn get_tax_summary(
         cum.values().sum(),
         period.values().sum(),
         ctx.settings.thresholds.exempt,
+        ctx.taxed_from_start,
     );
     let out = build_tax_declaration(
         rows,
@@ -949,7 +950,20 @@ pub(crate) async fn load_period_costs(
 ///
 /// `cum_before` = doanh thu lũy kế từ đầu năm tới trước kỳ, `in_period` = doanh
 /// thu của kỳ đang xem.
-pub(crate) fn period_is_taxable(cum_before: f64, in_period: f64, threshold: f64) -> bool {
+///
+/// `taxed_from_start` = hộ đã chốt Nhóm 2/3/4 trong hồ sơ HKD (do cơ quan thuế
+/// xác định): hộ đã thuộc diện nộp thuế cả năm nên kỳ nào có doanh thu là phải
+/// nộp, không chờ vượt ngưỡng. Ngược lại (hồ sơ để Nhóm 1 hoặc chưa chốt) thì
+/// áp dụng đúng Điều 8 khoản 1a: chỉ nộp từ kỳ doanh thu lũy kế vượt ngưỡng.
+pub(crate) fn period_is_taxable(
+    cum_before: f64,
+    in_period: f64,
+    threshold: f64,
+    taxed_from_start: bool,
+) -> bool {
+    if taxed_from_start {
+        return in_period > 0.0;
+    }
     cum_before + in_period > threshold
 }
 
@@ -1054,6 +1068,9 @@ pub(crate) struct TaxContext {
     /// Nhóm app đã ghim cho năm tính thuế này (đã vượt ngưỡng nhưng hồ sơ chưa
     /// chốt) — dùng để hiển thị "nhóm của năm đã chốt, không đổi giữa năm".
     pub(crate) frozen_group: Option<i64>,
+    /// true = hồ sơ HKD đã chốt Nhóm 2/3/4 → hộ thuộc diện nộp thuế suốt năm,
+    /// mọi kỳ có doanh thu đều phải nộp, không chờ doanh thu vượt ngưỡng.
+    pub(crate) taxed_from_start: bool,
     pub(crate) year_revenue: f64,
     pub(crate) alloc: Vec<(String, f64)>,
 }
@@ -1088,13 +1105,22 @@ pub(crate) async fn load_tax_context(pool: &SqlitePool, year: i64) -> Result<Tax
         .await;
         frozen = settings.group_by_year.get(year);
     }
-    let alloc = exempt_alloc(&year_rows, thresholds.exempt, &settings.exempt_choice);
+    // Hồ sơ chốt Nhóm 2/3/4 = cơ quan thuế đã xác định hộ thuộc diện nộp thuế,
+    // nên nộp ngay từ kỳ có doanh thu và KHÔNG trừ mức ngưỡng (ngưỡng chỉ dùng để
+    // xác định nhóm, không phải khoản miễn cho hộ đã thuộc diện).
+    let taxed_from_start = stored.is_some() && group >= 2;
+    let alloc = if taxed_from_start {
+        Vec::new()
+    } else {
+        exempt_alloc(&year_rows, thresholds.exempt, &settings.exempt_choice)
+    };
     Ok(TaxContext {
         settings,
         group,
         auto_group,
         group_from_profile: stored.is_some(),
         frozen_group: frozen,
+        taxed_from_start,
         year_revenue,
         alloc,
     })
@@ -1139,6 +1165,7 @@ pub(crate) async fn get_tax_declaration(
         cum_before.values().sum(),
         period_map.values().sum(),
         ctx.settings.thresholds.exempt,
+        ctx.taxed_from_start,
     );
     let out = build_tax_declaration(
         rows,
@@ -1230,6 +1257,7 @@ pub(crate) async fn get_tax_overview(
         cum_before.values().sum(),
         period_map.values().sum(),
         ctx.settings.thresholds.exempt,
+        ctx.taxed_from_start,
     );
 
     // Thuế GTGT phải nộp: tổng tiền ghi trên hóa đơn × tỷ lệ ngành (Điều 12
@@ -1297,6 +1325,7 @@ pub(crate) async fn get_tax_overview(
         auto_group: ctx.auto_group,
         group_from_profile: ctx.group_from_profile,
         frozen_group: ctx.frozen_group,
+        taxed_from_start: ctx.taxed_from_start,
         method: ctx.settings.method.clone(),
         period_revenue: round2(period_revenue),
         taxable_revenue: round2(taxable_revenue),
@@ -1401,7 +1430,7 @@ pub(crate) async fn get_tax_settlement(
     let income = round2(revenue - expense);
     // Quyết toán cả năm chỉ có nghĩa khi hộ thuộc diện tính thuế (Điều 8 khoản 1a);
     // hộ cả năm không vượt ngưỡng thì tổng thuế bằng 0 dù hồ sơ ghi nhóm nào.
-    let year_taxable = ctx.year_revenue > ctx.settings.thresholds.exempt;
+    let year_taxable = ctx.taxed_from_start || ctx.year_revenue > ctx.settings.thresholds.exempt;
     let rate = if year_taxable {
         profit_tncn_rate(ctx.group)
     } else {
@@ -1429,11 +1458,21 @@ pub(crate) async fn get_tax_settlement(
         let rows_m = load_tax_agg_range(&pool, year, m as i64, m as i64).await?;
         cum[m] = cum[m - 1] + year_revenue(&rows_m);
     }
-    let first = first_taxable_period(
-        &cum,
-        ctx.settings.thresholds.exempt,
-        months_per_period(period_kind),
-    );
+    let step = months_per_period(period_kind);
+    let first = if ctx.taxed_from_start {
+        // Hộ thuộc diện nộp thuế cả năm → kỳ tính thuế đầu tiên là kỳ có doanh
+        // thu đầu tiên, không chờ vượt ngưỡng.
+        (1..=12i64)
+            .step_by(step as usize)
+            .find(|m| cum[*m as usize] > cum[*m as usize - 1])
+            .map(|m| (m / step, m))
+    } else {
+        first_taxable_period(
+            &cum,
+            ctx.settings.thresholds.exempt,
+            months_per_period(period_kind),
+        )
+    };
 
     let out = json!({
         "year": year,
@@ -2094,6 +2133,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ho_ho_so_nhom_2_thi_phai_nop_thue_du_dt_chua_vuot_nguong() {
+        // Trường hợp người dùng thật gặp: hồ sơ chốt Nhóm 2, doanh thu năm chỉ
+        // 12,4 triệu (chưa vượt ngưỡng 01 tỷ) nhưng tờ khai ra thuế = 0. Sai, vì
+        // ngưỡng chỉ dùng XẾP NHÓM chứ không phải khoản miễn cho hộ đã thuộc diện
+        // nộp thuế — khi đó thuế tính trên toàn bộ doanh thu của kỳ.
+        let pool = test_pool().await;
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        sqlx::query("UPDATE business SET tax_group = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        add_journal_px(
+            &pool,
+            "2026-07-10",
+            "PX-G2",
+            "P1",
+            "PPHH",
+            12.0,
+            1_000_000.0,
+            12_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+
+        let ctx = load_tax_context(&pool, 2026).await.unwrap();
+        assert_eq!(ctx.group, 2, "nhóm lấy từ hồ sơ");
+        assert!(
+            ctx.taxed_from_start,
+            "chốt Nhóm 2 là thuộc diện nộp thuế cả năm"
+        );
+        assert!(
+            ctx.alloc.is_empty(),
+            "hộ thuộc diện nộp thuế thì không trừ mức ngưỡng"
+        );
+
+        // Kỳ có doanh thu → phải chịu thuế dù lũy kế 12 triệu < 01 tỷ.
+        let period_map = std::collections::HashMap::from([("PPHH".to_string(), 12_000_000.0)]);
+        let taxable = taxable_by_period(&Default::default(), &period_map, &ctx.alloc)
+            .into_iter()
+            .collect();
+        assert!(period_is_taxable(
+            0.0,
+            12_000_000.0,
+            ctx.settings.thresholds.exempt,
+            true
+        ));
+
+        let rows = load_tax_agg_range(&pool, 2026, 7, 7).await.unwrap();
+        let out = build_tax_declaration(
+            rows,
+            "revenue",
+            ctx.group,
+            &taxable,
+            period_is_taxable(0.0, 12_000_000.0, ctx.settings.thresholds.exempt, true),
+        );
+        // Tờ khai xếp theo mã nhóm ngành → lấy đúng dòng PPHH.
+        let r = out
+            .iter()
+            .find(|r| r.industry_code == "PPHH")
+            .expect("dòng PPHH");
+        assert_eq!(r.vat_tax, 120_000.0, "12 triệu × 1%");
+        assert_eq!(r.pit_tax, 60_000.0, "12 triệu × 0,5%");
+        assert_eq!(r.revenue_taxable, 12_000_000.0, "không trừ mức ngưỡng");
+    }
+
+    #[tokio::test]
     async fn to_khai_tu_db_tong_hop_theo_ky() {
         let pool = test_pool().await;
         seed_product(&pool, "P1", "Hàng 1", 0.01).await;
@@ -2375,18 +2481,39 @@ mod tax_rules_tests {
     fn ky_truoc_khi_vuot_nguong_thi_chua_phat_sinh_thue() {
         // Điều 8 khoản 1a: khai, nộp thuế KỂ TỪ kỳ phát sinh doanh thu vượt ngưỡng.
         // Quý 1–2 doanh thu lũy kế chưa vượt 01 tỷ → chưa phát sinh thuế.
-        assert!(!period_is_taxable(0.0, 400_000_000.0, THRESHOLD_EXEMPT));
+        assert!(!period_is_taxable(
+            0.0,
+            400_000_000.0,
+            THRESHOLD_EXEMPT,
+            false
+        ));
         assert!(!period_is_taxable(
             400_000_000.0,
             550_000_000.0,
-            THRESHOLD_EXEMPT
+            THRESHOLD_EXEMPT,
+            false
         ));
         // Quý 3 lũy kế 1,1 tỷ → có nghĩa vụ; cả GTGT lẫn TNCN tính trên quý này.
         assert!(period_is_taxable(
             950_000_000.0,
             150_000_000.0,
-            THRESHOLD_EXEMPT
+            THRESHOLD_EXEMPT,
+            false
         ));
+
+        // Hồ sơ chốt Nhóm 2/3/4 → thuộc diện nộp thuế suốt năm: kỳ nào có doanh
+        // thu là phải nộp, không chờ vượt ngưỡng.
+        assert!(period_is_taxable(
+            0.0,
+            400_000_000.0,
+            THRESHOLD_EXEMPT,
+            true
+        ));
+        assert!(period_is_taxable(0.0, 1.0, THRESHOLD_EXEMPT, true));
+        assert!(
+            !period_is_taxable(0.0, 0.0, THRESHOLD_EXEMPT, true),
+            "kỳ không có DT"
+        );
 
         // Hệ quả trên tờ khai: hộ nhóm 2 (DT cả năm > 1 tỷ) nhưng kỳ trước khi
         // vượt ngưỡng thì cột thuế vẫn bằng 0.

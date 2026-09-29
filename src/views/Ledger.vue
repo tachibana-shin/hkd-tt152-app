@@ -137,11 +137,6 @@ useKeepAliveRefresh(reload);
             />
           </div>
           <div v-if="rangeInherited" class="flex items-center gap-2 pb-1">
-            <Tag
-              value="Đang xem đúng khoảng ngày của màn trước"
-              severity="info"
-              data-testid="ledger-range-inherited"
-            />
             <Button label="Xem cả năm" size="small" text @click="clearInheritedRange" />
           </div>
           <div>

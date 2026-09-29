@@ -2086,7 +2086,6 @@ test("Sổ kế toán kế thừa khoảng ngày của Kế toán HKD và có n�
   await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
   await expect(datePicker("Từ ngày")).toHaveValue(accountingRange.from);
   await expect(datePicker("Đến ngày")).toHaveValue(accountingRange.to);
-  await expect(page.getByTestId("ledger-range-inherited")).toBeVisible();
 
   // Nút quay lại đưa về đúng màn Kế toán HKD, vẫn giữ khoảng ngày cũ.
   await page.getByTestId("back-to-accounting").click();
@@ -2472,19 +2471,16 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   await expect(page.getByTestId("tax-group-note")).toContainText("ổn định");
   await expect(page.getByTestId("tax-group-warning")).toHaveCount(0);
 
-  // ── 2. Nhóm 2 trong hồ sơ mà doanh thu chưa vượt ngưỡng → KHÔNG phát sinh thuế
-  // (Điều 8 khoản 1a). Nhãn nhóm trong hồ sơ không tạo ra thuế giả.
+  // ── 2. Hồ sơ chốt Nhóm 2 → hộ thuộc diện nộp thuế suốt năm, phải ra số thuế dù
+  // doanh thu chưa vượt ngưỡng (ngưỡng chỉ dùng xếp nhóm, không phải khoản miễn).
   await page.keyboard.press("Escape");
   await page.waitForTimeout(800);
   await expect(page.getByTestId("tax-group-source-note")).toBeVisible();
   await expect(page.getByTestId("tax-group-source-note")).toContainText("hồ sơ HKD");
+  await expect(page.getByTestId("tax-group-source-note")).toContainText("nộp thuế suốt năm");
   const textG2 = (await page.locator("main").innerText()).replace(/\s+/g, " ");
-  expect(textG2, "hồ sơ Nhóm 2 + DT chưa vượt ngưỡng: tổng thuế GTGT = 0").toContain(
-    "Tổng thuế GTGT: 0 đ",
-  );
-  expect(textG2, "hồ sơ Nhóm 2 + DT chưa vượt ngưỡng: tổng thuế TNCN = 0").toContain(
-    "Tổng thuế TNCN: 0 đ",
-  );
+  expect(textG2, "hồ sơ Nhóm 2: phải có thuế GTGT").not.toContain("Tổng thuế GTGT: 0 đ");
+  expect(textG2, "hồ sơ Nhóm 2: phải có thuế TNCN").not.toContain("Tổng thuế TNCN: 0 đ");
 
   // ── 3. Cài đặt: hạ ngưỡng xuống 5.000.000 → doanh thu 10.000.000 đã vượt ngưỡng
   // → phải phát sinh thuế dù hồ sơ vẫn ghi Nhóm 2.
@@ -2498,13 +2494,16 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   await sidebarButton(page, "Kế toán HKD").click();
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
   await page.waitForTimeout(1200);
+  await expect(page.getByTestId("tax-group-source-note")).toContainText("nộp thuế suốt năm");
+
+  // Hạ ngưỡng không làm đổi kết quả của hộ đã chốt Nhóm 2 → chứng minh ngưỡng chỉ
+  // quyết định nhóm, không phải khoản miễn thuế.
   const textLow = (await page.locator("main").innerText()).replace(/\s+/g, " ");
-  expect(textLow, "vượt ngưỡng do người dùng đặt: thuế GTGT > 0").not.toContain(
+  expect(textLow, "hạ ngưỡng không được xoá thuế của hộ thuộc diện nộp").not.toContain(
     "Tổng thuế GTGT: 0 đ",
   );
-  await expect(page.getByTestId("tax-group-source-note")).toContainText("đã bị vượt trong năm");
 
-  // ── 4. Trả ngưỡng về 01 tỷ → thuế lại bằng 0, rồi dọn hồ sơ về Nhóm 1
+  // ── 4. Trả ngưỡng về 01 tỷ, dọn hồ sơ về Nhóm 1 → thuế bằng 0 vì hộ thuộc diện miễn
   await openTab(page, "Cài đặt", "/settings");
   await page.getByTestId("tax-threshold-exempt").locator("input").fill("1000000000");
   await page.keyboard.press("Tab");

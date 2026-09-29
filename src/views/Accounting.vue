@@ -81,6 +81,23 @@ async function loadReports() {
 const declRows = ref<TaxDeclarationRow[]>([]);
 const declLoading = ref(false);
 const overview = ref<TaxOverview | null>(null);
+/**
+ * Căn cứ tính thuế của kỳ: hộ thuộc diện nộp cả năm, hay kỳ này chưa vượt ngưỡng.
+ *
+ * Hai trường hợp cho hai con số khác nhau nên phải nói rõ, tránh tưởng app tính sai:
+ * hồ sơ chốt Nhóm 2/3/4 → thuộc diện nộp thuế suốt năm, tính trên toàn bộ doanh
+ * thu của kỳ; hồ sơ để Nhóm 1 hoặc chưa chốt → chỉ nộp từ kỳ doanh thu lũy kế vượt
+ * ngưỡng (Điều 8 khoản 1a).
+ */
+function taxBasisText(o: TaxOverview): string {
+  if (o.taxed_from_start) {
+    return `Hộ thuộc diện nộp thuế suốt năm (hồ sơ chốt Nhóm ${o.group}), nên thuế tính trên toàn bộ doanh thu của kỳ — không chờ doanh thu vượt ngưỡng ${fmtThreshold(o.exempt_threshold)}.`;
+  }
+  return o.taxable_period
+    ? `Ngưỡng ${fmtThreshold(o.exempt_threshold)} đã bị vượt trong năm nên từ kỳ vượt ngưỡng hộ phải nộp thuế.`
+    : `Chưa vượt ngưỡng ${fmtThreshold(o.exempt_threshold)}/năm nên kỳ này chưa phát sinh thuế.`;
+}
+
 /** Nhóm hộ đang dùng lấy từ đâu — nói rõ để người dùng tin con số. */
 function groupSourceText(o: TaxOverview): string {
   if (o.group_from_profile) return "lấy từ hồ sơ HKD (bạn đã chốt, dùng cho mọi kỳ).";
@@ -595,15 +612,9 @@ useKeepAliveRefresh(reload);
         data-testid="tax-group-source-note"
         class="mt-3 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600"
       >
-        <b>Nhóm hộ: Nhóm {{ overview.group }}</b> — {{ groupSourceText(overview) }} Doanh thu cả năm
-        hiện tại {{ fmt(overview.year_revenue) }} đ (doanh thu năm chưa kết thúc nên mức này còn
-        tăng).
-        {{
-          overview.taxable_period
-            ? `Ngưỡng ${fmt(overview.exempt_threshold)} đ đã bị vượt trong năm nên từ kỳ vượt ngưỡng hộ phải nộp thuế.`
-            : `Chưa vượt ngưỡng ${fmt(overview.exempt_threshold)} đ/năm nên kỳ này chưa phát sinh thuế.`
-        }}
-        Muốn đổi ngưỡng: màn <b>Cài đặt</b>.
+        <b>Nhóm hộ: Nhóm {{ overview.group }}</b> — {{ groupSourceText(overview) }}
+        {{ taxBasisText(overview) }} Doanh thu cả năm hiện tại {{ fmt(overview.year_revenue) }} đ
+        (năm chưa kết thúc nên mức này còn tăng). Muốn đổi ngưỡng: màn <b>Cài đặt</b>.
       </div>
       <p
         v-if="overview && !overview.group && !overview.taxable_period"

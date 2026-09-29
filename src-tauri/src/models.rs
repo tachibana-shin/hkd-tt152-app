@@ -618,6 +618,9 @@ pub(crate) struct TaxOverview {
     /// Nhóm app đã ghim cho năm này khi hộ vượt ngưỡng mà hồ sơ chưa chốt nhóm —
     /// nhóm của năm giữ nguyên, vượt mốc giữa năm không chuyển sang nhóm kế tiếp.
     pub(crate) frozen_group: Option<i64>,
+    /// true = hồ sơ HKD chốt Nhóm 2/3/4: hộ thuộc diện nộp thuế suốt năm, mọi kỳ
+    /// có doanh thu đều phải nộp (không chờ vượt ngưỡng, không trừ mức ngưỡng).
+    pub(crate) taxed_from_start: bool,
     /// Phương pháp tính TNCN đang áp dụng: "revenue" | "profit"
     pub(crate) method: String,
     /// Doanh thu trong kỳ khai

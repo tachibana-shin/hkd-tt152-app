@@ -697,6 +697,11 @@ export interface TaxOverview {
   group_from_profile?: boolean;
   /** Nhóm app đã ghim cho năm này (đã vượt ngưỡng mà hồ sơ chưa chốt nhóm). */
   frozen_group?: number | null;
+  /**
+   * true = hồ sơ HKD chốt Nhóm 2/3/4: hộ thuộc diện nộp thuế suốt năm, mọi kỳ có
+   * doanh thu đều phải nộp — không chờ doanh thu vượt ngưỡng.
+   */
+  taxed_from_start?: boolean;
   /** Phương pháp TNCN đang áp dụng: "revenue" | "profit" */
   method: string;
   period_revenue: number; // doanh thu kỳ khai
