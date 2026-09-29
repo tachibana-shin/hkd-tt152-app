@@ -639,6 +639,9 @@ pub(crate) struct TaxOverview {
     pub(crate) profit: f64,
     /// Thuế suất TNCN theo lợi nhuận (15%/17%/20%) hoặc 0 nếu không áp dụng
     pub(crate) profit_rate: f64,
+    /// false = doanh thu lũy kế tới cuối kỳ chưa vượt mức ngưỡng 01 tỷ → kỳ này
+    /// chưa phát sinh thuế (Điều 8 khoản 1a NĐ 68/2026).
+    pub(crate) taxable_period: bool,
     pub(crate) vat_payable: f64,
     pub(crate) pit_tax: f64,
     /// Số thuế TNCN tạm nộp theo tỷ lệ % × doanh thu kỳ (Điều 10 khoản 2 điểm b

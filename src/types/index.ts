@@ -688,6 +688,12 @@ export interface TaxOverview {
   taxable_revenue: number;
   /** Mức trừ ngưỡng áp dụng cho năm (01 tỷ đồng — NĐ 141/2026/NĐ-CP). */
   exempt_threshold: number;
+  /**
+   * false = doanh thu lũy kế tới cuối kỳ vẫn chưa vượt mức ngưỡng 01 tỷ nên kỳ
+   * này chưa phát sinh thuế — khai, nộp thuế kể từ kỳ phát sinh (Điều 8 khoản 1a
+   * NĐ 68/2026), kể cả khi hộ đã thuộc nhóm 2 vì nhóm xếp theo cả năm.
+   */
+  taxable_period?: boolean;
   /** Giá vốn FIFO tính từ phiếu nhập. */
   cogs: number;
   /** Khoản chi khác được trừ (phiếu chi đủ chứng từ). */

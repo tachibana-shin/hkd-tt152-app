@@ -225,7 +225,15 @@ pub(crate) async fn get_tax_summary(
     let taxable = taxable_by_period(&cum, &period, &ctx.alloc)
         .into_iter()
         .collect();
-    let out = build_tax_declaration(rows, &ctx.settings.method, ctx.group, &taxable);
+    let taxable_period =
+        period_is_taxable(cum.values().sum(), period.values().sum(), THRESHOLD_EXEMPT);
+    let out = build_tax_declaration(
+        rows,
+        &ctx.settings.method,
+        ctx.group,
+        &taxable,
+        taxable_period,
+    );
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
 
@@ -817,6 +825,20 @@ pub(crate) async fn load_period_costs(
     Ok((round2(ok), round2(no), warnings))
 }
 
+/// Kỳ này đã phát sinh nghĩa vụ thuế chưa.
+///
+/// NĐ 68/2026 Điều 8 khoản 1 điểm a: hộ có doanh thu năm từ 01 tỷ trở xuống thì
+/// chỉ thông báo; **"phát sinh doanh thu thực tế trên [ngưỡng] trong năm thì khai,
+/// nộp thuế kể từ quý phát sinh"**. Nghĩa là kỳ mà doanh thu lũy kế tới cuối kỳ
+/// vẫn chưa vượt ngưỡng thì chưa phát sinh thuế GTGT lẫn TNCN — kể cả khi hộ đã
+/// thuộc nhóm 2, vì nhóm 2 được xếp từ tổng doanh thu cả năm.
+///
+/// `cum_before` = doanh thu lũy kế từ đầu năm tới trước kỳ, `in_period` = doanh
+/// thu của kỳ đang xem.
+pub(crate) fn period_is_taxable(cum_before: f64, in_period: f64, threshold: f64) -> bool {
+    cum_before + in_period > threshold
+}
+
 /// Doanh thu tính thuế TNCN của từng nhóm ngành **trong kỳ**, theo phương pháp
 /// trừ ngưỡng lũy kế.
 ///
@@ -856,8 +878,11 @@ pub(crate) fn build_tax_declaration(
     method: &str,
     group: i64,
     taxable: &std::collections::HashMap<String, f64>,
+    // false = kỳ nằm trước khi hộ vượt ngưỡng 01 tỷ → chưa phát sinh thuế
+    // (Điều 8 khoản 1a) dù hộ đã thuộc nhóm 2.
+    taxable_period: bool,
 ) -> Vec<TaxDeclarationRow> {
-    let exempt = group == 1;
+    let exempt = group == 1 || !taxable_period;
     rows.into_iter()
         .map(|r| {
             let base = net_revenue(&r);
@@ -967,7 +992,18 @@ pub(crate) async fn get_tax_declaration(
         taxable_by_period(&cum_before, &period_map, &ctx.alloc)
             .into_iter()
             .collect();
-    let out = build_tax_declaration(rows, &ctx.settings.method, ctx.group, &taxable);
+    let taxable_period = period_is_taxable(
+        cum_before.values().sum(),
+        period_map.values().sum(),
+        THRESHOLD_EXEMPT,
+    );
+    let out = build_tax_declaration(
+        rows,
+        &ctx.settings.method,
+        ctx.group,
+        &taxable,
+        taxable_period,
+    );
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
 
@@ -1036,10 +1072,19 @@ pub(crate) async fn get_tax_overview(
     let expense = round2(cogs + cost_ok);
     let profit = round2(period_revenue - expense);
 
+    // Kỳ này đã vượt ngưỡng 01 tỷ chưa (Điều 8 khoản 1a): hộ chưa phát sinh thuế
+    // trong kỳ thì cả GTGT lẫn TNCN đều bằng 0, kể cả khi hộ đã thuộc nhóm 2 vì
+    // nhóm hộ được xếp theo tổng doanh thu cả năm.
+    let taxable_period = period_is_taxable(
+        cum_before.values().sum(),
+        period_map.values().sum(),
+        THRESHOLD_EXEMPT,
+    );
+
     // Thuế GTGT phải nộp: tổng tiền ghi trên hóa đơn × tỷ lệ ngành (Điều 12
     // khoản 2 Luật GTGT) — hóa đơn HKD không tách thuế nên chính doanh thu là
     // cơ sở tính. Nhóm 1 thì miễn.
-    let vat_payable: f64 = if ctx.group == 1 {
+    let vat_payable: f64 = if ctx.group == 1 || !taxable_period {
         0.0
     } else {
         period_rows
@@ -1051,7 +1096,7 @@ pub(crate) async fn get_tax_overview(
     // Thuế TNCN (Điều 7 Luật TNCN + Điều 10 khoản 2 NĐ 68/2026):
     //   Nhóm 2 + phương pháp doanh thu → doanh thu TÍNH THUẾ (đã trừ ngưỡng) × tỷ lệ ngành
     //   Còn lại → thu nhập tính thuế (DT − CP được trừ) × 15%/17%/20%
-    let pit_tax: f64 = if ctx.group == 1 {
+    let pit_tax: f64 = if ctx.group == 1 || !taxable_period {
         0.0
     } else if ctx.group == 2 && ctx.settings.method == "revenue" {
         period_rows
@@ -1081,18 +1126,20 @@ pub(crate) async fn get_tax_overview(
 
     // Số tạm nộp theo Điều 10 khoản 2 điểm b: hộ nộp TNCN theo thu nhập tính
     // thuế thì tạm nộp theo tỷ lệ % × doanh thu của kỳ, rồi quyết toán cả năm.
-    let pit_provisional: f64 =
-        if ctx.group == 1 || ctx.group == 2 && ctx.settings.method == "revenue" {
-            pit_tax
-        } else {
-            period_rows
-                .iter()
-                .map(|r| {
-                    let t = taxable.get(&r.industry_code).copied().unwrap_or(0.0);
-                    round2(t * r.pit_rate)
-                })
-                .sum()
-        };
+    let pit_provisional: f64 = if ctx.group == 1
+        || !taxable_period
+        || (ctx.group == 2 && ctx.settings.method == "revenue")
+    {
+        pit_tax
+    } else {
+        period_rows
+            .iter()
+            .map(|r| {
+                let t = taxable.get(&r.industry_code).copied().unwrap_or(0.0);
+                round2(t * r.pit_rate)
+            })
+            .sum()
+    };
 
     let overview = TaxOverview {
         year,
@@ -1111,6 +1158,7 @@ pub(crate) async fn get_tax_overview(
         cost_warnings,
         profit,
         profit_rate,
+        taxable_period,
         vat_payable: round2(vat_payable),
         pit_tax: round2(pit_tax),
         pit_provisional: round2(pit_provisional),
@@ -1683,6 +1731,7 @@ mod tests {
             "revenue",
             2,
             &full("PPHH", 100_000_000.0),
+            true,
         );
         let r = &out[0];
         assert_eq!(r.vat_tax, 1_000_000.0);
@@ -1698,6 +1747,7 @@ mod tests {
             "revenue",
             2,
             &full("PPHH", 90_000_000.0),
+            true,
         );
         let r = &out[0];
         assert_eq!(r.revenue_up, 100_000_000.0);
@@ -1715,6 +1765,7 @@ mod tests {
             "revenue",
             1,
             &full("PPHH", 0.0),
+            true,
         );
         let r = &out[0];
         assert_eq!(r.vat_tax, 0.0);
@@ -1733,6 +1784,7 @@ mod tests {
             "profit",
             2,
             &full("PPHH", 0.0),
+            true,
         );
         assert_eq!(out[0].pit_tax, 0.0);
         assert_eq!(out[0].vat_tax, 20_000_000.0); // 2 tỷ x 1%
@@ -1746,6 +1798,7 @@ mod tests {
             "revenue",
             3,
             &full("PPHH", 0.0),
+            true,
         );
         assert_eq!(out[0].pit_tax, 0.0);
         assert_eq!(out[0].vat_tax, 100_000_000.0); // 10 tỷ x 1%
@@ -1836,6 +1889,7 @@ mod tests {
             "revenue",
             2,
             &full("PPHH", 1_500_000_000.0),
+            true,
         );
         let pphh = out.iter().find(|r| r.industry_code == "PPHH").unwrap();
         assert_eq!(pphh.revenue_up, 1_500_000_000.0); // chỉ PX1 + PX2
@@ -1858,6 +1912,7 @@ mod tests {
             "revenue",
             2,
             &full("PPHH", 1_600_000_000.0),
+            true,
         );
         let pphh_year = year.iter().find(|r| r.industry_code == "PPHH").unwrap();
         assert_eq!(pphh_year.revenue_up, 1_600_000_000.0);
@@ -1927,6 +1982,7 @@ mod tests {
             "revenue",
             2,
             &full("PPHH", 300_000_000.0),
+            true,
         );
         let pphh = out.iter().find(|r| r.industry_code == "PPHH").unwrap();
         assert_eq!(pphh.revenue_up, 300_000_000.0);
@@ -1945,6 +2001,11 @@ mod tests {
 #[cfg(test)]
 mod tax_rules_tests {
     use super::*;
+
+    /// Doanh thu tính thuế của 1 nhóm ngành (map theo mã).
+    fn full(code: &str, value: f64) -> std::collections::HashMap<String, f64> {
+        [(code.to_string(), value)].into_iter().collect()
+    }
 
     fn row(code: &str, up: f64, down: f64, pit_rate: f64) -> TaxAgg {
         TaxAgg {
@@ -1991,6 +2052,99 @@ mod tax_rules_tests {
         assert_eq!(taxable[0].1, 500_000_000.0);
         // 0,5 tỷ × 0,5% = 2,5 triệu (không phải 1,5 tỷ × 0,5% = 7,5 triệu).
         assert_eq!(round2(taxable[0].1 * 0.005), 2_500_000.0);
+    }
+
+    #[test]
+    fn ranh_gioc_1_ty_dung_theo_nguong_khong_phai_nop_thue() {
+        // Đúng 01 tỷ → khoản 1 Điều 7 Luật TNCN 109/2025: "từ mức 01 tỷ trở xuống
+        // không phải nộp" → hộ thuộc NHÓM 1, doanh thu tính thuế = 0, TNCN = 0.
+        let rows = vec![row("PPHH", THRESHOLD_EXEMPT, 0.0, 0.005)];
+        assert_eq!(tax_group(year_revenue(&rows)), 1);
+        let alloc = exempt_alloc(&rows, THRESHOLD_EXEMPT, &TaxableExemptChoice::Auto);
+        let taxable = taxable_by_period(
+            &Default::default(),
+            &rows
+                .iter()
+                .map(|r| (r.industry_code.clone(), net_revenue(r)))
+                .collect(),
+            &alloc,
+        );
+        assert_eq!(
+            taxable[0].1, 0.0,
+            "đúng ngưỡng thì doanh thu tính thuế bằng 0"
+        );
+
+        // 01 tỷ + 1 đồng → vượt ngưỡng: thuộc nhóm 2 và CHỈ 1 đồng đó chịu thuế
+        // (điểm a khoản 3 Điều 7: doanh thu tính thuế = phần vượt trên mức khoản 1).
+        let rows2 = vec![row("PPHH", THRESHOLD_EXEMPT + 1.0, 0.0, 0.005)];
+        assert_eq!(tax_group(year_revenue(&rows2)), 2);
+        let alloc2 = exempt_alloc(&rows2, THRESHOLD_EXEMPT, &TaxableExemptChoice::Auto);
+        let taxable2 = taxable_by_period(
+            &Default::default(),
+            &rows2
+                .iter()
+                .map(|r| (r.industry_code.clone(), net_revenue(r)))
+                .collect(),
+            &alloc2,
+        );
+        assert_eq!(taxable2[0].1, 1.0, "chỉ phần vượt ngưỡng mới chịu thuế");
+    }
+
+    #[test]
+    fn ky_truoc_khi_vuot_nguong_thi_chua_phat_sinh_thue() {
+        // Điều 8 khoản 1a: khai, nộp thuế KỂ TỪ kỳ phát sinh doanh thu vượt ngưỡng.
+        // Quý 1–2 doanh thu lũy kế chưa vượt 01 tỷ → chưa phát sinh thuế.
+        assert!(!period_is_taxable(0.0, 400_000_000.0, THRESHOLD_EXEMPT));
+        assert!(!period_is_taxable(
+            400_000_000.0,
+            550_000_000.0,
+            THRESHOLD_EXEMPT
+        ));
+        // Quý 3 lũy kế 1,1 tỷ → có nghĩa vụ; cả GTGT lẫn TNCN tính trên quý này.
+        assert!(period_is_taxable(
+            950_000_000.0,
+            150_000_000.0,
+            THRESHOLD_EXEMPT
+        ));
+
+        // Hệ quả trên tờ khai: hộ nhóm 2 (DT cả năm > 1 tỷ) nhưng kỳ trước khi
+        // vượt ngưỡng thì cột thuế vẫn bằng 0.
+        let pre = build_tax_declaration(
+            vec![row("PPHH", 400_000_000.0, 0.0, 0.005)],
+            "revenue",
+            2,
+            &full("PPHH", 0.0),
+            false,
+        );
+        assert_eq!(pre[0].vat_tax, 0.0);
+        assert_eq!(pre[0].pit_tax, 0.0);
+        // Cùng dữ liệu đó nhưng kỳ đã vượt ngưỡng → có thuế.
+        let post = build_tax_declaration(
+            vec![row("PPHH", 400_000_000.0, 0.0, 0.005)],
+            "revenue",
+            2,
+            &full("PPHH", 400_000_000.0),
+            true,
+        );
+        assert_eq!(post[0].vat_tax, 4_000_000.0); // 400tr x 1%
+        assert_eq!(post[0].pit_tax, 2_000_000.0); // 400tr x 0,5%
+    }
+
+    #[test]
+    fn muc_tru_chi_dung_mot_lan_trong_ca_nam() {
+        // 1,1 tỷ trải đều 4 quý: các quý trước bằng 0, quý cuối gánh hết phần
+        // vượt ngưỡng; tổng 4 quý đúng bằng 100 triệu (không trừ lặp/thiếu).
+        let alloc = vec![("PPHH".to_string(), THRESHOLD_EXEMPT)];
+        let per_quarter = 1_100_000_000.0 / 4.0;
+        let mut cum = std::collections::HashMap::new();
+        let mut total = 0.0;
+        for q in 0..4 {
+            let period = [("PPHH".to_string(), per_quarter)].into_iter().collect();
+            let taxable = taxable_by_period(&cum, &period, &alloc);
+            total += taxable[0].1;
+            cum.insert("PPHH".to_string(), per_quarter * (q as f64 + 1.0));
+        }
+        assert_eq!(round2(total), 100_000_000.0);
     }
 
     #[test]

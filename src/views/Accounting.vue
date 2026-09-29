@@ -566,6 +566,14 @@ useKeepAliveRefresh(reload);
         bằng 0 khi doanh thu chưa vượt mức ngưỡng 01 tỷ đồng. Sửa ở màn
         <b>Hồ sơ HKD → Nhóm hộ kinh doanh</b> nếu nhóm này không phải do cơ quan thuế chỉ định.
       </div>
+      <p
+        v-if="overview && !overview.group && !overview.taxable_period"
+        class="mt-3 text-xs text-sky-700"
+      >
+        Kỳ này chưa phát sinh nghĩa vụ thuế: doanh thu lũy kế tới cuối kỳ chưa vượt mức ngưỡng
+        {{ fmt(overview.exempt_threshold) }} đ/năm, nên theo Điều 8 khoản 1a Nghị định 68/2026 hộ
+        khai, nộp thuế kể từ kỳ phát sinh doanh thu vượt ngưỡng.
+      </p>
       <p v-if="overview?.group === 1" class="mt-3 text-xs text-emerald-600">
         Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ cần thông báo
         doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm sau).
