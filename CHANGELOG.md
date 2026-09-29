@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.2...v0.9.3) (2026-09-29)
+
+
+### Bug Fixes
+
+* **tax:** no tax before the period that passes the threshold ([2ef6370](https://github.com/tachibana-shin/hkd-tt152-app/commit/2ef63708a0bb352cd81c94ff165595b1b2e4c139))
+
 ## [0.9.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.1...v0.9.2) (2026-09-29)
 
 
