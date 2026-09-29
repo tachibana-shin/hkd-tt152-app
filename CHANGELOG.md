@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.1...v0.9.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **tax:** warn when the household group contradicts its own revenue ([51c1efe](https://github.com/tachibana-shin/hkd-tt152-app/commit/51c1efea102bf79b1508095653daf5accd6ad45a))
+
 ## [0.9.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.9.0...v0.9.1) (2026-09-29)
 
 
