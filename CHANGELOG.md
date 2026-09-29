@@ -1,5 +1,17 @@
 # Changelog
 
+# [0.11.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.10.1...v0.11.0) (2026-09-29)
+
+
+### Bug Fixes
+
+* **tax:** keep the cumulative 1bn allowance for PIT while VAT stays on full revenue ([775018b](https://github.com/tachibana-shin/hkd-tt152-app/commit/775018b78f192864b50c5f17dc9239be0dcca8f8))
+
+
+### Features
+
+* **tax:** show the PIT deduction and the remaining allowance on the declarations ([e7987e6](https://github.com/tachibana-shin/hkd-tt152-app/commit/e7987e6b651f8cadeff604d7ab0a4e499fe3f46b))
+
 ## [0.10.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.10.0...v0.10.1) (2026-09-29)
 
 
