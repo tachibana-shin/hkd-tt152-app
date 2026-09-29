@@ -76,6 +76,41 @@ const groupConfirmed = ref(false);
 const yearRevenue = ref(0);
 const loadingGroup = ref(false);
 
+/**
+ * Nhóm đang chốt trong hồ sơ khác nhóm app xếp từ doanh thu thực tế.
+ *
+ * Trường hợp này dễ gây nhầm: hộ để Nhóm 2 nhưng doanh thu chỉ 12 triệu thì tờ
+ * khai vẫn tính thuế GTGT (vì không thuộc diện miễn) trong khi thuế TNCN theo
+ * doanh thu bằng 0 (vì chưa vượt mức ngưỡng 01 tỷ) — hai con số trông trái ngược
+ * nhau. Vì vậy cảnh báo ngay tại ô chọn, kèm nút bấm đồng bộ lại.
+ */
+const groupMismatch = computed(() => form.tax_group != null && form.tax_group !== autoGroup.value);
+
+/** Vì sao lệch — nói rõ hệ quả, không chỉ "sai". */
+const groupMismatchHint = computed(() => {
+  if (!groupMismatch.value) return "";
+  const used = form.tax_group as number;
+  const auto = autoGroup.value as number;
+  const revenue = fmtVnd(yearRevenue.value);
+  if (auto === 1) {
+    return `Doanh thu cả năm ${revenue} không vượt mức 01 tỷ đồng nên hộ thuộc Nhóm 1 — miễn thuế GTGT và thuế TNCN. Đang để Nhóm ${used} nên tờ khai vẫn tính thuế GTGT, còn thuế TNCN theo doanh thu bằng 0 (chưa vượt ngưỡng 01 tỷ).`;
+  }
+  if (used === 1) {
+    return `Doanh thu cả năm ${revenue} đã vượt mức 01 tỷ đồng nên hộ thuộc ${groupLabelFor(auto)} và không còn miễn thuế. Đang để Nhóm 1 nên tờ khai chưa tính thuế.`;
+  }
+  return `Doanh thu cả năm ${revenue} → app xếp ${groupLabelFor(auto)}, nhưng hồ sơ đang để Nhóm ${used}.`;
+});
+
+/** "Nhóm 2 — doanh thu > 1 tỷ đến 3 tỷ" */
+function groupLabelFor(g: number): string {
+  return groupOptions.find((o) => o.value === g)?.label ?? `Nhóm ${g}`;
+}
+
+/** Bấm "Dùng nhóm app xếp" → đồng bộ nhóm theo doanh thu thực tế. */
+function useAutoGroup() {
+  if (autoGroup.value != null) form.tax_group = autoGroup.value;
+}
+
 async function loadGroup(stored: number | null) {
   loadingGroup.value = true;
   try {
@@ -305,6 +340,28 @@ async function save() {
               aria-label="Nhóm hộ kinh doanh"
               :disabled="loadingGroup"
             />
+          </div>
+          <div
+            v-if="groupMismatch"
+            data-testid="tax-group-warning"
+            class="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800"
+          >
+            <b>Nhóm đang để không khớp doanh thu thực tế.</b>
+            {{ groupMismatchHint }}
+            <div class="mt-1.5 flex items-center gap-2">
+              <Button
+                label="Dùng nhóm app xếp"
+                icon="pi pi-refresh"
+                size="small"
+                outlined
+                severity="warn"
+                data-testid="tax-group-use-auto"
+                @click="useAutoGroup"
+              />
+              <span v-if="loadingGroup" class="text-xs text-amber-700">
+                Đang tự xếp nhóm theo doanh thu…
+              </span>
+            </div>
           </div>
           <p class="mt-1 text-xs text-gray-500">
             <template v-if="loadingGroup"> Đang xếp nhóm theo doanh thu… </template>

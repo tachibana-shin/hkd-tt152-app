@@ -359,6 +359,17 @@ pub(crate) fn tax_group(total_revenue_year: f64) -> i64 {
     }
 }
 
+/// Nhóm đã chốt trong hồ sơ có khác nhóm app xếp từ doanh thu không.
+///
+/// Trả true khi hồ sơ ghi một nhóm khác nhóm suy ra từ doanh thu — trường hợp
+/// này làm số thuế trên tờ khai khó hiểu (GTGT vẫn tính vì không thuộc diện miễn,
+/// TNCN theo doanh thu bằng 0 vì chưa vượt ngưỡng 01 tỷ) nên UI cần cảnh báo.
+pub(crate) fn group_mismatch(stored: Option<i64>, auto_group: i64) -> bool {
+    stored
+        .filter(|g| (1..=4).contains(g))
+        .is_some_and(|g| g != auto_group)
+}
+
 /// Nhóm hộ dùng cho tờ khai: nhóm đã chốt trong hồ sơ HKD được ưu tiên, hộ
 /// chưa chốt (NULL) thì tự xếp theo doanh thu cả năm.
 pub(crate) fn effective_tax_group(stored: Option<i64>, total_revenue_year: f64) -> i64 {
@@ -892,6 +903,11 @@ pub(crate) fn build_tax_declaration(
 pub(crate) struct TaxContext {
     pub(crate) settings: TaxSettings,
     pub(crate) group: i64,
+    /// Nhóm app tự xếp từ doanh thu cả năm.
+    pub(crate) auto_group: i64,
+    /// true = nhóm đang dùng lấy từ hồ sơ HKD và KHÁC nhóm app xếp — tức là
+    /// cấu hình đang lệch với doanh thu thực tế (cần cảnh báo cho người dùng).
+    pub(crate) group_from_profile: bool,
     pub(crate) year_revenue: f64,
     pub(crate) alloc: Vec<(String, f64)>,
 }
@@ -900,11 +916,17 @@ pub(crate) async fn load_tax_context(pool: &SqlitePool, year: i64) -> Result<Tax
     let settings = load_tax_settings(pool).await?;
     let year_rows = load_tax_agg(pool, year, 0).await?;
     let year_revenue = year_revenue(&year_rows);
-    let group = effective_tax_group(load_stored_tax_group(pool).await?, year_revenue);
+    let stored = load_stored_tax_group(pool)
+        .await?
+        .filter(|g| (1..=4).contains(g));
+    let auto_group = tax_group(year_revenue);
+    let group = effective_tax_group(stored, year_revenue);
     let alloc = exempt_alloc(&year_rows, THRESHOLD_EXEMPT, &settings.exempt_choice);
     Ok(TaxContext {
         settings,
         group,
+        auto_group,
+        group_from_profile: group_mismatch(stored, auto_group),
         year_revenue,
         alloc,
     })
@@ -961,11 +983,14 @@ pub(crate) async fn get_tax_group(state: State<'_, AppState>, year: i64) -> Resu
         .map(|r| r.revenue_up - r.revenue_down)
         .sum();
     let auto = tax_group(revenue_year);
+    let confirmed = stored.filter(|g| (1..=4).contains(g));
     let out = json!({
-        "group": effective_tax_group(stored, revenue_year),
+        "group": effective_tax_group(confirmed, revenue_year),
         "auto_group": auto,
         "revenue_year": revenue_year,
-        "confirmed": stored.is_some(),
+        "confirmed": confirmed.is_some(),
+        // Nhóm đã chốt khác nhóm app xếp từ doanh thu → cấu hình lệch, UI cảnh báo.
+        "mismatch": group_mismatch(confirmed, auto),
     });
     Ok(out.to_string())
 }
@@ -1073,6 +1098,8 @@ pub(crate) async fn get_tax_overview(
         year,
         year_revenue: round2(ctx.year_revenue),
         group: ctx.group,
+        auto_group: ctx.auto_group,
+        group_from_profile: ctx.group_from_profile,
         method: ctx.settings.method.clone(),
         period_revenue: round2(period_revenue),
         taxable_revenue: round2(taxable_revenue),
@@ -2103,6 +2130,20 @@ mod tax_rules_tests {
         assert_eq!(fifo_cogs(&r2, &i2), 60.0);
         // Xuất vượt tồn (dữ liệu lệch) → không làm hỏng tờ khai.
         assert_eq!(fifo_cogs(&r2, &[("A".to_string(), 99.0)]), 20.0);
+    }
+
+    #[test]
+    fn canh_bao_khi_nhom_ho_lech_doanh_thu() {
+        // Chưa chốt nhóm → không cảnh báo, app tự xếp.
+        assert!(!group_mismatch(None, 1));
+        assert!(!group_mismatch(Some(1), 1));
+        // Hồ sơ ghi Nhóm 2 trong khi doanh thu 12 triệu (app xếp Nhóm 1) → cảnh báo.
+        assert!(group_mismatch(Some(2), 1));
+        // Ngược lại: hồ sơ còn Nhóm 1 nhưng doanh thu đã vượt 1 tỷ.
+        assert!(group_mismatch(Some(1), 2));
+        // Giá trị ngoài 1..4 coi như chưa chốt (không cảnh báo).
+        assert!(!group_mismatch(Some(0), 2));
+        assert!(!group_mismatch(Some(9), 2));
     }
 
     #[test]

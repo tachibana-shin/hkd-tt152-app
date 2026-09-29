@@ -55,8 +55,10 @@ test("login with a wrong password shows an error toast and stays on the login sc
   await page.getByTestId("login-username").fill(ADMIN.username);
   await page.getByTestId("login-password").fill("wrong-password");
   await page.getByRole("button", { name: "Đăng nhập" }).click();
+  // 20s: đây là test đầu tiên của suite nên app vừa khởi động — băm mật khẩu và
+  // mở kho dữ liệu lần đầu còn lâu hơn các test sau.
   await expect(page.locator(".p-toast-detail")).toContainText("Sai tên đăng nhập hoặc mật khẩu", {
-    timeout: 10_000,
+    timeout: 20_000,
   });
   await expect(page.getByTestId("login-username")).toBeVisible();
 });
@@ -2343,4 +2345,116 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
     .click();
   await page.getByRole("button", { name: "Lưu cấu hình" }).click();
   await expect(page.getByText("Đã lưu cấu hình thuế").first()).toBeVisible();
+});
+
+/**
+ * Nhóm hộ để khác với doanh thu thực tế thì phải cảnh báo ở cả hai nơi người
+ * dùng nhìn thấy: hồ sơ HKD (nơi sửa) và thẻ tổng hợp thuế (nơi đọc số liệu).
+ *
+ * Trường hợp này dễ gây nhầm: để Nhóm 2 khi doanh thu chỉ 12 triệu thì GTGT vẫn
+ * được tính, còn TNCN theo doanh thu bằng 0 — hai con số trông trái ngược nhau.
+ */
+test("Cảnh báo khi nhóm hộ lệch với doanh thu thực tế", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Bán 10.000.000 → doanh thu năm < 1 tỷ, app xếp Nhóm 1.
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-01",
+      voucher_no: "PN-NHOM01",
+      description: "Nhập hàng cho test nhóm hộ",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 10, unit_price: 1_000_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound: ${await stockIn.text()}`).toBe(true);
+  const out = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-02",
+      voucher_no: "PX-NHOM01",
+      description: "Bán hàng cho test nhóm hộ",
+      customer_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      outbound_type: "sale",
+      adjust_dir: "up",
+      receive_now: false,
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 10_000_000,
+          discount: 0,
+          industry_code: "PPHH",
+        },
+      ],
+      note: "",
+    },
+  });
+  expect(out.ok(), `save_outbound: ${await out.text()}`).toBe(true);
+
+  // Hộp cấu hình hộ mở từ thanh công cụ màn Kế toán HKD.
+  const openProfileDialog = async () => {
+    await page.getByRole("button", { name: "Cấu hình hộ KD" }).click();
+    await expect(page.getByTestId("hkd-tax-group")).toBeVisible();
+    await page.waitForTimeout(400);
+  };
+  const pickGroup = async (label: string) => {
+    await page.getByTestId("hkd-tax-group").click();
+    await page.locator(".p-select-option", { hasText: label }).first().click();
+  };
+  const saveProfile = async () => {
+    await page.getByRole("button", { name: "Lưu cấu hình" }).click();
+    await page.waitForTimeout(900);
+  };
+
+  // ── 1. Hồ sơ HKD: để Nhóm 2 (khác nhóm app xếp) → phải hiện cảnh báo + nút sửa
+  await sidebarButton(page, "Kế toán HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await openProfileDialog();
+  await pickGroup("Nhóm 2");
+  await saveProfile();
+  await openProfileDialog();
+  await expect(page.getByTestId("tax-group-warning")).toBeVisible();
+  await expect(page.getByTestId("tax-group-warning")).toContainText("không khớp doanh thu thực tế");
+  // Cảnh báo phải nêu hệ quả, không chỉ bảo "sai".
+  await expect(page.getByTestId("tax-group-warning")).toContainText("Nhóm 1");
+  await expect(page.getByTestId("tax-group-warning")).toContainText("miễn thuế");
+
+  // Bấm "Dùng nhóm app xếp" → cảnh báo biến mất ngay (chưa cần bấm Lưu).
+  await page.getByTestId("tax-group-use-auto").click();
+  await expect(page.getByTestId("tax-group-warning")).toHaveCount(0);
+
+  // ── 2. Để lại Nhóm 2 rồi xem thẻ tổng hợp thuế có ghi chú giải thích
+  await pickGroup("Nhóm 2");
+  await saveProfile();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(600);
+  await expect(page.getByTestId("tax-group-mismatch-note")).toBeVisible();
+  await expect(page.getByTestId("tax-group-mismatch-note")).toContainText(
+    "GTGT vẫn được tính theo tỷ lệ ngành",
+  );
+
+  // ── 3. Dọn lại: để Nhóm 1 (đúng theo doanh thu) → cả hai loại thuế bằng 0
+  await openProfileDialog();
+  await pickGroup("Nhóm 1");
+  await saveProfile();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(900);
+  await expect(page.getByTestId("tax-group-mismatch-note")).toHaveCount(0);
+  const text = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(text, "hộ nhóm 1: tổng thuế GTGT = 0").toContain("Tổng thuế GTGT: 0 đ");
+  expect(text, "hộ nhóm 1: tổng thuế TNCN = 0").toContain("Tổng thuế TNCN: 0 đ");
 });

@@ -553,6 +553,19 @@ useKeepAliveRefresh(reload);
           Thu/Chi nếu thực tế được trừ (Điều 6 Nghị định 68/2026).
         </p>
       </div>
+      <div
+        v-if="overview?.group_from_profile"
+        data-testid="tax-group-mismatch-note"
+        class="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800"
+      >
+        <b>Nhóm hộ đang dùng không khớp doanh thu thực tế.</b>
+        Doanh thu cả năm {{ fmt(overview.year_revenue) }} đ → theo NĐ 68/2026 + NĐ 141/2026 hộ thuộc
+        <b>Nhóm {{ overview.auto_group }}</b
+        >, nhưng hồ sơ đang để <b>Nhóm {{ overview.group }}</b
+        >. Vì vậy thuế GTGT vẫn được tính theo tỷ lệ ngành, còn thuế TNCN theo doanh thu tính thuế
+        bằng 0 khi doanh thu chưa vượt mức ngưỡng 01 tỷ đồng. Sửa ở màn
+        <b>Hồ sơ HKD → Nhóm hộ kinh doanh</b> nếu nhóm này không phải do cơ quan thuế chỉ định.
+      </div>
       <p v-if="overview?.group === 1" class="mt-3 text-xs text-emerald-600">
         Hộ có doanh thu cả năm ≤ 1 tỷ đồng được miễn thuế GTGT và thuế TNCN — chỉ cần thông báo
         doanh thu thực tế trong năm với cơ quan thuế (hạn 31/01 năm sau).

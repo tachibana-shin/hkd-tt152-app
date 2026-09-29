@@ -519,6 +519,13 @@ export interface TaxGroupInfo {
   revenue_year: number;
   /** true = người dùng đã chốt trong hồ sơ HKD. */
   confirmed: boolean;
+  /**
+   * true = nhóm đã chốt trong hồ sơ KHÁC nhóm app xếp từ doanh thu thực tế.
+   * Trường hợp này làm số thuế trên tờ khai khó hiểu (GTGT vẫn tính vì không
+   * thuộc diện miễn, còn TNCN theo doanh thu bằng 0 vì chưa vượt ngưỡng 1 tỷ)
+   * nên UI cần cảnh báo rõ.
+   */
+  mismatch?: boolean;
 }
 
 // ─── Cài đặt mặc định (bảng app_setting) ───
@@ -670,6 +677,10 @@ export interface TaxOverview {
   year_revenue: number;
   /** Nhóm hộ: 1 = ≤ 1 tỷ (miễn thuế), 2 = > 1–3 tỷ, 3 = > 3–50 tỷ, 4 = > 50 tỷ */
   group: number;
+  /** Nhóm app tự xếp từ doanh thu cả năm (để so với nhóm đang áp dụng). */
+  auto_group?: number;
+  /** true = nhóm đang dùng lấy từ hồ sơ và khác nhóm app xếp. */
+  group_from_profile?: boolean;
   /** Phương pháp TNCN đang áp dụng: "revenue" | "profit" */
   method: string;
   period_revenue: number; // doanh thu kỳ khai

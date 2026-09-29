@@ -611,6 +611,10 @@ pub(crate) struct TaxOverview {
     pub(crate) year_revenue: f64,
     /// Nhóm hộ kinh doanh: 1 = ≤ 1 tỷ (miễn thuế), 2 = > 1–3 tỷ, 3 = > 3–50 tỷ, 4 = > 50 tỷ
     pub(crate) group: i64,
+    /// Nhóm app tự xếp từ doanh thu cả năm
+    pub(crate) auto_group: i64,
+    /// true = nhóm đang dùng lấy từ hồ sơ HKD và khác nhóm app xếp
+    pub(crate) group_from_profile: bool,
     /// Phương pháp tính TNCN đang áp dụng: "revenue" | "profit"
     pub(crate) method: String,
     /// Doanh thu trong kỳ khai
