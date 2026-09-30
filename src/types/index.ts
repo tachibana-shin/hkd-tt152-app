@@ -697,23 +697,72 @@ export interface TaxSettlement {
   settle_deadline: string;
 }
 
-/** Nội dung 1 mẫu sổ kế toán theo TT 152/2025/TT-BTC. */
+/**
+ * Một ô của sổ: số, chữ, hoặc `null` (ô trống của mẫu).
+ *
+ * Backend trả về `null` thay vì chuỗi rỗng cho ô không có dữ liệu — phân biệt
+ * "ô trống trong mẫu" với "ô có chữ rỗng" để không in ra khung trống vô nghĩa.
+ */
+export type BookCell = number | string | null;
+
+/** Một cột của mẫu sổ. `key` là tên ô mà `BookRow.cells` dùng. */
+export interface BookColumn {
+  key: string;
+  /** Tiêu đề kèm số thứ tự cột của mẫu gốc, ví dụ `1 · Số tiền`. */
+  label: string;
+  kind: "text" | "money" | "qty" | "rate";
+  width: string;
+}
+
+/**
+ * Một dòng của sổ.
+ *
+ * `kind` quyết định cách in: `detail` (ghi chép), `section` (tiêu đề nhóm, ví dụ
+ * từng khối tiền trong S2e), `subtotal` (tổng nhóm), `total` (tổng cuối sổ).
+ */
+export interface BookRow {
+  kind: "detail" | "section" | "subtotal" | "total";
+  cells: Record<string, BookCell>;
+}
+
+/** Đầu sổ và chữ ký cuối sổ — giữ đúng bố cục mẫu gốc. */
+export interface BookHeader {
+  owner: string;
+  address: string;
+  tax_code: string;
+  location: string;
+  period: string;
+  unit: string;
+  sign_date: string;
+  signer: string;
+}
+
+/**
+ * Ghi chú dưới sổ. `action_book` có mặt thì hiện nút chuyển sang mẫu khác —
+ * dùng cho cảnh báo chọn nhầm mẫu (ví dụ chọn S2a khi hồ sơ tính TNCN theo
+ * thu nhập).
+ */
+export interface BookNote {
+  level: "info" | "warn";
+  text: string;
+  action_book?: string;
+  action_label?: string;
+}
+
+/**
+ * Nội dung 1 mẫu sổ kế toán theo TT 152/2025/TT-BTC.
+ *
+ * Bộ cột khác nhau theo từng mẫu (S1a 3 cột, S2d 12 cột, S3a 12 cột…) nên
+ * cấu trúc này mang theo mô tả cột thay vì một shape cứng.
+ */
 export interface TaxBook {
   book: string;
   title: string;
   period_label: string;
-  rows: {
-    group: string;
-    doc_no: string;
-    doc_date: string;
-    desc: string;
-    amount: number;
-    quantity: number;
-  }[];
-  total_revenue: number;
-  total_vat: number;
-  total_pit: number;
-  notes: string;
+  header: BookHeader;
+  columns: BookColumn[];
+  rows: BookRow[];
+  notes: BookNote[];
 }
 
 /** Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (Kế toán hộ KD). */

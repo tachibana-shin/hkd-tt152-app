@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT b.name AS \"name!\", b.address AS \"address!\", b.tax_code AS \"tax_code!\",\n                  (SELECT name FROM business_unit ORDER BY id LIMIT 1) AS \"unit!\"\n             FROM business b LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "name!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "address!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "tax_code!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit!",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "787ddb62ce1136a13520823e06470f442b14787291203b685a83e22b97f2a756"
+}

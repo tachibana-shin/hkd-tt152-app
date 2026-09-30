@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT opening_debit AS \"d!\", opening_credit AS \"c!\"\n             FROM account WHERE code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "d!",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "c!",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "07edfc9af2f9e1ec76cf2e1e2aaf51a63678a3f85d4e639fdeb6ee57ebe82503"
+}

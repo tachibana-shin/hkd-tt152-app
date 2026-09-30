@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.voucher_no AS \"voucher_no!\", je.posting_date AS \"posting_date!\",\n                  je.description AS \"description!\", je.industry_code AS \"industry_code!\",\n                  je.adjust_code AS \"adjust_code!\", je.amount\n             FROM journal_entry je\n            WHERE je.entry_type = 'PX'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n            ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "industry_code!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "adjust_code!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 5,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a35ab247611f5edd7a29148511b45e60b91086dfd31e8a9e48a23af475fc60e2"
+}

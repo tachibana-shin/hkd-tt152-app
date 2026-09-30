@@ -2142,7 +2142,7 @@ test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/t
   expect((await currentRange()).label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
 });
 
-test("Sổ kế toán kế thừa khoảng ngày của Kế toán HKD và có nút quay lại", async ({ page }) => {
+test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async ({ page }) => {
   await ensureLoggedIn(page);
   const datePicker = (label: string) =>
     page.locator(`label:text-is("${label}") + .p-datepicker input`);
@@ -2156,26 +2156,46 @@ test("Sổ kế toán kế thừa khoảng ngày của Kế toán HKD và có n�
   await expect(to).not.toHaveValue("");
   const accountingRange = { from: await from.inputValue(), to: await to.inputValue() };
 
-  // Bấm "Sổ S2a-HKD" → sang sổ nhật ký, phải mở đúng khoảng ngày đang xem.
-  await page.getByTestId("open-ledger").first().click();
-  await expect(page).toHaveURL(/\/ledger\?/);
+  // Mặc định S2a: đầu sổ + bộ cột đúng mẫu (A số hiệu, B ngày, C diễn giải, 1 số tiền).
+  await expect(page.getByText("SỔ DOANH THU BÁN HÀNG HÓA, DỊCH VỤ").first()).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /A · Số hiệu/ }).first()).toBeVisible();
+
+  // Bấm "Sổ S3a-HKD" → chuyển đúng mẫu S3a (10 cột số liệu thuế khác), không rời màn.
+  await page.getByTestId("open-book-s3a").click();
+  await expect(page.getByTestId("tax-book")).toContainText("S3a-HKD");
+  await expect(page.getByText("SỔ THEO DÕI NGHĨA VỤ THUẾ KHÁC").first()).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /10 · Thuế sử dụng đất/ })).toBeVisible();
+  // Hộ chỉ có GTGT/TNCN nên cột số để trống đúng mẫu, không bịa số.
+  await expect(page.getByText("Kỳ này chưa có phát sinh nào để ghi sổ.")).toBeVisible();
+  await expect(page).toHaveURL(/\/accounting$/);
+
+  // Bấm "Sổ S2b-HKD" → về lại mẫu doanh thu, vẫn cùng khoảng ngày.
+  await page.getByTestId("open-book-s2b").click();
+  await expect(page.getByTestId("tax-book")).toContainText("S2b-HKD");
+  await expect(page.getByText("SỔ DOANH THU BÁN HÀNG HÓA, DỊCH VỤ").first()).toBeVisible();
+  await expect(from).toHaveValue(accountingRange.from);
+  await expect(to).toHaveValue(accountingRange.to);
+
+  // S2d (vật liệu) và S2e (tiền) chọn được từ dropdown mẫu sổ.
+  await page.getByTestId("tax-book").click();
+  await page.locator(".p-select-option", { hasText: "S2d-HKD" }).first().click();
+  await expect(
+    page.getByText("SỔ CHI TIẾT VẬT LIỆU, DỤNG CỤ, SẢN PHẨM, HÀNG HÓA").first(),
+  ).toBeVisible();
+  await page.getByTestId("tax-book").click();
+  await page.locator(".p-select-option", { hasText: "S2e-HKD" }).first().click();
+  await expect(page.getByText("SỔ CHI TIẾT TIỀN").first()).toBeVisible();
+});
+
+// Các nút sổ không còn đẩy sang màn khác, nhưng Sổ nhật ký vẫn phải giữ nút quay
+// về màn Kế toán — không có nó người dùng vào bằng thanh công cụ là mắc kẹt.
+test("Sổ nhật ký có nút quay lại màn Kế toán HKD", async ({ page }) => {
+  await ensureLoggedIn(page);
+  await openTab(page, "Sổ nhật ký", "/ledger");
   await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
-  await expect(datePicker("Từ ngày")).toHaveValue(accountingRange.from);
-  await expect(datePicker("Đến ngày")).toHaveValue(accountingRange.to);
-
-  // Nút quay lại đưa về đúng màn Kế toán HKD, vẫn giữ khoảng ngày cũ.
   await page.getByTestId("back-to-accounting").click();
   await expect(page).toHaveURL(/\/accounting$/);
-  await expect(datePicker("Từ ngày")).toHaveValue(accountingRange.from);
-
-  // Bấm "Sổ S3a-HKD" → sổ chi tiết tiền cũng kế thừa ngày + có nút quay lại.
-  await page.getByTestId("open-cash").click();
-  await expect(page).toHaveURL(/\/cash\?/);
-  await expect(page.locator("header h2")).toHaveText("Phiếu thu / chi");
-  await expect(page.getByTestId("cash-from").locator("input")).toHaveValue(accountingRange.from);
-  await expect(page.getByTestId("cash-to").locator("input")).toHaveValue(accountingRange.to);
-  await page.getByTestId("back-to-accounting").click();
-  await expect(page).toHaveURL(/\/accounting$/);
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
 });
 
 test("Cấu hình HKD: nhóm hộ tự điền theo doanh thu, lưu lại và tờ khai theo nhóm đó", async ({

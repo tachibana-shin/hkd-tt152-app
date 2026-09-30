@@ -20,7 +20,6 @@ const business = useBusinessStore();
 const auth = useAuthStore();
 const { config } = storeToRefs(business);
 const toast = useToast();
-const router = useRouter();
 
 const loading = ref(false);
 // Tờ khai thuế: MỘT bảng duy nhất, theo khoảng ngày đang chọn ở thanh công cụ.
@@ -178,23 +177,19 @@ const groupLabel = computed(() => {
   }
 });
 /**
- * Mở sổ kế toán sang màn chi tiết, giữ nguyên khoảng ngày đang xem.
+ * Chọn một mẫu sổ và cuộn tới thẻ sổ kế toán.
  *
- * Truước đây bấm "Sổ S2a/S3a-HKD" chỉ đẩy route trần: màn nhật ký mở cả năm
- * (không thấy đúng kỳ đang xem) và không có đường quay lại. Nay truyền kèm
- * `from`/`to` và `back` để màn đích nạp đúng kỳ + có nút quay lại.
+ * Trước đây bấm "Sổ S2a/S3a-HKD" đẩy sang màn nhật ký chung `/ledger` (S3a thì
+ * đẩy sang `/cash` — hoàn toàn sai mẫu), nên số liệu không đúng mẫu TT 152 và
+ * mất luôn khoảng ngày đang xem. Nay giữ nguyên màn Kế toán: đổi mẫu sổ, nạp
+ * lại và cuộn tới đúng chỗ đang xem.
  */
-function openBook(target: "ledger" | "cash") {
-  const from = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
-  const to = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
-  void router.push({
-    path: target === "ledger" ? "/ledger" : "/cash",
-    query: {
-      from,
-      to,
-      back: "/accounting",
-      backLabel: "Kế toán HKD",
-    },
+function selectBook(target: string) {
+  book.value = target;
+  void loadBook().then(() => {
+    document
+      .querySelector("[data-testid='tax-book']")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 
@@ -206,6 +201,7 @@ const bookOptions = [
   { label: "S2c-HKD · Sổ chi tiết doanh thu, chi phí", value: "S2c" },
   { label: "S2d-HKD · Sổ chi tiết vật liệu, hàng hóa", value: "S2d" },
   { label: "S2e-HKD · Sổ chi tiết tiền", value: "S2e" },
+  { label: "S3a-HKD · Sổ theo dõi nghĩa vụ thuế khác", value: "S3a" },
 ];
 const book = ref("S2a");
 const bookData = ref<TaxBook | null>(null);
@@ -238,22 +234,22 @@ async function loadSettlement() {
   }
 }
 
+/**
+ * Xuất sổ hiện tại ra Excel theo đúng bộ cột của mẫu.
+ *
+ * Bộ cột mỗi mẫu một bộ (S1a 3 cột, S2d 12 cột…) nên không khai cứng được
+ * như trước — lấy nguyên `columns` backend trả về, ô trống xuất rỗng.
+ */
 function exportBookExcel() {
   const b = bookData.value;
   if (!b) return;
-  const cols: XlsxColumn[] = [
-    { header: "Nhóm ngành / Mã", key: "group" },
-    { header: "Số hiệu chứng từ", key: "doc_no" },
-    { header: "Ngày tháng", key: "doc_date" },
-    { header: "Diễn giải", key: "desc" },
-    { header: "Số lượng", key: "quantity" },
-    { header: "Số tiền", key: "amount" },
-  ];
-  exportXlsx(
-    `so-ke-toan-${b.book}-${declYear.value}`,
-    cols,
-    b.rows.map((r) => ({ ...r, group: r.group || "—" })),
-  );
+  const cols: XlsxColumn[] = b.columns.map((c) => ({ header: c.label, key: c.key }));
+  const rows = b.rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const c of b.columns) out[c.key] = r.cells[c.key] ?? "";
+    return out;
+  });
+  exportXlsx(`so-ke-toan-${b.book}-${declYear.value}`, cols, rows);
 }
 
 const declTotals = computed(() => {
@@ -812,24 +808,24 @@ useKeepAliveRefresh(reload);
             icon="pi pi-book"
             outlined
             class="justify-start"
-            data-testid="open-ledger"
-            @click="openBook('ledger')"
+            data-testid="open-book-s2a"
+            @click="selectBook('S2a')"
           />
           <Button
             label="Sổ S2b-HKD"
             icon="pi pi-book"
             outlined
             class="justify-start"
-            data-testid="open-ledger"
-            @click="openBook('ledger')"
+            data-testid="open-book-s2b"
+            @click="selectBook('S2b')"
           />
           <Button
             label="Sổ S3a-HKD"
             icon="pi pi-book"
             outlined
             class="justify-start"
-            data-testid="open-cash"
-            @click="openBook('cash')"
+            data-testid="open-book-s3a"
+            @click="selectBook('S3a')"
           />
           <Button
             label="In báo cáo"
@@ -1018,47 +1014,12 @@ useKeepAliveRefresh(reload);
           @click="loadBook"
         />
       </div>
-      <template v-if="bookData">
-        <h4 class="mb-1 text-center text-sm font-semibold uppercase">{{ bookData.title }}</h4>
-        <p class="mb-2 text-center text-xs text-gray-500">
-          Hộ, cá nhân kinh doanh: ……………… Địa chỉ: ……………… Mã số thuế: ……………… · Kỳ
-          {{ bookData.period_label }}
-        </p>
-        <AppDataTable :value="bookData.rows" :loading="bookLoading" stripedRows>
-          <Column header="A · Số hiệu" style="width: 7rem">
-            <template #body="{ data }">{{ data.doc_no }}</template>
-          </Column>
-          <Column header="B · Ngày tháng" style="width: 7rem">
-            <template #body="{ data }">{{ data.doc_date }}</template>
-          </Column>
-          <Column field="group" header="Nhóm ngành" style="width: 8rem" />
-          <Column field="desc" header="C · Diễn giải" />
-          <Column header="SL" align="right" style="width: 5rem">
-            <template #body="{ data }">{{ data.quantity ? fmt(data.quantity) : "" }}</template>
-          </Column>
-          <Column header="D · Số tiền" align="right" style="width: 9rem">
-            <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
-            <template #footer>
-              <b>{{ fmtVnd(bookData.total_revenue) }} đ</b>
-            </template>
-          </Column>
-          <template #empty
-            ><EmptyState text="Kỳ này chưa có phát sinh nào để ghi sổ." icon="pi pi-book"
-          /></template>
-        </AppDataTable>
-        <p class="mt-2 text-xs text-gray-500">{{ bookData.notes }}</p>
-        <div
-          v-if="bookData.total_vat || bookData.total_pit"
-          class="mt-2 flex flex-wrap gap-6 text-sm"
-        >
-          <span class="text-gray-500"
-            >Tổng thuế GTGT: <b class="text-rose-600">{{ fmtVnd(bookData.total_vat) }} đ</b></span
-          >
-          <span class="text-gray-500"
-            >Tổng thuế TNCN: <b class="text-rose-600">{{ fmtVnd(bookData.total_pit) }} đ</b></span
-          >
-        </div>
-      </template>
+      <TaxBookTable
+        v-if="bookData"
+        :book="bookData"
+        :loading="bookLoading"
+        @switch-book="selectBook"
+      />
     </SectionCard>
 
     <TaxConfigDialog

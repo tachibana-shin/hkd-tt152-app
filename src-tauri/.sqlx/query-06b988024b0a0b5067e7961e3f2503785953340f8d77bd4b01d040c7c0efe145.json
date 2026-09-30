@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.voucher_no AS \"voucher_no!\", je.posting_date AS \"posting_date!\",\n                  je.description AS \"description!\", je.product_code AS \"product_code!\",\n                  je.entry_type AS \"entry_type!\", je.quantity, je.unit_price,\n                  COALESCE(je.adjust_code, '') AS \"adjust_code!\",\n                  COALESCE(p.name, '') AS \"product_name!\", COALESCE(p.unit, '') AS \"unit!\"\n             FROM journal_entry je\n             LEFT JOIN product p ON p.code = je.product_code\n            WHERE je.entry_type IN ('PN', 'PX')\n              AND je.posting_date >= ? AND je.posting_date <= ?\n              AND je.product_code <> ''\n              AND (p.code IS NULL OR COALESCE(p.is_service, 0) = 0)\n            ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_code!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "entry_type!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "adjust_code!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_name!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit!",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "06b988024b0a0b5067e7961e3f2503785953340f8d77bd4b01d040c7c0efe145"
+}

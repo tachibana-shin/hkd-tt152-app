@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(unit, '') AS \"unit!: String\" FROM product WHERE code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "unit!: String",
+        "ordinal": 0,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "86ee54771f9d0d521dd031ee5821505bc4942598b59e7807cb6eef35251c2ac7"
+}

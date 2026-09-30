@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.voucher_no AS \"voucher_no!\", je.posting_date AS \"posting_date!\",\n                      je.description AS \"description!\", je.amount,\n                      je.bank_code AS \"bank_code!\",\n                      CASE WHEN je.debit_account = ? THEN 1 ELSE 0 END AS \"in_side!: i64\"\n                 FROM journal_entry je\n                WHERE je.posting_date >= ? AND je.posting_date <= ?\n                  AND (je.debit_account = ? OR je.credit_account = ?)\n                ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "bank_code!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "in_side!: i64",
+        "ordinal": 5,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "516a996eec0596179d1979819c880544bf138cb74e8a5f4a43787ef0d66afc8a"
+}

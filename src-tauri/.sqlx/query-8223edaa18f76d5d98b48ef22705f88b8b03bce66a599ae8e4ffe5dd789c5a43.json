@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT product_code AS \"product_code!\",\n                  SUM(CASE WHEN entry_type = 'PN' THEN quantity ELSE 0 END) AS \"in_q!: f64\",\n                  SUM(CASE WHEN entry_type = 'PX' THEN quantity ELSE 0 END) AS \"out_q!: f64\",\n                  SUM(CASE WHEN entry_type = 'PN' THEN quantity * unit_price ELSE 0 END) AS \"in_v!: f64\",\n                  SUM(CASE WHEN entry_type = 'PX' THEN quantity * unit_price ELSE 0 END) AS \"out_v!: f64\"\n             FROM journal_entry\n            WHERE entry_type IN ('PN', 'PX')\n              AND posting_date < ?\n              AND product_code <> ''\n            GROUP BY product_code",
+  "describe": {
+    "columns": [
+      {
+        "name": "product_code!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "in_q!: f64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "out_q!: f64",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "in_v!: f64",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "out_v!: f64",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8223edaa18f76d5d98b48ef22705f88b8b03bce66a599ae8e4ffe5dd789c5a43"
+}

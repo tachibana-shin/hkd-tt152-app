@@ -3,11 +3,14 @@ import { parseIsoDate } from "@/utils/format";
 /**
  * Khoảng ngày + nút quay lại khi màn được mở từ màn khác.
  *
- * Màn Kế toán HKD mở sổ (Sổ nhật ký chung, Sổ chi tiết tiền) bằng cách đẩy route
- * kèm `?from=&to=&back=/accounting`. Nhờ vậy màn đích mở ra **đúng khoảng ngày
- * đang xem** thay vì lùi về cả năm, và có nút quay lại chỗ vừa đến — trước đây
- * bấm nút sổ là rơi vào màn khác mà không có đường về, phải tự tìm trên thanh
- * công cụ.
+ * Sổ nhật ký chung và Sổ chi tiết tiền nhận khoảng ngày và đường quay lại qua
+ * query `?from=&to=&back=/accounting&backLabel=…` nếu có màn khác đẩy sang —
+ * nhờ vậy màn đích mở ra đúng kỳ đang xem thay vì lùi về cả năm. Không có query
+ * thì dùng mặc định của màn và nút quay lại đưa về `fallback`.
+ *
+ * Màn Kế toán HKD **không còn đẩy query này**: 3 nút S2a/S2b/S3a chọn mẫu sổ
+ * và hiển thị ngay trên chỗ đó (`selectBook`), không còn chuyển sang `/ledger`
+ * hay `/cash` nữa. Cơ chế query vẫn giữ cho lần nối màn sau.
  *
  * Query rác (thiếu, sai định dạng, ngược thứ tự) chỉ bị bỏ qua, không làm hỏng màn.
  */
