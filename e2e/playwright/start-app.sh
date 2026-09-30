@@ -19,7 +19,12 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.5
 done
 
-TESTDIR=$(mktemp -d /tmp/hkd-e2e-XXXXXX)
+# Thư mục dữ liệu lấy theo $TMPDIR (mặc định /tmp). /tmp là tmpfs và có thể đầy
+# khi máy đang lưu file tạm khác → SQLite báo "disk I/O error" khi chạy migration
+# và cả phiên E2E chết oan. Đặt TMPDIR sang đĩa thường thì E2E không còn phụ thuộc
+# vào dung lượng /tmp. Con trỏ /tmp/hkd-e2e-dir giữ nguyên để test đọc được.
+E2E_TMP=${TMPDIR:-/tmp}
+TESTDIR=$(mktemp -d "$E2E_TMP/hkd-e2e-XXXXXX")
 echo "$TESTDIR" > /tmp/hkd-e2e-dir
 
 export HKD_DATA_DIR="$TESTDIR"
