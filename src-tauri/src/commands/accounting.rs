@@ -177,8 +177,17 @@ pub(crate) async fn get_trial_balance(
 /// cho hộ đã chọn tính theo lợi nhuận — lệch với thẻ tổng hợp ngay trên màn.
 /// Giờ dùng chung `build_tax_declaration` với tờ khai theo kỳ nên hai thẻ luôn
 /// khớp nhau.
+/// Tờ khai thuế theo khoảng ngày đang chọn, chia theo nhóm ngành nghề.
+///
+/// Trước đây có hai lệnh gần như trùng nhau: một lệnh theo khoảng ngày tùy ý và
+/// một lệnh theo kỳ khai (năm/quý/tháng). Người dùng chỉ cần một bảng — theo đúng
+/// khoảng thời gian đang chọn trên thanh công cụ — nên đã gộp còn lệnh này.
+///
+/// Mức trừ ngưỡng TNCN vẫn tính theo doanh thu lũy kế **từ đầu năm** tới trước
+/// ngày bắt đầu của khoảng, nên xem một khoảng bất kỳ trong năm vẫn không bị tính
+/// trùng phần mức trừ.
 #[tauri::command]
-pub(crate) async fn get_tax_summary(
+pub(crate) async fn get_tax_declaration(
     state: State<'_, AppState>,
     from_date: String,
     to_date: String,
@@ -190,30 +199,7 @@ pub(crate) async fn get_tax_summary(
         .and_then(|y| y.parse::<i64>().ok())
         .ok_or("Ngày bắt đầu không hợp lệ")?;
     let ctx = load_tax_context(&pool, year).await?;
-    let rows: Vec<TaxAgg> = sqlx::query_as!(
-        TaxAgg,
-        "SELECT
-            ig.code AS industry_code,
-            ig.name AS industry_name,
-            ig.vat_rate,
-            ig.pit_rate,
-            COALESCE(SUM(CASE WHEN je.adjust_code != 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) AS revenue_up,
-            COALESCE(SUM(CASE WHEN je.adjust_code = 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) AS revenue_down
-         FROM industry_group ig
-         LEFT JOIN journal_entry je ON je.industry_code = ig.code
-            AND je.entry_type = 'PX'
-            AND je.posting_date >= ?
-            AND je.posting_date <= ?
-            AND je.unit_code = ?
-         GROUP BY ig.code
-         ORDER BY ig.code",
-        from_date,
-        to_date,
-        unit_code
-    )
-    .fetch_all(&*pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let rows = load_tax_agg_in_range(&pool, &from_date, &to_date, &unit_code).await?;
 
     // Mức trừ ngưỡng 01 tỷ là số tiền của cả năm: dùng lũy kế doanh thu từ đầu
     // năm tới hết ngày trước kỳ đang xem để biết kỳ này còn trừ được bao nhiêu.
@@ -242,6 +228,39 @@ pub(crate) async fn get_tax_summary(
         &deducted,
     );
     Ok(serde_json::to_string(&out).unwrap_or_default())
+}
+
+/// Doanh thu ghi trên phiếu xuất trong khoảng ngày, gộp theo nhóm ngành nghề.
+async fn load_tax_agg_in_range(
+    pool: &SqlitePool,
+    from_date: &str,
+    to_date: &str,
+    unit_code: &str,
+) -> Result<Vec<TaxAgg>, String> {
+    sqlx::query_as!(
+        TaxAgg,
+        "SELECT
+            ig.code AS industry_code,
+            ig.name AS industry_name,
+            ig.vat_rate,
+            ig.pit_rate,
+            COALESCE(SUM(CASE WHEN je.adjust_code != 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) AS revenue_up,
+            COALESCE(SUM(CASE WHEN je.adjust_code = 'GiamDT' THEN je.amount ELSE 0.0 END), 0.0) AS revenue_down
+         FROM industry_group ig
+         LEFT JOIN journal_entry je ON je.industry_code = ig.code
+            AND je.entry_type = 'PX'
+            AND je.posting_date >= ?
+            AND je.posting_date <= ?
+            AND je.unit_code = ?
+         GROUP BY ig.code
+         ORDER BY ig.code",
+        from_date,
+        to_date,
+        unit_code
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Doanh thu lũy kế từ 01/01 của `year` tới hết ngày `to_date` (ISO), theo nhóm ngành.
@@ -350,6 +369,41 @@ pub(crate) async fn load_tax_agg_range(
 //   • NĐ 141/2026/NĐ-CP — nâng ngưỡng 500 triệu → 01 tỷ đồng, áp dụng từ 01/01/2026
 //   • Luật Thuế GTGT 48/2024/QH15 — Điều 12 (tỷ lệ % trên doanh thu)
 //   • TT 152/2025/TT-BTC — mẫu sổ S1a/S2a/S2b–S2e/S3a-HKD
+
+/// Khoảng ngày có đúng bằng một kỳ khai không (năm / quý / tháng đủ tháng).
+///
+/// Tờ khai nộp cho cơ quan thuế theo kỳ, nhưng người dùng xem tờ khai theo khoảng
+/// ngày tùy ý. Hạn nộp chỉ có nghĩa khi khoảng đó trùng một kỳ khai — trùng thì trả
+/// `(loại kỳ, số kỳ)`, không trùng thì `None` (UI ẩn hạn nộp thay vì hiện sai).
+pub(crate) fn period_of_range(from_date: &str, to_date: &str) -> Option<(String, i64)> {
+    let (fy, fm, fd) = date_parts(from_date)?;
+    let (ty, tm, td) = date_parts(to_date)?;
+    if fy != ty {
+        return None;
+    }
+    let year = fy;
+    // Cả năm: 01/01 → 31/12 (ngày cuối tháng 12 có thể 29/30/31).
+    if fm == 1 && fd == 1 && tm == 12 && td == last_day_of_month(year, 12).0 {
+        return Some(("year".to_string(), 0));
+    }
+    let q_start = (fm - 1) / 3 * 3 + 1;
+    let q_end = q_start + 2;
+    if fm == q_start && tm == q_end && fd == 1 && td == last_day_of_month(year, q_end).0 {
+        return Some(("quarter".to_string(), (q_start - 1) / 3 + 1));
+    }
+    // Một tháng đủ: cùng tháng, từ ngày 01 tới ngày cuối tháng.
+    if fm == tm && fd == 1 && td == last_day_of_month(year, tm).0 {
+        return Some(("month".to_string(), tm));
+    }
+    None
+}
+
+/// Tách ngày ISO `yyyy-mm-dd` thành (năm, tháng, ngày).
+fn date_parts(d: &str) -> Option<(i64, i64, i64)> {
+    let (y, rest) = d.split_once('-')?;
+    let (m, day) = rest.split_once('-')?;
+    Some((y.parse().ok()?, m.parse().ok()?, day.parse().ok()?))
+}
 
 /// Ngưỡng doanh thu năm không phải nộp thuế GTGT và TNCN: 01 tỷ đồng
 /// (NĐ 141/2026/NĐ-CP sửa NĐ 68/2026/NĐ-CP).
@@ -1167,44 +1221,6 @@ async fn load_industry_rates(pool: &SqlitePool) -> Result<Vec<(String, f64, f64)
 
 /// Tờ khai thuế theo kỳ (sheet To Khai Thue) — nhóm theo nhóm ngành nghề.
 /// period: "month" | "quarter" | "year" | "per_occurrence"; period_no: 1..12 / 1..4 / 0.
-#[tauri::command]
-pub(crate) async fn get_tax_declaration(
-    state: State<'_, AppState>,
-    year: i64,
-    period: String,
-    period_no: i64,
-) -> Result<String, String> {
-    let pool = state.pool.read().await;
-    let ctx = load_tax_context(&pool, year).await?;
-    let (from_m, to_m) = period_range(&period, period_no)?;
-    let rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
-    let cum_before = load_cum_revenue_before(&pool, year, from_m).await?;
-    let period_map: std::collections::HashMap<String, f64> = rows
-        .iter()
-        .map(|r| (r.industry_code.clone(), net_revenue(r)))
-        .collect();
-    let split = split_by_period(&cum_before, &period_map, &ctx.alloc);
-    let taxable: std::collections::HashMap<String, f64> =
-        split.iter().map(|(c, v, _)| (c.clone(), *v)).collect();
-    let deducted: std::collections::HashMap<String, f64> =
-        split.iter().map(|(c, _, d)| (c.clone(), *d)).collect();
-    let taxable_period = period_is_taxable(
-        cum_before.values().sum(),
-        period_map.values().sum(),
-        ctx.settings.thresholds.exempt,
-        ctx.taxed_from_start,
-    );
-    let out = build_tax_declaration(
-        rows,
-        &ctx.settings.method,
-        ctx.group,
-        &taxable,
-        taxable_period,
-        &deducted,
-    );
-    Ok(serde_json::to_string(&out).unwrap_or_default())
-}
-
 /// Nhóm hộ hiện hành + doanh thu cả năm dùng để xếp nhóm: hộp thoại cấu hình
 /// HKD dùng để tự điền sẵn (và cho sửa tay nếu cơ quan thuế xếp khác).
 #[tauri::command]
@@ -1247,21 +1263,23 @@ pub(crate) async fn get_tax_group(state: State<'_, AppState>, year: i64) -> Resu
 #[tauri::command]
 pub(crate) async fn get_tax_overview(
     state: State<'_, AppState>,
-    year: i64,
-    period: String,
-    period_no: i64,
+    from_date: String,
+    to_date: String,
+    unit_code: String,
 ) -> Result<String, String> {
     let pool = state.pool.read().await;
+    let year = from_date
+        .get(0..4)
+        .and_then(|y| y.parse::<i64>().ok())
+        .ok_or("Ngày bắt đầu không hợp lệ")?;
     let ctx = load_tax_context(&pool, year).await?;
-    let (from_m, to_m) = period_range(&period, period_no)?;
-    let (from, to) = (
-        format!("{:04}-{:02}-01", year, from_m),
-        format!("{:04}-{:02}-31", year, to_m),
-    );
 
-    let period_rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
+    let period_rows = load_tax_agg_in_range(&pool, &from_date, &to_date, &unit_code).await?;
     let period_revenue = year_revenue(&period_rows);
-    let cum_before = load_cum_revenue_before(&pool, year, from_m).await?;
+    // Lũy kế từ đầu năm tới hết ngày trước khoảng đang xem — cùng cách với tờ khai
+    // để mức trừ ngưỡng TNCN của kỳ khớp đúng với bảng tờ khai.
+    let cum_before = load_cum_revenue_until(&pool, year, &prev_day(&from_date)).await?;
+    let (from, to) = (from_date.clone(), to_date.clone());
     let period_map: std::collections::HashMap<String, f64> = period_rows
         .iter()
         .map(|r| (r.industry_code.clone(), net_revenue(r)))
@@ -1379,7 +1397,8 @@ pub(crate) async fn get_tax_overview(
         vat_payable: round2(vat_payable),
         pit_tax: round2(pit_tax),
         pit_provisional: round2(pit_provisional),
-        deadline: tax_deadline(&period, period_no, year),
+        // Hạn nộp chỉ hiện khi khoảng đang xem trùng đúng một kỳ khai.
+        deadline: period_of_range(&from, &to).and_then(|(kind, no)| tax_deadline(&kind, no, year)),
         total_tax: round2(vat_payable + pit_tax),
     };
     Ok(serde_json::to_string(&overview).unwrap_or_default())
@@ -2094,6 +2113,34 @@ mod tests {
             tax_group_with(50_000_000_000.01, &TaxThresholds::default()),
             4
         );
+    }
+
+    #[test]
+    fn han_nop_chi_hien_khi_khoang_date_trung_ky_khai() {
+        // Trùng kỳ khai → có hạn nộp để in ra tờ khai nộp cơ quan thuế.
+        assert_eq!(
+            period_of_range("2026-01-01", "2026-12-31"),
+            Some(("year".to_string(), 0))
+        );
+        assert_eq!(
+            period_of_range("2026-07-01", "2026-09-30"),
+            Some(("quarter".to_string(), 3))
+        );
+        assert_eq!(
+            period_of_range("2026-09-01", "2026-09-30"),
+            Some(("month".to_string(), 9))
+        );
+        // Năm nhuận: 29/02 vẫn là ngày cuối tháng 2.
+        assert_eq!(
+            period_of_range("2028-02-01", "2028-02-29"),
+            Some(("month".to_string(), 2))
+        );
+        // Khoảng tùy ý (xem cho nhanh) hoặc qua nhiều năm → không có hạn nộp,
+        // vì tờ khai chỉ nộp theo kỳ.
+        assert_eq!(period_of_range("2026-09-01", "2026-09-15"), None);
+        assert_eq!(period_of_range("2026-07-01", "2026-09-29"), None);
+        assert_eq!(period_of_range("2025-12-01", "2026-01-31"), None);
+        assert_eq!(period_of_range("x", "y"), None);
     }
 
     #[test]

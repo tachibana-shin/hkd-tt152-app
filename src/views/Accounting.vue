@@ -23,7 +23,8 @@ const toast = useToast();
 const router = useRouter();
 
 const loading = ref(false);
-const taxRows = ref<TaxDeclarationRow[]>([]);
+// Tờ khai thuế: MỘT bảng duy nhất, theo khoảng ngày đang chọn ở thanh công cụ.
+// (Trước đây có hai bảng — theo nhóm ngành nghề và theo kỳ — trùng dữ liệu nhau.)
 const tb = ref<TrialBalanceRow[]>([]);
 const re = ref<RevenueExpenseRow>({
   revenue_up: 0,
@@ -58,12 +59,10 @@ async function loadReports() {
     const year = new Date().getFullYear();
     const f = toIsoDate(fromDate.value) || `${year}-01-01`;
     const t = toIsoDate(toDate.value) || `${year}-12-31`;
-    const [tax, rev, balance] = await Promise.all([
-      api.getTaxSummary(f, t, unitCode.value),
+    const [rev, balance] = await Promise.all([
       api.getRevenueExpense(f, t),
       api.getTrialBalance(f, t),
     ]);
-    taxRows.value = tax;
     re.value = rev;
     tb.value = balance;
   } catch (e) {
@@ -106,19 +105,33 @@ function groupSourceText(o: TaxOverview): string {
     return `đã chốt cho năm ${o.year} theo doanh thu khi vượt ngưỡng, giữ nguyên cả năm.`;
   return "app tự xếp từ doanh thu năm.";
 }
-const declYear = ref(new Date().getFullYear());
+/**
+ * Năm tính thuế — lấy theo NĂM của khoảng ngày đang chọn (mức trừ ngưỡng và hạn
+ * nộp đều tính theo năm dương lịch), nên đổi khoảng ngày sang năm khác thì tờ
+ * khai, sổ và quyết toán cùng đổi theo.
+ */
+const declYear = computed(
+  () => Number(toIsoDate(fromDate.value).slice(0, 4)) || new Date().getFullYear(),
+);
 // Bộ chọn kỳ để XEM tờ khai: quý / tháng / năm (mặc định theo kỳ khai đã cấu hình)
-const declPeriod = ref<"year" | "quarter" | "month">("quarter");
-const declPeriodNo = ref(1);
-const declPeriodTypeOptions: { label: string; value: "year" | "quarter" | "month" }[] = [
+/**
+ * Bộ chọn kỳ — chỉ dùng cho SỔ KẾ TOÁN theo mẫu TT 152/2025.
+ *
+ * Tờ khai thuế đã gộp còn một bảng và chạy theo khoảng ngày ở thanh công cụ, nên
+ * không còn bộ chọn kỳ ở tờ khai. Sổ kế toán vẫn phải theo kỳ khai (quý/tháng/năm)
+ * vì đó là kỳ mà sổ được lập và lưu.
+ */
+const bookPeriod = ref<"year" | "quarter" | "month">("quarter");
+const bookPeriodNo = ref(1);
+const bookPeriodTypeOptions: { label: string; value: "year" | "quarter" | "month" }[] = [
   { label: "Theo quý", value: "quarter" },
   { label: "Theo tháng", value: "month" },
   { label: "Theo năm", value: "year" },
 ];
-const declPeriodNoOptions = computed(() => {
-  if (declPeriod.value === "quarter")
+const bookPeriodNoOptions = computed(() => {
+  if (bookPeriod.value === "quarter")
     return [1, 2, 3, 4].map((q) => ({ label: `Quý ${q}`, value: q }));
-  if (declPeriod.value === "month")
+  if (bookPeriod.value === "month")
     return Array.from({ length: 12 }, (_, i) => ({
       label: `Tháng ${i + 1}`,
       value: i + 1,
@@ -203,8 +216,8 @@ const settleLoading = ref(false);
 async function loadBook() {
   bookLoading.value = true;
   try {
-    const no = declPeriod.value === "year" ? 0 : declPeriodNo.value;
-    bookData.value = await api.getTaxBooks(declYear.value, declPeriod.value, no, book.value);
+    const no = bookPeriod.value === "year" ? 0 : bookPeriodNo.value;
+    bookData.value = await api.getTaxBooks(declYear.value, bookPeriod.value, no, book.value);
   } catch (e) {
     bookData.value = null;
     toast.add({ severity: "error", summary: "Lỗi tải sổ kế toán", detail: String(e) });
@@ -269,41 +282,19 @@ function printReport() {
   window.print();
 }
 
-function exportExcel() {
-  const cols: XlsxColumn[] = [
-    { header: "Mã ngành", key: "industry_code" },
-    { header: "Nhóm ngành", key: "industry_name" },
-    { header: "Thuế GTGT %", key: "vat_percent" },
-    { header: "Thuế TNCN %", key: "pit_percent" },
-    { header: "Doanh thu tính thuế", key: "revenue_up" },
-    { header: "Giảm trừ DT", key: "revenue_down" },
-    { header: "Thuế GTGT phải nộp", key: "vat_tax" },
-    { header: "Thuế TNCN phải nộp", key: "pit_tax" },
-  ];
-  const rows = taxRows.value.map((r) => ({
-    industry_code: r.industry_code,
-    industry_name: r.industry_name,
-    vat_percent: r.vat_rate * 100,
-    pit_percent: r.pit_rate * 100,
-    revenue_up: r.revenue_up,
-    revenue_down: r.revenue_down,
-    vat_tax: r.vat_tax,
-    pit_tax: r.pit_tax,
-  }));
-  exportXlsx(`to-khai-thue-${new Date().getFullYear()}`, cols, rows);
-}
-
 async function loadDeclaration() {
   declLoading.value = true;
   try {
-    const no = declPeriod.value === "year" ? 0 : declPeriodNo.value;
+    // Cùng khoảng ngày với các bảng khác trên màn → tờ khai luôn khớp số liệu.
+    const f = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
+    const t = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
     const [rows, ov] = await Promise.all([
-      api.getTaxDeclaration(declYear.value, declPeriod.value, no),
-      api.getTaxOverview(declYear.value, declPeriod.value, no),
+      api.getTaxDeclaration(f, t, unitCode.value),
+      api.getTaxOverview(f, t, unitCode.value),
     ]);
     declRows.value = rows;
     overview.value = ov;
-    // Sổ kế toán và số tạm nộp theo cùng kỳ/ký hiệu nên nạp kèm cho khỏi lệch.
+    // Sổ kế toán theo kỳ khai (bản in theo mẫu TT 152) + số tạm nộp cả năm.
     await Promise.all([loadBook(), loadSettlement()]);
   } catch (e) {
     toast.add({
@@ -343,9 +334,8 @@ function exportDeclarationExcel() {
     vat_payable: r.vat_payable,
     pit_tax: r.pit_tax,
   }));
-  const periodLabel =
-    declPeriod.value === "year" ? "ca-nam" : `${declPeriod.value}-${declPeriodNo.value}`;
-  exportXlsx(`to-khai-thue-ky-${declYear.value}-${periodLabel}`, cols, rows);
+  // Tên file theo khoảng ngày đang xem (tờ khai không còn bộ chọn kỳ riêng).
+  exportXlsx(`to-khai-thue-${toIsoDate(fromDate.value)}-${toIsoDate(toDate.value)}`, cols, rows);
 }
 
 function openTaxConfig() {
@@ -380,19 +370,19 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
     life: 3000,
   });
   if (
-    (payload.period === "month" && declPeriod.value !== "month") ||
-    (payload.period === "quarter" && declPeriod.value !== "quarter")
+    (payload.period === "month" && bookPeriod.value !== "month") ||
+    (payload.period === "quarter" && bookPeriod.value !== "quarter")
   ) {
-    declPeriod.value = payload.period === "month" ? "month" : "quarter";
+    bookPeriod.value = payload.period === "month" ? "month" : "quarter";
     const now = new Date();
-    declPeriodNo.value =
-      declPeriod.value === "quarter" ? Math.floor(now.getMonth() / 3) + 1 : now.getMonth() + 1;
+    bookPeriodNo.value =
+      bookPeriod.value === "quarter" ? Math.floor(now.getMonth() / 3) + 1 : now.getMonth() + 1;
   } else if (
     (payload.period === "year" || payload.period === "per_occurrence") &&
-    declPeriod.value !== "year"
+    bookPeriod.value !== "year"
   ) {
-    declPeriod.value = "year";
-    declPeriodNo.value = 0;
+    bookPeriod.value = "year";
+    bookPeriodNo.value = 0;
   }
   await loadDeclaration();
 }
@@ -411,13 +401,13 @@ void (async () => {
     taxPeriod.value = settings.tax_period;
     taxMethod.value = settings.tax_method;
     // Mặc định xem theo đúng kỳ khai của hộ (per_occurrence xem theo năm).
-    if (taxPeriod.value === "month") declPeriod.value = "month";
+    if (taxPeriod.value === "month") bookPeriod.value = "month";
     else if (taxPeriod.value === "year" || taxPeriod.value === "per_occurrence")
-      declPeriod.value = "year";
-    else declPeriod.value = "quarter";
+      bookPeriod.value = "year";
+    else bookPeriod.value = "quarter";
     const now = new Date();
-    if (declPeriod.value === "quarter") declPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
-    else if (declPeriod.value === "month") declPeriodNo.value = now.getMonth() + 1;
+    if (bookPeriod.value === "quarter") bookPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
+    else if (bookPeriod.value === "month") bookPeriodNo.value = now.getMonth() + 1;
   }
   applyReportPeriod();
   await reload();
@@ -481,56 +471,6 @@ useKeepAliveRefresh(reload);
         </div>
       </template>
     </Card>
-
-    <!-- Tờ khai thuế theo nhóm ngành -->
-    <SectionCard title="Tờ khai thuế theo nhóm ngành nghề (TT 152/2025)">
-      <template #icon><i-mdi-file-certificate class="text-rose-500" /></template>
-      <p class="mb-3 text-xs text-gray-500">
-        Khoảng ngày đang chọn ở thanh công cụ. Số thuế đã tính theo nhóm hộ và phương pháp TNCN đã
-        cấu hình — doanh thu chưa vượt ngưỡng thì thuế bằng 0.
-      </p>
-      <AppDataTable :value="taxRows" :loading="loading" stripedRows>
-        <Column field="industry_code" header="Mã ngành" />
-        <Column field="industry_name" header="Nhóm ngành nghề" />
-        <Column field="vat_rate" header="Thuế GTGT" align="right">
-          <template #body="{ data }">{{ (data.vat_rate * 100).toFixed(1) }}%</template>
-        </Column>
-        <Column field="pit_rate" header="Thuế TNCN" align="right">
-          <template #body="{ data }">{{ (data.pit_rate * 100).toFixed(1) }}%</template>
-        </Column>
-        <Column field="revenue_up" header="Doanh thu tính thuế" align="right">
-          <template #body="{ data }">{{ fmtVnd(data.revenue_up) }}</template>
-        </Column>
-        <Column field="revenue_down" header="Giảm trừ DT" align="right">
-          <template #body="{ data }">{{ fmtVnd(data.revenue_down) }}</template>
-        </Column>
-        <Column field="pit_deduction" header="Trừ mức trừ TNCN" align="right">
-          <template #body="{ data }">{{ fmtVnd(data.pit_deduction) }}</template>
-        </Column>
-        <Column field="revenue_taxable" header="DT tính thuế TNCN" align="right">
-          <template #body="{ data }">{{ fmtVnd(data.revenue_taxable) }}</template>
-        </Column>
-        <Column field="vat_tax" header="Thuế GTGT phải nộp" align="right">
-          <template #body="{ data }">
-            <b>{{ fmtVnd(data.vat_tax) }}</b>
-          </template>
-        </Column>
-        <Column field="pit_tax" header="Thuế TNCN phải nộp" align="right">
-          <template #body="{ data }">
-            <b>{{ fmtVnd(data.pit_tax) }}</b>
-          </template>
-        </Column>
-        <template #empty
-          ><EmptyState text="Chưa có dữ liệu doanh thu trong kỳ." icon="pi pi-chart-line"
-        /></template>
-      </AppDataTable>
-      <div v-if="taxRows.length" class="mt-4 flex justify-end gap-8 text-sm border-t pt-3">
-        <span class="text-gray-500">Tổng thuế GTGT:</span>
-        <b class="text-rose-600">{{ fmt(taxRows.reduce((s, r) => s + r.vat_tax, 0)) }} đ</b>
-        <span class="text-gray-500 ml-4">Tổng thuế TNCN:</span>
-        <b class="text-rose-600">{{ fmt(taxRows.reduce((s, r) => s + r.pit_tax, 0)) }} đ</b>
-      </div>
-    </SectionCard>
 
     <!-- Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 -->
     <SectionCard title="Tổng hợp thuế phải nộp (NĐ 68/2026, NĐ 141/2026)">
@@ -663,8 +603,8 @@ useKeepAliveRefresh(reload);
     <SectionCard>
       <template #icon><i-mdi-clipboard-text-outline class="text-violet-500" /></template>
       <template #title>
-        <span>Tờ khai thuế theo kỳ</span>
-        <span class="text-xs font-normal text-gray-400">Nhóm theo ngành nghề</span>
+        <span>Tờ khai thuế</span>
+        <span class="text-xs font-normal text-gray-400">Theo khoảng thời gian đang chọn</span>
       </template>
       <template #actions>
         <Button
@@ -677,41 +617,13 @@ useKeepAliveRefresh(reload);
         />
       </template>
       <div class="flex flex-wrap items-center gap-3 mb-3">
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">Loại kỳ</label>
-          <Select
-            v-model="declPeriod"
-            :options="declPeriodTypeOptions"
-            optionLabel="label"
-            optionValue="value"
-            class="w-36"
-            @change="loadDeclaration"
-          />
-        </div>
-        <div v-if="declPeriod !== 'year'">
-          <label class="text-xs text-gray-500 block mb-1">Kỳ</label>
-          <Select
-            v-model="declPeriodNo"
-            :options="declPeriodNoOptions"
-            optionLabel="label"
-            optionValue="value"
-            class="w-32"
-            @change="loadDeclaration"
-          />
-        </div>
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">Năm</label>
-          <InputNumber
-            v-model="declYear"
-            :min="2000"
-            :max="2100"
-            class="w-32"
-            @input="loadDeclaration"
-          />
-        </div>
+        <span class="text-xs text-gray-500">
+          Tờ khai cho khoảng: <b class="text-primary-600">{{ reportPeriodLabel }}</b>
+          <span v-if="reportPeriodLabel === 'Chưa chọn khoảng ngày'"> — chọn ở thanh công cụ</span>
+        </span>
         <Button
-          label="Tải tờ khai"
-          icon="pi pi-search"
+          label="Tải lại tờ khai"
+          icon="pi pi-refresh"
           size="small"
           :loading="declLoading"
           @click="loadDeclaration"
@@ -726,6 +638,13 @@ useKeepAliveRefresh(reload);
           :value="`Hạn nộp: ${overview.deadline}`"
           severity="info"
           icon="pi pi-calendar-clock"
+          class="ml-auto"
+        />
+        <Tag
+          v-else-if="overview"
+          value="Khoảng chưa trùng kỳ khai nên không có hạn nộp"
+          severity="secondary"
+          icon="pi pi-calendar"
           class="ml-auto"
         />
       </div>
@@ -920,11 +839,12 @@ useKeepAliveRefresh(reload);
             @click="printReport"
           />
           <Button
-            label="Xuất Excel"
+            label="Xuất tờ khai Excel"
             icon="pi pi-file-excel"
             outlined
             class="justify-start"
-            @click="exportExcel"
+            :disabled="!declRows.length"
+            @click="exportDeclarationExcel"
           />
           <Button
             v-if="auth.isAdmin"
@@ -1050,7 +970,31 @@ useKeepAliveRefresh(reload);
           @click="exportBookExcel"
         />
       </template>
-      <div class="mb-3 flex flex-wrap items-center gap-3">
+      <div class="mb-3 flex flex-wrap items-end gap-3">
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Loại kỳ sổ</label>
+          <Select
+            v-model="bookPeriod"
+            :options="bookPeriodTypeOptions"
+            optionLabel="label"
+            optionValue="value"
+            class="w-36"
+            aria-label="Loại kỳ sổ"
+            @change="loadBook"
+          />
+        </div>
+        <div v-if="bookPeriod !== 'year'">
+          <label class="text-xs text-gray-500 block mb-1">Kỳ</label>
+          <Select
+            v-model="bookPeriodNo"
+            :options="bookPeriodNoOptions"
+            optionLabel="label"
+            optionValue="value"
+            class="w-32"
+            aria-label="Kỳ sổ"
+            @change="loadBook"
+          />
+        </div>
         <div class="min-w-96">
           <label class="text-xs text-gray-500 block mb-1">Mẫu sổ</label>
           <div data-testid="tax-book" class="w-full">

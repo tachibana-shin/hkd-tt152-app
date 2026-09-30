@@ -2313,17 +2313,32 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
   await page.waitForTimeout(1200);
 
-  // ── 1. Nhóm 1 (DT cả năm < 1 tỷ): cả hai thẻ tờ khai đều phải bằng 0.
+  // ── 1. Nhóm 1 (DT cả năm < 1 tỷ): tờ khai phải bằng 0.
   //      Kiểm tra đúng số tiền của từng thẻ, không so chuỗi số tiền chung vì các
   //      test trước đó đã để lại dữ liệu trong cùng cơ sở dữ liệu E2E.
   const summaryText = (await page.locator("main").innerText()).replace(/\s+/g, " ");
-  expect(summaryText, "phải có thẻ tờ khai theo nhóm ngành nghề").toContain(
-    "Tờ khai thuế theo nhóm ngành nghề",
+  // Một bảng tờ khai duy nhất, chạy theo khoảng ngày đang chọn ở thanh công cụ.
+  expect(summaryText, "phải có đúng một thẻ tờ khai").toContain("Tờ khai thuế");
+  expect(summaryText, "tờ khai phải ghi khoảng thời gian đang chọn").toContain(
+    "Tờ khai cho khoảng:",
   );
-  expect(summaryText, "hộ nhóm 1: tổng thuế GTGT phải bằng 0").toContain("Tổng thuế GTGT: 0 đ");
-  expect(summaryText, "hộ nhóm 1: tổng thuế TNCN phải bằng 0").toContain("Tổng thuế TNCN: 0 đ");
+  // Chỉ còn đúng MỘT bảng tờ khai; bảng "theo nhóm ngành nghề" cũ đã bị gộp.
+  await expect(
+    page.getByText("Tờ khai thuế", { exact: true }),
+    "chỉ còn 1 bảng tờ khai",
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("Tờ khai thuế theo nhóm ngành nghề (TT 152/2025)"),
+    "bảng tờ khai trùng lặp đã bị gộp",
+  ).toHaveCount(0);
+  // Số thuế lấy từ thẻ tổng hợp (thẻ trùng lặp đã bị gộp nên không còn dòng
+  // "Tổng thuế GTGT/TNCN" riêng).
+  expect(summaryText, "hộ nhóm 1: thuế GTGT phải nộp bằng 0").toContain("Thuế GTGT phải nộp 0 đ");
+  expect(summaryText, "hộ nhóm 1: thuế TNCN phải nộp bằng 0").toContain(
+    "Thuế TNCN phải nộp (theo doanh thu) 0 đ",
+  );
   expect(summaryText, "phải xếp đúng nhóm 1").toContain("Nhóm 1 — doanh thu ≤ 1 tỷ: miễn thuế");
-  expect(summaryText, "kỳ nhóm 1 phải hiện hạn nộp tờ khai").toContain("Hạn nộp tờ khai");
+  expect(summaryText, "khoảng trùng kỳ khai thì phải có hạn nộp").toContain("Hạn nộp: ");
 
   // ── 2. Chuyển sang phương pháp theo lợi nhuận: thấy giá vốn FIFO và chi bị loại
   await page.getByRole("button", { name: "Cấu hình thuế" }).click();
@@ -2480,9 +2495,11 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   await expect(page.getByTestId("tax-group-source-note")).toContainText("nộp thuế suốt năm");
   const textG2 = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   // GTGT: 1% trên toàn bộ doanh thu ghi trên hóa đơn → có số.
-  expect(textG2, "hồ sơ Nhóm 2: phải có thuế GTGT").not.toContain("Tổng thuế GTGT: 0 đ");
+  expect(textG2, "hồ sơ Nhóm 2: phải có thuế GTGT").not.toContain("Thuế GTGT phải nộp 0 đ");
   // TNCN: doanh thu mới 10.000.000 < mức trừ 01 tỷ → cơ sở tính thuế bằng 0.
-  expect(textG2, "hồ sơ Nhóm 2 + DT dưới mức trừ: thuế TNCN = 0").toContain("Tổng thuế TNCN: 0 đ");
+  expect(textG2, "hồ sơ Nhóm 2 + DT dưới mức trừ: thuế TNCN = 0").toContain(
+    "Thuế TNCN phải nộp (theo doanh thu) 0 đ",
+  );
   // Tờ khai phải ghi rõ đã trừ bao nhiêu, và hạn ngạch mức trừ còn lại phải hiện ra.
   await expect(page.getByTestId("exempt-quota")).toContainText("Hạn ngạch mức trừ TNCN còn lại");
   await expect(page.getByTestId("exempt-quota")).toContainText("TNCN theo doanh thu còn bằng 0");
@@ -2506,7 +2523,7 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   // quyết định nhóm, không phải khoản miễn thuế.
   const textLow = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   expect(textLow, "hạ ngưỡng không được xoá thuế của hộ thuộc diện nộp").not.toContain(
-    "Tổng thuế GTGT: 0 đ",
+    "Thuế GTGT phải nộp 0 đ",
   );
 
   // ── 4. Trả ngưỡng về 01 tỷ, dọn hồ sơ về Nhóm 1 → thuế bằng 0 vì hộ thuộc diện miễn
@@ -2524,6 +2541,8 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   await page.keyboard.press("Escape");
   await page.waitForTimeout(1200);
   const text = (await page.locator("main").innerText()).replace(/\s+/g, " ");
-  expect(text, "hộ nhóm 1: tổng thuế GTGT = 0").toContain("Tổng thuế GTGT: 0 đ");
-  expect(text, "hộ nhóm 1: tổng thuế TNCN = 0").toContain("Tổng thuế TNCN: 0 đ");
+  expect(text, "hộ nhóm 1: thuế GTGT phải nộp = 0").toContain("Thuế GTGT phải nộp 0 đ");
+  expect(text, "hộ nhóm 1: thuế TNCN phải nộp = 0").toContain(
+    "Thuế TNCN phải nộp (theo doanh thu) 0 đ",
+  );
 });

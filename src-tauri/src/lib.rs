@@ -85,7 +85,6 @@ pub fn run() {
             commands::accounting::get_ledger,
             commands::accounting::get_ledger_page,
             commands::accounting::get_trial_balance,
-            commands::accounting::get_tax_summary,
             commands::accounting::get_tax_declaration,
             commands::accounting::get_tax_overview,
             commands::accounting::get_tax_settlement,

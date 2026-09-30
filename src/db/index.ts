@@ -598,16 +598,6 @@ export const api = {
       items: args.items,
     }),
 
-  // ─── REPORTS ───
-  /**
-   * Tờ khai thuế theo nhóm ngành trong khoảng ngày đang chọn.
-   * Dùng chung quy tắc với `getTaxDeclaration` (đã xét nhóm hộ + phương pháp
-   * TNCN + mức trừ ngưỡng 01 tỷ) nên hai thẻ trên màn Kế toán không mâu thuẫn nhau.
-   */
-  getTaxSummary: async (fromDate: string, toDate: string, unitCode: string) =>
-    parse<TaxDeclarationRow[]>(
-      await call<string>("get_tax_summary", { fromDate, toDate, unitCode }),
-    ),
   getRevenueExpense: async (fromDate: string, toDate: string) =>
     parse<RevenueExpenseRow>(await call<string>("get_revenue_expense", { fromDate, toDate })),
   getTrialBalance: async (fromDate: string, toDate: string) =>
@@ -902,16 +892,26 @@ export const api = {
   getAttendanceWorkDays: async (period: string) =>
     parse<AttendanceWorkDay[]>(await call<string>("get_attendance_work_days", { period })),
 
-  // ─── TỜ KHAI THUẾ THEO KỲ ───
-  // period: "year" | "quarter" | "month" | "occurrence"; periodNo: 1..12 (tháng) / 1..4 (quý) / 0 (năm)
-  getTaxDeclaration: async (year: number, period: string, periodNo: number) =>
+  // ─── TỜ KHAI THUẾ (theo khoảng ngày đang chọn ở thanh công cụ) ───
+  /**
+   * Một bảng duy nhất, chia theo nhóm ngành nghề.
+   *
+   * Đã gộp "theo nhóm ngành nghề" (bám khoảng ngày) với "theo kỳ khai" vì hai
+   * bảng cho ra cùng một dữ liệu. Mức trừ ngưỡng TNCN vẫn tính lũy kế từ đầu
+   * năm nên xem khoảng nào cũng không tính trùng.
+   */
+  getTaxDeclaration: async (fromDate: string, toDate: string, unitCode: string) =>
     parse<TaxDeclarationRow[]>(
-      await call<string>("get_tax_declaration", { year, period, periodNo }),
+      await call<string>("get_tax_declaration", { fromDate, toDate, unitCode }),
     ),
 
-  // Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)
-  getTaxOverview: async (year: number, period: string, periodNo: number) =>
-    parse<TaxOverview>(await call<string>("get_tax_overview", { year, period, periodNo })),
+  /**
+   * Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)
+   * — cùng khoảng ngày với tờ khai nên hai thẻ không mâu thuẫn nhau.
+   * `deadline` chỉ có khi khoảng đang xem trùng đúng một kỳ khai.
+   */
+  getTaxOverview: async (fromDate: string, toDate: string, unitCode: string) =>
+    parse<TaxOverview>(await call<string>("get_tax_overview", { fromDate, toDate, unitCode })),
   /** Nhóm hộ hiện hành + doanh thu cả năm dùng xếp nhóm (hộp cấu hình HKD tự điền). */
   getTaxGroup: async (year: number) =>
     parse<TaxGroupInfo>(await call<string>("get_tax_group", { year })),

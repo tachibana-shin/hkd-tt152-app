@@ -640,26 +640,19 @@ pub async fn api_invoke(
             from_date: String,
             to_date: String
         ),
-        "get_tax_summary" => mx!(
-            commands::accounting::get_tax_summary,
+        "get_tax_declaration" => mx!(
+            commands::accounting::get_tax_declaration,
             body,
             from_date: String,
             to_date: String,
             unit_code: String
         ),
-        "get_tax_declaration" => mx!(
-            commands::accounting::get_tax_declaration,
-            body,
-            year: i64,
-            period: String,
-            period_no: i64
-        ),
         "get_tax_overview" => mx!(
             commands::accounting::get_tax_overview,
             body,
-            year: i64,
-            period: String,
-            period_no: i64
+            from_date: String,
+            to_date: String,
+            unit_code: String
         ),
         "get_tax_settlement" => mx!(
             commands::accounting::get_tax_settlement,
