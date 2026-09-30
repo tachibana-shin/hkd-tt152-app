@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.12.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.11.0...v0.12.0) (2026-09-30)
+
+
+### Features
+
+* **stock:** one row per voucher and persist the trade discount ([ceb0b00](https://github.com/tachibana-shin/hkd-tt152-app/commit/ceb0b00888f065a23d02c4d8d36055cc1655d6f8))
+
 # [0.11.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.10.1...v0.11.0) (2026-09-29)
 
 
