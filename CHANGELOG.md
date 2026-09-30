@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.15.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.14.0...v0.15.0) (2026-09-30)
+
+
+### Features
+
+* **accounting:** open journal and cash screens with the active period ([5cb1b8f](https://github.com/tachibana-shin/hkd-tt152-app/commit/5cb1b8f828b42ee3017f68696932a800326029ec))
+
 # [0.14.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.13.0...v0.14.0) (2026-09-30)
 
 
