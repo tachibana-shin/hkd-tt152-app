@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.14.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.13.0...v0.14.0) (2026-09-30)
+
+
+### Features
+
+* **accounting:** quick period switcher following the household tax period ([9b853c3](https://github.com/tachibana-shin/hkd-tt152-app/commit/9b853c32bba0ae0fddbbe1d75660e3b9569b36b9))
+
 # [0.13.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.12.2...v0.13.0) (2026-09-30)
 
 
