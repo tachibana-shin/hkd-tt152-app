@@ -1,5 +1,17 @@
 # Changelog
 
+# [0.13.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.12.2...v0.13.0) (2026-09-30)
+
+
+### Bug Fixes
+
+* **e2e:** take the test data dir from TMPDIR instead of hard-coding /tmp ([cb90549](https://github.com/tachibana-shin/hkd-tt152-app/commit/cb90549d1a916596c5f194a6090d416da7635804))
+
+
+### Features
+
+* **accounting:** print each TT 152 book with its own official columns ([1d35306](https://github.com/tachibana-shin/hkd-tt152-app/commit/1d3530697131c3235d789c24b95cb353a8e62ccf))
+
 ## [0.12.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.12.1...v0.12.2) (2026-09-30)
 
 
