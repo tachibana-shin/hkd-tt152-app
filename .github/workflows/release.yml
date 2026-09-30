@@ -317,9 +317,9 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          # Lấy đúng mục của bản này trong CHANGELOG.md (commit release đã
-          # được semantic-release đẩy lên main). Không có mục (chạy tay với
-          # bản chưa có trong changelog) thì chỉ dùng phần hướng dẫn.
+          # Read this version's entry from CHANGELOG.md (semantic-release already
+          # pushed that commit to main). A manual run of an unreleased version has
+          # no entry yet — the install section still goes out.
           {
             echo "### Tải bản cài"
             echo
@@ -327,17 +327,13 @@ jobs:
             echo
             echo "Người dùng bản cài (\`.exe\` / \`.dmg\` / \`.AppImage\`) có thể cập nhật ngay trong app: **Cài đặt → Cập nhật ứng dụng**."
             echo
-            if [ -f CHANGELOG.md ]; then
-              notes=$(awk -v v="$VERSION" '
-                $0 ~ "^## \\[" v "\\]" { grab = 1; next }
-                grab && /^## \[/ { exit }
-                grab { print }
-              ' CHANGELOG.md | sed -e '/./,$!d' -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
-              if [ -n "$notes" ]; then
-                echo "### Thay đổi"
-                echo
-                echo "$notes"
-              fi
+            # Extraction lives in a Node script rather than awk: semantic-release
+            # writes `# [1.2.0]` for minor releases but `## [1.2.1]` for patches, so
+            # a `^## [` pattern silently dropped the change list of every minor
+            # release. The script accepts both heading levels.
+            notes=$(node scripts/release-notes.mjs "$VERSION" || true)
+            if [ -n "$notes" ]; then
+              echo "$notes"
             fi
           } > release-notes.md
           gh release edit "v$VERSION" --draft=false \
