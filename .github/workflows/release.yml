@@ -310,6 +310,21 @@ jobs:
             version=$(git tag --list 'v*' --sort=-v:refname | head -1 | sed 's/^v//')
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # semantic-release pushed its release commit to main AFTER this workflow
+      # started, so the checkout above predates it and its CHANGELOG.md has no
+      # entry for this version. Re-read the file from the tip of origin/main,
+      # otherwise every auto-published release ships without its change list.
+      - name: Lấy CHANGELOG.md mới nhất từ main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet --no-tags origin main
+          if git show FETCH_HEAD:CHANGELOG.md > CHANGELOG.md 2>/dev/null; then
+            echo "Đã lấy CHANGELOG.md từ origin/main ($(git rev-parse --short FETCH_HEAD))"
+          else
+            echo "::notice::origin/main chưa có CHANGELOG.md — dùng bản trong checkout."
+          fi
+
       - name: Viết nội dung & công khai
         shell: bash
         env:
@@ -317,9 +332,8 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          # Read this version's entry from CHANGELOG.md (semantic-release already
-          # pushed that commit to main). A manual run of an unreleased version has
-          # no entry yet — the install section still goes out.
+          # Read this version's entry from CHANGELOG.md. A manual run of a version
+          # that has no entry yet still gets the install section on its own.
           {
             echo "### Tải bản cài"
             echo
