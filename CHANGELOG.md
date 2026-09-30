@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.12.0...v0.12.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **release:** include the change list in the published release body ([41d6e93](https://github.com/tachibana-shin/hkd-tt152-app/commit/41d6e93bd0a5cb2c67af5fb6f06ef7edc11928cf))
+
 # [0.12.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.11.0...v0.12.0) (2026-09-30)
 
 
