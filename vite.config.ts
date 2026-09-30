@@ -22,6 +22,7 @@ const PRIMEVUE_COMPONENTS = [
   "AutoComplete",
   "Avatar",
   "Button",
+  "ButtonGroup",
   "Card",
   "Checkbox",
   "Column",

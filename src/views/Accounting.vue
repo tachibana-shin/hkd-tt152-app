@@ -13,7 +13,7 @@ import type {
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
-import { describeRange, taxPeriodRange } from "@/utils/period";
+import { describeRange, monthRange, quarterRange, sameDay, taxPeriodRange } from "@/utils/period";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const business = useBusinessStore();
@@ -353,6 +353,65 @@ function applyReportPeriod() {
 /** Nhãn kỳ đang xem, để khỏi tự nhẩy từ hai ô ngày. */
 const reportPeriodLabel = computed(() => describeRange(fromDate.value, toDate.value));
 
+/**
+ * Kỳ khai của hộ quyết định có "chuyển nhanh" hay không và bao nhiêu kỳ:
+ *   • `quarter` → 4 nút Quý 1-4 (bấm là xong, không cần mở menu)
+ *   • `month`   → 12 tháng trong một Select (12 nút thì chiếm hết thanh lọc)
+ *   • `year` / `per_occurrence` → cả năm là một kỳ duy nhất, không có gì để
+ *     chuyển nên không hiện control cho khỏi rối.
+ */
+const quickQuarters = computed(() => (taxPeriod.value === "quarter" ? [1, 2, 3, 4] : []));
+const quickMonths = computed(() =>
+  taxPeriod.value === "month"
+    ? Array.from({ length: 12 }, (_, i) => ({ label: `Tháng ${i + 1}`, value: i + 1 }))
+    : [],
+);
+
+/**
+ * Kỳ đang xem nếu khoảng ngày khớp **trọn** kỳ theo kỳ khai của hộ, ngược lại
+ * `null` (đang xem khoảng tự chọn) — dùng để tô nút / chọn sẵn trong ô.
+ */
+const activeQuickNo = computed<number | null>(() => {
+  const isQuarter = taxPeriod.value === "quarter";
+  const isMonth = taxPeriod.value === "month";
+  if (!isQuarter && !isMonth) return null;
+  const from = fromDate.value;
+  const to = toDate.value;
+  if (!from || !to) return null;
+  const no = isQuarter ? Math.floor(from.getMonth() / 3) + 1 : from.getMonth() + 1;
+  const r = isQuarter ? quarterRange(from.getFullYear(), no) : monthRange(from.getFullYear(), no);
+  return sameDay(from, r.from) && sameDay(to, r.to) ? no : null;
+});
+
+/**
+ * Chuyển nhanh sang kỳ `no`: đặt hai ô ngày đúng ranh giới kỳ rồi nạp lại cả
+ * màn (báo cáo doanh thu - chi phí, tờ khai, sổ kế toán).
+ *
+ * Năm lấy theo khoảng **đang xem** chứ không phải năm hệ thống: đang tra cứu
+ * năm 2025 mà chọn Quý 3 thì phải ở quý 3/2025, nếu không người dùng đang so
+ * sánh số liệu năm cũ bỗng bị nhảy sang năm nay.
+ */
+async function goQuick(no: number) {
+  const isQuarter = taxPeriod.value === "quarter";
+  const r = isQuarter ? quarterRange(declYear.value, no) : monthRange(declYear.value, no);
+  fromDate.value = r.from;
+  toDate.value = r.to;
+  // Sổ kế toán đi theo cùng kỳ với tờ khai (đúng như lúc lưu Cấu hình thuế) —
+  // để tờ khai quý N nằm cạnh sổ quý khác là sai số liệu.
+  bookPeriod.value = isQuarter ? "quarter" : "month";
+  bookPeriodNo.value = no;
+  // `reload()` chỉ nạp báo cáo + tờ khai, sổ phải gọi riêng (không có watcher).
+  await Promise.all([reload(), loadBook()]);
+}
+
+/** `v-model` của bộ chọn chuyển nhanh theo tháng. */
+const quickMonthModel = computed<number | null>({
+  get: () => (taxPeriod.value === "month" ? activeQuickNo.value : null),
+  set: (v) => {
+    if (v != null) void goQuick(Number(v));
+  },
+});
+
 async function onTaxConfigSaved(payload: { period: string; method: string }) {
   taxPeriod.value = payload.period;
   taxMethod.value = payload.method;
@@ -454,6 +513,36 @@ useKeepAliveRefresh(reload);
               optionLabel="label"
               optionValue="value"
               class="w-44"
+            />
+          </div>
+          <div v-if="quickQuarters.length || quickMonths.length">
+            <label class="text-xs text-gray-500 block mb-1">Chuyển nhanh</label>
+            <ButtonGroup
+              v-if="quickQuarters.length"
+              v-tooltip.top="'Đổi khoảng ngày sang quý đó rồi nạp lại cả màn'"
+            >
+              <Button
+                v-for="q in quickQuarters"
+                :key="q"
+                :label="`Quý ${q}`"
+                size="small"
+                :severity="activeQuickNo === q ? 'primary' : 'secondary'"
+                :outlined="activeQuickNo !== q"
+                :data-testid="`quick-quarter-${q}`"
+                @click="goQuick(q)"
+              />
+            </ButtonGroup>
+            <Select
+              v-else
+              v-model="quickMonthModel"
+              :options="quickMonths"
+              option-label="label"
+              option-value="value"
+              placeholder="Chọn tháng"
+              class="w-40"
+              aria-label="Chuyển nhanh theo tháng"
+              data-testid="quick-month"
+              v-tooltip.top="'Đổi khoảng ngày sang tháng đó rồi nạp lại cả màn'"
             />
           </div>
           <Button label="Xem báo cáo" icon="pi pi-search" size="small" @click="loadReports" />

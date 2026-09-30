@@ -2142,6 +2142,69 @@ test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/t
   expect((await currentRange()).label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
 });
 
+// Nút "chuyển nhanh" phải theo đúng "Kỳ khai thuế của hộ": khai theo quý thì 4 nút,
+// theo tháng thì chọn được 12 tháng, năm/từng lần phát sinh thì không hiện gì.
+test("Kế toán HKD: chuyển nhanh kỳ theo kỳ khai của hộ (quý / tháng / năm)", async ({ page }) => {
+  await ensureLoggedIn(page);
+  const y = new Date().getFullYear();
+
+  const datePicker = (label: string) =>
+    page.locator(`label:text-is("${label}") + .p-datepicker input`);
+
+  /** Đổi kỳ khai qua hộp thoại "Cấu hình thuế" — đúng đường người dùng đi. */
+  async function setTaxPeriod(optionText: RegExp) {
+    await page.getByRole("button", { name: "Cấu hình thuế" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator(".p-select").first().click();
+    await page.locator(".p-select-option", { hasText: optionText }).first().click();
+    await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+    await expect(dialog).toBeHidden();
+  }
+
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+
+  // Kỳ sổ hiển thị ngay sau nhãn "Kỳ", cùng pattern với các ô ngày ở trên.
+  const bookPeriodNo = page.locator('label:text-is("Kỳ") + .p-select');
+  const quickMonth = page.locator('label:text-is("Chuyển nhanh") + .p-select');
+  const quickLabel = page.locator('label:text-is("Chuyển nhanh")');
+
+  // ── Khai theo quý → 4 nút; bấm "Quý 3" thì ngày, tờ khai và kỳ sổ cùng Q3 ──
+  await setTaxPeriod(/^Theo quý/);
+  await expect(page.getByTestId("quick-quarter-3")).toBeVisible();
+  await page.getByTestId("quick-quarter-3").click();
+  await expect(datePicker("Từ ngày")).toHaveValue(`01/07/${y}`);
+  await expect(datePicker("Đến ngày")).toHaveValue(`30/09/${y}`);
+  await expect(bookPeriodNo).toContainText("Quý 3");
+  // Kỳ đang xem được tô đậm (severity primary, không outlined), kỳ khác thì không.
+  await expect(page.getByTestId("quick-quarter-3")).toHaveAttribute("data-p-severity", "primary");
+  await expect(page.getByTestId("quick-quarter-3")).not.toHaveAttribute("data-p", /outlined/);
+  await expect(page.getByTestId("quick-quarter-1")).toHaveAttribute("data-p-severity", "secondary");
+  await expect(page.getByTestId("quick-quarter-1")).toHaveAttribute("data-p", /outlined/);
+  // Khai theo quý thì không có bộ chọn tháng (nhãn vẫn còn, chỉ có nhóm nút).
+  await expect(quickMonth).toHaveCount(0);
+
+  // ── Khai theo tháng → hết nút quý, chuyển sang bộ chọn 12 tháng ──
+  await setTaxPeriod(/^Theo tháng/);
+  await expect(page.getByTestId("quick-quarter-1")).toHaveCount(0);
+  await expect(quickMonth).toBeVisible();
+  await quickMonth.click();
+  await page.locator(".p-select-option", { hasText: "Tháng 12" }).first().click();
+  await expect(datePicker("Từ ngày")).toHaveValue(`01/12/${y}`);
+  await expect(datePicker("Đến ngày")).toHaveValue(`31/12/${y}`);
+  await expect(bookPeriodNo).toContainText("Tháng 12");
+
+  // ── Khai theo năm: cả năm là một kỳ duy nhất → không có gì để chuyển nhanh ──
+  await setTaxPeriod(/^Theo năm/);
+  await expect(page.getByTestId("quick-quarter-1")).toHaveCount(0);
+  await expect(quickLabel).toHaveCount(0);
+
+  // Trả lại mặc định để không ảnh hưởng test sau.
+  await setTaxPeriod(/^Theo quý/);
+  await expect(page.getByTestId("quick-quarter-1")).toBeVisible();
+});
+
 test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async ({ page }) => {
   await ensureLoggedIn(page);
   const datePicker = (label: string) =>

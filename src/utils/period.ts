@@ -18,19 +18,46 @@ export type PeriodRange = { from: Date; to: Date };
 const lastDayOfMonth = (year: number, month: number) => new Date(year, month + 1, 0);
 
 /**
+ * Khoảng ngày của một quý trong năm (`quarter` = 1-4).
+ *
+ * Dùng cho nút chuyển nhanh Quý 1-4 ở màn Kế toán HKD và cho kỳ khai theo quý —
+ * hai chỗ phải ra đúng ranh giới giống nhau thì nhãn "Quý 3/2026" mới khớp với
+ * hai ô ngày đang chọn.
+ */
+export function quarterRange(year: number, quarter: number): PeriodRange {
+  const q = Math.min(Math.max(Math.trunc(quarter) || 1, 1), 4);
+  const month = (q - 1) * 3;
+  return { from: new Date(year, month, 1), to: lastDayOfMonth(year, month + 2) };
+}
+
+/**
+ * Khoảng ngày của một tháng trong năm (`month` = 1-12).
+ *
+ * Cùng mục đích với `quarterRange`: nút chuyển nhanh theo tháng và kỳ khai theo
+ * tháng phải ra đúng một ranh giới để nhãn "Tháng 7/2026" khớp hai ô ngày.
+ */
+export function monthRange(year: number, month: number): PeriodRange {
+  const m = Math.min(Math.max(Math.trunc(month) || 1, 1), 12) - 1;
+  return { from: new Date(year, m, 1), to: lastDayOfMonth(year, m) };
+}
+
+/** Hai ngày có cùng năm/tháng/ngày — so để biết khoảng ngày có khớp một quý/tháng không. */
+export const sameDay = (a: Date | null, b: Date | null): boolean =>
+  !!a &&
+  !!b &&
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
+
+/**
  * Khoảng ngày của kỳ chứa `today`, theo kỳ khai của hộ.
  * Kỳ lạ (rỗng, không đọc được) thì rơi về cả năm — an toàn, không lỗi.
  */
 export function taxPeriodRange(period: string | null | undefined, today = new Date()): PeriodRange {
   const y = today.getFullYear();
   const m = today.getMonth();
-  if (period === "month") {
-    return { from: new Date(y, m, 1), to: lastDayOfMonth(y, m) };
-  }
-  if (period === "quarter") {
-    const first = Math.floor(m / 3) * 3;
-    return { from: new Date(y, first, 1), to: lastDayOfMonth(y, first + 2) };
-  }
+  if (period === "month") return monthRange(y, m + 1);
+  if (period === "quarter") return quarterRange(y, Math.floor(m / 3) + 1);
   return { from: new Date(y, 0, 1), to: new Date(y, 11, 31) };
 }
 
