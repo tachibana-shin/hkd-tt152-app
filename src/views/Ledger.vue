@@ -20,11 +20,24 @@ const totalAmount = ref(0);
 
 // Khoảng ngày mở từ màn Kế toán HKD (query ?from=&to=) — mở ra đúng kỳ đang xem.
 const { inheritedFrom, inheritedTo, backLabel, goBack } = useInheritedRange();
-const fromDate = ref<Date | null>(inheritedFrom);
-const toDate = ref<Date | null>(inheritedTo);
+const fromDate = ref<Date | null>(inheritedFrom.value);
+const toDate = ref<Date | null>(inheritedTo.value);
 const entryType = ref("");
 /** true = khoảng ngày đến từ màn khác, báo để người dùng biết vì sao sổ không cả năm. */
-const rangeInherited = computed(() => !!inheritedFrom || !!inheritedTo);
+const rangeInherited = computed(() => !!inheritedFrom.value || !!inheritedTo.value);
+
+/**
+ * Mở lại màn này bằng query mới (ở Kế toán HKD chọn kỳ khác rồi bấm "Mở Sổ
+ * nhật ký"): `<KeepAlive>` không chạy lại `setup()` nên phải nghe `route.query`.
+ *
+ * Chỉ đặt ngày, không nạp ở đây — `useKeepAliveRefresh` nạp ngay sau đó khi
+ * màn được lấy lại từ cache (pre-flush watcher chạy trước `onActivated`), nên
+ * dữ liệu đã được nạp bằng đúng kỳ mới, không có hai lời gọi song song đua nhau.
+ */
+watch([inheritedFrom, inheritedTo], ([f, t]) => {
+  fromDate.value = f;
+  toDate.value = t;
+});
 
 const entryOptions = [{ label: "Toàn bộ", value: "" }, "PN", "PX", "PT", "PC"];
 

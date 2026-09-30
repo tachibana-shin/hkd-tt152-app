@@ -193,6 +193,31 @@ function selectBook(target: string) {
   });
 }
 
+const router = useRouter();
+const route = useRoute();
+
+/**
+ * Mở Sổ nhật ký (`/ledger`) hoặc Thu / Chi (`/cash`) kèm đúng kỳ đang xem.
+ *
+ * Hai màn này không phải mẫu TT 152 nên không gộp vào thẻ sổ, nhưng vẫn phải có
+ * lối vào có chủ đích từ đây (trước chỉ vào được bằng thanh menu). Truyền
+ * `?from=&to=` + đường quay lại, màn đích nhận qua `useInheritedRange` → mở ra
+ * là đúng kỳ, bấm "Quay lại Kế toán HKD" là về ngay chỗ này.
+ */
+function openJournal(path: "/ledger" | "/cash") {
+  const from = toIsoDate(fromDate.value);
+  const to = toIsoDate(toDate.value);
+  void router.push({
+    path,
+    query: {
+      // Thiếu một trong hai ngày thì để trống, màn đích tự lấy mặc định của nó.
+      ...(from && to ? { from, to } : {}),
+      back: route.fullPath,
+      backLabel: "Kế toán HKD",
+    },
+  });
+}
+
 // ─── Sổ kế toán theo mẫu TT 152/2025/TT-BTC + tạm nộp & quyết toán năm ───
 const bookOptions = [
   { label: "S1a-HKD · Sổ doanh thu (nhóm 1)", value: "S1a" },
@@ -915,6 +940,23 @@ useKeepAliveRefresh(reload);
             class="justify-start"
             data-testid="open-book-s3a"
             @click="selectBook('S3a')"
+          />
+          <!-- 2 màn không phải mẫu TT 152: vẫn cho mở thẳng kèm kỳ đang xem. -->
+          <Button
+            label="Mở Sổ nhật ký"
+            icon="pi pi-external-link"
+            outlined
+            class="justify-start"
+            data-testid="open-ledger"
+            @click="openJournal('/ledger')"
+          />
+          <Button
+            label="Mở Thu / Chi"
+            icon="pi pi-external-link"
+            outlined
+            class="justify-start"
+            data-testid="open-cash"
+            @click="openJournal('/cash')"
           />
           <Button
             label="In báo cáo"

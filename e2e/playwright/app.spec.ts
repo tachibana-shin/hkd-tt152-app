@@ -2261,6 +2261,48 @@ test("Sổ nhật ký có nút quay lại màn Kế toán HKD", async ({ page })
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
 });
 
+// 2 nút "Mở Sổ nhật ký" / "Mở Thu / Chi" phải mang theo kỳ người dùng đang xem.
+// Lần mở thứ hai không chạy lại `setup()` (KeepAlive) — nếu không nghe query
+// thì vẫn ra kỳ của lần mở đầu, nên test mở lại với kỳ khác để bắt lỗi đó.
+test("Kế toán HKD: mở Sổ nhật ký / Thu-Chi kèm kỳ đang xem", async ({ page }) => {
+  await ensureLoggedIn(page);
+  const y = new Date().getFullYear();
+  const ledgerDate = (label: string) =>
+    page.locator(`label:text-is("${label}") + .p-datepicker input`);
+  const cashDate = (placeholder: string) => page.locator(`input[placeholder="${placeholder}"]`);
+
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+
+  // Kỳ 1: chọn Quý 3 rồi mở Sổ nhật ký → đúng quý 3, kèm nút bỏ lọc cả năm.
+  await page.getByTestId("quick-quarter-3").click();
+  await expect(ledgerDate("Từ ngày")).toHaveValue(`01/07/${y}`);
+  await page.getByTestId("open-ledger").click();
+  await expect(page).toHaveURL(/\/ledger\?/);
+  await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
+  await expect(ledgerDate("Từ ngày")).toHaveValue(`01/07/${y}`);
+  await expect(ledgerDate("Đến ngày")).toHaveValue(`30/09/${y}`);
+  await expect(page.getByText("Xem cả năm")).toBeVisible();
+
+  // Kỳ 2: quay về, đổi sang Quý 1 rồi mở lại → là quý 1, không kẹt quý 3.
+  await page.getByTestId("back-to-accounting").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await page.getByTestId("quick-quarter-1").click();
+  await expect(ledgerDate("Từ ngày")).toHaveValue(`01/01/${y}`);
+  await page.getByTestId("open-ledger").click();
+  await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
+  await expect(ledgerDate("Từ ngày")).toHaveValue(`01/01/${y}`);
+  await expect(ledgerDate("Đến ngày")).toHaveValue(`31/03/${y}`);
+
+  // Màn Thu / Chi nhận nguyên kỳ đang xem.
+  await page.getByTestId("back-to-accounting").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await page.getByTestId("open-cash").click();
+  await expect(page.locator("header h2")).toHaveText("Phiếu thu / chi");
+  await expect(cashDate("Từ ngày")).toHaveValue(`01/01/${y}`);
+  await expect(cashDate("Đến ngày")).toHaveValue(`31/03/${y}`);
+});
+
 test("Cấu hình HKD: nhóm hộ tự điền theo doanh thu, lưu lại và tờ khai theo nhóm đó", async ({
   page,
 }) => {

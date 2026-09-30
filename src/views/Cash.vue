@@ -31,9 +31,22 @@ const typeFilter = ref("");
 // Khoảng ngày mở từ màn Kế toán HKD (query ?from=&to=) — S3a là sổ chi tiết tiền
 // nên phải lọc theo kỳ đang xem, không lấy cả năm.
 const { inheritedFrom, inheritedTo, backLabel, goBack } = useInheritedRange();
-const fromDate = ref<Date | null>(inheritedFrom);
-const toDate = ref<Date | null>(inheritedTo);
-const rangeInherited = computed(() => !!inheritedFrom || !!inheritedTo);
+const fromDate = ref<Date | null>(inheritedFrom.value);
+const toDate = ref<Date | null>(inheritedTo.value);
+const rangeInherited = computed(() => !!inheritedFrom.value || !!inheritedTo.value);
+
+/**
+ * Mở lại màn này bằng query mới (ở Kế toán HKD chọn kỳ khác rồi bấm "Mở Thu /
+ * Chi"): `<KeepAlive>` không chạy lại `setup()` nên phải nghe `route.query`.
+ *
+ * Chỉ đặt ngày, không nạp ở đây — `useKeepAliveRefresh` nạp ngay sau đó khi
+ * màn được lấy lại từ cache (pre-flush watcher chạy trước `onActivated`), nên
+ * dữ liệu đã được nạp bằng đúng kỳ mới, không có hai lời gọi song song đua nhau.
+ */
+watch([inheritedFrom, inheritedTo], ([f, t]) => {
+  fromDate.value = f;
+  toDate.value = t;
+});
 /** true = chỉ lọc khi có ngày; để trống thì xem toàn bộ. */
 const range = () => ({
   from: toIsoDate(fromDate.value),
