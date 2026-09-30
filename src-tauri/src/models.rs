@@ -259,6 +259,28 @@ pub(crate) struct JournalEntryRow {
     pub(crate) note: String,
 }
 
+/// 1 dòng = 1 phiếu nhập/phiếu xuất (gom từ `journal_entry` cho màn kho).
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct StockVoucherRow {
+    pub(crate) voucher_no: String,
+    pub(crate) posting_date: String,
+    pub(crate) entry_type: String,
+    pub(crate) description: String,
+    pub(crate) supplier_name: Option<String>,
+    pub(crate) customer_name: Option<String>,
+    /// Số DÒNG hàng của phiếu (kể cả dòng điều chỉnh).
+    pub(crate) line_count: i64,
+    /// SỐ LOẠI mặt hàng = COUNT(DISTINCT product_code).
+    pub(crate) item_count: i64,
+    /// Tổng số lượng (các loại cộng lại) — tiện khi nhập ghi chung đơn vị.
+    pub(crate) total_qty: f64,
+    /// Tổng tiền chiết khấu thương mại của phiếu (đ).
+    pub(crate) discount: f64,
+    /// Tổng thành tiền = giá trị SAU chiết khấu.
+    pub(crate) amount: f64,
+    pub(crate) note: String,
+}
+
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub(crate) struct InvoiceRow {
     pub(crate) id: Option<i64>,

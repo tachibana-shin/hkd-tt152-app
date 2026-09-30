@@ -198,6 +198,7 @@ pub fn run() {
             commands::stock::save_outbound,
             commands::stock::get_journal_entries,
             commands::stock::get_journal_entries_page,
+            commands::stock::get_stock_vouchers_page,
             commands::stock::get_voucher,
             commands::stock::get_stock_lots,
         ])

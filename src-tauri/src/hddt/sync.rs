@@ -975,6 +975,8 @@ pub(crate) struct PreviewRow {
     pub(crate) new_product_count: i64,
     pub(crate) tgtcthue: f64,
     pub(crate) tgtthue: f64,
+    /// Tổng tiền chiết khấu thương mại trên hóa đơn (cổng trả về `ttcktmai`).
+    pub(crate) ttcktmai: f64,
     pub(crate) tgtttbso: f64,
     pub(crate) voucher_no: String,
     pub(crate) detail_error: String,
@@ -1007,13 +1009,14 @@ pub(crate) async fn preview(
         PreviewRow,
         "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon, portal_kind,
                 status, skip_reason, line_count, new_product_count,
-                tgtcthue, tgtthue, tgtttbso, voucher_no, detail_error
+                tgtcthue, tgtthue, ttcktmai, tgtttbso, voucher_no, detail_error
            FROM hddt_purchase_invoice
           WHERE (? = '' OR posting_date >= ?) AND (? = '' OR posting_date <= ?)
          UNION ALL
          SELECT 0, hi.portal_id, hi.posting_date, hi.nbmst, hi.nbten, hi.khhdon, hi.shdon,
                 hi.portal_kind, 'imported', '', hi.line_count, hi.new_product_count,
-                hi.tgtcthue, hi.tgtthue, hi.tgtttbso, COALESCE(iv.voucher_no, ''), ''
+                hi.tgtcthue, hi.tgtthue, hi.ttcktmai, hi.tgtttbso,
+                COALESCE(iv.voucher_no, ''), ''
            FROM hddt_imported_invoice hi
            LEFT JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id
           WHERE (? = '' OR hi.posting_date >= ?) AND (? = '' OR hi.posting_date <= ?)

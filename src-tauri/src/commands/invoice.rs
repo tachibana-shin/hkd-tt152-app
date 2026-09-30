@@ -838,6 +838,7 @@ pub(crate) async fn replace_invoice_core(
             "HKD",
             "GiamDT",
             reason,
+            0.0,
         )
         .await?;
     }

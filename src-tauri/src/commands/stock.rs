@@ -3,7 +3,7 @@
 use crate::helpers::*;
 use crate::models::*;
 use serde_json::json;
-use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
+use sqlx::sqlite::{Sqlite, SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager, State};
 
@@ -233,6 +233,8 @@ pub(crate) async fn save_inbound_core(
                 unit_code,
                 "GiamCP",
                 &note_full,
+                // Dòng điều chỉnh giảm hàng + chiết phí: tiền CK gắn với dòng này.
+                discount,
             )
             .await?;
             if vat > 0.0 {
@@ -256,6 +258,7 @@ pub(crate) async fn save_inbound_core(
                     unit_code,
                     "GiamCP",
                     &note_full,
+                    0.0,
                 )
                 .await?;
             }
@@ -303,6 +306,7 @@ pub(crate) async fn save_inbound_core(
             unit_code,
             "",
             &note_full,
+            discount,
         )
         .await?;
         // Khấu trừ GTGT: bút toán bổ sung Nợ 133 (thuế được khấu trừ) / Có credit.
@@ -328,6 +332,7 @@ pub(crate) async fn save_inbound_core(
                 unit_code,
                 "",
                 &note_full,
+                0.0,
             )
             .await?;
         }
@@ -374,6 +379,7 @@ pub(crate) async fn save_inbound_core(
                 unit_code,
                 "",
                 &pc_note,
+                0.0,
             )
             .await?;
         }
@@ -632,6 +638,7 @@ pub(crate) async fn save_outbound_core(
                 unit_code,
                 adjust,
                 note,
+                item.discount,
             )
             .await?;
             revenue_total += amount;
@@ -677,6 +684,7 @@ pub(crate) async fn save_outbound_core(
                 unit_code,
                 "GiamDT",
                 note,
+                0.0,
             )
             .await?;
             insert_journal_entry(
@@ -699,6 +707,7 @@ pub(crate) async fn save_outbound_core(
                 unit_code,
                 "",
                 note,
+                0.0,
             )
             .await?;
             revenue_total += amount;
@@ -766,6 +775,7 @@ pub(crate) async fn save_outbound_core(
             unit_code,
             "",
             note,
+            0.0,
         )
         .await?;
         invoice_lines.push((
@@ -817,6 +827,7 @@ pub(crate) async fn save_outbound_core(
                 unit_code,
                 "",
                 &pt_note,
+                0.0,
             )
             .await?;
         }
@@ -1368,6 +1379,180 @@ pub(crate) async fn get_journal_entries_page_core(
     Ok(rows)
 }
 
+/// Phiếu nhập / phiếu xuất gom theo phiếu: **mỗi phiếu 1 dòng**, phân trang ở server.
+///
+/// Màn kho trước đây in thẳng `journal_entry` nên một phiếu có N mặt hàng thì ra N
+/// dòng, trông như N phiếu trùng số. Sổ vẫn phải giữ chi tiết dòng (dùng cho FIFO,
+/// bảng cân đối, tờ khai), nên chỉ gom ở màn hiển thị; bấm vào dòng vẫn mở được
+/// chi tiết từng dòng.
+///
+/// Cột `item_count` là SỐ LOẠI mặt hàng (`COUNT(DISTINCT product_code)`), không
+/// phải tổng số lượng — đúng như bản kê trên hóa đơn. `discount` là tổng tiền chiết
+/// khấu của các dòng, `amount` là tổng giá trị **sau** chiết khấu.
+#[tauri::command]
+pub(crate) async fn get_stock_vouchers_page(
+    state: State<'_, AppState>,
+    lazy_event: String,
+    entry_type: String,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    let pool = state.pool.read().await;
+    let search = ev.global_keyword().unwrap_or_default();
+    let (rows, total) = stock_vouchers_core(
+        &pool,
+        &entry_type,
+        &from_date,
+        &to_date,
+        &search,
+        page.size,
+        page.offset,
+    )
+    .await?;
+    Ok(json!({ "rows": rows, "total": total }).to_string())
+}
+
+/// Mảnh SQL của điều kiện lọc: xen kẽ chữ và tham số bind.
+///
+/// `QueryBuilder` đặt mọi `push_bind` vào đúng vị trí đang đứng, nên điều kiện
+/// và tham số phải được đẩy xen kẽ — gom hết điều kiện rồi bind sau sẽ lệch
+/// chỗ và sinh SQL sai.
+enum WherePart {
+    Text(String),
+    Bind(String),
+}
+
+/// Dựng điều kiện lọc danh sách phiếu (loại phiếu + khoảng ngày + từ khoá).
+fn voucher_where_parts(
+    entry_type: &str,
+    from_date: &str,
+    to_date: &str,
+    search: &str,
+) -> Vec<WherePart> {
+    let mut parts = vec![WherePart::Text("1=1".to_string())];
+    let mut push = |sql: &str, value: &str| {
+        parts.push(WherePart::Text(sql.to_string()));
+        parts.push(WherePart::Bind(value.to_string()));
+    };
+    if !entry_type.trim().is_empty() {
+        push(" AND entry_type = ", entry_type);
+    }
+    if !from_date.trim().is_empty() {
+        push(" AND posting_date >= ", from_date);
+    }
+    if !to_date.trim().is_empty() {
+        push(" AND posting_date <= ", to_date);
+    }
+    // Từ khoá: mỗi cột một bind, xen kẽ với chữ "LIKE" để thứ tự `?` khớp.
+    // (Không dùng `page::global_where` vì hàm đó gộp toàn bộ điều kiện thành
+    // một chuỗi, bind sẽ rơi hết ra sau ngoặc đóng.)
+    let kw = search.trim();
+    if !kw.is_empty() {
+        // Khoá ký tự đại diện để gõ `%` cũng chỉ tìm đúng chữ đó.
+        let like = format!("%{}%", kw.replace('%', "\\%").replace('_', "\\_"));
+        let cols = [
+            "voucher_no",
+            "description",
+            "supplier_name",
+            "customer_name",
+            "note",
+        ];
+        parts.push(WherePart::Text(" AND (".to_string()));
+        for (i, col) in cols.iter().enumerate() {
+            if i > 0 {
+                parts.push(WherePart::Text(" OR ".to_string()));
+            }
+            parts.push(WherePart::Text(format!("{col} LIKE ")));
+            parts.push(WherePart::Bind(like.clone()));
+            parts.push(WherePart::Text(" ESCAPE '\\'".to_string()));
+        }
+        parts.push(WherePart::Text(")".to_string()));
+    }
+    parts
+}
+
+/// Đẩy các mảnh điều kiện vào builder theo đúng thứ tự.
+fn push_voucher_where<'q>(qb: &mut sqlx::QueryBuilder<'q, Sqlite>, parts: &[WherePart]) {
+    for part in parts {
+        match part {
+            WherePart::Text(t) => {
+                qb.push(t.clone());
+            }
+            WherePart::Bind(v) => {
+                qb.push_bind(v.clone());
+            }
+        }
+    }
+}
+
+/// Phần `SELECT ... FROM journal_entry` dùng chung cho truy vấn lấy dòng và
+/// truy vấn đếm — phải GIỐNG NHAU, nếu không thì điều kiện lọc theo tên cột đã
+/// đặt bí danh (`supplier_name`…) sẽ không tồn tại trong truy vấn đếm.
+const VOUCHER_INNER_SQL: &str = "SELECT je.posting_date, je.voucher_no, je.entry_type,
+                je.description, je.product_code, je.quantity, je.discount, je.amount,
+                je.note,
+                COALESCE(s.name, '') AS supplier_name,
+                COALESCE(c.name, '') AS customer_name
+           FROM journal_entry je
+           LEFT JOIN supplier s ON s.code = je.supplier_code
+           LEFT JOIN customer c ON c.code = je.customer_code
+          WHERE ";
+
+/// Thân truy vấn danh sách phiếu — tách riêng để unit test gọi trực tiếp.
+pub(crate) async fn stock_vouchers_core(
+    pool: &SqlitePool,
+    entry_type: &str,
+    from_date: &str,
+    to_date: &str,
+    search: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<StockVoucherRow>, i64), String> {
+    let parts = voucher_where_parts(entry_type, from_date, to_date, search);
+    let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT voucher_no, MIN(posting_date) AS posting_date, entry_type,
+                MIN(description) AS description,
+                MAX(supplier_name) AS supplier_name, MAX(customer_name) AS customer_name,
+                SUM(CASE WHEN product_code <> '' THEN 1 ELSE 0 END) AS line_count,
+                COUNT(DISTINCT CASE WHEN product_code <> '' THEN product_code END) AS item_count,
+                SUM(quantity) AS total_qty,
+                SUM(discount) AS discount,
+                SUM(amount) AS amount,
+                MAX(note) AS note
+           FROM (
+             SELECT je.posting_date, je.voucher_no, je.entry_type, je.description,
+                    je.product_code, je.quantity, je.discount, je.amount, je.note,
+                    COALESCE(s.name, '') AS supplier_name,
+                    COALESCE(c.name, '') AS customer_name
+               FROM journal_entry je
+               LEFT JOIN supplier s ON s.code = je.supplier_code
+               LEFT JOIN customer c ON c.code = je.customer_code
+             WHERE ",
+    );
+    push_voucher_where(&mut qb, &parts);
+    qb.push(") v GROUP BY voucher_no, entry_type ORDER BY MIN(posting_date) DESC, voucher_no DESC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    let rows: Vec<StockVoucherRow> = qb
+        .build_query_as::<StockVoucherRow>()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Tổng số phiếu (COUNT DISTINCT theo cùng bộ lọc) để bảng đếm đúng số trang.
+    let mut cq = sqlx::QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM (SELECT 1 FROM (");
+    cq.push(VOUCHER_INNER_SQL);
+    push_voucher_where(&mut cq, &parts);
+    cq.push(") v GROUP BY voucher_no, entry_type) g");
+    let total: i64 = cq.build_query_scalar().fetch_one(pool).await.unwrap_or(0);
+
+    Ok((rows, total))
+}
+
 /// Chi tiết 1 chứng từ theo số phiếu — phục vụ in PNK (mẫu 01-VT) / PXK (mẫu 02-VT).
 /// Gộp tên sản phẩm, nhà cung cấp / khách hàng để trình bày phiếu in.
 #[tauri::command]
@@ -1849,6 +2034,99 @@ mod tests {
     }
 
     // ─── save_inbound_core (DB) ───
+
+    #[tokio::test]
+    async fn chiet_khau_duoc_luu_va_gom_phieu_mot_dong() {
+        // Một phiếu 3 dòng hàng (2 loại) có chiết khấu → màn kho phải ra MỘT dòng
+        // với số loại mặt hàng = 2, chiết khấu = tổng Tiền CK, thành tiền = sau CK.
+        let pool = test_pool().await;
+        seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        seed_product(&pool, "P2", "Hàng B", 0.01).await;
+        seed_warehouse(&pool, "W1", "Kho 1").await;
+
+        let items = vec![
+            InboundItemInput {
+                product_code: "P1".into(),
+                quantity: 2.0,
+                unit_price: 1_000_000.0,
+                discount: 200_000.0,
+            },
+            InboundItemInput {
+                product_code: "P1".into(), // cùng loại, dòng thứ 2
+                quantity: 1.0,
+                unit_price: 1_000_000.0,
+                discount: 100_000.0,
+            },
+            InboundItemInput {
+                product_code: "P2".into(),
+                quantity: 1.0,
+                unit_price: 500_000.0,
+                discount: 0.0,
+            },
+        ];
+        save_inbound_core(
+            &pool,
+            "2026-02-10",
+            "PN-CK",
+            "Nhập có chiết khấu",
+            "",
+            "W1",
+            "HKD",
+            &items,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+        )
+        .await
+        .expect("nhập kho có chiết khấu");
+
+        // Tiền CK được ghi lại trên từng dòng (không chỉ trừ vào giá trị).
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT COALESCE(SUM(discount), 0) FROM journal_entry WHERE voucher_no = 'PN-CK'"
+            )
+            .await,
+            300_000.0
+        );
+
+        let (rows, total) = stock_vouchers_core(&pool, "PN", "", "", "", 20, 0)
+            .await
+            .expect("danh sách phiếu");
+        assert_eq!(total, 1);
+        assert_eq!(rows.len(), 1, "1 phiếu = 1 dòng");
+        let v = &rows[0];
+        assert_eq!(v.voucher_no, "PN-CK");
+        assert_eq!(v.item_count, 2, "số LOẠI mặt hàng, không phải số lượng");
+        assert_eq!(v.total_qty, 4.0);
+        assert_eq!(v.discount, 300_000.0);
+        // Thành tiền = 2tr + 1tr + 500k − 300k CK = 3,2 triệu.
+        assert_eq!(v.amount, 3_200_000.0);
+
+        // Ô tìm kiếm: lọc theo số phiếu / diễn giải, không vỡ cú pháp SQL.
+        let descs: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT description FROM journal_entry WHERE voucher_no = 'PN-CK'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        eprintln!("DEBUG6 descs={:?}", descs);
+        let (found, found_total) = stock_vouchers_core(&pool, "PN", "", "", "chiết khấu", 20, 0)
+            .await
+            .expect("tìm theo diễn giải");
+        assert_eq!(found_total, 1);
+        assert_eq!(found[0].voucher_no, "PN-CK");
+        let (none, none_total) = stock_vouchers_core(&pool, "PN", "", "", "khong-ton-tai", 20, 0)
+            .await
+            .expect("tìm từ khoá không khớp");
+        assert_eq!(none_total, 0);
+        assert!(none.is_empty());
+    }
 
     #[tokio::test]
     async fn nhap_kho_tao_lo_va_ghi_so_nhap() {

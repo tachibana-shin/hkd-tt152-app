@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO journal_entry\n         (posting_date, voucher_no, doc_date, description, product_code,\n          supplier_code, customer_code, quantity, unit_price, amount, entry_type,\n          debit_account, credit_account, industry_code, vat_rate, pit_rate,\n          unit_code, adjust_code, note, discount)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 20
+    },
+    "nullable": []
+  },
+  "hash": "254058e93ee90034ad03d3c22edb0de9fa877d825733b22eb122f15b2bff2c26"
+}

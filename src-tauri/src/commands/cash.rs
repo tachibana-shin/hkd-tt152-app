@@ -100,6 +100,7 @@ pub(crate) async fn save_cash_entry(
         unit_code,
         "",
         &input.note,
+        0.0,
     )
     .await?;
     // Số phiếu là duy nhất theo từng loại (đã kiểm ở trên) nên cập nhật theo

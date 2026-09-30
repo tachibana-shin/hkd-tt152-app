@@ -129,6 +129,32 @@ export interface JournalEntry {
   note?: string;
 }
 
+/**
+ * 1 dòng của bảng Phiếu nhập / Phiếu xuất = 1 phiếu (gom từ `journal_entry`).
+ *
+ * Màn kho trước đây in từng dòng hàng nên một phiếu 10 mặt hàng ra 10 dòng trùng
+ * số phiếu; giờ gom lại 1 dòng 1 phiếu, bấm vào để xem chi tiết từng dòng.
+ */
+export interface StockVoucherRow {
+  voucher_no: string;
+  posting_date: string;
+  entry_type: string;
+  description: string;
+  supplier_name?: string | null;
+  customer_name?: string | null;
+  /** Số dòng hàng của phiếu (kể cả dòng điều chỉnh). */
+  line_count: number;
+  /** SỐ LOẠI mặt hàng (COUNT DISTINCT product_code) — không phải tổng số lượng. */
+  item_count: number;
+  /** Tổng số lượng các loại cộng lại. */
+  total_qty: number;
+  /** Tổng tiền chiết khấu thương mại của phiếu (đ). */
+  discount: number;
+  /** Tổng thành tiền = giá trị SAU chiết khấu. */
+  amount: number;
+  note: string;
+}
+
 export interface JournalEntryRow {
   id: number;
   posting_date: string;
@@ -969,6 +995,8 @@ export interface HddtSyncRow {
   new_product_count: number;
   tgtcthue: number;
   tgtthue: number;
+  /** Tổng tiền chiết khấu thương mại trên hóa đơn (cổng trả về `ttcktmai`). */
+  ttcktmai: number;
   tgtttbso: number;
   voucher_no: string;
   detail_error: string;

@@ -58,6 +58,7 @@ import type {
   InventoryRow,
   StockLot,
   JournalEntryRow,
+  StockVoucherRow,
   LedgerRow,
   Invoice,
   InvoiceItem,
@@ -928,6 +929,26 @@ export const api = {
     parse<TaxBook>(await call<string>("get_tax_books", { year, period, periodNo, book })),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───
+  /**
+   * Danh sách phiếu nhập / phiếu xuất gom theo phiếu — **1 phiếu = 1 dòng**
+   * (kèm số loại mặt hàng, tổng chiết khấu, thành tiền). Chi tiết dòng hàng vẫn
+   * xem qua `getVoucher` như trước.
+   */
+  getStockVouchersPage: async (
+    lazyEvent: unknown,
+    entryType: string,
+    fromDate: string,
+    toDate: string,
+  ) =>
+    parse<PageResult<StockVoucherRow>>(
+      await call<string>("get_stock_vouchers_page", {
+        lazyEvent: JSON.stringify(lazyEvent),
+        entryType,
+        fromDate,
+        toDate,
+      }),
+    ),
+
   getVoucher: async (voucherNo: string) =>
     parse<VoucherRow[]>(await call<string>("get_voucher", { voucherNo })),
 

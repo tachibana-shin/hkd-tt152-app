@@ -340,6 +340,13 @@ void (async () => {
             </div>
           </template>
         </Column>
+        <Column header="Chiết khấu" align="right" :style="{ width: '9rem' }">
+          <template #body="{ data }">
+            <span :class="data.ttcktmai > 0 ? 'text-emerald-600' : 'text-gray-400'">
+              {{ data.ttcktmai > 0 ? fmtMoney(data.ttcktmai) : "—" }}
+            </span>
+          </template>
+        </Column>
         <Column header="Tổng TT" align="right">
           <template #body="{ data }">{{ fmtMoney(data.tgtttbso) }}</template>
         </Column>

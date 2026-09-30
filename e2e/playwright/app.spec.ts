@@ -831,6 +831,10 @@ test("Nhap/Xuat kho: chặn số phiếu trùng, số phiếu mới không đụ
   await dlg.getByRole("button", { name: "Hủy" }).click();
 
   // Lưu phiếu với số gợi ý → hộp thoại đóng, phiếu mới xuất hiện trong danh sách.
+  // Bỏ lọc khoảng ngày trước: danh sách nay gom theo phiếu và lọc ở SERVER, nên
+  // phiếu vừa lập (ngày hôm nay) sẽ không hiện nếu khoảng lọc vẫn là 01–02/09.
+  await page.getByRole("button", { name: "Xoá lọc" }).click();
+  await page.waitForTimeout(600);
   await page.getByRole("button", { name: "Tạo phiếu xuất" }).click();
   const dlg2 = page.getByRole("dialog");
   const line = dlg2.locator("tbody tr").first();
@@ -844,6 +848,78 @@ test("Nhap/Xuat kho: chặn số phiếu trùng, số phiếu mới không đụ
   await expect(page.locator("tr", { has: page.getByText(suggested, { exact: true }) })).toHaveCount(
     1,
   );
+});
+
+test("Nhap/Xuat kho: 1 phiếu = 1 dòng, có số loại mặt hàng và chiết khấu", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Cần 2 loại hàng để phân biệt "số loại" với "tổng số lượng" (seed chỉ có SP001).
+  const newProduct = await request.post("/api/save_product", {
+    data: {
+      code: "SP-CK2",
+      name: "Hàng chiết khấu 2",
+      unit: "Cái",
+      salePrice: 600_000,
+      costPrice: 500_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(newProduct.ok(), `save_product: ${await newProduct.text()}`).toBe(true);
+
+  // 1 phiếu nhập 3 dòng hàng (2 loại) có chiết khấu → bảng phải ra MỘT dòng.
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-27",
+      voucher_no: "PN-GOM01",
+      description: "Phiếu gom nhiều dòng có chiết khấu",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [
+        { product_code: "SP001", quantity: 2, unit_price: 1_000_000, discount: 200_000 },
+        { product_code: "SP001", quantity: 1, unit_price: 1_000_000, discount: 100_000 },
+        { product_code: "SP-CK2", quantity: 3, unit_price: 500_000, discount: 50_000 },
+      ],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound: ${await stockIn.text()}`).toBe(true);
+
+  await sidebarButton(page, "Nhập kho").click();
+  await expect(page.locator("header h2")).toHaveText("Nhập kho");
+  const row = page.locator("tr", { has: page.getByText("PN-GOM01", { exact: true }) }).first();
+  await expect(row, "phiếu 3 dòng hàng phải hiện đúng 1 dòng").toBeVisible();
+  await expect(
+    page.locator("tr", { has: page.getByText("PN-GOM01", { exact: true }) }),
+    "không được lặp dòng theo từng mặt hàng",
+  ).toHaveCount(1);
+
+  // Số LOẠI mặt hàng = 2 (không phải tổng số lượng 6), chiết khấu 350.000,
+  // thành tiền = 2tr + 1tr + 1,5tr − 350k = 4,15 triệu.
+  await expect(row.getByRole("cell").nth(4)).toHaveText("2");
+  await expect(row.getByRole("cell").nth(6)).toContainText("350.000 đ");
+  await expect(row.getByRole("cell").nth(7)).toContainText("4.150.000 đ");
+
+  // Chi tiết dòng hàng vẫn xem được khi bấm số phiếu.
+  await row.getByRole("button", { name: "Xem phiếu", exact: true }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toBeVisible();
+  await expect(dlg.locator("tbody tr")).toHaveCount(3);
+  await dlg.getByRole("button", { name: "Đóng" }).click();
 });
 
 test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", async ({ page, request }) => {

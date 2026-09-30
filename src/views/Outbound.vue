@@ -5,20 +5,26 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import { api } from "@/db";
-import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
+import type { StockVoucherRow } from "@/types";
+import { fmtDec, fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useLazyPage } from "@/composables/useLazyPage";
 
 const catalog = useCatalogStore();
 const stock = useStockStore();
 const auth = useAuthStore();
 const { products, customers, industryGroups, warehouses } = storeToRefs(catalog);
-const { entries, loading } = storeToRefs(stock);
+const { loading } = storeToRefs(stock);
+/**
+ * Bảng gom theo phiếu: 1 phiếu = 1 dòng (số loại mặt hàng, tổng chiết khấu, thành
+ * tiền). Trước đây bảng in thẳng `journal_entry` nên 1 phiếu N mặt hàng ra N dòng
+ * trùng số phiếu. Chi tiết từng dòng vẫn xem được khi bấm số phiếu.
+ */
+const voucherRows = ref<StockVoucherRow[]>([]);
+const voucherTotal = ref(0);
+const voucherTotals = computed(() => voucherRows.value.reduce((s, r) => s + r.amount, 0));
+const voucherDiscount = computed(() => voucherRows.value.reduce((s, r) => s + r.discount, 0));
 const toast = useToast();
-const router = useRouter();
-
-function printVoucher(row: { voucher_no: string }) {
-  router.push("/print/" + encodeURIComponent(row.voucher_no));
-}
 
 // ─── Xem phiếu (chỉ đọc) — dùng chung VoucherViewDialog ───
 const viewVoucherNo = ref("");
@@ -97,6 +103,8 @@ const form = reactive({
     product_code: string;
     quantity: number;
     unit_price: number;
+    /** Tiền chiết khấu thương mại trên dòng (đ) — doanh thu = SL × ĐG − CK. */
+    discount: number;
     industry_code: string;
     warehouse_code: string;
   }[],
@@ -159,6 +167,7 @@ function addRow() {
     product_code: "",
     quantity: 1,
     unit_price: 0,
+    discount: 0,
     industry_code: industryGroups.value[0]?.code ?? "PPHH",
     warehouse_code: "", // rỗng → kho mặc định của sản phẩm / kho đầu tiên
   });
@@ -236,6 +245,8 @@ async function save() {
       }`,
     });
     dialog.value = false;
+    // Danh sách gom theo phiếu không do store nạp → nạp lại sau khi lưu.
+    await loadVouchers();
   } catch (e) {
     toast.add({
       severity: "error",
@@ -250,12 +261,27 @@ async function save() {
 // ─── Bộ lọc danh sách phiếu (giữ khi chuyển menu nhờ KeepAlive) ───
 const f = reactive({ search: "", from: null as Date | null, to: null as Date | null });
 
-function loadEntries() {
-  return stock.loadEntries("PX", toIsoDate(f.from), toIsoDate(f.to), f.search.trim());
+// Phân trang server-side: danh sách phiếu dài theo thời gian, mỗi phiếu 1 dòng.
+const page = useLazyPage(async (lazy) => {
+  loading.value = true;
+  try {
+    const res = await api.getStockVouchersPage(lazy, "PX", toIsoDate(f.from), toIsoDate(f.to));
+    voucherRows.value = res.rows;
+    voucherTotal.value = res.total;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi tải danh sách phiếu", detail: String(e) });
+  } finally {
+    loading.value = false;
+  }
+});
+
+/** Đổi khoảng ngày / từ khoá tìm kiếm → nạp lại trang đầu. */
+function loadVouchers() {
+  return page.setKeyword(f.search.trim());
 }
 
 async function reload() {
-  await Promise.all([catalog.loadAll(), loadEntries()]);
+  await Promise.all([catalog.loadAll(), loadVouchers()]);
 }
 
 void reload();
@@ -282,49 +308,69 @@ useKeepAliveRefresh(reload);
       v-model:search="f.search"
       v-model:from="f.from"
       v-model:to="f.to"
-      @change="loadEntries"
+      @change="loadVouchers"
     />
 
     <Card>
       <template #content>
         <AppDataTable
-          :value="entries"
+          :value="voucherRows"
           :loading="loading"
+          :totalRecords="voucherTotal"
+          :first="page.first.value"
+          :rows="page.rowsPerPage.value"
+          :rows-per-page-options="page.pageSizes"
+          data-testid="voucher-table-outbound"
+          sort-mode="single"
+          removable-sort
+          filter-toggle
+          :global-filter-fields="['voucher_no', 'description', 'customer_name']"
           stripedRows
-          paginator
-          :rows="10"
           actions-header="Thao tác"
           actions-width="132"
+          @page="page.onPage"
+          @sort="page.onSort"
         >
-          <Column field="voucher_no" header="Số phiếu">
+          <Column field="voucher_no" header="Số phiếu" sortable>
             <template #body="{ data }">
               <Button
                 :label="data.voucher_no"
                 link
                 class="!p-0 text-sm"
                 :aria-label="`Xem phiếu ${data.voucher_no}`"
-                v-tooltip="'Xem phiếu'"
+                v-tooltip="'Xem chi tiết dòng hàng của phiếu'"
                 @click="openVoucher(data.voucher_no)"
               />
             </template>
           </Column>
-          <Column field="posting_date" header="Ngày" />
-          <Column field="product_code" header="Mã SP" />
+          <Column field="posting_date" header="Ngày" sortable />
           <Column field="description" header="Diễn giải" />
-          <Column field="customer_name" header="Khách hàng">
+          <Column field="customer_name" header="Khách hàng" sortable>
             <template #body="{ data }">{{ data.customer_name || "—" }}</template>
           </Column>
-          <Column field="industry_code" header="Nhóm ngành">
+          <Column field="item_count" header="Số loại MH" align="right" sortable>
+            <template #body="{ data }">{{ data.item_count }}</template>
+          </Column>
+          <Column field="total_qty" header="Tổng SL" align="right">
+            <template #body="{ data }">{{ fmtDec(data.total_qty) }}</template>
+          </Column>
+          <Column field="discount" header="Chiết khấu" align="right" sortable>
             <template #body="{ data }">
-              <Tag :value="data.industry_code" severity="info" />
+              <span :class="data.discount > 0 ? 'text-emerald-600' : 'text-gray-400'">
+                {{ data.discount > 0 ? fmtVnd(data.discount) : "—" }}
+              </span>
+            </template>
+            <template #footer>
+              {{ voucherRows.length ? fmtVnd(voucherDiscount) : "" }}
             </template>
           </Column>
-          <Column field="quantity" header="SL" align="right" />
-          <Column field="unit_price" header="Đơn giá" align="right">
-            <template #body="{ data }">{{ fmtVnd(data.unit_price) }}</template>
-          </Column>
-          <Column field="amount" header="Thành tiền" align="right">
-            <template #body="{ data }">{{ fmtVnd(data.amount) }}</template>
+          <Column field="amount" header="Thành tiền" align="right" sortable>
+            <template #body="{ data }"
+              ><b>{{ fmtVnd(data.amount) }}</b></template
+            >
+            <template #footer>
+              {{ voucherRows.length ? fmtVnd(voucherTotals) : "" }}
+            </template>
           </Column>
           <template #actions="{ data }">
             <div class="flex justify-center gap-1">
@@ -332,35 +378,24 @@ useKeepAliveRefresh(reload);
                 icon="pi pi-eye"
                 text
                 rounded
-                size="small"
                 aria-label="Xem phiếu"
-                v-tooltip="'Xem phiếu'"
+                v-tooltip="'Xem chi tiết dòng hàng của phiếu'"
                 @click="openVoucher(data.voucher_no)"
               />
               <Button
-                v-if="!data.adjust_code"
-                icon="pi pi-undo"
+                icon="pi pi-replay"
                 text
                 rounded
-                size="small"
-                aria-label="Lập phiếu điều chỉnh (khách trả lại)"
-                v-tooltip="'Lập phiếu điều chỉnh (khách trả lại)'"
+                severity="warn"
+                :aria-label="`Lập phiếu điều chỉnh theo ${data.voucher_no}`"
+                v-tooltip="'Lập phiếu điều chỉnh (giảm hóa đơn bán) theo phiếu này'"
                 @click="adjustFromVoucher(data)"
-              />
-              <Button
-                icon="pi pi-print"
-                text
-                rounded
-                size="small"
-                aria-label="In phiếu"
-                v-tooltip="'In phiếu'"
-                @click="printVoucher(data)"
               />
             </div>
           </template>
-          <template #empty
-            ><EmptyState text="Chưa có phiếu xuất kho." icon="pi pi-upload"
-          /></template>
+          <template #empty>
+            <EmptyState text="Chưa có phiếu nào trong khoảng ngày đang lọc." icon="pi pi-inbox" />
+          </template>
         </AppDataTable>
       </template>
     </Card>
@@ -513,6 +548,7 @@ useKeepAliveRefresh(reload);
         price-field="sale_price"
         show-industry
         show-warehouse
+        show-discount
         pre-input
         show-add-product
         info="Xuất FIFO theo kho đã chọn ở từng dòng; dòng bỏ trống kho sẽ lấy kho mặc định của sản phẩm."

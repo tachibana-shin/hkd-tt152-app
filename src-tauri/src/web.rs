@@ -463,6 +463,14 @@ pub async fn api_invoke(
             from_date: String,
             to_date: String
         ),
+        "get_stock_vouchers_page" => mx!(
+            commands::stock::get_stock_vouchers_page,
+            body,
+            lazy_event: String,
+            entry_type: String,
+            from_date: String,
+            to_date: String
+        ),
         "get_voucher" => mx!(commands::stock::get_voucher, body, voucher_no: String),
         "get_stock_lots" => mx!(commands::stock::get_stock_lots, body, product_code: String),
 

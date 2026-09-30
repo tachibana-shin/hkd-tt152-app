@@ -74,14 +74,17 @@ pub(crate) async fn insert_journal_entry(
     unit_code: &str,
     adjust_code: &str,
     note: &str,
+    // Số tiền chiết khấu thương mại của dòng (đ). `amount` đã là giá trị SAU chiết
+    // khấu; tham số này chỉ để ghi nhận mục chiết khấu trên chứng từ.
+    discount: f64,
 ) -> Result<(), String> {
     sqlx::query!(
         "INSERT INTO journal_entry
          (posting_date, voucher_no, doc_date, description, product_code,
           supplier_code, customer_code, quantity, unit_price, amount, entry_type,
           debit_account, credit_account, industry_code, vat_rate, pit_rate,
-          unit_code, adjust_code, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          unit_code, adjust_code, note, discount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         posting_date,
         voucher_no,
         posting_date,
@@ -100,7 +103,8 @@ pub(crate) async fn insert_journal_entry(
         pit_rate,
         unit_code,
         adjust_code,
-        note
+        note,
+        discount
     )
     .execute(&mut **tx)
     .await

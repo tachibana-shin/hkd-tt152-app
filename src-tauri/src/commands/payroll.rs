@@ -171,6 +171,7 @@ pub(crate) async fn save_payroll_core(
             "HKD",
             "",
             "Tự sinh từ bảng lương",
+            0.0,
         )
         .await?;
     } else {
