@@ -53,16 +53,17 @@ const GRID = { style: BorderStyle.SINGLE, size: 6, color: "000000" };
 const NO_LINE = { style: BorderStyle.NONE, size: 0, color: "auto" };
 
 /**
- * Cỡ chữ theo nửa điểm của Word (20 = 10pt).
+ * Cỡ chữ theo nửa điểm của Word (28 = 14pt).
  *
- * Sổ in ra A4 thật để nộp nên bám cỡ biểu mẫu: chữ trong bảng 10pt, tiêu đề
- * cột/hàng khối 9pt, dòng chú thích 8pt, tên sổ 12pt — đọc rõ khi in mà bảng
- * nhiều cột (S2a nhiều cột số) vẫn không tràn ô.
+ * Cỡ chữ gốc của bộ xuất file (Word lẫn Excel) là 14pt theo yêu cầu — in A4
+ * đọc rõ; các dòng phụ scale theo: tiêu đề cột/khối 13pt, chú thích 12pt, tên
+ * sổ 16pt. Bảng vẫn `TableLayoutType.FIXED` nên cột hẹp tự xuống dòng thay vì
+ * tràn ô.
  */
-const SIZE_BODY = 20; // 10pt — chữ trong bảng
-const SIZE_BAND = 18; // 9pt — tiêu đề cột, hàng khối ngành
-const SIZE_NOTE = 16; // 8pt — dòng "(Ký, ghi rõ họ tên…)"
-const SIZE_TITLE = 24; // 12pt — tên sổ
+const SIZE_BODY = 28; // 14pt — chữ trong bảng
+const SIZE_BAND = 26; // 13pt — tiêu đề cột, hàng khối ngành
+const SIZE_NOTE = 24; // 12pt — dòng "(Ký, ghi rõ họ tên…)"
+const SIZE_TITLE = 32; // 16pt — tên sổ
 
 /** Nền hàng cột và hàng tổng hợp — theo `@media print` của bảng sổ. */
 const FILL_HEAD = "EEEEEE";

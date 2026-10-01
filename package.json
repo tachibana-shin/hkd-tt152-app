@@ -36,6 +36,7 @@
     "ag-grid-community": "^36.2.0",
     "ag-grid-vue3": "^36.2.0",
     "docx": "^9.8.1",
+    "exceljs": "^4.4.0",
     "pinia": "^4.0.3",
     "primeicons": "^8.0.1",
     "primevue": "^5.0.1",

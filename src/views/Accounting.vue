@@ -367,7 +367,7 @@ async function loadSettlement() {
  * Bộ cột mỗi mẫu một bộ (S1a 3 cột, S2d 12 cột…) nên không khai cứng được
  * như trước — lấy nguyên `columns` backend trả về, ô trống xuất rỗng.
  */
-function exportBookExcel() {
+async function exportBookExcel() {
   const b = bookData.value;
   if (!b) return;
   const cols: XlsxColumn[] = b.columns.map((c) => ({ header: c.label, key: c.key }));
@@ -376,7 +376,11 @@ function exportBookExcel() {
     for (const c of b.columns) out[c.key] = r.cells[c.key] ?? "";
     return out;
   });
-  exportXlsx(`so-ke-toan-${b.book}-${declYear.value}`, cols, rows);
+  try {
+    await exportXlsx(`so-ke-toan-${b.book}-${declYear.value}`, cols, rows);
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi xuất file Excel", detail: String(e) });
+  }
 }
 
 /**
@@ -452,7 +456,7 @@ async function loadDeclaration() {
   }
 }
 
-function exportDeclarationExcel() {
+async function exportDeclarationExcel() {
   const cols: XlsxColumn[] = [
     { header: "Nhóm ngành nghề", key: "industry_name" },
     { header: "Mã", key: "industry_code" },
@@ -480,7 +484,15 @@ function exportDeclarationExcel() {
     pit_tax: r.pit_tax,
   }));
   // Tên file theo khoảng ngày đang xem (tờ khai không còn bộ chọn kỳ riêng).
-  exportXlsx(`to-khai-thue-${toIsoDate(fromDate.value)}-${toIsoDate(toDate.value)}`, cols, rows);
+  try {
+    await exportXlsx(
+      `to-khai-thue-${toIsoDate(fromDate.value)}-${toIsoDate(toDate.value)}`,
+      cols,
+      rows,
+    );
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi xuất file Excel", detail: String(e) });
+  }
 }
 
 function openTaxConfig() {
