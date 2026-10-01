@@ -232,6 +232,9 @@ const groupLabel = computed(() => {
  * lại và cuộn tới đúng chỗ đang xem.
  */
 function selectBook(target: string) {
+  // Sổ không thuộc hồ sơ (vd chuyển sang S2b khi hộ đang nộp theo % doanh thu)
+  // thì không mở — chọn là in ra sổ không nộp được.
+  if (!bookVisible(target)) return;
   book.value = target;
   void loadBook().then(() => {
     document
@@ -266,7 +269,7 @@ function openJournal(path: "/ledger" | "/cash") {
 }
 
 // ─── Sổ kế toán theo mẫu TT 152/2025/TT-BTC + tạm nộp & quyết toán năm ───
-const bookOptions = [
+const allBookOptions = [
   { label: "S1a-HKD · Sổ doanh thu (nhóm 1)", value: "S1a" },
   { label: "S2a-HKD · Sổ doanh thu theo nhóm ngành (nộp theo % doanh thu)", value: "S2a" },
   { label: "S2b-HKD · Sổ doanh thu (nộp GTGT theo %, TNCN theo thu nhập)", value: "S2b" },
@@ -275,7 +278,46 @@ const bookOptions = [
   { label: "S2e-HKD · Sổ chi tiết tiền", value: "S2e" },
   { label: "S3a-HKD · Sổ theo dõi nghĩa vụ thuế khác", value: "S3a" },
 ];
+/**
+ * Danh sách mẫu sổ áp dụng cho hồ sơ (Điều 4 TT 152) do backend trả.
+ *
+ * `null` = chưa nạp xong (hoặc lỗi) → vẫn hiện đủ 7 mẫu, không vì thế mà biến
+ * mất sổ đang xem. Số nhóm/phương pháp tính thuế đổi khi lưu Cấu hình nên không
+ * tự suy ra ở đây — một nguồn duy nhất là backend.
+ */
+const applicableBooks = ref<string[] | null>(null);
+
+/** Công tắc xem đủ 7 mẫu sổ — dùng khi đối chiếu mẫu in, nhớ lại giữa các lần mở. */
+const SHOW_ALL_BOOKS_KEY = "hkd:tt152:show-all-books";
+const showAllBooks = ref(localStorage.getItem(SHOW_ALL_BOOKS_KEY) === "1");
+/** Mẫu sổ đang xem — giữ khi quay lại màn (KeepAlive) và khi đổi kỳ. */
 const book = ref("S2a");
+
+const bookOptions = computed(() =>
+  showAllBooks.value || applicableBooks.value == null
+    ? allBookOptions
+    : allBookOptions.filter((o) => applicableBooks.value!.includes(o.value)),
+);
+
+/** Một mẫu có được hiện/chọn không (dùng cho dropdown lẫn các nút sổ nhanh). */
+function bookVisible(value: string): boolean {
+  return bookOptions.value.some((o) => o.value === value);
+}
+
+/**
+ * Sổ đang chọn phải luôn nằm trong danh sách được phép.
+ *
+ * Đổi nhóm hộ hoặc tắt công tắc "xem tất cả" thì sổ cũ có thể không còn thuộc
+ * hồ sơ → tự chuyển về mẫu áp dụng đầu tiên, không để người dùng kẹt trên một
+ * mẫu sổ không nộp được. Trả về true nếu đã phải đổi sổ.
+ */
+function ensureBookVisible(): boolean {
+  if (bookVisible(book.value)) return false;
+  const first = bookOptions.value[0];
+  if (first) book.value = first.value;
+  return true;
+}
+
 const bookData = ref<TaxBook | null>(null);
 const bookLoading = ref(false);
 const settlement = ref<TaxSettlement | null>(null);
@@ -292,6 +334,13 @@ async function loadBook() {
   } finally {
     bookLoading.value = false;
   }
+}
+
+/** Bật/tắt xem đủ 7 mẫu sổ → lưu lựa chọn và đổi ngay sang sổ hợp lệ nếu cần. */
+function toggleShowAllBooks(value: boolean) {
+  showAllBooks.value = value;
+  localStorage.setItem(SHOW_ALL_BOOKS_KEY, value ? "1" : "0");
+  if (ensureBookVisible()) void loadBook();
 }
 
 async function loadSettlement() {
@@ -356,12 +405,19 @@ async function loadDeclaration() {
     // Cùng khoảng ngày với các bảng khác trên màn → tờ khai luôn khớp số liệu.
     const f = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
     const t = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
-    const [rows, ov] = await Promise.all([
+    const [rows, ov, books] = await Promise.all([
       api.getTaxDeclaration(f, t, unitCode.value),
       api.getTaxOverview(f, t, unitCode.value),
+      // Danh sách mẫu sổ của hồ sơ (Điều 4 TT 152) — đổi nhóm hộ là đổi luôn
+      // bộ sổ được phép, nên nạp cùng lúc với tờ khai.
+      api.getApplicableBooks(declYear.value),
     ]);
     declRows.value = rows;
     overview.value = ov;
+    applicableBooks.value = books;
+    // Hồ sơ mới sang nhóm khác → sổ đang mở có thể không còn áp dụng, đổi sang
+    // mẫu hợp lệ trước khi nạp để không in ra sổ không thuộc hồ sơ.
+    ensureBookVisible();
     // Sổ kế toán theo kỳ khai (bản in theo mẫu TT 152) + số tạm nộp cả năm.
     await Promise.all([loadBook(), loadSettlement()]);
   } catch (e) {
@@ -472,8 +528,10 @@ async function goQuick(no: number) {
   // để tờ khai quý N nằm cạnh sổ quý khác là sai số liệu.
   bookPeriod.value = isQuarter ? "quarter" : "month";
   bookPeriodNo.value = no;
-  // `reload()` chỉ nạp báo cáo + tờ khai, sổ phải gọi riêng (không có watcher).
-  await Promise.all([reload(), loadBook()]);
+  // `loadDeclaration()` bên trong `reload()` đã nạp sẵn sổ (và tự đổi sang mẫu
+  // sổ hợp lệ nếu hồ sơ vừa sang nhóm khác) — đừng bắn thêm một lần song song,
+  // hai lần nạp đua nhau có thể ghi đè sổ vừa đúng mẫu.
+  await reload();
 }
 
 /** `v-model` của bộ chọn chuyển nhanh theo tháng. */
@@ -992,7 +1050,18 @@ useKeepAliveRefresh(reload);
       <SectionCard title="Sổ sách theo mẫu TT 152/2025">
         <template #icon><i-mdi-book-open-page-variant class="text-sky-500" /></template>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <!-- Nút sổ nhanh chỉ hiện mẫu đúng hồ sơ (Điều 4 TT 152). -->
           <Button
+            v-if="bookVisible('S1a')"
+            label="Sổ S1a-HKD"
+            icon="pi pi-book"
+            outlined
+            class="justify-start"
+            data-testid="open-book-s1a"
+            @click="selectBook('S1a')"
+          />
+          <Button
+            v-if="bookVisible('S2a')"
             label="Sổ S2a-HKD"
             icon="pi pi-book"
             outlined
@@ -1001,6 +1070,7 @@ useKeepAliveRefresh(reload);
             @click="selectBook('S2a')"
           />
           <Button
+            v-if="bookVisible('S2b')"
             label="Sổ S2b-HKD"
             icon="pi pi-book"
             outlined
@@ -1009,6 +1079,7 @@ useKeepAliveRefresh(reload);
             @click="selectBook('S2b')"
           />
           <Button
+            v-if="bookVisible('S3a')"
             label="Sổ S3a-HKD"
             icon="pi pi-book"
             outlined
@@ -1219,6 +1290,19 @@ useKeepAliveRefresh(reload);
           class="mt-4"
           @click="loadBook"
         />
+        <!-- Mặc định chỉ hiện sổ đúng nhóm hộ; bật lên để đối chiếu đủ 7 mẫu in. -->
+        <div class="flex items-center gap-2 mt-4">
+          <ToggleSwitch
+            :model-value="showAllBooks"
+            input-id="show-all-books"
+            data-testid="show-all-books"
+            aria-label="Xem tất cả 7 mẫu sổ"
+            @update:model-value="toggleShowAllBooks"
+          />
+          <label for="show-all-books" class="text-xs text-gray-500 cursor-pointer">
+            Xem tất cả 7 mẫu sổ
+          </label>
+        </div>
       </div>
       <TaxBookTable
         v-if="bookData"

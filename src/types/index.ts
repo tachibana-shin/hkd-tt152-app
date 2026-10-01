@@ -526,6 +526,11 @@ export interface BusinessConfig {
   name: string;
   tax_code: string;
   address: string;
+  /**
+   * Địa điểm kinh doanh ghi trên đầu sổ theo mẫu TT 152/2025 ("Địa điểm kinh
+   * doanh: …"). Để trống thì sổ tự lấy `address` để không in ra dòng trống.
+   */
+  location: string;
   short_name: string;
   ownership: string;
   province: string;

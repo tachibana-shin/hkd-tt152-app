@@ -53,6 +53,10 @@ pub(crate) struct BusinessConfigRow {
     pub(crate) name: String,
     pub(crate) tax_code: String,
     pub(crate) address: String,
+    /// Địa điểm kinh doanh ghi trên đầu sổ theo mẫu TT 152/2025 ("Địa điểm
+    /// kinh doanh: …"). Khác `address` (địa chỉ đăng ký): hộ bán ở chợ, ở cửa
+    /// hàng khác thì nơi bán thật mới là địa điểm ghi trên sổ.
+    pub(crate) location: String,
     pub(crate) short_name: String,
     pub(crate) ownership: String,
     pub(crate) province: String,

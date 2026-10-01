@@ -241,6 +241,7 @@ pub async fn api_invoke(
             name: String,
             tax_code: String,
             address: String,
+            location: String,
             short_name: String,
             ownership: String,
             province: String,
@@ -674,6 +675,11 @@ pub async fn api_invoke(
             period: String,
             period_no: i64,
             book: String
+        ),
+        "get_applicable_books" => mx!(
+            commands::accounting::get_applicable_books,
+            body,
+            year: i64
         ),
         "get_tax_group" => mx!(commands::accounting::get_tax_group, body, year: i64),
         "get_revenue_expense" => mx!(

@@ -2284,6 +2284,7 @@ struct OwnerInfo {
 async fn load_owner(pool: &SqlitePool) -> Result<OwnerInfo, String> {
     let b = sqlx::query!(
         r#"SELECT b.name AS "name!", b.address AS "address!", b.tax_code AS "tax_code!",
+                  b.location AS "location!",
                   (SELECT name FROM business_unit ORDER BY id LIMIT 1) AS "unit!"
              FROM business b LIMIT 1"#
     )
@@ -2291,12 +2292,18 @@ async fn load_owner(pool: &SqlitePool) -> Result<OwnerInfo, String> {
     .await
     .map_err(|e| e.to_string())?;
     Ok(match b {
+        // Địa điểm kinh doanh trống → lấy địa chỉ đăng ký, đầu sổ không bao giờ
+        // in ra một dòng trống phía sau dấu hai chấm.
         Some(r) => OwnerInfo {
+            location: if r.location.trim().is_empty() {
+                r.address.clone()
+            } else {
+                r.location
+            },
             name: r.name,
             address: r.address,
             tax_code: r.tax_code,
             unit: r.unit,
-            location: String::new(),
         },
         None => OwnerInfo {
             name: String::new(),
@@ -2306,6 +2313,19 @@ async fn load_owner(pool: &SqlitePool) -> Result<OwnerInfo, String> {
             location: String::new(),
         },
     })
+}
+
+/// Ngày ghi sổ dạng `dd/mm/yyyy` — mẫu sổ in tay viết ngày tháng kiểu Việt Nam,
+/// để nguyên `2026-07-05` thì cột "Ngày tháng" in ra khác hẳn dòng chữ ký ngày
+/// ở cuối sổ (`today_vn`). Chuỗi không đúng dạng ISO thì giữ nguyên, không bịa ngày.
+fn vn_date(iso: &str) -> String {
+    match iso.split_once('-') {
+        Some((y, rest)) if y.len() == 4 && rest.len() == 5 => match rest.split_once('-') {
+            Some((m, d)) => format!("{d}/{m}/{y}"),
+            None => iso.to_string(),
+        },
+        _ => iso.to_string(),
+    }
 }
 
 /// Ngày ký cuối sổ: hôm nay, định dạng `dd/mm/yyyy`.
@@ -2325,26 +2345,77 @@ pub(crate) async fn get_tax_books(
     book: String,
 ) -> Result<String, String> {
     let pool = state.pool.read().await;
+    build_tax_book(&pool, year, &period, period_no, &book).await
+}
+
+/// Lấy danh sách mẫu sổ **áp dụng** cho hồ sơ đang mở (Điều 4 TT 152/2025).
+///
+/// Màn Kế toán dùng danh sách này để chỉ hiện sổ đúng nhóm hộ — chọn nhầm mẫu
+/// không thuộc nhóm thì sổ in ra không nộp được. Trả về JSON `["S1a", "S3a"]`.
+#[tauri::command]
+pub(crate) async fn get_applicable_books(
+    state: State<'_, AppState>,
+    year: i64,
+) -> Result<String, String> {
+    let pool = state.pool.read().await;
     let ctx = load_tax_context(&pool, year).await?;
-    let (from_m, to_m) = period_range(&period, period_no)?;
+    let books = applicable_books(ctx.group, &ctx.settings.method);
+    Ok(serde_json::to_string(&books).unwrap_or_default())
+}
+
+/// Mẫu sổ TT 152/2025 áp dụng cho một hồ sơ — Điều 4 phân theo **nhóm hộ** và
+/// **phương pháp tính thuế TNCN**:
+///
+/// * Nhóm 1 (doanh thu ≤ ngưỡng, miễn thuế) → chỉ sổ doanh thu `S1a`;
+/// * Nhóm 2 nộp TNCN theo tỷ lệ % doanh thu → `S2a`;
+/// * Còn lại (TNCN theo thu nhập — gồm cả Nhóm 3/4 luôn tính theo lợi nhuận)
+///   → `S2b` + `S2c` + `S2d` + `S2e`;
+/// * `S3a` (thuế khác) luôn mở: app chưa theo dõi các loại thuế này nên không
+///   ẩn đi được, để đó khi hộ phát sinh thuế bảo vệ môi trường, thuế sử dụng đất…
+///
+/// Điều kiện "theo thu nhập" phải trùng với `by_revenue` của tờ khai
+/// (`ctx.group <= 2 && method == "revenue"`) — hai chỗ mà lệch thì sổ in ra và
+/// tờ khai khai hai kiểu thuế TNCN khác nhau.
+pub(crate) fn applicable_books(group: i64, method: &str) -> Vec<&'static str> {
+    let mut books: Vec<&'static str> = if group <= 1 {
+        vec!["S1a"]
+    } else if group <= 2 && method == "revenue" {
+        vec!["S2a"]
+    } else {
+        vec!["S2b", "S2c", "S2d", "S2e"]
+    };
+    books.push("S3a");
+    books
+}
+
+/// Nội dung một mẫu sổ — tách khỏi lệnh Tauri để test gọi được với pool in-memory.
+async fn build_tax_book(
+    pool: &SqlitePool,
+    year: i64,
+    period: &str,
+    period_no: i64,
+    book: &str,
+) -> Result<String, String> {
+    let ctx = load_tax_context(pool, year).await?;
+    let (from_m, to_m) = period_range(period, period_no)?;
     let from = format!("{year:04}-{from_m:02}-01");
     let to = format!("{year:04}-{to_m:02}-31");
-    let period_label = describe_tax_period(&period, period_no, year);
-    let owner = load_owner(&pool).await?;
-    let names = load_industry_names(&pool).await?;
+    let period_label = describe_tax_period(period, period_no, year);
+    let owner = load_owner(pool).await?;
+    let names = load_industry_names(pool).await?;
 
     let mut notes: Vec<BookNote> = Vec::new();
-    let (title, columns, rows) = match book.as_str() {
+    let (title, columns, rows) = match book {
         // ── S1a: hộ nhóm 1 — sổ doanh thu bán hàng hóa, dịch vụ ────────────
         "S1a" => {
-            let sales = sales_rows(&pool, &from, &to).await?;
+            let sales = sales_rows(pool, &from, &to).await?;
             let mut rows = Vec::new();
             let mut total = 0.0;
             for s in &sales {
                 let amount = signed_amount(s.adjust_code.as_str(), s.amount);
                 total += amount;
                 let mut r = BookRow::detail();
-                r.text("a", &s.posting_date);
+                r.text("a", vn_date(&s.posting_date));
                 r.text("b", format!("{} — {}", s.voucher_no, s.description));
                 r.money("1", amount);
                 rows.push(r);
@@ -2362,8 +2433,8 @@ pub(crate) async fn get_tax_books(
         // ── S2a/S2b: sổ doanh thu theo nhóm ngành có cùng tỷ lệ % ─────────
         "S2a" | "S2b" => {
             let is_s2a = book == "S2a";
-            let sales = sales_rows(&pool, &from, &to).await?;
-            let rates = load_industry_rates(&pool).await?;
+            let sales = sales_rows(pool, &from, &to).await?;
+            let rates = load_industry_rates(pool).await?;
             // Nhóm 1 không chịu thuế: sổ chỉ ghi doanh thu, không ghi số thuế.
             let exempt = ctx.group == 1;
             // TNCN theo tỷ lệ % doanh thu chỉ thuộc S2a. S2b là mẫu của hộ tính
@@ -2425,7 +2496,7 @@ pub(crate) async fn get_tax_books(
                     let amount = signed_amount(s.adjust_code.as_str(), s.amount);
                     let mut r = BookRow::detail();
                     r.text("a", &s.voucher_no);
-                    r.text("b", &s.posting_date);
+                    r.text("b", vn_date(&s.posting_date));
                     r.text("c", &s.description);
                     r.money("1", amount);
                     rows.push(r);
@@ -2498,9 +2569,9 @@ pub(crate) async fn get_tax_books(
         }
         // ── S2c: sổ chi tiết doanh thu, chi phí ─────────────────────────────
         "S2c" => {
-            let period_rows = load_tax_agg_range(&pool, year, from_m, to_m).await?;
-            let cogs = load_fifo_cogs(&pool, &from, &to).await?;
-            let (cost_ok, _cost_no, warnings) = load_period_costs(&pool, &from, &to).await?;
+            let period_rows = load_tax_agg_range(pool, year, from_m, to_m).await?;
+            let cogs = load_fifo_cogs(pool, &from, &to).await?;
+            let (cost_ok, _cost_no, warnings) = load_period_costs(pool, &from, &to).await?;
             let mut rows = Vec::new();
             let mut revenue = 0.0;
             for r in &period_rows {
@@ -2542,7 +2613,7 @@ pub(crate) async fn get_tax_books(
             rows.push(t);
             // (4) Thuế TNCN theo thu nhập tính thuế — dùng cùng cách tính với
             // tờ khai để sổ và tờ khớp nhau.
-            let pit = pit_on_income(&pool, year, diff).await?;
+            let pit = pit_on_income(pool, year, diff).await?;
             let mut t = BookRow::total();
             t.text("c", "4. Tổng số thuế TNCN phải nộp {(4) = (3) × thuế suất}");
             t.money("1", pit.0);
@@ -2588,7 +2659,7 @@ pub(crate) async fn get_tax_books(
         }
         // ── S2d: sổ chi tiết vật liệu, dụng cụ, sản phẩm, hàng hóa ──────────
         "S2d" => {
-            let (rows, note) = stock_ledger_rows(&pool, &from, &to).await?;
+            let (rows, note) = stock_ledger_rows(pool, &from, &to).await?;
             if let Some(n) = note {
                 notes.push(n);
             }
@@ -2600,7 +2671,7 @@ pub(crate) async fn get_tax_books(
         }
         // ── S2e: sổ chi tiết tiền ───────────────────────────────────────────
         "S2e" => {
-            let rows = cash_ledger_rows(&pool, &from, &to).await?;
+            let rows = cash_ledger_rows(pool, &from, &to).await?;
             notes.push(BookNote {
                 level: "info",
                 text: "Sổ chia thành khối Tiền mặt và khối Tiền gửi không kỳ hạn; mỗi khối có dòng Ngân hàng (với tiền gửi), Tiền mặt/Tiền gửi đầu kỳ, Tổng tiền thu (gửi) vào, Tổng tiền chi (rút) ra và Tiền mặt tồn / Tiền gửi cuối kỳ. Số đầu kỳ lấy từ số dư tài khoản tiền tại màn Tài khoản.".into(),
@@ -2643,7 +2714,7 @@ pub(crate) async fn get_tax_books(
          của Bộ trưởng Bộ Tài chính)"
     );
     // Dòng dưới tiêu đề: mỗi mẫu một nhãn khác nhau; S2e không có dòng này.
-    let (location_label, location) = match book.as_str() {
+    let (location_label, location) = match book {
         "S2c" => ("Tên địa điểm kinh doanh", owner.location.clone()),
         "S2d" => ("Tên vật liệu, dụng cụ, sản phẩm, hàng hóa", String::new()),
         "S2e" => ("", String::new()),
@@ -2657,12 +2728,18 @@ pub(crate) async fn get_tax_books(
         location_label: location_label.to_string(),
         period: period_label.clone(),
         form_ref,
-        unit: "VNĐ".to_string(),
+        unit: if book == "S2d" {
+            // Mẫu S2d không có dòng "Đơn vị tính:" ở đầu sổ — đơn vị ghi ngay
+            // trên từng dòng ở cột D, thêm dòng này là in sai mẫu.
+            String::new()
+        } else {
+            "VNĐ".to_string()
+        },
         sign_date: today_vn(),
         signer: "NGƯỜI ĐẠI DIỆN HỘ KINH DOANH / CÁ NHÂN KINH DOANH".to_string(),
     };
     let out = TaxBook {
-        book: book.clone(),
+        book: book.to_string(),
         title,
         period_label,
         header,
@@ -2896,7 +2973,7 @@ async fn stock_ledger_rows(
             let mut r = BookRow::detail();
             r.text("item", &label);
             r.text("a", &m.voucher_no);
-            r.text("b", &m.posting_date);
+            r.text("b", vn_date(&m.posting_date));
             r.text("c", &m.description);
             r.text("d", &unit);
             r.money("1", m.unit_price);
@@ -3006,7 +3083,8 @@ fn movement_row(item: &str, in_q: f64, in_v: f64, out_q: f64, out_v: f64) -> Boo
 /// tổng thu, tổng chi và số dư cuối kỳ. App ghi mọi phát sinh đi qua tài khoản
 /// tiền — không chỉ phiếu thu/phiếu chi — vì đó mới là dòng tiền thật.
 async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec<BookRow>, String> {
-    let accounts = [("111", "TIỀN MẶT"), ("112", "TIỀN GỬI KHÔNG KỲ HẠN")];
+    // Khối in đậm đúng văn bản mẫu in: "Tiền mặt" / "Tiền gửi không kỳ hạn".
+    let accounts = [("111", "Tiền mặt"), ("112", "Tiền gửi không kỳ hạn")];
     let mut rows: Vec<BookRow> = Vec::new();
 
     for (code, title) in accounts {
@@ -3055,7 +3133,7 @@ async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec
             g
         };
 
-        // Mẫu gốc có một dòng khối in đậm "TIỀN MẶT" / "TIỀN GỬI KHÔNG KỲ HẠN"
+        // Mẫu gốc có một dòng khối in đậm "Tiền mặt" / "Tiền gửi không kỳ hạn"
         // trước, riêng khối tiền gửi mới có thêm dòng "Ngân hàng …" cho từng ngân
         // hàng bên dưới.
         let mut sec = BookRow::section();
@@ -3117,7 +3195,7 @@ async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec
                 let incoming = m.in_side == 1;
                 let mut r = BookRow::detail();
                 r.text("a", &m.voucher_no);
-                r.text("b", &m.posting_date);
+                r.text("b", vn_date(&m.posting_date));
                 r.text(
                     "c",
                     format!(
@@ -3808,6 +3886,251 @@ mod tests {
         assert_eq!(period_range("month", 3).unwrap(), (3, 3));
         assert_eq!(period_range("year", 0).unwrap(), (1, 12));
         assert!(period_range("quarter", 5).is_err());
+    }
+
+    // ── Sổ dựng đủ theo mẫu in — gọi thẳng builder với pool in-memory ──────
+    //
+    // Trước đây chỉ có test bộ cột, nên đầu sổ và dòng tổng cộng sai mẫu thì
+    // không gì bắt được. Đây là các test dựng nguyên quyển sổ rồi soi từng dòng.
+
+    /// Dựng 1 sổ (kỳ Quý 3/2026) và đọc lại dưới dạng JSON.
+    async fn build_book(pool: &SqlitePool, book: &str) -> serde_json::Value {
+        let raw = build_tax_book(pool, 2026, "quarter", 3, book)
+            .await
+            .unwrap_or_else(|e| panic!("dựng sổ {book} lỗi: {e}"));
+        serde_json::from_str(&raw).expect("sổ là JSON hợp lệ")
+    }
+
+    /// Khóa 1 ô chữ của dòng sổ — ô không có key = mẫu để trắng.
+    fn text_cell<'a>(row: &'a serde_json::Value, key: &str) -> &'a str {
+        row["cells"].get(key).and_then(|v| v.as_str()).unwrap_or("")
+    }
+
+    /// Các cột của sổ theo đúng thứ tự in trên phụ lục.
+    fn column_labels(book: &serde_json::Value) -> Vec<&str> {
+        book["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["label"].as_str().unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn s1a_ghi_dung_mau_tung_dong_va_dong_tong_cong() {
+        let pool = test_pool().await;
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-01",
+            "P1",
+            "PPHH",
+            1.0,
+            100_000.0,
+            100_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-07-20",
+            "PX-02",
+            "P1",
+            "PPHH",
+            1.0,
+            50_000.0,
+            50_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+
+        let book = build_book(&pool, "S1a").await;
+        assert_eq!(book["title"], "SỔ DOANH THU BÁN HÀNG HÓA, DỊCH VỤ");
+        assert!(
+            book["header"]["form_ref"]
+                .as_str()
+                .unwrap()
+                .starts_with("Mẫu số S1a-HKD"),
+            "khối mẫu số phải đúng mẫu S1a"
+        );
+        assert_eq!(book["header"]["period"], "Quý 3/2026");
+        assert_eq!(book["header"]["unit"], "VNĐ");
+        // Mẫu S1a chỉ có 3 cột, không có cột số hiệu chứng từ.
+        assert_eq!(
+            column_labels(&book),
+            ["A · Ngày tháng", "B · Diễn giải", "1 · Số tiền"]
+        );
+
+        let rows = book["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 3, "2 phiếu bán + 1 dòng tổng cộng");
+        assert_eq!(text_cell(&rows[0], "a"), "05/07/2026");
+        assert_eq!(text_cell(&rows[0], "b"), "PX-01 — test");
+        assert_eq!(rows[0]["cells"]["1"].as_f64(), Some(100_000.0));
+        assert_eq!(text_cell(&rows[1], "a"), "20/07/2026");
+        // Dòng cuối đúng chữ "Tổng cộng" ở cột B và cộng đúng cả kỳ.
+        assert_eq!(rows[2]["kind"], "total");
+        assert_eq!(text_cell(&rows[2], "b"), "Tổng cộng");
+        assert_eq!(rows[2]["cells"]["1"].as_f64(), Some(150_000.0));
+    }
+
+    #[tokio::test]
+    async fn s3a_du_12_cot_thue_va_khong_bia_so_khi_chua_phat_sinh() {
+        let pool = test_pool().await;
+        let book = build_book(&pool, "S3a").await;
+        assert_eq!(book["title"], "SỔ THEO DÕI NGHĨA VỤ THUẾ KHÁC");
+        assert!(book["header"]["form_ref"]
+            .as_str()
+            .unwrap()
+            .starts_with("Mẫu số S3a-HKD"));
+        assert_eq!(book["header"]["location_label"], "Địa điểm kinh doanh");
+        // Đúng 12 cột A + B + 1..10 và đúng văn bản từng cột trên phụ lục.
+        assert_eq!(
+            column_labels(&book),
+            [
+                "A · Ngày tháng ghi sổ",
+                "B · Diễn giải",
+                "1 · Lượng HH, DV chịu thuế",
+                "2 · Mức thuế tuyệt đối",
+                "3 · Giá tính thuế / 01 đơn vị",
+                "4 · Thuế suất",
+                "5 · TSX, TNK, TTĐB theo tỷ lệ %",
+                "6 · TSX, TNK, TTĐB tuyệt đối",
+                "7 · TSX, TNK, TTĐB phải nộp",
+                "8 · Thuế bảo vệ môi trường",
+                "9 · Thuế tài nguyên",
+                "10 · Thuế sử dụng đất",
+            ]
+        );
+        // App chưa lưu giao dịch thuế khác → không có dòng số liệu nào, không bịa.
+        assert!(book["rows"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dau_so_khong_bao_gio_in_dong_dia_diem_kinh_doanh_trong() {
+        let pool = test_pool().await;
+        // Chưa khai địa điểm → lấy địa chỉ đăng ký làm địa điểm kinh doanh.
+        sqlx::query("UPDATE business SET address = '12 Đường A, TP B' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let book = build_book(&pool, "S1a").await;
+        assert_eq!(book["header"]["location_label"], "Địa điểm kinh doanh");
+        assert_eq!(book["header"]["location"], "12 Đường A, TP B");
+
+        // Hộ bán ở chợ → khai riêng thì đúng chỗ bán mới được ghi lên sổ.
+        sqlx::query("UPDATE business SET location = 'Chợ Bến Thành' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let book = build_book(&pool, "S2a").await;
+        assert_eq!(book["header"]["location"], "Chợ Bến Thành");
+
+        // S2c đổi nhãn theo mẫu; S2e không có dòng này; S2d không có dòng
+        // "Đơn vị tính:" ở đầu sổ (đơn vị nằm trong cột D từng dòng).
+        let book = build_book(&pool, "S2c").await;
+        assert_eq!(book["header"]["location_label"], "Tên địa điểm kinh doanh");
+        let book = build_book(&pool, "S2e").await;
+        assert_eq!(book["header"]["location_label"], "");
+        assert_eq!(book["header"]["location"], "");
+        let book = build_book(&pool, "S2d").await;
+        assert_eq!(book["header"]["unit"], "");
+    }
+
+    #[tokio::test]
+    async fn s2b_chi_ghi_thue_gtgt_theo_mau_con_s2a_moi_co_thue_tncn() {
+        let pool = test_pool().await;
+        sqlx::query("UPDATE business SET tax_group = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO app_setting(key, value) VALUES('tax_method', 'revenue') \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-01",
+            "P1",
+            "PPHH",
+            1.0,
+            1_000_000.0,
+            1_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+
+        // Mẫu S2b: mỗi khối ngành chỉ có "Thuế GTGT", tổng cuối chỉ 1 dòng
+        // "Tổng số thuế GTGT phải nộp" — không có số thuế TNCN ở sổ này.
+        let s2b = build_book(&pool, "S2b").await;
+        let labels: Vec<String> = s2b["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| text_cell(r, "c").to_string())
+            .collect();
+        assert!(
+            labels.iter().all(|l| !l.contains("TNCN")),
+            "S2b không được ghi thuế TNCN: {labels:?}"
+        );
+        assert_eq!(labels.last().unwrap(), "Tổng số thuế GTGT phải nộp");
+
+        // Cùng dữ liệu nhưng mở mẫu S2a (hộ nhóm 2 nộp theo % doanh thu) thì
+        // phải có đủ "Thuế TNCN" trong khối ngành và dòng tổng cuối.
+        let s2a = build_book(&pool, "S2a").await;
+        let labels: Vec<String> = s2a["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| text_cell(r, "c").to_string())
+            .collect();
+        assert!(labels.iter().any(|l| l == "Thuế TNCN"), "{labels:?}");
+        assert_eq!(labels.last().unwrap(), "Tổng số thuế TNCN phải nộp");
+    }
+
+    #[test]
+    fn danh_sach_so_ap_dung_theo_nhom_ho_va_phuong_phap_thue() {
+        // Nhóm 1 (miễn thuế) → chỉ sổ doanh thu + sổ thuế khác.
+        assert_eq!(applicable_books(1, "revenue"), ["S1a", "S3a"]);
+        assert_eq!(applicable_books(1, "profit"), ["S1a", "S3a"]);
+        // Nhóm 2 nộp TNCN theo tỷ lệ % doanh thu → S2a.
+        assert_eq!(applicable_books(2, "revenue"), ["S2a", "S3a"]);
+        // Nhóm 2 nộp TNCN theo thu nhập → đủ 4 sổ chi tiết.
+        assert_eq!(
+            applicable_books(2, "profit"),
+            ["S2b", "S2c", "S2d", "S2e", "S3a"]
+        );
+        // Nhóm 3/4 luôn tính TNCN theo lợi nhuận, kể cả khi cấu hình còn để
+        // "theo doanh thu" — trùng với `by_revenue` của tờ khai.
+        assert_eq!(
+            applicable_books(3, "revenue"),
+            ["S2b", "S2c", "S2d", "S2e", "S3a"]
+        );
+        assert_eq!(
+            applicable_books(4, "revenue"),
+            ["S2b", "S2c", "S2d", "S2e", "S3a"]
+        );
+        // S3a có mặt ở mọi hồ sơ: app chưa theo dõi thuế khác nên không ẩn được.
+        for (group, method) in [(1, "revenue"), (2, "revenue"), (3, "profit")] {
+            assert!(applicable_books(group, method).contains(&"S3a"));
+        }
+    }
+
+    #[test]
+    fn ngay_ghi_so_dang_dd_mm_yyyy_theo_mau_in() {
+        assert_eq!(vn_date("2026-07-05"), "05/07/2026");
+        assert_eq!(vn_date("2026-12-31"), "31/12/2026");
+        // Không phải ngày ISO thì giữ nguyên — không bịa ngày cho chứng từ.
+        assert_eq!(vn_date(""), "");
+        assert_eq!(vn_date("05/07/2026"), "05/07/2026");
     }
 }
 

@@ -103,7 +103,8 @@ const hasData = computed(() => props.book.rows.length > 0);
       <span>Kỳ kê khai: {{ book.header.period || book.period_label }}</span>
     </div>
 
-    <div class="book-unit">Đơn vị tính: {{ book.header.unit }}</div>
+    <!-- Mẫu S2d không có dòng này ở đầu sổ (đơn vị tính nằm trong cột D) -->
+    <div v-if="book.header.unit" class="book-unit">Đơn vị tính: {{ book.header.unit }}</div>
 
     <table class="book-table">
       <thead>

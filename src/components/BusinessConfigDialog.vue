@@ -30,6 +30,8 @@ const form = reactive({
   short_name: "",
   tax_code: "",
   address: "",
+  // Địa điểm kinh doanh ghi trên đầu sổ TT 152 — khác địa chỉ đăng ký.
+  location: "",
   ownership: "Tư nhân",
   province: "",
   tax_code_issued_on: "",
@@ -152,6 +154,7 @@ watch(
       short_name: c.short_name,
       tax_code: c.tax_code,
       address: c.address,
+      location: c.location ?? "",
       ownership: c.ownership,
       province: c.province,
       tax_code_issued_on: c.tax_code_issued_on,
@@ -329,6 +332,17 @@ async function save() {
       </FormField>
       <FormField label="Địa chỉ" class="col-span-2">
         <InputText v-model="form.address" />
+      </FormField>
+      <FormField label="Địa điểm kinh doanh" class="col-span-2">
+        <InputText
+          v-model="form.location"
+          placeholder="Chợ, cửa hàng, sạp… nơi bán hàng (để trống thì lấy Địa chỉ)"
+          class="w-full"
+          data-testid="hkd-location"
+        />
+        <p class="mt-1 text-xs text-gray-500">
+          Ghi trên đầu tất cả sổ theo mẫu TT 152: "Địa điểm kinh doanh: …".
+        </p>
       </FormField>
       <FormField label="Loại hình">
         <InputText v-model="form.ownership" />

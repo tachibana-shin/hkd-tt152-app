@@ -200,6 +200,7 @@ export const api = {
       name: cfg.name ?? "",
       taxCode: cfg.tax_code ?? "",
       address: cfg.address ?? "",
+      location: cfg.location ?? "",
       shortName: cfg.short_name ?? "",
       ownership: cfg.ownership ?? "Tư nhân",
       province: cfg.province ?? "",
@@ -934,6 +935,14 @@ export const api = {
   /** Nội dung 1 mẫu sổ kế toán theo TT 152/2025/TT-BTC (S1a | S2a | S2b | S2c | S2d | S2e). */
   getTaxBooks: async (year: number, period: string, periodNo: number, book: string) =>
     parse<TaxBook>(await call<string>("get_tax_books", { year, period, periodNo, book })),
+
+  /**
+   * Mẫu sổ **áp dụng** cho hồ sơ đang mở theo Điều 4 TT 152/2025 — vd Nhóm 1 chỉ
+   * có S1a, nhóm 2 nộp TNCN theo thu nhập thì S2b–S2e. Màn Kế toán chỉ hiện các
+   * mẫu này (có công tắc xem đủ 7 mẫu khi đối chiếu).
+   */
+  getApplicableBooks: async (year: number) =>
+    parse<string[]>(await call<string>("get_applicable_books", { year })),
 
   // ─── CHI TIẾT CHỨNG TỪ (in PNK/PXK) ───
   /**

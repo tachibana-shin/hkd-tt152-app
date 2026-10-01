@@ -20,8 +20,8 @@ pub(crate) async fn get_business_info(state: State<'_, AppState>) -> Result<Stri
 #[tauri::command]
 pub(crate) async fn get_business_config(state: State<'_, AppState>) -> Result<String, String> {
     let row = sqlx::query_as::<_, BusinessConfigRow>(
-        "SELECT name, tax_code, address, short_name, ownership, province, tax_code_issued_on,
-                phone, email, hddt_start_date, hddt_symbol, tax_group
+        "SELECT name, tax_code, address, location, short_name, ownership, province,
+                tax_code_issued_on, phone, email, hddt_start_date, hddt_symbol, tax_group
          FROM business WHERE id = 1",
     )
     .fetch_one(&*state.pool.read().await)
@@ -37,6 +37,8 @@ pub(crate) async fn save_business_config(
     name: String,
     tax_code: String,
     address: String,
+    // Địa điểm kinh doanh ghi trên đầu sổ TT 152 — để trống thì sổ lấy `address`.
+    location: String,
     short_name: String,
     ownership: String,
     province: String,
@@ -58,13 +60,14 @@ pub(crate) async fn save_business_config(
     let pool = state.pool.read().await;
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     sqlx::query!(
-        "INSERT INTO business (id, name, tax_code, address, short_name, ownership,
+        "INSERT INTO business (id, name, tax_code, address, location, short_name, ownership,
                                province, tax_code_issued_on, phone, email, hddt_start_date,
                                hddt_symbol, tax_group)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name, tax_code = excluded.tax_code,
-            address = excluded.address, short_name = excluded.short_name,
+            address = excluded.address, location = excluded.location,
+            short_name = excluded.short_name,
             ownership = excluded.ownership, province = excluded.province,
             tax_code_issued_on = excluded.tax_code_issued_on,
             phone = excluded.phone, email = excluded.email,
@@ -74,6 +77,7 @@ pub(crate) async fn save_business_config(
         name,
         tax_code,
         address,
+        location,
         short_name,
         ownership,
         province,

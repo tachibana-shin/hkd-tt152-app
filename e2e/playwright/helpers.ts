@@ -24,6 +24,9 @@ export async function seedApp(baseURL: string) {
         name: "E2E TEST BUSINESS",
         taxCode: "010000000000",
         address: "123 Lang Road, Hanoi",
+        // Địa điểm kinh doanh ghi trên đầu sổ TT 152 — gửi kèm luôn để test
+        // đầu sổ không in ra dòng trống.
+        location: "E2E Market Stall",
         shortName: "E2E TEST",
         ownership: "Household business",
         province: "Hanoi",

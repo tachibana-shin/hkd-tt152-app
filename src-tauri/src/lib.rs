@@ -89,6 +89,7 @@ pub fn run() {
             commands::accounting::get_tax_overview,
             commands::accounting::get_tax_settlement,
             commands::accounting::get_tax_books,
+            commands::accounting::get_applicable_books,
             commands::accounting::get_tax_group,
             commands::accounting::get_revenue_expense,
             commands::accounting::cogs_backfill_pending,

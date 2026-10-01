@@ -2219,9 +2219,20 @@ test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async (
   await expect(to).not.toHaveValue("");
   const accountingRange = { from: await from.inputValue(), to: await to.inputValue() };
 
-  // Mặc định S2a: đầu sổ + bộ cột đúng mẫu (A số hiệu, B ngày, C diễn giải, 1 số tiền).
+  // Mặc định S1a (hồ sơ E2E chưa chốt nhóm → app tự xếp Nhóm 1 → chỉ sổ doanh
+  // thu): đầu sổ + bộ cột đúng mẫu (A Ngày tháng, B Diễn giải, 1 Số tiền).
   await expect(page.getByText("SỔ DOANH THU BÁN HÀNG HÓA, DỊCH VỤ").first()).toBeVisible();
-  await expect(page.getByRole("columnheader", { name: /A · Số hiệu/ }).first()).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /A · Ngày tháng/ }).first()).toBeVisible();
+  // Đầu sổ ghi đúng địa điểm kinh doanh đã khai trong hồ sơ, không in trống.
+  await expect(page.getByTestId("tax-book-table")).toContainText(
+    "Địa điểm kinh doanh: E2E Market Stall",
+  );
+
+  // Nhóm 1 chỉ có S1a + S3a → bật "Xem tất cả 7 mẫu sổ" để soi đủ mẫu in.
+  await page.locator("#show-all-books").click();
+  await page.getByTestId("tax-book").click();
+  await expect(page.locator(".p-select-option")).toHaveCount(7);
+  await page.keyboard.press("Escape");
 
   // Bấm "Sổ S3a-HKD" → chuyển đúng mẫu S3a (10 cột số liệu thuế khác), không rời màn.
   await page.getByTestId("open-book-s3a").click();
@@ -2248,6 +2259,41 @@ test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async (
   await page.getByTestId("tax-book").click();
   await page.locator(".p-select-option", { hasText: "S2e-HKD" }).first().click();
   await expect(page.getByText("SỔ CHI TIẾT TIỀN").first()).toBeVisible();
+});
+
+// Danh sách mẫu sổ bám theo hồ sơ HKD (Điều 4 TT 152/2025): hồ sơ chưa chốt
+// nhóm → Nhóm 1 → chỉ S1a + S3a; công tắc "Xem tất cả" mở đủ 7 mẫu và được nhớ
+// lại cả sau khi tải lại trang.
+test("Danh sách mẫu sổ chỉ hiện sổ đúng nhóm HKD và nhớ lựa chọn xem tất cả", async ({ page }) => {
+  await ensureLoggedIn(page);
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await expect(page.getByTestId("tax-book")).toBeVisible();
+
+  // Dropdown chỉ 2 mẫu đúng nhóm, các nút sổ nhanh cũng chỉ hiện 2 mẫu đó.
+  await page.getByTestId("tax-book").click();
+  await expect(page.locator(".p-select-option")).toHaveCount(2);
+  await expect(page.locator(".p-select-option", { hasText: "S1a-HKD" })).toBeVisible();
+  await expect(page.locator(".p-select-option", { hasText: "S3a-HKD" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("open-book-s1a")).toBeVisible();
+  await expect(page.getByTestId("open-book-s3a")).toBeVisible();
+  await expect(page.getByTestId("open-book-s2a")).toHaveCount(0);
+  await expect(page.getByTestId("open-book-s2b")).toHaveCount(0);
+
+  // Bật công tắc → đủ 7 mẫu để đối chiếu mẫu in.
+  await page.locator("#show-all-books").click();
+  await page.getByTestId("tax-book").click();
+  await expect(page.locator(".p-select-option")).toHaveCount(7);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("open-book-s2b")).toBeVisible();
+
+  // Nhớ lựa chọn: tải lại trang (cùng cách người dùng F5) là vẫn còn bật.
+  await page.reload();
+  await expect(page.getByTestId("tax-book")).toBeVisible();
+  await page.getByTestId("tax-book").click();
+  await expect(page.locator(".p-select-option")).toHaveCount(7);
+  await page.keyboard.press("Escape");
 });
 
 // Các nút sổ không còn đẩy sang màn khác, nhưng Sổ nhật ký vẫn phải giữ nút quay
@@ -2564,8 +2610,13 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
     "không có chứng từ thanh toán không dùng tiền mặt",
   );
 
-  // ── 3. Sổ kế toán TT 152/2025: mặc định S2a ghi DOANH THU THEO TỪNG CHỨNG TỪ
+  // ── 3. Sổ kế toán TT 152/2025: S2a ghi DOANH THU THEO TỪNG CHỨNG TỪ
   //      (cột A số hiệu, B ngày tháng, C diễn giải, D số tiền) như mẫu sổ.
+  //      Hồ sơ chưa chốt nhóm → Nhóm 1 nên app mặc định mở S1a; muốn soi S2a,
+  //      S2c phải bật "Xem tất cả 7 mẫu sổ" trước.
+  await page.locator("#show-all-books").click();
+  await page.getByTestId("open-book-s2a").click();
+  await expect(page.getByRole("columnheader", { name: /A · Số hiệu/ }).first()).toBeVisible();
   const s2a = (await page.locator("main").innerText()).replace(/\s+/g, " ");
   expect(s2a, "sổ S2a phải ghi từng dòng chứng từ").toContain("PX-TAX01");
   expect(s2a, "sổ S2a phải ghi theo nhóm ngành").toContain("PPHH");
