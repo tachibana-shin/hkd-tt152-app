@@ -3,6 +3,7 @@ import { storeToRefs } from "pinia";
 import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import { exportXlsx, type XlsxColumn } from "@/utils/excel";
+import { exportBookDocx } from "@/utils/bookDoc";
 import type {
   RevenueExpenseRow,
   CogsBackfillPending,
@@ -371,6 +372,21 @@ function exportBookExcel() {
     return out;
   });
   exportXlsx(`so-ke-toan-${b.book}-${declYear.value}`, cols, rows);
+}
+
+/**
+ * Xuất cùng mẫu sổ đó ra file Word `.docx` khổ A4 dọc — khi muốn nộp bản sửa
+ * tay hoặc in bằng Word thay vì in thẳng từ trình duyệt. Tên file trùng mẫu
+ * Excel cho dễ tìm trong thư mục tải về.
+ */
+async function exportBookWord() {
+  const b = bookData.value;
+  if (!b) return;
+  try {
+    await exportBookDocx(b, `so-ke-toan-${b.book}-${declYear.value}`);
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi xuất file Word", detail: String(e) });
+  }
 }
 
 const declTotals = computed(() => {
@@ -1241,6 +1257,15 @@ useKeepAliveRefresh(reload);
           outlined
           :disabled="!bookData?.rows.length"
           @click="exportBookExcel"
+        />
+        <Button
+          label="Xuất Word"
+          icon="pi pi-file-word"
+          size="small"
+          outlined
+          title="Xuất sổ ra file Word (.docx) khổ A4 dọc"
+          :disabled="!bookData?.rows.length"
+          @click="exportBookWord"
         />
       </template>
       <div class="mb-3 flex flex-wrap items-end gap-3">

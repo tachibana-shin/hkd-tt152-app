@@ -13,40 +13,13 @@
 import { computed } from "vue";
 import Button from "primevue/button";
 import type { BookCell, BookColumn, TaxBook } from "@/types";
-import { fmtDec, fmtInt, fmtPct } from "@/utils/format";
+// Hiển thị ô lấy từ `@/utils/bookCell` — cùng một bản với file Word xuất ra,
+// đổi định dạng ở đây là file Word đổi theo, không lệch nhau.
+import { bookLabelColumn, bookCellValue, renderBookCell } from "@/utils/bookCell";
 
 const props = defineProps<{ book: TaxBook; loading?: boolean }>();
 
 const emit = defineEmits<{ switchBook: [book: string] }>();
-
-/** Ô trống của mẫu → chuỗi rỗng (không in gì). */
-function cell(row: { cells: Record<string, BookCell> }, key: string): BookCell {
-  return row.cells[key] ?? null;
-}
-
-/**
- * Định dạng theo kiểu cột do backend khai báo.
- *
- * `rate` nhận cả hai dạng: tỉ lệ phần trăm dạng thập phân (0.01 → `1%`) và số
- * phần trăm (5 → `5%`) — tuỳ chỗ nào ghi vào.
- */
-function render(row: { cells: Record<string, BookCell> }, col: BookColumn): string {
-  const v = cell(row, col.key);
-  if (v === null || v === "") return "";
-  if (typeof v === "string") return v;
-  switch (col.kind) {
-    // Sổ kế toán VN ghi bằng đồng nguyên — backend đã làm tròn, fmtInt chỉ việc
-    // định dạng theo dấu phẩy/thousand của tiếng Việt.
-    case "money":
-      return fmtInt(v);
-    case "qty":
-      return fmtDec(v);
-    case "rate":
-      return Math.abs(v) <= 1 ? fmtPct(v) : `${fmtInt(v)}%`;
-    default:
-      return fmtDec(v);
-  }
-}
 
 /** Cột số luôn căn phải; cột chữ căn trái. */
 function align(col: BookColumn): string {
@@ -56,7 +29,7 @@ function align(col: BookColumn): string {
 /** Ô đang âm (chi phí, số dư âm) tô đỏ để dễ soi khi đối chiếu. */
 function isNegative(row: { cells: Record<string, BookCell> }, col: BookColumn): boolean {
   if (col.kind === "text") return false;
-  const v = cell(row, col.key);
+  const v = bookCellValue(row, col.key);
   return typeof v === "number" && v < 0;
 }
 
@@ -74,9 +47,7 @@ const rowClass = computed(() => (kind: string) => {
 });
 
 /** Cột đầu tiên mang nhãn dòng khi mẫu không có cột "Diễn giải" riêng. */
-const labelColumn = computed(
-  () => props.book.columns.find((c) => c.kind === "text" && c.key !== "a" && c.key !== "b")?.key,
-);
+const labelColumn = computed(() => bookLabelColumn(props.book.columns));
 
 /**
  * Cắt chuỗi ô ở dấu `/` để chèn `<wbr>` — mở cơ hội ngắt dòng ngay tại đó.
@@ -160,7 +131,7 @@ const columnWidths = computed(() => {
               'book-label': col.key === labelColumn,
             }"
           >
-            <template v-for="(part, k) in cellParts(render(row, col))" :key="k"
+            <template v-for="(part, k) in cellParts(renderBookCell(row, col))" :key="k"
               >{{ part }}<wbr
             /></template>
           </td>
