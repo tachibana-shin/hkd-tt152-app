@@ -28,7 +28,7 @@ const saving = ref(false);
 const loading = ref(false);
 const entries = ref<JournalEntryRow[]>([]);
 const typeFilter = ref("");
-// Khoảng ngày mở từ màn Kế toán HKD (query ?from=&to=) — S3a là sổ chi tiết tiền
+// Khoảng ngày mở từ tab Sổ kế toán (query ?from=&to=) — S3a là sổ chi tiết tiền
 // nên phải lọc theo kỳ đang xem, không lấy cả năm.
 const { inheritedFrom, inheritedTo, backLabel, goBack } = useInheritedRange();
 const fromDate = ref<Date | null>(inheritedFrom.value);
@@ -36,7 +36,7 @@ const toDate = ref<Date | null>(inheritedTo.value);
 const rangeInherited = computed(() => !!inheritedFrom.value || !!inheritedTo.value);
 
 /**
- * Mở lại màn này bằng query mới (ở Kế toán HKD chọn kỳ khác rồi bấm "Mở Thu /
+ * Mở lại màn này bằng query mới (ở tab Sổ kế toán chọn kỳ khác rồi bấm "Mở Thu /
  * Chi"): `<KeepAlive>` không chạy lại `setup()` nên phải nghe `route.query`.
  *
  * Chỉ đặt ngày, không nạp ở đây — `useKeepAliveRefresh` nạp ngay sau đó khi

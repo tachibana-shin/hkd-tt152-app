@@ -15,16 +15,11 @@ import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
 import { describeRange, monthRange, quarterRange, sameDay, taxPeriodRange } from "@/utils/period";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
-import { useTaxBooks } from "@/composables/useTaxBooks";
 
 const business = useBusinessStore();
 const auth = useAuthStore();
 const { config } = storeToRefs(business);
 const toast = useToast();
-// Sổ kế toán sống ở tab riêng (`/books`) nhưng state dùng chung: màn này chỉ
-// cần đồng bộ NĂM SỔ theo khoảng ngày đang xem và gióng kỳ sổ theo "Chuyển
-// nhanh" / Cấu hình thuế (tờ khai – sổ đi cùng kỳ, xem `useTaxBooks`).
-const { bookYear, bookPeriod, bookPeriodNo } = useTaxBooks();
 
 const loading = ref(false);
 // Tờ khai thuế: MỘT bảng duy nhất, theo khoảng ngày đang chọn ở thanh công cụ.
@@ -158,13 +153,13 @@ function groupSourceText(o: TaxOverview): string {
 /**
  * Năm tính thuế — lấy theo NĂM của khoảng ngày đang chọn (mức trừ ngưỡng và hạn
  * nộp đều tính theo năm dương lịch), nên đổi khoảng ngày sang năm khác thì tờ
- * khai, sổ và quyết toán cùng đổi theo.
+ * khai và quyết toán cùng đổi theo.
  */
 const declYear = computed(
   () => Number(toIsoDate(fromDate.value).slice(0, 4)) || new Date().getFullYear(),
 );
-// (Bộ chọn kỳ sổ — "Loại kỳ sổ" / "Kỳ" — nằm ở tab Sổ kế toán, state dùng chung
-// trong `useTaxBooks`.)
+// (Bộ chọn của SỔ — "Năm" / "Loại kỳ sổ" / "Kỳ" — nằm trọn ở tab Sổ kế toán,
+// không phụ thuộc màn này.)
 
 // Cấu hình kê khai thuế của hộ (app_setting): kỳ khai + phương pháp TNCN
 const taxDialog = ref(false);
@@ -251,9 +246,6 @@ async function loadDeclaration() {
     // Cùng khoảng ngày với các bảng khác trên màn → tờ khai luôn khớp số liệu.
     const f = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
     const t = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
-    // Tab Sổ kế toán đọc cùng năm này (sổ nạp lại khi mở tab — `refreshBooks`),
-    // nên đổi khoảng ngày sang năm khác thì tờ khai, sổ và quyết toán cùng đổi.
-    bookYear.value = declYear.value;
     const [rows, ov] = await Promise.all([
       api.getTaxDeclaration(f, t, unitCode.value),
       api.getTaxOverview(f, t, unitCode.value),
@@ -374,12 +366,6 @@ async function goQuick(no: number) {
   const r = isQuarter ? quarterRange(declYear.value, no) : monthRange(declYear.value, no);
   fromDate.value = r.from;
   toDate.value = r.to;
-  // Sổ kế toán đi theo cùng kỳ với tờ khai (đúng như lúc lưu Cấu hình thuế) —
-  // để tờ khai quý N nằm cạnh sổ quý khác là sai số liệu. Tab Sổ nạp lại khi
-  // mở (KeepAlive `refreshBooks`) nên ở đây chỉ cần gióng kỳ, đừng bắn thêm
-  // một lần nạp song song.
-  bookPeriod.value = isQuarter ? "quarter" : "month";
-  bookPeriodNo.value = no;
   await reload();
 }
 
@@ -403,21 +389,6 @@ async function onTaxConfigSaved(payload: { period: string; method: string }) {
     detail: `Kỳ khai: ${taxPeriodLabel.value} • TNCN: ${taxMethodLabel.value}`,
     life: 3000,
   });
-  if (
-    (payload.period === "month" && bookPeriod.value !== "month") ||
-    (payload.period === "quarter" && bookPeriod.value !== "quarter")
-  ) {
-    bookPeriod.value = payload.period === "month" ? "month" : "quarter";
-    const now = new Date();
-    bookPeriodNo.value =
-      bookPeriod.value === "quarter" ? Math.floor(now.getMonth() / 3) + 1 : now.getMonth() + 1;
-  } else if (
-    (payload.period === "year" || payload.period === "per_occurrence") &&
-    bookPeriod.value !== "year"
-  ) {
-    bookPeriod.value = "year";
-    bookPeriodNo.value = 0;
-  }
   await loadDeclaration();
 }
 
@@ -434,8 +405,6 @@ void (async () => {
   if (settings) {
     taxPeriod.value = settings.tax_period;
     taxMethod.value = settings.tax_method;
-    // (Kỳ sổ mặc định — "Theo năm" + số kỳ theo quý hiện tại — nằm ở
-    // `useTaxBooks`: tab Sổ mở trước cũng ra đúng vậy, không reset ở đây.)
   }
   applyReportPeriod();
   await reload();

@@ -18,7 +18,7 @@ const total = ref(0);
 /** Tổng số tiền CẢ kỳ lọc (do server tính, không phải tổng của trang đang xem). */
 const totalAmount = ref(0);
 
-// Khoảng ngày mở từ màn Kế toán HKD (query ?from=&to=) — mở ra đúng kỳ đang xem.
+// Khoảng ngày mở từ tab Sổ kế toán (query ?from=&to=) — mở ra đúng kỳ sổ.
 const { inheritedFrom, inheritedTo, backLabel, goBack } = useInheritedRange();
 const fromDate = ref<Date | null>(inheritedFrom.value);
 const toDate = ref<Date | null>(inheritedTo.value);
@@ -27,7 +27,7 @@ const entryType = ref("");
 const rangeInherited = computed(() => !!inheritedFrom.value || !!inheritedTo.value);
 
 /**
- * Mở lại màn này bằng query mới (ở Kế toán HKD chọn kỳ khác rồi bấm "Mở Sổ
+ * Mở lại màn này bằng query mới (ở tab Sổ kế toán chọn kỳ khác rồi bấm "Mở Sổ
  * nhật ký"): `<KeepAlive>` không chạy lại `setup()` nên phải nghe `route.query`.
  *
  * Chỉ đặt ngày, không nạp ở đây — `useKeepAliveRefresh` nạp ngay sau đó khi

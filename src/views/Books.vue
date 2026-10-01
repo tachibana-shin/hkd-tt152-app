@@ -6,14 +6,15 @@ import { useTaxBooks } from "@/composables/useTaxBooks";
 
 /**
  * Tab "Sổ kế toán" — xem sổ theo mẫu TT 152/2025/TT-BTC, tách khỏi màn Kế
- * toán HKD cho bớt dày: tab này chỉ có chọn kỳ/mẫu sổ, bảng sổ và xuất file;
- * tờ khai, tổng hợp thuế, quyết toán vẫn ở màn Kế toán.
+ * toán HKD cho bớt dày: tab này chỉ có chọn năm/kỳ/mẫu sổ, bảng sổ và xuất
+ * file; tờ khai, tổng hợp thuế, quyết toán vẫn ở màn Kế toán.
  *
- * Kỳ sổ dùng chung state với màn Kế toán (composable) — "Chuyển nhanh" bên kia
- * sang đây là đúng kỳ, không cần đồng bộ thêm.
+ * Năm / loại kỳ / số kỳ đều tự chọn ngay ở đây và được nhớ lại — không còn
+ * đồng bộ với khoảng ngày hay "Chuyển nhanh" của màn Kế toán.
  */
 const {
   bookYear,
+  bookYearOptions,
   book,
   bookPeriod,
   bookPeriodNo,
@@ -73,7 +74,8 @@ function printBook() {
 
 // Mở tab là nạp: danh sách mẫu theo hồ sơ + sổ đang chọn.
 void refreshBooks();
-// Quay lại tab (KeepAlive giữ state) → nạp lại: kỳ có thể đã đổi ở màn Kế toán.
+// Quay lại tab (KeepAlive giữ state) → nạp lại sổ cho khỏi cũ (số liệu sổ có
+// thể đổi ở các màn khác, còn kỳ/năm thì tự chọn ở đây rồi lưu lại).
 useKeepAliveRefresh(refreshBooks);
 </script>
 
@@ -186,6 +188,19 @@ useKeepAliveRefresh(refreshBooks);
         />
       </template>
       <div class="mb-3 flex flex-wrap items-end gap-3">
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Năm</label>
+          <Select
+            v-model="bookYear"
+            :options="bookYearOptions"
+            optionLabel="label"
+            optionValue="value"
+            class="w-28"
+            aria-label="Năm của sổ"
+            data-testid="book-year"
+            @change="refreshBooks"
+          />
+        </div>
         <div>
           <label class="text-xs text-gray-500 block mb-1">Loại kỳ sổ</label>
           <Select

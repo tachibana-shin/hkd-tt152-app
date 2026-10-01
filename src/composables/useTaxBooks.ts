@@ -1,4 +1,4 @@
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useToast } from "primevue/usetoast";
 import { api } from "@/db";
 import type { TaxBook } from "@/types";
@@ -6,13 +6,14 @@ import { exportBookDocx } from "@/utils/bookDoc";
 import { exportXlsx, type XlsxColumn } from "@/utils/excel";
 
 /**
- * Trạng thái SỔ KẾ TOÁN theo mẫu TT 152/2025/TT-BTC — dùng chung cho tab
- * "Sổ kế toán" (`/books`) và màn Kế toán HKD (`/accounting`).
+ * Trạng thái SỔ KẾ TOÁN theo mẫu TT 152/2025/TT-BTC — tab "Sổ kế toán"
+ * (`/books`).
  *
- * Kỳ sổ phải đi cùng kỳ tờ khai như trước đây: bấm "Chuyển nhanh" hoặc lưu
- * Cấu hình thuế ở màn Kế toán thì mở tab Sổ ra đúng kỳ đó. Hai màn không mở
- * cùng lúc (mỗi route một view) nên state đặt ở phạm vi module — dùng chung
- * mà không cần store, và KeepAlive của màn nào giữ state của màn đó.
+ * Sổ KHÔNG còn đi theo tờ khai: năm, loại kỳ và số kỳ do người dùng chọn
+ * ngay trên tab Sổ rồi nhớ lại (localStorage) — màn Kế toán HKD tự lo khoảng
+ * ngày báo cáo của riêng nó, không gióng gì sang đây. State đặt ở phạm vi
+ * module để sống qua các lần mở lại tab trong phiên (không cần store), và
+ * KeepAlive của màn giữ state của màn đó.
  */
 
 /** 7 mẫu sổ của TT 152/2025 (Điều 4) — lọc theo hồ sơ khi đã nạp xong. */
@@ -41,18 +42,25 @@ const showAllBooks = ref(localStorage.getItem(SHOW_ALL_BOOKS_KEY) === "1");
 /** Mẫu sổ đang xem — giữ khi quay lại màn (KeepAlive) và khi đổi kỳ. */
 const book = ref("S2a");
 
-/**
- * Năm của sổ — đi theo NĂM khoảng ngày màn Kế toán HKD đang xem (màn đó đồng
- * bộ mỗi lần nạp tờ khai, nên đổi khoảng ngày sang năm khác thì sổ cùng đổi).
- * Mở thẳng tab Sổ chưa qua màn Kế toán thì mặc định năm hiện tại.
- */
-const bookYear = ref(new Date().getFullYear());
+type BookPeriod = "year" | "quarter" | "month";
+
+/** Năm xem sổ — 2020 … năm sau: quá khứ để tra cứu, năm sau để ghi sổ trước. */
+const MIN_BOOK_YEAR = 2020;
+const MAX_BOOK_YEAR = new Date().getFullYear() + 1;
+const bookYearOptions = Array.from({ length: MAX_BOOK_YEAR - MIN_BOOK_YEAR + 1 }, (_, i) => ({
+  label: String(MIN_BOOK_YEAR + i),
+  value: MIN_BOOK_YEAR + i,
+}));
+
+/** Số kỳ hợp lệ với loại kỳ — mặc định theo kỳ đang chạy (quý/tháng hiện tại). */
+function defaultPeriodNo(period: BookPeriod): number {
+  const now = new Date();
+  return period === "month" ? now.getMonth() + 1 : Math.floor(now.getMonth() / 3) + 1;
+}
 
 /**
- * Bộ chọn kỳ — chỉ dùng cho SỔ KẾ TOÁN theo mẫu TT 152/2025.
- *
- * Tờ khai thuế đã gộp còn một bảng và chạy theo khoảng ngày ở thanh công cụ,
- * nên không còn bộ chọn kỳ ở tờ khai.
+ * Năm + kỳ của sổ: tự chọn trên tab Sổ, KHÔNG đi theo tờ khai nữa, nhớ lại
+ * qua các lần mở app (localStorage). Dữ liệu cũ/hỏng thì về mặc định.
  *
  * Sổ mặc định là cuốn GHI CẢ NĂM: Luật Kế toán (Điều 25.2, 26.1, 26.4, 26.7)
  * bắt sổ mở vào đầu kỳ kế toán năm, ghi liên tục đến khi khóa sổ và in thành
@@ -61,8 +69,54 @@ const bookYear = ref(new Date().getFullYear());
  * kỳ kê khai, đối chiếu với tờ khai 01/CNKD của kỳ đó. Số kỳ để sẵn theo quý
  * hiện tại để người dùng đổi sang "Theo quý" là ra ngay kỳ đang chạy.
  */
-const bookPeriod = ref<"year" | "quarter" | "month">("year");
-const bookPeriodNo = ref(Math.floor(new Date().getMonth() / 3) + 1);
+const BOOK_VIEW_KEY = "hkd:tt152:book-view";
+function readBookView(): { year: number; period: BookPeriod; no: number } {
+  const fallback = {
+    year: new Date().getFullYear(),
+    period: "year" as BookPeriod,
+    no: defaultPeriodNo("quarter"),
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(BOOK_VIEW_KEY) ?? "null") as {
+      year?: number;
+      period?: string;
+      no?: number;
+    } | null;
+    if (!saved) return fallback;
+    const period: BookPeriod =
+      saved.period === "quarter" || saved.period === "month" ? saved.period : "year";
+    const year =
+      typeof saved.year === "number" && saved.year >= MIN_BOOK_YEAR && saved.year <= MAX_BOOK_YEAR
+        ? saved.year
+        : fallback.year;
+    const max = period === "quarter" ? 4 : 12;
+    const no =
+      typeof saved.no === "number" && saved.no >= 1 && saved.no <= max
+        ? saved.no
+        : defaultPeriodNo(period);
+    return { year, period, no };
+  } catch {
+    return fallback;
+  }
+}
+
+const savedView = readBookView();
+const bookYear = ref(savedView.year);
+const bookPeriod = ref<BookPeriod>(savedView.period);
+const bookPeriodNo = ref(savedView.no);
+
+// Đổi quý ↔ tháng mà số kỳ vượt loại kỳ mới (vd Tháng 12 → Theo quý) thì đưa
+// về số kỳ hợp lệ, không để loadBook bắn một quý/tháng không tồn tại.
+watch(bookPeriod, (period) => {
+  const max = period === "quarter" ? 4 : 12;
+  if (bookPeriodNo.value < 1 || bookPeriodNo.value > max)
+    bookPeriodNo.value = defaultPeriodNo(period);
+});
+
+// Nhớ lựa chọn trên tab Sổ qua các lần mở lại app.
+watch([bookYear, bookPeriod, bookPeriodNo], ([year, period, no]) => {
+  localStorage.setItem(BOOK_VIEW_KEY, JSON.stringify({ year, period, no }));
+});
 
 const bookPeriodTypeOptions: { label: string; value: "year" | "quarter" | "month" }[] = [
   { label: "Theo quý", value: "quarter" },
@@ -213,6 +267,7 @@ export function useTaxBooks() {
   return {
     /** Năm của sổ — màn Sổ tính khoảng ngày đẩy sang Sổ nhật ký / Thu-Chi. */
     bookYear,
+    bookYearOptions,
     book,
     bookPeriod,
     bookPeriodNo,
