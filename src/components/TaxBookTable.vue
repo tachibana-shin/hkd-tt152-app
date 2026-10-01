@@ -96,10 +96,11 @@ const hasData = computed(() => props.book.rows.length > 0);
 /**
  * Độ rộng cột do backend khai theo `rem`, đúng tỉ lệ mẫu in (S1a: 7-7-24-10).
  *
- * Bảng vẫn cộng các `rem` đó lại thành 768px rồi vượt ra ngoài khung sổ, nên
- * cửa sổ nhỏ là cả trang bị kéo tràn ngang. Đưa về phần trăm trên tổng: tỉ lệ
- * giữa các cột giữ nguyên đúng như mẫu, nhưng bảng luôn vừa khung — máy hẹp thì
- * cột co lại và chữ tự xuống dòng thay vì đẩy trang ra ngoài.
+ * Hai kiểu viết đều hỏng một bên: cộng thẳng các `rem` đó lại thì cửa sổ hẹp
+ * bị kéo tràn ngang, còn kẹp `max-width` bằng tổng `rem` thì cửa sổ rộng lại
+ * hở một khoảng trắng lớn bên phải. Về phần trăm trên tổng là lối chung: tỉ lệ
+ * giữa các cột giữ nguyên đúng như mẫu in, mà bảng luôn chạy hết khung — hẹp thì
+ * cột co lại cho chữ tự xuống dòng, rộng thì cột giãn ra lấp đầy, không hở.
  */
 const columnWidths = computed(() => {
   const cols = props.book.columns;
@@ -108,16 +109,6 @@ const columnWidths = computed(() => {
   // Không khai độ rộng (hoặc khai lỗi) thì chia đều, vẫn không được tràn.
   if (total <= 0) return rem.map(() => `${(100 / Math.max(cols.length, 1)).toFixed(2)}%`);
   return rem.map((w) => `${((w / total) * 100).toFixed(2)}%`);
-});
-
-/**
- * Khổ tối đa của bảng = tổng `rem` của mẫu: màn rộng vẫn dừng ở đúng khổ in
- * như cũ (không kéo dài chữ ra hết Card), còn màn hẹp thì `width: 100%` thắng
- * và bảng co theo khung.
- */
-const tableMaxWidth = computed(() => {
-  const total = props.book.columns.reduce((a, c) => a + (parseFloat(c.width) || 0), 0);
-  return total > 0 ? `${total}rem` : "";
 });
 </script>
 
@@ -146,7 +137,7 @@ const tableMaxWidth = computed(() => {
     <!-- Mẫu S2d không có dòng này ở đầu sổ (đơn vị tính nằm trong cột D) -->
     <div v-if="book.header.unit" class="book-unit">Đơn vị tính: {{ book.header.unit }}</div>
 
-    <table class="book-table" :style="tableMaxWidth ? `max-width:${tableMaxWidth}` : ''">
+    <table class="book-table">
       <thead>
         <tr>
           <th
