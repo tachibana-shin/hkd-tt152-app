@@ -78,6 +78,19 @@ const labelColumn = computed(
   () => props.book.columns.find((c) => c.kind === "text" && c.key !== "a" && c.key !== "b")?.key,
 );
 
+/**
+ * Cắt chuỗi ô ở dấu `/` để chèn `<wbr>` — mở cơ hội ngắt dòng ngay tại đó.
+ *
+ * Cột hẹp (màn 638px, cột "Ngày, tháng" ~72px) thì `27/09/2026` vốn bị bẻ giữa
+ * chữ số ra `27/09/202` + `6`; có `<wbr>` thì trình duyệt xuống dòng ở dấu gạch
+ * thành `27/09/` + `2026`, còn chỗ rộng thì vẫn nằm gọn một dòng. Không có `/`
+ * thì chuỗi không đổi (trở lại một đoạn duy nhất).
+ */
+function cellParts(value: string): string[] {
+  const segs = value.split("/");
+  return segs.map((s, i) => (i < segs.length - 1 ? `${s}/` : s));
+}
+
 const hasData = computed(() => props.book.rows.length > 0);
 
 /**
@@ -156,7 +169,9 @@ const tableMaxWidth = computed(() => {
               'book-label': col.key === labelColumn,
             }"
           >
-            {{ render(row, col) }}
+            <template v-for="(part, k) in cellParts(render(row, col))" :key="k"
+              >{{ part }}<wbr
+            /></template>
           </td>
         </tr>
       </tbody>
@@ -289,7 +304,9 @@ const tableMaxWidth = computed(() => {
 .book-table th,
 .book-table td {
   border: 1px solid var(--book-line);
-  padding: 0.2rem 0.35rem;
+  /* Ngang 0.2rem thay vì 0.35rem: cột ngày 7rem chỉ thiếu ~3px nên ngày
+     `27/09/2026` phải xuống dòng dù cột đã chia đúng tỉ lệ mẫu. */
+  padding: 0.2rem 0.2rem;
   vertical-align: top;
   word-break: break-word;
 }
