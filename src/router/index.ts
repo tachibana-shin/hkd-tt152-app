@@ -123,6 +123,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "Kế toán HKD" },
   },
   {
+    path: "/books",
+    name: "books",
+    component: () => import("@/views/Books.vue"),
+    meta: { title: "Sổ kế toán" },
+  },
+  {
     path: "/users",
     name: "users",
     component: () => import("@/views/Users.vue"),

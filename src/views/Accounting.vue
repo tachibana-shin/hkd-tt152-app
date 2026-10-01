@@ -3,12 +3,10 @@ import { storeToRefs } from "pinia";
 import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import { exportXlsx, type XlsxColumn } from "@/utils/excel";
-import { exportBookDocx } from "@/utils/bookDoc";
 import type {
   RevenueExpenseRow,
   CogsBackfillPending,
   TrialBalanceRow,
-  TaxBook,
   TaxDeclarationRow,
   TaxOverview,
   TaxSettlement,
@@ -17,11 +15,16 @@ import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
 import { describeRange, monthRange, quarterRange, sameDay, taxPeriodRange } from "@/utils/period";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
+import { useTaxBooks } from "@/composables/useTaxBooks";
 
 const business = useBusinessStore();
 const auth = useAuthStore();
 const { config } = storeToRefs(business);
 const toast = useToast();
+// Sổ kế toán sống ở tab riêng (`/books`) nhưng state dùng chung: màn này chỉ
+// cần đồng bộ NĂM SỔ theo khoảng ngày đang xem và gióng kỳ sổ theo "Chuyển
+// nhanh" / Cấu hình thuế (tờ khai – sổ đi cùng kỳ, xem `useTaxBooks`).
+const { bookYear, bookPeriod, bookPeriodNo } = useTaxBooks();
 
 const loading = ref(false);
 // Tờ khai thuế: MỘT bảng duy nhất, theo khoảng ngày đang chọn ở thanh công cụ.
@@ -160,36 +163,8 @@ function groupSourceText(o: TaxOverview): string {
 const declYear = computed(
   () => Number(toIsoDate(fromDate.value).slice(0, 4)) || new Date().getFullYear(),
 );
-// Bộ chọn kỳ để XEM tờ khai: quý / tháng / năm (mặc định theo kỳ khai đã cấu hình)
-/**
- * Bộ chọn kỳ — chỉ dùng cho SỔ KẾ TOÁN theo mẫu TT 152/2025.
- *
- * Tờ khai thuế đã gộp còn một bảng và chạy theo khoảng ngày ở thanh công cụ, nên
- * không còn bộ chọn kỳ ở tờ khai.
- *
- * Sổ mặc định là cuốn GHI CẢ NĂM: Luật Kế toán (Điều 25.2, 26.1, 26.4, 26.7)
- * bắt sổ mở vào đầu kỳ kế toán năm, ghi liên tục đến khi khóa sổ và in thành
- * quyển riêng cho từng năm để lưu trữ. TT 152/2025 không quy định kỳ cho sổ nhưng
- * mẫu S2a có sẵn dòng "Kỳ kê khai" → vẫn giữ chọn quý/tháng để TRÍCH sổ theo
- * kỳ kê khai, đối chiếu với tờ khai 01/CNKD của kỳ đó.
- */
-const bookPeriod = ref<"year" | "quarter" | "month">("year");
-const bookPeriodNo = ref(1);
-const bookPeriodTypeOptions: { label: string; value: "year" | "quarter" | "month" }[] = [
-  { label: "Theo quý", value: "quarter" },
-  { label: "Theo tháng", value: "month" },
-  { label: "Theo năm", value: "year" },
-];
-const bookPeriodNoOptions = computed(() => {
-  if (bookPeriod.value === "quarter")
-    return [1, 2, 3, 4].map((q) => ({ label: `Quý ${q}`, value: q }));
-  if (bookPeriod.value === "month")
-    return Array.from({ length: 12 }, (_, i) => ({
-      label: `Tháng ${i + 1}`,
-      value: i + 1,
-    }));
-  return [];
-});
+// (Bộ chọn kỳ sổ — "Loại kỳ sổ" / "Kỳ" — nằm ở tab Sổ kế toán, state dùng chung
+// trong `useTaxBooks`.)
 
 // Cấu hình kê khai thuế của hộ (app_setting): kỳ khai + phương pháp TNCN
 const taxDialog = ref(false);
@@ -229,125 +204,8 @@ const groupLabel = computed(() => {
       return `Nhóm 4 — doanh thu > ${g4}`;
   }
 });
-/**
- * Chọn một mẫu sổ và cuộn tới thẻ sổ kế toán.
- *
- * Trước đây bấm "Sổ S2a/S3a-HKD" đẩy sang màn nhật ký chung `/ledger` (S3a thì
- * đẩy sang `/cash` — hoàn toàn sai mẫu), nên số liệu không đúng mẫu TT 152 và
- * mất luôn khoảng ngày đang xem. Nay giữ nguyên màn Kế toán: đổi mẫu sổ, nạp
- * lại và cuộn tới đúng chỗ đang xem.
- */
-function selectBook(target: string) {
-  // Sổ không thuộc hồ sơ (vd chuyển sang S2b khi hộ đang nộp theo % doanh thu)
-  // thì không mở — chọn là in ra sổ không nộp được.
-  if (!bookVisible(target)) return;
-  book.value = target;
-  void loadBook().then(() => {
-    document
-      .querySelector("[data-testid='tax-book']")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-}
-
-const router = useRouter();
-const route = useRoute();
-
-/**
- * Mở Sổ nhật ký (`/ledger`) hoặc Thu / Chi (`/cash`) kèm đúng kỳ đang xem.
- *
- * Hai màn này không phải mẫu TT 152 nên không gộp vào thẻ sổ, nhưng vẫn phải có
- * lối vào có chủ đích từ đây (trước chỉ vào được bằng thanh menu). Truyền
- * `?from=&to=` + đường quay lại, màn đích nhận qua `useInheritedRange` → mở ra
- * là đúng kỳ, bấm "Quay lại Kế toán HKD" là về ngay chỗ này.
- */
-function openJournal(path: "/ledger" | "/cash") {
-  const from = toIsoDate(fromDate.value);
-  const to = toIsoDate(toDate.value);
-  void router.push({
-    path,
-    query: {
-      // Thiếu một trong hai ngày thì để trống, màn đích tự lấy mặc định của nó.
-      ...(from && to ? { from, to } : {}),
-      back: route.fullPath,
-      backLabel: "Kế toán HKD",
-    },
-  });
-}
-
-// ─── Sổ kế toán theo mẫu TT 152/2025/TT-BTC + tạm nộp & quyết toán năm ───
-const allBookOptions = [
-  { label: "S1a-HKD · Sổ doanh thu (nhóm 1)", value: "S1a" },
-  { label: "S2a-HKD · Sổ doanh thu theo nhóm ngành (nộp theo % doanh thu)", value: "S2a" },
-  { label: "S2b-HKD · Sổ doanh thu (nộp GTGT theo %, TNCN theo thu nhập)", value: "S2b" },
-  { label: "S2c-HKD · Sổ chi tiết doanh thu, chi phí", value: "S2c" },
-  { label: "S2d-HKD · Sổ chi tiết vật liệu, hàng hóa", value: "S2d" },
-  { label: "S2e-HKD · Sổ chi tiết tiền", value: "S2e" },
-  { label: "S3a-HKD · Sổ theo dõi nghĩa vụ thuế khác", value: "S3a" },
-];
-/**
- * Danh sách mẫu sổ áp dụng cho hồ sơ (Điều 4 TT 152) do backend trả.
- *
- * `null` = chưa nạp xong (hoặc lỗi) → vẫn hiện đủ 7 mẫu, không vì thế mà biến
- * mất sổ đang xem. Số nhóm/phương pháp tính thuế đổi khi lưu Cấu hình nên không
- * tự suy ra ở đây — một nguồn duy nhất là backend.
- */
-const applicableBooks = ref<string[] | null>(null);
-
-/** Công tắc xem đủ 7 mẫu sổ — dùng khi đối chiếu mẫu in, nhớ lại giữa các lần mở. */
-const SHOW_ALL_BOOKS_KEY = "hkd:tt152:show-all-books";
-const showAllBooks = ref(localStorage.getItem(SHOW_ALL_BOOKS_KEY) === "1");
-/** Mẫu sổ đang xem — giữ khi quay lại màn (KeepAlive) và khi đổi kỳ. */
-const book = ref("S2a");
-
-const bookOptions = computed(() =>
-  showAllBooks.value || applicableBooks.value == null
-    ? allBookOptions
-    : allBookOptions.filter((o) => applicableBooks.value!.includes(o.value)),
-);
-
-/** Một mẫu có được hiện/chọn không (dùng cho dropdown lẫn các nút sổ nhanh). */
-function bookVisible(value: string): boolean {
-  return bookOptions.value.some((o) => o.value === value);
-}
-
-/**
- * Sổ đang chọn phải luôn nằm trong danh sách được phép.
- *
- * Đổi nhóm hộ hoặc tắt công tắc "xem tất cả" thì sổ cũ có thể không còn thuộc
- * hồ sơ → tự chuyển về mẫu áp dụng đầu tiên, không để người dùng kẹt trên một
- * mẫu sổ không nộp được. Trả về true nếu đã phải đổi sổ.
- */
-function ensureBookVisible(): boolean {
-  if (bookVisible(book.value)) return false;
-  const first = bookOptions.value[0];
-  if (first) book.value = first.value;
-  return true;
-}
-
-const bookData = ref<TaxBook | null>(null);
-const bookLoading = ref(false);
 const settlement = ref<TaxSettlement | null>(null);
 const settleLoading = ref(false);
-
-async function loadBook() {
-  bookLoading.value = true;
-  try {
-    const no = bookPeriod.value === "year" ? 0 : bookPeriodNo.value;
-    bookData.value = await api.getTaxBooks(declYear.value, bookPeriod.value, no, book.value);
-  } catch (e) {
-    bookData.value = null;
-    toast.add({ severity: "error", summary: "Lỗi tải sổ kế toán", detail: String(e) });
-  } finally {
-    bookLoading.value = false;
-  }
-}
-
-/** Bật/tắt xem đủ 7 mẫu sổ → lưu lựa chọn và đổi ngay sang sổ hợp lệ nếu cần. */
-function toggleShowAllBooks(value: boolean) {
-  showAllBooks.value = value;
-  localStorage.setItem(SHOW_ALL_BOOKS_KEY, value ? "1" : "0");
-  if (ensureBookVisible()) void loadBook();
-}
 
 async function loadSettlement() {
   settleLoading.value = true;
@@ -358,43 +216,6 @@ async function loadSettlement() {
     toast.add({ severity: "error", summary: "Lỗi tải số tạm nộp", detail: String(e) });
   } finally {
     settleLoading.value = false;
-  }
-}
-
-/**
- * Xuất sổ hiện tại ra Excel theo đúng bộ cột của mẫu.
- *
- * Bộ cột mỗi mẫu một bộ (S1a 3 cột, S2d 12 cột…) nên không khai cứng được
- * như trước — lấy nguyên `columns` backend trả về, ô trống xuất rỗng.
- */
-async function exportBookExcel() {
-  const b = bookData.value;
-  if (!b) return;
-  const cols: XlsxColumn[] = b.columns.map((c) => ({ header: c.label, key: c.key }));
-  const rows = b.rows.map((r) => {
-    const out: Record<string, unknown> = {};
-    for (const c of b.columns) out[c.key] = r.cells[c.key] ?? "";
-    return out;
-  });
-  try {
-    await exportXlsx(`so-ke-toan-${b.book}-${declYear.value}`, cols, rows);
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi xuất file Excel", detail: String(e) });
-  }
-}
-
-/**
- * Xuất cùng mẫu sổ đó ra file Word `.docx` khổ A4 dọc — khi muốn nộp bản sửa
- * tay hoặc in bằng Word thay vì in thẳng từ trình duyệt. Tên file trùng mẫu
- * Excel cho dễ tìm trong thư mục tải về.
- */
-async function exportBookWord() {
-  const b = bookData.value;
-  if (!b) return;
-  try {
-    await exportBookDocx(b, `so-ke-toan-${b.book}-${declYear.value}`);
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi xuất file Word", detail: String(e) });
   }
 }
 
@@ -430,21 +251,17 @@ async function loadDeclaration() {
     // Cùng khoảng ngày với các bảng khác trên màn → tờ khai luôn khớp số liệu.
     const f = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
     const t = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
-    const [rows, ov, books] = await Promise.all([
+    // Tab Sổ kế toán đọc cùng năm này (sổ nạp lại khi mở tab — `refreshBooks`),
+    // nên đổi khoảng ngày sang năm khác thì tờ khai, sổ và quyết toán cùng đổi.
+    bookYear.value = declYear.value;
+    const [rows, ov] = await Promise.all([
       api.getTaxDeclaration(f, t, unitCode.value),
       api.getTaxOverview(f, t, unitCode.value),
-      // Danh sách mẫu sổ của hồ sơ (Điều 4 TT 152) — đổi nhóm hộ là đổi luôn
-      // bộ sổ được phép, nên nạp cùng lúc với tờ khai.
-      api.getApplicableBooks(declYear.value),
     ]);
     declRows.value = rows;
     overview.value = ov;
-    applicableBooks.value = books;
-    // Hồ sơ mới sang nhóm khác → sổ đang mở có thể không còn áp dụng, đổi sang
-    // mẫu hợp lệ trước khi nạp để không in ra sổ không thuộc hồ sơ.
-    ensureBookVisible();
-    // Sổ kế toán theo kỳ khai (bản in theo mẫu TT 152) + số tạm nộp cả năm.
-    await Promise.all([loadBook(), loadSettlement()]);
+    // Số tạm nộp cả năm — bảng quyết toán vẫn nằm trên màn này.
+    await loadSettlement();
   } catch (e) {
     toast.add({
       severity: "error",
@@ -558,12 +375,11 @@ async function goQuick(no: number) {
   fromDate.value = r.from;
   toDate.value = r.to;
   // Sổ kế toán đi theo cùng kỳ với tờ khai (đúng như lúc lưu Cấu hình thuế) —
-  // để tờ khai quý N nằm cạnh sổ quý khác là sai số liệu.
+  // để tờ khai quý N nằm cạnh sổ quý khác là sai số liệu. Tab Sổ nạp lại khi
+  // mở (KeepAlive `refreshBooks`) nên ở đây chỉ cần gióng kỳ, đừng bắn thêm
+  // một lần nạp song song.
   bookPeriod.value = isQuarter ? "quarter" : "month";
   bookPeriodNo.value = no;
-  // `loadDeclaration()` bên trong `reload()` đã nạp sẵn sổ (và tự đổi sang mẫu
-  // sổ hợp lệ nếu hồ sơ vừa sang nhóm khác) — đừng bắn thêm một lần song song,
-  // hai lần nạp đua nhau có thể ghi đè sổ vừa đúng mẫu.
   await reload();
 }
 
@@ -618,10 +434,8 @@ void (async () => {
   if (settings) {
     taxPeriod.value = settings.tax_period;
     taxMethod.value = settings.tax_method;
-    // Mở màn là sổ cả năm (kỳ kế toán năm) — không bám kỳ khai; số kỳ để sẵn
-    // theo quý hiện tại để người dùng đổi sang "Theo quý" là ra ngay kỳ đang có.
-    bookPeriod.value = "year";
-    bookPeriodNo.value = Math.floor(new Date().getMonth() / 3) + 1;
+    // (Kỳ sổ mặc định — "Theo năm" + số kỳ theo quý hiện tại — nằm ở
+    // `useTaxBooks`: tab Sổ mở trước cũng ra đúng vậy, không reset ở đây.)
   }
   applyReportPeriod();
   await reload();
@@ -1075,64 +889,10 @@ useKeepAliveRefresh(reload);
         </div>
       </SectionCard>
 
-      <!-- Sổ sách (mẫu TT 152) -->
-      <SectionCard title="Sổ sách theo mẫu TT 152/2025">
+      <!-- In, xuất tờ khai & sao lưu — sổ đã tách sang tab "Sổ kế toán" -->
+      <SectionCard title="In, xuất tờ khai & sao lưu">
         <template #icon><i-mdi-book-open-page-variant class="text-sky-500" /></template>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <!-- Nút sổ nhanh chỉ hiện mẫu đúng hồ sơ (Điều 4 TT 152). -->
-          <Button
-            v-if="bookVisible('S1a')"
-            label="Sổ S1a-HKD"
-            icon="pi pi-book"
-            outlined
-            class="justify-start"
-            data-testid="open-book-s1a"
-            @click="selectBook('S1a')"
-          />
-          <Button
-            v-if="bookVisible('S2a')"
-            label="Sổ S2a-HKD"
-            icon="pi pi-book"
-            outlined
-            class="justify-start"
-            data-testid="open-book-s2a"
-            @click="selectBook('S2a')"
-          />
-          <Button
-            v-if="bookVisible('S2b')"
-            label="Sổ S2b-HKD"
-            icon="pi pi-book"
-            outlined
-            class="justify-start"
-            data-testid="open-book-s2b"
-            @click="selectBook('S2b')"
-          />
-          <Button
-            v-if="bookVisible('S3a')"
-            label="Sổ S3a-HKD"
-            icon="pi pi-book"
-            outlined
-            class="justify-start"
-            data-testid="open-book-s3a"
-            @click="selectBook('S3a')"
-          />
-          <!-- 2 màn không phải mẫu TT 152: vẫn cho mở thẳng kèm kỳ đang xem. -->
-          <Button
-            label="Mở Sổ nhật ký"
-            icon="pi pi-external-link"
-            outlined
-            class="justify-start"
-            data-testid="open-ledger"
-            @click="openJournal('/ledger')"
-          />
-          <Button
-            label="Mở Thu / Chi"
-            icon="pi pi-external-link"
-            outlined
-            class="justify-start"
-            data-testid="open-cash"
-            @click="openJournal('/cash')"
-          />
           <Button
             label="In báo cáo"
             icon="pi pi-print"
@@ -1251,103 +1011,6 @@ useKeepAliveRefresh(reload);
           /></template>
         </AppDataTable>
       </div>
-    </SectionCard>
-
-    <!-- Sổ kế toán theo mẫu TT 152/2025/TT-BTC -->
-    <SectionCard>
-      <template #icon><i-mdi-book-open-variant class="text-cyan-600" /></template>
-      <template #title>
-        <span>Sổ kế toán (mẫu TT 152/2025/TT-BTC)</span>
-        <span v-if="bookData" class="text-xs font-normal text-gray-400">
-          {{ bookData.period_label }}
-        </span>
-      </template>
-      <template #actions>
-        <Button
-          label="Xuất Excel"
-          icon="pi pi-file-excel"
-          size="small"
-          outlined
-          :disabled="!bookData?.rows.length"
-          @click="exportBookExcel"
-        />
-        <Button
-          label="Xuất Word"
-          icon="pi pi-file-word"
-          size="small"
-          outlined
-          title="Xuất sổ ra file Word (.docx) khổ A4 dọc"
-          :disabled="!bookData?.rows.length"
-          @click="exportBookWord"
-        />
-      </template>
-      <div class="mb-3 flex flex-wrap items-end gap-3">
-        <div>
-          <label class="text-xs text-gray-500 block mb-1">Loại kỳ sổ</label>
-          <Select
-            v-model="bookPeriod"
-            :options="bookPeriodTypeOptions"
-            optionLabel="label"
-            optionValue="value"
-            class="w-36"
-            aria-label="Loại kỳ sổ"
-            @change="loadBook"
-          />
-        </div>
-        <div v-if="bookPeriod !== 'year'">
-          <label class="text-xs text-gray-500 block mb-1">Kỳ</label>
-          <Select
-            v-model="bookPeriodNo"
-            :options="bookPeriodNoOptions"
-            optionLabel="label"
-            optionValue="value"
-            class="w-32"
-            aria-label="Kỳ sổ"
-            @change="loadBook"
-          />
-        </div>
-        <div class="min-w-96">
-          <label class="text-xs text-gray-500 block mb-1">Mẫu sổ</label>
-          <div data-testid="tax-book" class="w-full">
-            <Select
-              v-model="book"
-              :options="bookOptions"
-              option-label="label"
-              option-value="value"
-              class="w-full"
-              aria-label="Mẫu sổ"
-              @change="loadBook"
-            />
-          </div>
-        </div>
-        <Button
-          label="Xem sổ"
-          icon="pi pi-search"
-          size="small"
-          :loading="bookLoading"
-          class="mt-4"
-          @click="loadBook"
-        />
-        <!-- Mặc định chỉ hiện sổ đúng nhóm hộ; bật lên để đối chiếu đủ 7 mẫu in. -->
-        <div class="flex items-center gap-2 mt-4">
-          <ToggleSwitch
-            :model-value="showAllBooks"
-            input-id="show-all-books"
-            data-testid="show-all-books"
-            aria-label="Xem tất cả 7 mẫu sổ"
-            @update:model-value="toggleShowAllBooks"
-          />
-          <label for="show-all-books" class="text-xs text-gray-500 cursor-pointer">
-            Xem tất cả 7 mẫu sổ
-          </label>
-        </div>
-      </div>
-      <TaxBookTable
-        v-if="bookData"
-        :book="bookData"
-        :loading="bookLoading"
-        @switch-book="selectBook"
-      />
     </SectionCard>
 
     <TaxConfigDialog

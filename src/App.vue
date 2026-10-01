@@ -228,6 +228,7 @@ const menuItems: MenuItem[] = [
   },
   { label: "Nhật ký HĐ", icon: "pi pi-history", to: "/audit", roles: ["admin", "ketoan", "xem"] },
   { label: "Kế toán HKD", icon: "pi pi-calculator", to: "/accounting", roles: ["admin", "ketoan"] },
+  { label: "Sổ kế toán", icon: "pi pi-bookmark", to: "/books", roles: ["admin", "ketoan"] },
   { label: "Người dùng", icon: "pi pi-user-edit", to: "/users", roles: ["admin"] },
   {
     label: "Hồ sơ HKD",

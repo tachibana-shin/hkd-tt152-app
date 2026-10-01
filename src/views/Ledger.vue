@@ -120,7 +120,7 @@ useKeepAliveRefresh(reload);
             icon="pi pi-arrow-left"
             severity="secondary"
             outlined
-            data-testid="back-to-accounting"
+            data-testid="back-to-previous"
             @click="goBack()"
           />
           <Button label="Tải lại" icon="pi pi-refresh" @click="applyFilters()" />

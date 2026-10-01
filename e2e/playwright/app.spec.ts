@@ -124,6 +124,7 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
     ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua", "/hddt-sync"],
     ["Nhật ký HĐ", "Nhật ký hoạt động", "/audit"],
     ["Kế toán HKD", "Kế toán HKD", "/accounting"],
+    ["Sổ kế toán", "Sổ kế toán", "/books"],
     ["Người dùng", "Người dùng & phân quyền", "/users"],
     ["Hồ sơ HKD", "Hồ sơ HKD", "/profiles"],
     ["Cài đặt", "Cài đặt", "/settings"],
@@ -2165,10 +2166,19 @@ test("Kế toán HKD: chuyển nhanh kỳ theo kỳ khai của hộ (quý / thá
   await openTab(page, "Kế toán HKD", "/accounting");
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
 
-  // Kỳ sổ hiển thị ngay sau nhãn "Kỳ", cùng pattern với các ô ngày ở trên.
+  // Kỳ SỔ hiển thị trên tab riêng "Sổ kế toán" — cùng state với "Chuyển nhanh".
   const bookPeriodNo = page.locator('label:text-is("Kỳ") + .p-select');
   const quickMonth = page.locator('label:text-is("Chuyển nhanh") + .p-select');
   const quickLabel = page.locator('label:text-is("Chuyển nhanh")');
+
+  /** Qua tab Sổ, đọc kỳ sổ đang chọn, rồi về lại màn Kế toán. */
+  async function expectBookPeriod(text: string | RegExp) {
+    await openTab(page, "Sổ kế toán", "/books");
+    await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
+    await expect(bookPeriodNo).toContainText(text);
+    await openTab(page, "Kế toán HKD", "/accounting");
+    await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  }
 
   // ── Khai theo quý → 4 nút; bấm "Quý 3" thì ngày, tờ khai và kỳ sổ cùng Q3 ──
   await setTaxPeriod(/^Theo quý/);
@@ -2176,7 +2186,7 @@ test("Kế toán HKD: chuyển nhanh kỳ theo kỳ khai của hộ (quý / thá
   await page.getByTestId("quick-quarter-3").click();
   await expect(datePicker("Từ ngày")).toHaveValue(`01/07/${y}`);
   await expect(datePicker("Đến ngày")).toHaveValue(`30/09/${y}`);
-  await expect(bookPeriodNo).toContainText("Quý 3");
+  await expectBookPeriod("Quý 3");
   // Kỳ đang xem được tô đậm (severity primary, không outlined), kỳ khác thì không.
   await expect(page.getByTestId("quick-quarter-3")).toHaveAttribute("data-p-severity", "primary");
   await expect(page.getByTestId("quick-quarter-3")).not.toHaveAttribute("data-p", /outlined/);
@@ -2193,32 +2203,42 @@ test("Kế toán HKD: chuyển nhanh kỳ theo kỳ khai của hộ (quý / thá
   await page.locator(".p-select-option", { hasText: "Tháng 12" }).first().click();
   await expect(datePicker("Từ ngày")).toHaveValue(`01/12/${y}`);
   await expect(datePicker("Đến ngày")).toHaveValue(`31/12/${y}`);
-  await expect(bookPeriodNo).toContainText("Tháng 12");
+  await expectBookPeriod("Tháng 12");
 
   // ── Khai theo năm: cả năm là một kỳ duy nhất → không có gì để chuyển nhanh ──
   await setTaxPeriod(/^Theo năm/);
   await expect(page.getByTestId("quick-quarter-1")).toHaveCount(0);
   await expect(quickLabel).toHaveCount(0);
+  // Kỳ sổ cũng về "Theo năm" → không còn ô "Kỳ" (trước đây kẹt tháng 12).
+  await openTab(page, "Sổ kế toán", "/books");
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
+  await expect(page.locator('label:text-is("Loại kỳ sổ") + .p-select')).toContainText("Theo năm");
+  await expect(bookPeriodNo).toHaveCount(0);
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
 
   // Trả lại mặc định để không ảnh hưởng test sau.
   await setTaxPeriod(/^Theo quý/);
   await expect(page.getByTestId("quick-quarter-1")).toBeVisible();
 });
 
-test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async ({ page }) => {
+test("Sổ kế toán mở đúng mẫu trên tab riêng", async ({ page }) => {
   await ensureLoggedIn(page);
   const datePicker = (label: string) =>
     page.locator(`label:text-is("${label}") + .p-datepicker input`);
 
+  // Khoảng ngày báo cáo màn Kế toán phải nguyên vẹn sau khi thao tác ở tab Sổ —
+  // hai tab dùng state riêng cho phần hiển thị, chỉ chung NĂM tính thuế.
   await openTab(page, "Kế toán HKD", "/accounting");
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
-  // Chờ khoảng ngày mặc định (theo kỳ khai) được app gán xong.
   const from = datePicker("Từ ngày");
   const to = datePicker("Đến ngày");
   await expect(from).not.toHaveValue("");
   await expect(to).not.toHaveValue("");
   const accountingRange = { from: await from.inputValue(), to: await to.inputValue() };
 
+  await openTab(page, "Sổ kế toán", "/books");
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
   // Mặc định S1a (hồ sơ E2E chưa chốt nhóm → app tự xếp Nhóm 1 → chỉ sổ doanh
   // thu): đầu sổ + bộ cột đúng mẫu (A Ngày tháng, B Diễn giải, 1 Số tiền).
   await expect(page.getByText("SỔ DOANH THU BÁN HÀNG HÓA, DỊCH VỤ").first()).toBeVisible();
@@ -2234,21 +2254,19 @@ test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async (
   await expect(page.locator(".p-select-option")).toHaveCount(7);
   await page.keyboard.press("Escape");
 
-  // Bấm "Sổ S3a-HKD" → chuyển đúng mẫu S3a (10 cột số liệu thuế khác), không rời màn.
+  // Bấm "Sổ S3a-HKD" → chuyển đúng mẫu S3a (10 cột số liệu thuế khác), không rời tab.
   await page.getByTestId("open-book-s3a").click();
   await expect(page.getByTestId("tax-book")).toContainText("S3a-HKD");
   await expect(page.getByText("SỔ THEO DÕI NGHĨA VỤ THUẾ KHÁC").first()).toBeVisible();
   await expect(page.getByRole("columnheader", { name: /10 · Thuế sử dụng đất/ })).toBeVisible();
   // Hộ chỉ có GTGT/TNCN nên cột số để trống đúng mẫu, không bịa số.
   await expect(page.getByText("Kỳ này chưa có phát sinh nào để ghi sổ.")).toBeVisible();
-  await expect(page).toHaveURL(/\/accounting$/);
+  await expect(page).toHaveURL(/\/books$/);
 
-  // Bấm "Sổ S2b-HKD" → về lại mẫu doanh thu, vẫn cùng khoảng ngày.
+  // Bấm "Sổ S2b-HKD" → về lại mẫu doanh thu.
   await page.getByTestId("open-book-s2b").click();
   await expect(page.getByTestId("tax-book")).toContainText("S2b-HKD");
   await expect(page.getByText("SỔ DOANH THU BÁN HÀNG HÓA, DỊCH VỤ").first()).toBeVisible();
-  await expect(from).toHaveValue(accountingRange.from);
-  await expect(to).toHaveValue(accountingRange.to);
 
   // S2d (vật liệu) và S2e (tiền) chọn được từ dropdown mẫu sổ.
   await page.getByTestId("tax-book").click();
@@ -2259,6 +2277,11 @@ test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async (
   await page.getByTestId("tax-book").click();
   await page.locator(".p-select-option", { hasText: "S2e-HKD" }).first().click();
   await expect(page.getByText("SỔ CHI TIẾT TIỀN").first()).toBeVisible();
+
+  // Về màn Kế toán: khoảng ngày báo cáo không bị các thao tác sổ ảnh hưởng.
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(from).toHaveValue(accountingRange.from);
+  await expect(to).toHaveValue(accountingRange.to);
 });
 
 // Danh sách mẫu sổ bám theo hồ sơ HKD (Điều 4 TT 152/2025): hồ sơ chưa chốt
@@ -2266,8 +2289,8 @@ test("Sổ kế toán mở đúng mẫu ngay trên màn Kế toán HKD", async (
 // lại cả sau khi tải lại trang.
 test("Danh sách mẫu sổ chỉ hiện sổ đúng nhóm HKD và nhớ lựa chọn xem tất cả", async ({ page }) => {
   await ensureLoggedIn(page);
-  await openTab(page, "Kế toán HKD", "/accounting");
-  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await openTab(page, "Sổ kế toán", "/books");
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
   await expect(page.getByTestId("tax-book")).toBeVisible();
 
   // Dropdown chỉ 2 mẫu đúng nhóm, các nút sổ nhanh cũng chỉ hiện 2 mẫu đó.
@@ -2298,19 +2321,22 @@ test("Danh sách mẫu sổ chỉ hiện sổ đúng nhóm HKD và nhớ lựa c
 
 // Các nút sổ không còn đẩy sang màn khác, nhưng Sổ nhật ký vẫn phải giữ nút quay
 // về màn Kế toán — không có nó người dùng vào bằng thanh công cụ là mắc kẹt.
-test("Sổ nhật ký có nút quay lại màn Kế toán HKD", async ({ page }) => {
+test("Sổ nhật ký có nút quay lại màn Sổ kế toán", async ({ page }) => {
   await ensureLoggedIn(page);
   await openTab(page, "Sổ nhật ký", "/ledger");
   await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
-  await page.getByTestId("back-to-accounting").click();
-  await expect(page).toHaveURL(/\/accounting$/);
-  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  // Mở thẳng bằng thanh menu (không kèm query back) → về màn dự phòng /books:
+  // chính tab này là nơi có nút "Mở Sổ nhật ký".
+  await page.getByTestId("back-to-previous").click();
+  await expect(page).toHaveURL(/\/books$/);
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
 });
 
-// 2 nút "Mở Sổ nhật ký" / "Mở Thu / Chi" phải mang theo kỳ người dùng đang xem.
-// Lần mở thứ hai không chạy lại `setup()` (KeepAlive) — nếu không nghe query
-// thì vẫn ra kỳ của lần mở đầu, nên test mở lại với kỳ khác để bắt lỗi đó.
-test("Kế toán HKD: mở Sổ nhật ký / Thu-Chi kèm kỳ đang xem", async ({ page }) => {
+// 2 nút "Mở Sổ nhật ký" / "Mở Thu / Chi" (ở tab Sổ kế toán) phải mang theo kỳ
+// sổ người dùng đang xem — kỳ này do màn Kế toán "Chuyển nhanh" gióng qua
+// (state dùng chung). Màn đích đọc query lúc mở (KeepAlive không chạy lại
+// `setup()`) nên test mở lại với kỳ khác để bắt lỗi kẹt kỳ cũ.
+test("Sổ kế toán: mở Sổ nhật ký / Thu-Chi kèm kỳ sổ đang xem", async ({ page }) => {
   await ensureLoggedIn(page);
   const y = new Date().getFullYear();
   const ledgerDate = (label: string) =>
@@ -2320,9 +2346,12 @@ test("Kế toán HKD: mở Sổ nhật ký / Thu-Chi kèm kỳ đang xem", async
   await openTab(page, "Kế toán HKD", "/accounting");
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
 
-  // Kỳ 1: chọn Quý 3 rồi mở Sổ nhật ký → đúng quý 3, kèm nút bỏ lọc cả năm.
+  // Kỳ 1: chuyển nhanh Quý 3 (tờ khai đổi, kỳ sổ gióng theo) → sang tab Sổ,
+  // mở Sổ nhật ký → đúng quý 3, kèm nút bỏ lọc cả năm.
   await page.getByTestId("quick-quarter-3").click();
   await expect(ledgerDate("Từ ngày")).toHaveValue(`01/07/${y}`);
+  await openTab(page, "Sổ kế toán", "/books");
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
   await page.getByTestId("open-ledger").click();
   await expect(page).toHaveURL(/\/ledger\?/);
   await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
@@ -2330,19 +2359,21 @@ test("Kế toán HKD: mở Sổ nhật ký / Thu-Chi kèm kỳ đang xem", async
   await expect(ledgerDate("Đến ngày")).toHaveValue(`30/09/${y}`);
   await expect(page.getByText("Xem cả năm")).toBeVisible();
 
-  // Kỳ 2: quay về, đổi sang Quý 1 rồi mở lại → là quý 1, không kẹt quý 3.
-  await page.getByTestId("back-to-accounting").click();
-  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  // Kỳ 2: quay về tab Sổ, đổi sang Quý 1 ở màn Kế toán rồi mở lại → quý 1.
+  await page.getByTestId("back-to-previous").click();
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
+  await openTab(page, "Kế toán HKD", "/accounting");
   await page.getByTestId("quick-quarter-1").click();
   await expect(ledgerDate("Từ ngày")).toHaveValue(`01/01/${y}`);
+  await openTab(page, "Sổ kế toán", "/books");
   await page.getByTestId("open-ledger").click();
   await expect(page.locator("header h2")).toHaveText("Sổ nhật ký chung");
   await expect(ledgerDate("Từ ngày")).toHaveValue(`01/01/${y}`);
   await expect(ledgerDate("Đến ngày")).toHaveValue(`31/03/${y}`);
 
-  // Màn Thu / Chi nhận nguyên kỳ đang xem.
-  await page.getByTestId("back-to-accounting").click();
-  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  // Màn Thu / Chi nhận nguyên kỳ sổ đang xem.
+  await page.getByTestId("back-to-previous").click();
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
   await page.getByTestId("open-cash").click();
   await expect(page.locator("header h2")).toHaveText("Phiếu thu / chi");
   await expect(cashDate("Từ ngày")).toHaveValue(`01/01/${y}`);
@@ -2610,10 +2641,12 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
     "không có chứng từ thanh toán không dùng tiền mặt",
   );
 
-  // ── 3. Sổ kế toán TT 152/2025: S2a ghi DOANH THU THEO TỪNG CHỨNG TỪ
-  //      (cột A số hiệu, B ngày tháng, C diễn giải, D số tiền) như mẫu sổ.
-  //      Hồ sơ chưa chốt nhóm → Nhóm 1 nên app mặc định mở S1a; muốn soi S2a,
-  //      S2c phải bật "Xem tất cả 7 mẫu sổ" trước.
+  // ── 3. Sổ kế toán TT 152/2025 (tab "Sổ kế toán"): S2a ghi DOANH THU THEO
+  //      TỪNG CHỨNG TỪ (cột A số hiệu, B ngày tháng, C diễn giải, D số tiền)
+  //      như mẫu sổ. Hồ sơ chưa chốt nhóm → Nhóm 1 nên tab tự mở S1a; muốn soi
+  //      S2a, S2c phải bật "Xem tất cả 7 mẫu sổ" trước.
+  await openTab(page, "Sổ kế toán", "/books");
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
   await page.locator("#show-all-books").click();
   await page.getByTestId("open-book-s2a").click();
   await expect(page.getByRole("columnheader", { name: /A · Số hiệu/ }).first()).toBeVisible();
@@ -2632,11 +2665,14 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
     "Doanh thu bán hàng hóa, dịch vụ",
   );
 
-  // ── 4. Bảng tạm nộp theo kỳ + quyết toán cả năm
-  expect(bookText, "phải có bảng tạm nộp theo kỳ").toContain("Tổng TNCN tạm nộp");
-  expect(bookText, "phải có số phải nộp khi quyết toán").toContain("Số phải nộp khi quyết toán");
-  expect(bookText, "phải nhắc hạn quyết toán 31/03 năm sau").toContain("31/03/2027");
-  expect(bookText, "bảng tạm nộp phải có hạn nộp từng kỳ").toContain("31/10/2026");
+  // ── 4. Quay lại màn Kế toán: bảng tạm nộp theo kỳ + quyết toán cả năm
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  const settleText = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(settleText, "phải có bảng tạm nộp theo kỳ").toContain("Tổng TNCN tạm nộp");
+  expect(settleText, "phải có số phải nộp khi quyết toán").toContain("Số phải nộp khi quyết toán");
+  expect(settleText, "phải nhắc hạn quyết toán 31/03 năm sau").toContain("31/03/2027");
+  expect(settleText, "bảng tạm nộp phải có hạn nộp từng kỳ").toContain("31/10/2026");
 
   // ── 5. Trả lại cấu hình gốc (theo doanh thu) để không ảnh hưởng test sau
   await page.getByRole("button", { name: "Cấu hình thuế" }).click();

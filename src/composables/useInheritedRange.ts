@@ -4,12 +4,13 @@ import { parseIsoDate } from "@/utils/format";
  * Khoảng ngày + nút quay lại khi màn được mở từ màn khác.
  *
  * Sổ nhật ký chung và Sổ chi tiết tiền nhận khoảng ngày và đường quay lại qua
- * query `?from=&to=&back=/accounting&backLabel=…` nếu có màn khác đẩy sang —
- * nhờ vậy màn đích mở ra đúng kỳ đang xem thay vì lùi về cả năm. Không có query
- * thì dùng mặc định của màn và nút quay lại đưa về `fallback`.
+ * query `?from=&to=&back=/books&backLabel=…` nếu có màn khác đẩy sang — nhờ vậy
+ * màn đích mở ra đúng kỳ đang xem thay vì lùi về cả năm. Không có query thì dùng
+ * mặc định của màn và nút quay lại đưa về `fallback`.
  *
- * Màn Kế toán HKD mở 2 màn này bằng 2 nút ở thẻ "Sổ sách theo mẫu TT 152"
- * (`openJournal`), kèm đúng khoảng ngày người dùng đang xem.
+ * Tab Sổ kế toán mở 2 màn này bằng 2 nút ở thẻ "Mở sổ nhanh" (`openJournal`),
+ * kèm đúng kỳ sổ người dùng đang xem — nên màn dự phòng cũng là `/books`: mở
+ * thẳng bằng thanh menu thì quay lại về đúng chỗ có lối vào của nó.
  *
  * Mọi giá trị trả về là **computed đọc `route.query` mỗi lần truy cập**, không
  * phải số chụp một lần ở `setup()`: các màn này nằm trong `<KeepAlive>` nên mở
@@ -18,7 +19,7 @@ import { parseIsoDate } from "@/utils/format";
  *
  * Query rác (thiếu, sai định dạng, ngược thứ tự) chỉ bị bỏ qua, không làm hỏng màn.
  */
-export function useInheritedRange(fallback = "/accounting") {
+export function useInheritedRange(fallback = "/books") {
   const route = useRoute();
   const router = useRouter();
 
