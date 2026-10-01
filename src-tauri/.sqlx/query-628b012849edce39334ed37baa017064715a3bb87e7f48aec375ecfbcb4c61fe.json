@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"n!\" FROM journal_entry\n                WHERE voucher_no = 'PX-TRON' AND entry_type = 'PX'",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "628b012849edce39334ed37baa017064715a3bb87e7f48aec375ecfbcb4c61fe"
+}

@@ -3386,6 +3386,8 @@ pub(crate) async fn get_inventory_summary(state: State<'_, AppState>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::stock::save_outbound_core;
+    use crate::models::{OutboundInvoiceInput, OutboundItemInput};
     use crate::test_support::*;
 
     fn agg(up: f64, down: f64) -> TaxAgg {
@@ -4260,6 +4262,112 @@ mod tests {
         assert_eq!(line_money(&book, "Thuế GTGT"), 20_000.0);
         // Tỷ lệ TNCN không đụng tới thì số thuế TNCN giữ nguyên.
         assert_eq!(line_money(&book, "Thuế TNCN"), 5_000.0);
+    }
+
+    /// Một hóa đơn (một phiếu PX) bán trộn mặt hàng 1,5% và mặt hàng 7%:
+    /// sổ phải tách đúng hai khối ngành, mỗi khối chỉ nhận dòng tiền của mặt
+    /// hàng thuộc ngành đó và thuế tính theo tỷ lệ riêng của từng ngành —
+    /// gộp hai dòng vào một khối hay áp chung một tỷ lệ là sai.
+    #[tokio::test]
+    async fn s2a_hoa_don_tron_hai_ty_le_khac_mo_dung_hai_khoi_nganh() {
+        let pool = test_pool().await;
+        ho_nhom_2_theo_doanh_thu(&pool).await;
+        // Hai tỷ lệ này không có trong danh mục seed — hộ thêm được ở màn
+        // Danh mục; test chèn thẳng để xác nhận sổ lấy tỷ lệ từ bảng ngành.
+        sqlx::query(
+            "INSERT INTO industry_group (code, name, vat_rate, pit_rate) VALUES
+                ('TYLE-15', 'Mặt hàng thuế suất 1,5%', 0.015, 0.01),
+                ('TYLE-7',  'Mặt hàng thuế suất 7%',   0.07,  0.02)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let h1 = seed_product(&pool, "H1", "Mặt hàng 1,5%", 0.015).await;
+        let h2 = seed_product(&pool, "H2", "Mặt hàng 7%", 0.07).await;
+        let w: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM warehouse WHERE code = 'KHO-CHINH'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        add_stock_lot(&pool, h1, w, 5.0, 100_000.0, "2026-01-01").await;
+        add_stock_lot(&pool, h2, w, 5.0, 100_000.0, "2026-01-01").await;
+
+        // Một phiếu xuất duy nhất gộp hai mặt hàng thuộc hai nhóm ngành khác
+        // tỷ lệ — đúng đường người dùng tạo hóa đơn trộn.
+        let items = [
+            OutboundItemInput {
+                product_code: "H1".into(),
+                quantity: 1.0,
+                unit_price: 2_000_000.0,
+                discount: 0.0,
+                industry_code: "TYLE-15".into(),
+                warehouse_code: "".into(),
+            },
+            OutboundItemInput {
+                product_code: "H2".into(),
+                quantity: 1.0,
+                unit_price: 1_000_000.0,
+                discount: 0.0,
+                industry_code: "TYLE-7".into(),
+                warehouse_code: "".into(),
+            },
+        ];
+        let r = save_outbound_core(
+            &pool,
+            "2026-07-15",
+            "PX-TRON",
+            "Bán trộn hai tỷ lệ",
+            "",
+            "HKD",
+            &items,
+            "",
+            false,
+            "sale",
+            "",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .expect("xuất kho");
+        // Hai mặt hàng → hai dòng doanh thu, mỗi dòng một nhóm ngành.
+        assert_eq!(r.entries, 2);
+        assert_eq!(r.revenue, 3_000_000.0);
+        let px_lines: i64 = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) AS "n!" FROM journal_entry
+                WHERE voucher_no = 'PX-TRON' AND entry_type = 'PX'"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(px_lines, 2);
+
+        let book = build_book(&pool, "S2a").await;
+        assert_eq!(
+            row_lines(&book),
+            vec![
+                (
+                    "section",
+                    "",
+                    "1. Ngành nghề Mặt hàng thuế suất 1,5% (TYLE-15)",
+                    0.0
+                ),
+                ("detail", "PX-TRON", "Bán trộn hai tỷ lệ", 2_000_000.0),
+                ("subtotal", "", "Tổng cộng (1)", 2_000_000.0),
+                ("subtotal", "", "Thuế GTGT", 30_000.0), // 2.000.000 × 1,5%
+                ("subtotal", "", "Thuế TNCN", 20_000.0), // 2.000.000 × 1%
+                (
+                    "section",
+                    "",
+                    "2. Ngành nghề Mặt hàng thuế suất 7% (TYLE-7)",
+                    0.0
+                ),
+                ("detail", "PX-TRON", "Bán trộn hai tỷ lệ", 1_000_000.0),
+                ("subtotal", "", "Tổng cộng (2)", 1_000_000.0),
+                ("subtotal", "", "Thuế GTGT", 70_000.0), // 1.000.000 × 7%
+                ("subtotal", "", "Thuế TNCN", 20_000.0), // 1.000.000 × 2%
+                ("total", "", "Tổng số thuế GTGT phải nộp", 100_000.0),
+                ("total", "", "Tổng số thuế TNCN phải nộp", 40_000.0),
+            ],
+        );
     }
 
     #[test]
