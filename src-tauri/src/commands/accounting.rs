@@ -1346,6 +1346,10 @@ pub(crate) fn build_tax_declaration(
     // doanh thu vượt ngưỡng của các kỳ sau.
     let exempt = !taxable_period;
     rows.into_iter()
+        // Nhóm ngành không có doanh thu trong kỳ thì không lên tờ khai — mẫu
+        // chỉ liệt kê ngành có phát sinh (phiếu ghi giá 0 không tạo ra dòng
+        // báo cáo). Ngành có tăng/giảm bằng nhau vẫn giữ dù doanh thu ròng 0.
+        .filter(|r| r.revenue_up != 0.0 || r.revenue_down != 0.0)
         .map(|r| {
             // Giữ mã nhóm ngành lại: dùng cho tra cơ sở tính thuế và mức trừ.
             let code = r.industry_code.clone();
@@ -2751,6 +2755,10 @@ async fn build_tax_book(
 }
 
 /// Dòng doanh thu (PX) trong khoảng ngày — nguồn chung cho S1a/S2a/S2b.
+///
+/// Phiếu ghi giá 0 không phát sinh doanh thu nên không đưa vào sổ: để nguyên
+/// thì S2a mở ra một khối ngành trống toàn dòng 0 đồng (khối "Cho thuê tài
+/// sản…" từng hiện chỉ vì một phiếu giá 0, trong khi không bán gì cả).
 struct SalesRow {
     voucher_no: String,
     posting_date: String,
@@ -2768,6 +2776,7 @@ async fn sales_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec<Sales
              FROM journal_entry je
             WHERE je.entry_type = 'PX'
               AND je.posting_date >= ? AND je.posting_date <= ?
+              AND je.amount <> 0
             ORDER BY je.posting_date, je.id"#,
         from,
         to
@@ -3441,6 +3450,48 @@ mod tests {
         assert_eq!(r.vat_tax, 900_000.0); // 90tr x 1%
         assert_eq!(r.vat_payable, 900_000.0);
         assert_eq!(r.pit_tax, 450_000.0); // 90tr x 0,5%
+    }
+
+    /// Ngành nghề không có doanh thu trong kỳ thì không được liệt kê trên tờ
+    /// khai — mẫu chỉ ghi ngành có phát sinh (phiếu ghi giá 0 không tạo ra
+    /// dòng báo cáo), nhưng ngành có tăng/giảm bằng nhau thì vẫn phải ghi.
+    #[test]
+    fn to_khai_khong_liet_ke_nhom_nganh_khong_phat_sinh() {
+        fn nganh(revenue_up: f64, revenue_down: f64) -> TaxAgg {
+            TaxAgg {
+                industry_code: "DV-TS".into(),
+                industry_name: "Cho thuê tài sản, đại lý bảo hiểm, xổ số, bán hàng đa cấp".into(),
+                vat_rate: 0.05,
+                pit_rate: 0.05,
+                revenue_up,
+                revenue_down,
+            }
+        }
+
+        // Cả kỳ không có gì → mẫu không còn dòng ngành trống.
+        let out = build_tax_declaration(
+            vec![nganh(0.0, 0.0), agg(100_000_000.0, 0.0)],
+            "revenue",
+            2,
+            &full("PPHH", 100_000_000.0),
+            true,
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(out.len(), 1, "chỉ ngành có doanh thu mới lên tờ khai");
+        assert_eq!(out[0].industry_code, "PPHH");
+
+        // Bán 500k rồi trả lại 500k → ròng 0 nhưng đã phát sinh → vẫn ghi.
+        let out = build_tax_declaration(
+            vec![nganh(500_000.0, 500_000.0)],
+            "revenue",
+            2,
+            &full("DV-TS", 0.0),
+            true,
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].revenue_up, 500_000.0);
+        assert_eq!(out[0].revenue_down, 500_000.0);
     }
 
     #[test]
@@ -4367,6 +4418,71 @@ mod tests {
                 ("total", "", "Tổng số thuế GTGT phải nộp", 100_000.0),
                 ("total", "", "Tổng số thuế TNCN phải nộp", 40_000.0),
             ],
+        );
+    }
+
+    /// Phiếu ghi giá 0 không phát sinh doanh thu: không được mở khối ngành
+    /// trống trong sổ. S2a từng hiện khối "Cho thuê tài sản…" chỉ toàn dòng 0
+    /// đồng dù cả kỳ không bán gì thuộc ngành đó.
+    #[tokio::test]
+    async fn s2a_bo_qua_phieu_tien_0_khong_mo_khoi_nganh_trong() {
+        let pool = test_pool().await;
+        ho_nhom_2_theo_doanh_thu(&pool).await;
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-0",
+            "P1",
+            "DV-TS",
+            1.0,
+            0.0,
+            0.0,
+            0.05,
+            0.05,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-07-06",
+            "PX-1",
+            "P1",
+            "PPHH",
+            1.0,
+            1_000_000.0,
+            1_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+
+        // S2a chỉ mở khối PPHH — khối DV-TS (phiếu giá 0) biến mất.
+        let book = build_book(&pool, "S2a").await;
+        assert_eq!(
+            row_lines(&book),
+            vec![
+                (
+                    "section",
+                    "",
+                    "1. Ngành nghề Phân phối, cung cấp hàng hóa (PPHH)",
+                    0.0
+                ),
+                ("detail", "PX-1", "test", 1_000_000.0),
+                ("subtotal", "", "Tổng cộng (1)", 1_000_000.0),
+                ("subtotal", "", "Thuế GTGT", 10_000.0),
+                ("subtotal", "", "Thuế TNCN", 5_000.0),
+                ("total", "", "Tổng số thuế GTGT phải nộp", 10_000.0),
+                ("total", "", "Tổng số thuế TNCN phải nộp", 5_000.0),
+            ],
+        );
+
+        // S1a (sổ một cột số tiền) cũng không ghi dòng 0 đồng: còn 1 dòng bán
+        // + 1 dòng tổng cộng.
+        let s1a = build_book(&pool, "S1a").await;
+        assert_eq!(
+            s1a["rows"].as_array().unwrap().len(),
+            2,
+            "phiếu 0 đồng không lên sổ S1a"
         );
     }
 

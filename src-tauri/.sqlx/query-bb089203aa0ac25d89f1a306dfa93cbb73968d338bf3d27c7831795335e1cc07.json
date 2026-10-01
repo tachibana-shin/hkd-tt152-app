@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT je.voucher_no AS \"voucher_no!\", je.posting_date AS \"posting_date!\",\n                  je.description AS \"description!\", je.industry_code AS \"industry_code!\",\n                  je.adjust_code AS \"adjust_code!\", je.amount\n             FROM journal_entry je\n            WHERE je.entry_type = 'PX'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n            ORDER BY je.posting_date, je.id",
+  "query": "SELECT je.voucher_no AS \"voucher_no!\", je.posting_date AS \"posting_date!\",\n                  je.description AS \"description!\", je.industry_code AS \"industry_code!\",\n                  je.adjust_code AS \"adjust_code!\", je.amount\n             FROM journal_entry je\n            WHERE je.entry_type = 'PX'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n              AND je.amount <> 0\n            ORDER BY je.posting_date, je.id",
   "describe": {
     "columns": [
       {
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "a35ab247611f5edd7a29148511b45e60b91086dfd31e8a9e48a23af475fc60e2"
+  "hash": "bb089203aa0ac25d89f1a306dfa93cbb73968d338bf3d27c7831795335e1cc07"
 }
