@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.15.0...v0.15.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **accounting:** post cost-of-sale 632/152 and align books with TT 152 forms ([7f3264d](https://github.com/tachibana-shin/hkd-tt152-app/commit/7f3264d1a2a9b94da6d9b8cf9a30b9ad260ca5c5))
+
 # [0.15.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.14.0...v0.15.0) (2026-09-30)
 
 
