@@ -522,9 +522,6 @@ useKeepAliveRefresh(reload);
           <span v-if="config" class="text-sm text-gray-500 ml-auto">
             <i class="pi pi-calendar mr-1" />Kỳ khai thuế: <b>{{ taxPeriodLabel }}</b> • TNCN:
             <b>{{ taxMethodLabel }}</b>
-            <span class="mx-1 text-gray-300">|</span>
-            Đang xem:
-            <b class="text-primary-600">{{ reportPeriodLabel }}</b>
           </span>
         </div>
       </template>

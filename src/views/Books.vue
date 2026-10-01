@@ -157,9 +157,6 @@ useKeepAliveRefresh(refreshBooks);
       <template #icon><i-mdi-book-open-variant class="text-cyan-600" /></template>
       <template #title>
         <span>Sổ kế toán (mẫu TT 152/2025/TT-BTC)</span>
-        <span v-if="bookData" class="text-xs font-normal text-gray-400">
-          {{ bookData.period_label }}
-        </span>
       </template>
       <template #actions>
         <Button

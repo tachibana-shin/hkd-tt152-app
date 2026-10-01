@@ -2096,11 +2096,11 @@ test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/t
     const to = datePicker("Đến ngày");
     await expect(from).not.toHaveValue("");
     await expect(to).not.toHaveValue("");
-    await expect(page.getByText("Đang xem:")).toBeVisible();
+    // Chờ cấu hình tải xong (dòng "Kỳ khai thuế" chỉ hiện khi đã có config).
+    await expect(page.getByText("Kỳ khai thuế:")).toBeVisible();
     return {
       from: await from.inputValue(),
       to: await to.inputValue(),
-      label: (await page.getByText("Đang xem:").innerText()).trim(),
     };
   }
 
@@ -2122,25 +2122,24 @@ test("Kế toán: khoảng ngày mặc định theo kỳ khai của hộ (quý/t
   const q = await currentRange();
   expect(q.from, "ngày đầu phải là ngày 01 của quý hiện tại").toBe(dmy(quarterStart));
   expect(q.to, "ngày cuối phải là ngày cuối của quý hiện tại").toBe(dmy(quarterEnd));
-  expect(q.label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
 
   // Đổi sang khai theo tháng → khoảng ngày báo cáo theo tháng hiện tại.
   await setTaxPeriod(/^Theo tháng/);
   const mo = await currentRange();
   expect(mo.from).toBe(dmy(monthStart));
   expect(mo.to).toBe(dmy(monthEnd));
-  expect(mo.label).toContain(`Tháng ${m + 1}/${y}`);
 
   // Đổi sang khai theo năm → cả năm.
   await setTaxPeriod(/^Theo năm/);
   const yr = await currentRange();
   expect(yr.from).toBe(`01/01/${y}`);
   expect(yr.to).toBe(`31/12/${y}`);
-  expect(yr.label).toContain(`Năm ${y}`);
 
   // Trả lại mặc định để không ảnh hưởng test sau.
   await setTaxPeriod(/^Theo quý/);
-  expect((await currentRange()).label).toContain(`Quý ${Math.floor(m / 3) + 1}/${y}`);
+  const back = await currentRange();
+  expect(back.from).toBe(dmy(quarterStart));
+  expect(back.to).toBe(dmy(quarterEnd));
 });
 
 // Nút "chuyển nhanh" phải theo đúng "Kỳ khai thuế của hộ": khai theo quý thì 4 nút,
@@ -2386,7 +2385,7 @@ test("Cấu hình HKD: nhóm hộ tự điền theo doanh thu, lưu lại và t�
   await ensureLoggedIn(page);
   await openTab(page, "Kế toán HKD", "/accounting");
   await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
-  await expect(page.getByText("Đang xem:")).toBeVisible();
+  await expect(page.getByText("Kỳ khai thuế:")).toBeVisible();
 
   // Chưa chốt nhóm: app tự xếp nhóm 1 vì E2E chưa có doanh thu.
   // Nhãn nhóm xuất hiện ở cả thẻ tổng hợp và thẻ Tag → lấy phần tử đầu.
