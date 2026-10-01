@@ -53,13 +53,16 @@ const GRID = { style: BorderStyle.SINGLE, size: 6, color: "000000" };
 const NO_LINE = { style: BorderStyle.NONE, size: 0, color: "auto" };
 
 /**
- * Cỡ chữ theo nửa điểm của Word, đối chiếu cỡ `rem` trên giao diện theo tỉ lệ
- * 1rem = 16px = 12pt.
+ * Cỡ chữ theo nửa điểm của Word (20 = 10pt).
+ *
+ * Sổ in ra A4 thật để nộp nên bám cỡ biểu mẫu: chữ trong bảng 10pt, tiêu đề
+ * cột/hàng khối 9pt, dòng chú thích 8pt, tên sổ 12pt — đọc rõ khi in mà bảng
+ * nhiều cột (S2a nhiều cột số) vẫn không tràn ô.
  */
-const SIZE_BODY = 18; // 0,75rem = 9pt — chữ trong bảng
-const SIZE_BAND = 16; // 0,7rem ≈ 8pt — tiêu đề cột, hàng khối ngành
-const SIZE_NOTE = 14; // 0,65rem ≈ 7,8pt — dòng "(Ký, ghi rõ họ tên…)"
-const SIZE_TITLE = 20; // 0,85rem ≈ 10pt — tên sổ
+const SIZE_BODY = 20; // 10pt — chữ trong bảng
+const SIZE_BAND = 18; // 9pt — tiêu đề cột, hàng khối ngành
+const SIZE_NOTE = 16; // 8pt — dòng "(Ký, ghi rõ họ tên…)"
+const SIZE_TITLE = 24; // 12pt — tên sổ
 
 /** Nền hàng cột và hàng tổng hợp — theo `@media print` của bảng sổ. */
 const FILL_HEAD = "EEEEEE";
