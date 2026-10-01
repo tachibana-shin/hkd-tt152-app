@@ -165,10 +165,15 @@ const declYear = computed(
  * Bộ chọn kỳ — chỉ dùng cho SỔ KẾ TOÁN theo mẫu TT 152/2025.
  *
  * Tờ khai thuế đã gộp còn một bảng và chạy theo khoảng ngày ở thanh công cụ, nên
- * không còn bộ chọn kỳ ở tờ khai. Sổ kế toán vẫn phải theo kỳ khai (quý/tháng/năm)
- * vì đó là kỳ mà sổ được lập và lưu.
+ * không còn bộ chọn kỳ ở tờ khai.
+ *
+ * Sổ mặc định là cuốn GHI CẢ NĂM: Luật Kế toán (Điều 25.2, 26.1, 26.4, 26.7)
+ * bắt sổ mở vào đầu kỳ kế toán năm, ghi liên tục đến khi khóa sổ và in thành
+ * quyển riêng cho từng năm để lưu trữ. TT 152/2025 không quy định kỳ cho sổ nhưng
+ * mẫu S2a có sẵn dòng "Kỳ kê khai" → vẫn giữ chọn quý/tháng để TRÍCH sổ theo
+ * kỳ kê khai, đối chiếu với tờ khai 01/CNKD của kỳ đó.
  */
-const bookPeriod = ref<"year" | "quarter" | "month">("quarter");
+const bookPeriod = ref<"year" | "quarter" | "month">("year");
 const bookPeriodNo = ref(1);
 const bookPeriodTypeOptions: { label: string; value: "year" | "quarter" | "month" }[] = [
   { label: "Theo quý", value: "quarter" },
@@ -601,14 +606,10 @@ void (async () => {
   if (settings) {
     taxPeriod.value = settings.tax_period;
     taxMethod.value = settings.tax_method;
-    // Mặc định xem theo đúng kỳ khai của hộ (per_occurrence xem theo năm).
-    if (taxPeriod.value === "month") bookPeriod.value = "month";
-    else if (taxPeriod.value === "year" || taxPeriod.value === "per_occurrence")
-      bookPeriod.value = "year";
-    else bookPeriod.value = "quarter";
-    const now = new Date();
-    if (bookPeriod.value === "quarter") bookPeriodNo.value = Math.floor(now.getMonth() / 3) + 1;
-    else if (bookPeriod.value === "month") bookPeriodNo.value = now.getMonth() + 1;
+    // Mở màn là sổ cả năm (kỳ kế toán năm) — không bám kỳ khai; số kỳ để sẵn
+    // theo quý hiện tại để người dùng đổi sang "Theo quý" là ra ngay kỳ đang có.
+    bookPeriod.value = "year";
+    bookPeriodNo.value = Math.floor(new Date().getMonth() / 3) + 1;
   }
   applyReportPeriod();
   await reload();
