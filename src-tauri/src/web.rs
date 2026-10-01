@@ -682,6 +682,8 @@ pub async fn api_invoke(
             from_date: String,
             to_date: String
         ),
+        "cogs_backfill_pending" => mx!(commands::accounting::cogs_backfill_pending, body),
+        "backfill_cogs_entries" => mx!(commands::accounting::backfill_cogs_entries, body),
 
         // ── Nhật ký hệ thống / sao lưu ──
         "log_audit" => mx!(

@@ -778,6 +778,35 @@ pub(crate) async fn save_outbound_core(
             0.0,
         )
         .await?;
+        // Giá vốn của đúng số hàng vừa xuất (theo FIFO). Ghi cặp Nợ 632 / Có 152
+        // để bảng cân đối có cột giá vốn và lợi nhuận trước thuế không bị tính
+        // thừa — hàng bán ra trước đây không hiện ở cột chi phí nào. Phiếu điều
+        // chỉnh giảm (khách trả lại) đã ghi đảo cặp này ở nhánh trên.
+        if cogs > 0.0 && item.quantity > 0.0 {
+            insert_journal_entry(
+                &mut tx,
+                posting_date,
+                voucher_no,
+                "CP",
+                description,
+                &item.product_code,
+                "",
+                customer_code,
+                item.quantity,
+                cogs / item.quantity,
+                round2(cogs),
+                "632",
+                "152",
+                &industry,
+                0.0,
+                0.0,
+                unit_code,
+                "",
+                note,
+                0.0,
+            )
+            .await?;
+        }
         invoice_lines.push((
             product.id,
             item.quantity,
@@ -1575,6 +1604,10 @@ pub(crate) async fn get_voucher(
          LEFT JOIN supplier s ON s.code = je.supplier_code
          LEFT JOIN customer c ON c.code = je.customer_code
          WHERE je.voucher_no = ?
+         -- Dòng giá vốn Nợ 632 / Có 152 sinh kèm khi xuất bán là bút toán KẾ TOÁN,
+         -- không phải dòng hàng trên phiếu: cộng vào thì Cộng thành tiền của phiếu
+         -- xuất bị thổi lên bằng giá vốn. Nó vẫn hiện ở sổ cái và bảng cân đối.
+         AND je.entry_type != 'CP'
          ORDER BY je.id ASC",
     )
     .bind(&voucher_no)
@@ -1929,6 +1962,58 @@ mod tests {
         assert_eq!(je.industry_code, "DVXD-KNL");
         assert_eq!(je.vat_rate, 0.05);
         assert_eq!(je.pit_rate, 0.02);
+    }
+
+    // ─── Xuất bán phải ghi giá vốn: cặp Nợ 632 / Có 152 ───
+
+    #[tokio::test]
+    async fn xuat_ban_ghi_gia_von_632_co_152() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 20.0, 1000.0, "2026-01-01").await;
+
+        // Bán 5 x 2.000, giá vốn FIFO 5 x 1.000 = 5.000
+        let r = save_outbound_core(
+            &pool,
+            "2026-05-20",
+            "PXK-GV",
+            "Bán hàng ghi giá vốn",
+            "KH1",
+            "HKD",
+            &[out_wh("P1", 5.0, 2000.0, "W1")],
+            "",
+            false,
+            "sale",
+            "",
+            &OutboundInvoiceInput::default(),
+        )
+        .await
+        .expect("xuất kho bán hàng");
+        assert_eq!(r.revenue, 10_000.0);
+        assert_eq!(r.cogs, 5_000.0);
+
+        // Hai bút toán: doanh thu (131/511) và giá vốn (632/152).
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'PXK-GV'"
+            )
+            .await,
+            2
+        );
+        let je = sqlx::query!(
+            "SELECT entry_type, debit_account, credit_account, amount, quantity, unit_price
+             FROM journal_entry WHERE voucher_no = 'PXK-GV' AND debit_account = '632'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(je.entry_type, "CP");
+        assert_eq!(je.credit_account, "152");
+        assert_eq!(je.amount, 5_000.0);
+        assert_eq!(je.quantity, 5.0);
+        assert_eq!(je.unit_price, 1000.0);
     }
 
     // ─── Thu tiền ngay: tự tạo phiếu thu (PT) liên kết thanh toán của khách hàng ───

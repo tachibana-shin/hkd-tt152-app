@@ -482,6 +482,20 @@ export interface RevenueExpenseRow {
   revenue_down: number;
   expense_up: number;
   expense_down: number;
+  /** Giá vốn hàng đã xuất kho trong kỳ, tính theo FIFO (đơn vị: đồng). */
+  cogs: number;
+}
+
+/**
+ * Số bút toán giá vốn (Nợ 632 / Có 152) còn thiếu cho phiếu xuất lịch sử —
+ * phiếu xuất trước khi app bắt đầu ghi giá vốn vẫn chưa có dòng 632/152 nên
+ * bảng cân đối thiếu cột chi phí.
+ */
+export interface CogsBackfillPending {
+  /** Số lượt xuất chưa có bút toán giá vốn. */
+  count: number;
+  /** Tổng giá vốn FIFO của các lượt đó (đơn vị: đồng). */
+  amount: number;
 }
 
 /** Bảng cân đối số phát sinh — dư đầu kỳ + phát sinh + dư cuối kỳ theo tài khoản. */
@@ -730,8 +744,13 @@ export interface BookHeader {
   owner: string;
   address: string;
   tax_code: string;
+  /** Giá trị dòng dưới tiêu đề; không có dòng này thì để rỗng. */
   location: string;
+  /** Nhãn của dòng đó; rỗng = mẫu không có dòng này (S2e). */
+  location_label: string;
   period: string;
+  /** Khối "Mẫu số …-HKD (Kèm theo Thông tư số 152/2025/TT-BTC …)" góc phải. */
+  form_ref: string;
   unit: string;
   sign_date: string;
   signer: string;

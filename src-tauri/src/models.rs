@@ -184,14 +184,6 @@ pub(crate) struct CustomerRow {
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
-pub(crate) struct RevenueExpenseRow {
-    pub(crate) revenue_up: f64,
-    pub(crate) revenue_down: f64,
-    pub(crate) expense_up: f64,
-    pub(crate) expense_down: f64,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
 pub(crate) struct InventoryRow {
     pub(crate) product_code: String,
     pub(crate) product_name: String,

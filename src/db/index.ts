@@ -54,6 +54,7 @@ import type {
   Supplier,
   Customer,
   RevenueExpenseRow,
+  CogsBackfillPending,
   TrialBalanceRow,
   InventoryRow,
   StockLot,
@@ -601,6 +602,12 @@ export const api = {
 
   getRevenueExpense: async (fromDate: string, toDate: string) =>
     parse<RevenueExpenseRow>(await call<string>("get_revenue_expense", { fromDate, toDate })),
+  /** Số phiếu xuất lịch sử còn thiếu bút toán Nợ 632 / Có 152 (hết khi đã ghi bù). */
+  getCogsBackfillPending: async () =>
+    parse<CogsBackfillPending>(await call<string>("cogs_backfill_pending")),
+  /** Ghi bút toán giá vốn cho các phiếu xuất lịch sử — chạy lại không ghi trùng. */
+  backfillCogsEntries: async () =>
+    parse<CogsBackfillPending>(await call<string>("backfill_cogs_entries")),
   getTrialBalance: async (fromDate: string, toDate: string) =>
     parse<TrialBalanceRow[]>(await call<string>("get_trial_balance", { fromDate, toDate })),
 

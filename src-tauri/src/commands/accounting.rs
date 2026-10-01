@@ -507,6 +507,30 @@ pub(crate) fn profit_tncn_rate(group: i64) -> f64 {
     }
 }
 
+/// Số thuế TNCN quyết toán cả năm.
+///
+/// * Hộ nộp TNCN theo tỷ lệ % trên doanh thu (`by_revenue`) thì số quyết toán
+///   chính là **tổng số đã tạm nộp** trong năm (Điều 10 NĐ 68/2026) — không
+///   tính lại theo thu nhập tính thuế, nếu không hai ô trong card quyết toán
+///   mâu thuẫn với nhau (số quyết toán ≠ 0 nhưng chênh lệch ép bằng 0).
+/// * Phương pháp thu nhập: thu nhập tính thuế × thuế suất, nhưng chỉ khi hộ
+///   thuộc diện nộp thuế cả năm (Điều 8 khoản 1a); không thì bằng 0.
+pub(crate) fn settlement_tax(
+    by_revenue: bool,
+    provisional_total: f64,
+    year_taxable: bool,
+    income: f64,
+    rate: f64,
+) -> f64 {
+    if by_revenue {
+        round2(provisional_total)
+    } else if year_taxable {
+        round2(income.max(0.0) * rate)
+    } else {
+        0.0
+    }
+}
+
 /// Doanh thu thuần của 1 nhóm ngành trong kỳ (đã trừ khoản giảm doanh thu).
 pub(crate) fn net_revenue(r: &TaxAgg) -> f64 {
     r.revenue_up - r.revenue_down
@@ -668,7 +692,13 @@ pub(crate) type Issue = (String, f64);
 /// Nhập trước rồi xuất sau trong cùng một mã hàng: tồn lô dư = tổng nhập − tổng
 /// xuất đã tính. Xuất vượt tồn (dữ liệu lệch) → lấy hết tồn còn lại, phần
 /// thiếu tính bằng 0 thay vì làm hỏng cả tờ khai.
-pub(crate) fn fifo_cogs(receipts: &[Receipt], issues: &[Issue]) -> f64 {
+/// Giá vốn FIFO của **từng** lượt xuất trong `issues`, giữ nguyên thứ tự của
+/// `issues` (chưa làm tròn từng lượt — cộng lại rồi làm tròn một lần nên khớp
+/// chẵn với [`fifo_cogs`]).
+///
+/// Dùng khi ghi bổ sung bút toán Nợ 632 / Có 152 cho phiếu xuất lịch sử: mỗi
+/// lượt xuất cần một dòng giá vốn riêng, gộp lại thì không ghi được.
+pub(crate) fn fifo_cogs_per_issue(receipts: &[Receipt], issues: &[Issue]) -> Vec<f64> {
     // Tồn lô theo mã hàng: Vec<(số lượng còn, đơn giá)> theo thứ tự nhập.
     let mut lots: std::collections::HashMap<&str, Vec<(f64, f64)>> =
         std::collections::HashMap::new();
@@ -677,25 +707,34 @@ pub(crate) fn fifo_cogs(receipts: &[Receipt], issues: &[Issue]) -> f64 {
             lots.entry(code.as_str()).or_default().push((*qty, *price));
         }
     }
-    let mut cogs = 0.0;
+    let mut costs = Vec::with_capacity(issues.len());
     for (code, qty) in issues {
-        if *qty <= 0.0 {
-            continue;
-        }
-        let mut remaining = *qty;
-        if let Some(queue) = lots.get_mut(code.as_str()) {
-            for lot in queue.iter_mut() {
-                if remaining <= 1e-9 {
-                    break;
+        let mut cost = 0.0;
+        // Xuất âm / bằng 0 (điều chỉnh giảm) không có giá vốn — vẫn giữ một ô
+        // trong kết quả để chỉ số khớp với `issues`.
+        if *qty > 0.0 {
+            let mut remaining = *qty;
+            if let Some(queue) = lots.get_mut(code.as_str()) {
+                for lot in queue.iter_mut() {
+                    if remaining <= 1e-9 {
+                        break;
+                    }
+                    let take = remaining.min(lot.0);
+                    cost += take * lot.1;
+                    lot.0 -= take;
+                    remaining -= take;
                 }
-                let take = remaining.min(lot.0);
-                cogs += take * lot.1;
-                lot.0 -= take;
-                remaining -= take;
             }
         }
+        costs.push(cost);
     }
-    round2(cogs)
+    costs
+}
+
+/// Giá vốn FIFO của **tất cả** lượt xuất trong `issues` (tổng một lần rồi mới
+/// làm tròn) — dùng cho tờ khai và card quyết toán.
+pub(crate) fn fifo_cogs(receipts: &[Receipt], issues: &[Issue]) -> f64 {
+    round2(fifo_cogs_per_issue(receipts, issues).iter().sum())
 }
 
 // ─── CHI PHÍ ĐƯỢC TRỪ (NĐ 68/2026 Điều 6) ───
@@ -891,6 +930,9 @@ pub(crate) async fn load_cum_revenue_before(
 /// Nhập lấy **từ trước `from`** để kỳ tính thuế sau vẫn dùng được tồn đầu kỳ;
 /// xuất chỉ lấy trong khoảng `from..=to` vì đó là giá vốn của kỳ đang tính.
 /// Hàng dịch vụ không theo dõi tồn nên không có giá vốn (khớp lúc lập phiếu xuất).
+/// Phiếu điều chỉnh giảm (khách trả lại) loại khỏi lượt xuất: app đã nhập lại hàng
+/// (bút Nợ 152 / Có 632) chứ không tiêu kho, coi là lượt xuất thì lô FIFO hụt đi
+/// so với sổ kho và giá vốn của các lần bán sau bị đẩy lên.
 pub(crate) async fn load_fifo_cogs(pool: &SqlitePool, from: &str, to: &str) -> Result<f64, String> {
     let receipts: Vec<Receipt> = sqlx::query!(
         r#"SELECT je.product_code AS "product_code!", je.quantity, je.unit_price
@@ -916,6 +958,7 @@ pub(crate) async fn load_fifo_cogs(pool: &SqlitePool, from: &str, to: &str) -> R
             WHERE je.entry_type = 'PX'
               AND je.posting_date >= ? AND je.posting_date <= ?
               AND je.quantity > 0
+              AND COALESCE(je.adjust_code, '') != 'GiamDT'
               AND COALESCE(p.is_service, 0) = 0
             ORDER BY je.posting_date, je.id"#,
         from,
@@ -928,6 +971,213 @@ pub(crate) async fn load_fifo_cogs(pool: &SqlitePool, from: &str, to: &str) -> R
     .map(|r| (r.product_code, r.quantity))
     .collect();
     Ok(fifo_cogs(&receipts, &issues))
+}
+
+/// Một lượt xuất kho kèm đủ thông tin để ghi bút toán giá vốn lịch sử.
+#[derive(sqlx::FromRow)]
+pub(crate) struct IssueRow {
+    pub(crate) voucher_no: String,
+    pub(crate) posting_date: String,
+    pub(crate) description: String,
+    pub(crate) product_code: String,
+    pub(crate) customer_code: String,
+    pub(crate) unit_code: String,
+    pub(crate) industry_code: String,
+    pub(crate) quantity: f64,
+    pub(crate) note: String,
+}
+
+/// Số bút toán giá vốn (Nợ 632 / Có 152) còn thiếu cho phiếu xuất lịch sử.
+#[derive(serde::Serialize, Default, Clone, Copy)]
+pub(crate) struct CogsBackfillPending {
+    /// Số lượt xuất chưa có bút toán giá vốn.
+    pub(crate) count: u32,
+    /// Tổng giá vốn FIFO của các lượt đó (đồng, làm tròn 2 số).
+    pub(crate) amount: f64,
+}
+
+/// Tải toàn bộ lượt nhập (đầu vào của FIFO) và lượt xuất (cần ghi bút toán).
+///
+/// Không giới hạn khoảng ngày: bút toán giá vốn là **lịch sử** — kỳ nào cũng
+/// phải được ghi một lần, kể cả khi card quyết toán đang xem một kỳ khác.
+async fn load_fifo_rows(pool: &SqlitePool) -> Result<(Vec<Receipt>, Vec<IssueRow>), String> {
+    let receipts: Vec<Receipt> = sqlx::query!(
+        r#"SELECT je.product_code AS "product_code!", je.quantity, je.unit_price
+             FROM journal_entry je
+             JOIN product p ON p.code = je.product_code
+            WHERE je.entry_type = 'PN'
+              AND je.quantity > 0
+              AND COALESCE(p.is_service, 0) = 0
+            ORDER BY je.posting_date, je.id"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .map(|r| (r.product_code, r.quantity, r.unit_price))
+    .collect();
+    let issues: Vec<IssueRow> = sqlx::query_as!(
+        IssueRow,
+        r#"SELECT je.voucher_no AS "voucher_no!",
+                  je.posting_date AS "posting_date!",
+                  je.description AS "description!",
+                  je.product_code AS "product_code!",
+                  je.customer_code AS "customer_code!",
+                  je.unit_code AS "unit_code!",
+                  je.industry_code AS "industry_code!",
+                  je.quantity,
+                  je.note AS "note!"
+             FROM journal_entry je
+             JOIN product p ON p.code = je.product_code
+            WHERE je.entry_type = 'PX'
+              AND je.quantity > 0
+              -- Khách trả lại app đã ghi bút Nợ 152 / Có 632 rồi, không có dòng
+              -- 632/152 nào để bổ sung (ghi thêm thì sẽ sai chiều).
+              AND COALESCE(je.adjust_code, '') != 'GiamDT'
+              AND COALESCE(p.is_service, 0) = 0
+            ORDER BY je.posting_date, je.id"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok((receipts, issues))
+}
+
+/// Số bút toán `CP` đã ghi cho từng cặp (số phiếu, mã hàng).
+async fn load_cogs_entry_counts(
+    pool: &SqlitePool,
+) -> Result<std::collections::HashMap<(String, String), u32>, String> {
+    let rows = sqlx::query!(
+        r#"SELECT voucher_no AS "voucher_no!", product_code AS "product_code!", COUNT(*) AS "count!: i64"
+             FROM journal_entry
+            WHERE entry_type = 'CP'
+            GROUP BY voucher_no, product_code"#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ((r.voucher_no, r.product_code), r.count as u32))
+        .collect())
+}
+
+/// Các lượt xuất chưa có bút toán giá vốn, theo thứ tự ngày — tức là kế hoạch
+/// ghi bổ sung. Cặp (số phiếu, mã hàng) đã có bút toán thì lượt xuất kế nó coi
+/// như **đã ghi** nên không viết lại → chạy bao nhiêu lần cũng không trùng.
+///
+/// Trả về rỗng khi `costs` không khớp `issues` để không bao giờ ghi nhầm số.
+fn cogs_backfill_plan(
+    issues: &[IssueRow],
+    costs: &[f64],
+    existing: &std::collections::HashMap<(String, String), u32>,
+) -> Vec<usize> {
+    if costs.len() != issues.len() {
+        return Vec::new();
+    }
+    let mut remaining = existing.clone();
+    let mut pending = Vec::new();
+    for (i, issue) in issues.iter().enumerate() {
+        // Không có giá vốn (hàng giá 0, xuất vượt tồn) → không có gì để ghi;
+        // loại khỏi kế hoạch để ô cảnh báo không treo hoài với bút toán vô nghĩa.
+        if costs[i] <= 0.0 {
+            continue;
+        }
+        let key = (issue.voucher_no.clone(), issue.product_code.clone());
+        match remaining.get_mut(&key) {
+            // Đã có ít nhất một bút toán CP cho cặp này → tiêu một suất.
+            Some(n) if *n > 0 => *n -= 1,
+            _ => pending.push(i),
+        }
+    }
+    pending
+}
+
+/// Giá vốn FIFO cho một danh sách lượt xuất (chỉ số khớp `issues`).
+fn issue_costs(receipts: &[Receipt], issues: &[IssueRow]) -> Vec<f64> {
+    let issues_arg: Vec<Issue> = issues
+        .iter()
+        .map(|i| (i.product_code.clone(), i.quantity))
+        .collect();
+    fifo_cogs_per_issue(receipts, &issues_arg)
+}
+
+/// (số lượt xuất còn thiếu bút toán giá vốn, tổng giá vốn của chúng).
+async fn cogs_backfill_summary(pool: &SqlitePool) -> Result<CogsBackfillPending, String> {
+    let (receipts, issues) = load_fifo_rows(pool).await?;
+    let existing = load_cogs_entry_counts(pool).await?;
+    let costs = issue_costs(&receipts, &issues);
+    let plan = cogs_backfill_plan(&issues, &costs, &existing);
+    Ok(CogsBackfillPending {
+        count: plan.len() as u32,
+        amount: round2(plan.iter().map(|&i| costs[i]).sum()),
+    })
+}
+
+/// Số lượt xuất còn thiếu bút toán Nợ 632 / Có 152 (dùng để hiện nút ghi bổ
+/// sung ở card Tổng hợp doanh thu - chi phí).
+#[tauri::command]
+pub(crate) async fn cogs_backfill_pending(state: State<'_, AppState>) -> Result<String, String> {
+    let pool = state.pool.read().await;
+    let pending = cogs_backfill_summary(&pool).await?;
+    serde_json::to_string(&pending).map_err(|e| e.to_string())
+}
+
+/// Ghi bút toán Nợ 632 / Có 152 cho các phiếu xuất lịch sử chưa có giá vốn.
+///
+/// Giá vốn tính lại đúng bằng `fifo_cogs_per_issue` (cùng logic FIFO với lúc lập
+/// phiếu xuất) nên sổ cái khớp với card quyết toán. Lặp lại được: lần hai không
+/// còn lượt nào thiếu.
+#[tauri::command]
+pub(crate) async fn backfill_cogs_entries(state: State<'_, AppState>) -> Result<String, String> {
+    let pool = state.pool.read().await;
+    let (receipts, issues) = load_fifo_rows(&pool).await?;
+    let existing = load_cogs_entry_counts(&pool).await?;
+    let costs = issue_costs(&receipts, &issues);
+    let plan = cogs_backfill_plan(&issues, &costs, &existing);
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let mut written = 0_u32;
+    let mut amount = 0.0_f64;
+    for &idx in &plan {
+        let issue = &issues[idx];
+        let cost = round2(costs[idx]);
+        // Xuất vượt tồn (dữ liệu lệch) không có giá vốn → bỏ qua thay vì tạo
+        // bút toán 632/152 bằng 0 làm lệch bảng cân đối.
+        if cost <= 0.0 {
+            continue;
+        }
+        insert_journal_entry(
+            &mut tx,
+            &issue.posting_date,
+            &issue.voucher_no,
+            "CP",
+            &issue.description,
+            &issue.product_code,
+            "",
+            &issue.customer_code,
+            issue.quantity,
+            cost / issue.quantity,
+            cost,
+            "632",
+            "152",
+            &issue.industry_code,
+            0.0,
+            0.0,
+            &issue.unit_code,
+            "",
+            &issue.note,
+            0.0,
+        )
+        .await?;
+        written += 1;
+        amount += cost;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    serde_json::to_string(&CogsBackfillPending {
+        count: written,
+        amount: round2(amount),
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Chi phí trong kỳ: (được trừ, không được trừ, danh sách vi phạm).
@@ -1483,6 +1733,12 @@ pub(crate) async fn get_tax_settlement(
     let revenue = ctx.year_revenue;
     let expense = round2(cogs + cost_ok);
     let income = round2(revenue - expense);
+    // Hộ nộp TNCN theo tỷ lệ % trên doanh thu thì số quyết toán cả năm chính là
+    // tổng số đã tạm nộp trong năm (Điều 10 NĐ 68/2026), không tính lại theo thu
+    // nhập tính thuế. Trước đây luôn nhân thu nhập × thuế suất nên card quyết toán
+    // in ra số quyết toán khác 0 trong khi chênh lệch ép bằng 0 — hai ô mâu thuẫn
+    // với nhau.
+    let by_revenue = ctx.group <= 2 && ctx.settings.method == "revenue";
     // Quyết toán cả năm chỉ có nghĩa khi hộ thuộc diện tính thuế (Điều 8 khoản 1a);
     // hộ cả năm không vượt ngưỡng thì tổng thuế bằng 0 dù hồ sơ ghi nhóm nào.
     let year_taxable = ctx.taxed_from_start || ctx.year_revenue > ctx.settings.thresholds.exempt;
@@ -1491,16 +1747,10 @@ pub(crate) async fn get_tax_settlement(
     } else {
         0.0
     };
-    let final_tax = if year_taxable {
-        round2(income.max(0.0) * rate)
-    } else {
-        0.0
-    };
-    // Hộ nộp theo tỷ lệ % doanh thu thì số phải nộp chính là tổng tạm nộp.
+    let final_tax = settlement_tax(by_revenue, provisional_total, year_taxable, income, rate);
     // Hộ vượt ngưỡng mà hồ sơ đang ghi Nhóm 1 thì không có mức thuế suất theo
     // thu nhập để áp, nên TNCN vẫn tính theo tỷ lệ % doanh thu cho tới khi hộ
     // xác nhận lại nhóm (nguyên tắc ổn định: nhóm của năm không tự đổi giữa chừng).
-    let by_revenue = ctx.group <= 2 && ctx.settings.method == "revenue";
     let difference = if by_revenue {
         0.0
     } else {
@@ -1577,7 +1827,7 @@ pub(crate) async fn get_tax_settlement(
 /// Một ô của sổ: số hoặc chữ. Ô không có dữ liệu được bỏ trống hoàn toàn
 /// (không có key trong `cells`) — frontend coi key vắng là ô trống của mẫu nên
 /// không in ra số 0 ở chỗ mẫu gốc để trắng.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, PartialEq, Debug)]
 #[serde(untagged)]
 pub(crate) enum BookCell {
     Num(f64),
@@ -1633,14 +1883,12 @@ impl BookRow {
         Self::new("section")
     }
 
-    fn num(&mut self, key: &str, v: f64) -> &mut Self {
-        self.cells.insert(key.to_string(), BookCell::Num(round2(v)));
-        self
-    }
-
-    /// Số tiền — luôn làm tròn 2 chữ số thập phân như mẫu gốc.
+    /// Số tiền — sổ kế toán Việt Nam ghi bằng đồng nguyên nên làm tròn tới số
+    /// nguyên. Giữ 2 chữ số thập phân thì sổ in ra `122.019,99` trong khi tờ khai
+    /// ghi `122.020`, hai số không khớp nhau khi đối chiếu với cơ quan thuế.
     fn money(&mut self, key: &str, v: f64) -> &mut Self {
-        self.num(key, v)
+        self.cells.insert(key.to_string(), BookCell::Num(v.round()));
+        self
     }
 
     /// Số lượng — giữ nguyên phần thập phân, chỉ làm tròn 3 chữ số để tránh sai số
@@ -1658,13 +1906,24 @@ impl BookRow {
 }
 
 /// Phần đầu sổ và phần chữ ký cuối sổ — giữ đúng bố cục mẫu gốc.
+///
+/// Mẫu in đặt khối "Mẫu số Sxx-HKD (Kèm theo Thông tư số 152/2025/TT-BTC …)"
+/// ở góc trên bên phải, còn tên địa điểm kinh doanh / kỳ kê khai nằm ngay dưới
+/// tiêu đề giữa trang — không nằm cùng khối với tên hộ như trước.
 #[derive(serde::Serialize, Default)]
 pub(crate) struct BookHeader {
     pub(crate) owner: String,
     pub(crate) address: String,
     pub(crate) tax_code: String,
+    /// Giá trị dòng dưới tiêu đề ("Địa điểm kinh doanh: …"). Mẫu nào không có
+    /// dòng này thì để rỗng.
     pub(crate) location: String,
+    /// Nhãn của dòng đó — mỗi mẫu một tên ("Tên địa điểm kinh doanh" ở S2c,
+    /// "Tên vật liệu, dụng cụ…" ở S2d, bỏ hẳn ở S2e). Rỗng = không hiện dòng.
+    pub(crate) location_label: String,
     pub(crate) period: String,
+    /// Khối "Mẫu số …" góc trên bên phải đầu sổ.
+    pub(crate) form_ref: String,
     pub(crate) unit: String,
     pub(crate) sign_date: String,
     pub(crate) signer: String,
@@ -2124,8 +2383,10 @@ pub(crate) async fn get_tax_books(
             let mut total_revenue = 0.0;
             let mut total_vat = 0.0;
             let mut total_pit = 0.0;
-            // Gom theo ngành nghề: mẫu gốc mở sổ cho từng ngành nghề có cùng
-            // tỷ lệ %, nên cột "Diễn giải" phải nêu rõ ngành nghề.
+            // Mẫu gốc chia sổ theo từng nhóm ngành: mỗi khối là dòng
+            // "n. Ngành nghề …" → dòng chứng từ của khối → "Tổng cộng (n)" →
+            // "Thuế GTGT" → "Thuế TNCN". Các dòng thuế phải nằm ngay sau tổng
+            // cộng của đúng nhóm đó, không gom hết thuế xuống cuối sổ.
             let mut order: Vec<String> = Vec::new();
             let mut groups: std::collections::HashMap<String, (f64, f64, f64)> =
                 std::collections::HashMap::new();
@@ -2147,58 +2408,72 @@ pub(crate) async fn get_tax_books(
                 total_revenue += amount;
                 total_vat += round2(amount * rate_vat);
                 total_pit += round2(amount * rate_pit);
-                let mut r = BookRow::detail();
-                r.text("a", &s.voucher_no);
-                r.text("b", &s.posting_date);
-                r.text(
-                    "c",
-                    format!("{} — {}", s.description, industry_label(&names, &industry)),
-                );
-                r.money("1", amount);
-                rows.push(r);
             }
-            for industry in &order {
-                let (sum, _vat, _pit) = groups.get(industry).copied().unwrap_or((0.0, 0.0, 0.0));
-                let mut r = BookRow::subtotal();
-                r.text(
+            for (i, industry) in order.iter().enumerate() {
+                let (sum, vat, pit) = groups.get(industry).copied().unwrap_or((0.0, 0.0, 0.0));
+                let mut head = BookRow::section();
+                head.text(
                     "c",
-                    format!("Tổng cộng ngành nghề: {}", industry_label(&names, industry)),
+                    format!("{}. Ngành nghề {}", i + 1, industry_label(&names, industry)),
                 );
+                rows.push(head);
+                // Chứng từ của đúng nhóm ngành này, vẫn giữ thứ tự ngày như mẫu.
+                for s in &sales {
+                    if &s.industry_code != industry {
+                        continue;
+                    }
+                    let amount = signed_amount(s.adjust_code.as_str(), s.amount);
+                    let mut r = BookRow::detail();
+                    r.text("a", &s.voucher_no);
+                    r.text("b", &s.posting_date);
+                    r.text("c", &s.description);
+                    r.money("1", amount);
+                    rows.push(r);
+                }
+                let mut r = BookRow::subtotal();
+                r.text("c", format!("Tổng cộng ({})", i + 1));
                 r.money("1", sum);
                 rows.push(r);
-            }
-            let mut t = BookRow::total();
-            t.text("c", "Tổng cộng doanh thu trong kỳ");
-            t.money("1", total_revenue);
-            rows.push(t);
-            if exempt {
-                // S2a không có cột riêng cho ghi chú, nên đưa lời giải thích vào
-                // chính cột Diễn giải của dòng tổng — đừng ghi vào cột số không
-                // tồn tại (trước đây ghi vào ô "8" của mẫu S2d thì mất trắng).
-                let mut t = BookRow::total();
-                t.text(
-                    "c",
-                    "Thuế GTGT phải nộp — hộ thuộc nhóm 1 chỉ thông báo doanh thu, không phát sinh thuế",
-                );
-                t.money("1", 0.0);
-                rows.push(t);
-            } else {
-                let mut t = BookRow::total();
-                t.text("c", "Thuế GTGT phải nộp trong kỳ");
-                t.money("1", total_vat);
-                rows.push(t);
+                // Hộ nhóm 1 không phát sinh thuế nên số thuế từng nhóm ghi 0.
+                let mut r = BookRow::subtotal();
+                r.text("c", "Thuế GTGT");
+                r.money("1", if exempt { 0.0 } else { vat });
+                rows.push(r);
                 if pit_by_revenue {
-                    let mut t = BookRow::total();
-                    t.text("c", "Thuế TNCN phải nộp trong kỳ");
-                    t.money("1", total_pit);
-                    rows.push(t);
+                    let mut r = BookRow::subtotal();
+                    r.text("c", "Thuế TNCN");
+                    r.money("1", pit);
+                    rows.push(r);
                 }
+            }
+            // Hai dòng tổng cuối sổ theo mẫu gốc.
+            let mut t = BookRow::total();
+            t.text("c", "Tổng số thuế GTGT phải nộp");
+            t.money("1", if exempt { 0.0 } else { total_vat });
+            rows.push(t);
+            if pit_by_revenue {
+                let mut t = BookRow::total();
+                t.text("c", "Tổng số thuế TNCN phải nộp");
+                t.money("1", total_pit);
+                rows.push(t);
+            }
+            if exempt {
+                // S2a không có cột riêng cho ghi chú, nên lời giải thích đưa vào
+                // ghi chú dưới sổ thay vì ghi vào cột số không tồn tại.
+                notes.push(BookNote {
+                    level: "info",
+                    text: "Hộ thuộc nhóm 1 chỉ thông báo doanh thu, không phát sinh thuế."
+                        .to_string(),
+                    action_book: None,
+                    action_label: None,
+                });
             }
             notes.push(BookNote {
                 level: "info",
                 text: format!(
-                    "Nhóm {} · tổng thuế GTGT {} đ. {}",
+                    "Nhóm {} · doanh thu {} đ · tổng thuế GTGT {} đ. {}",
                     ctx.group,
+                    fmt_thousands(total_revenue),
                     fmt_thousands(total_vat),
                     if pit_by_revenue {
                         format!(
@@ -2234,60 +2509,42 @@ pub(crate) async fn get_tax_books(
                     continue;
                 }
                 revenue += net;
-                let mut row = BookRow::detail();
-                row.text("a", "—");
-                row.text("b", format!("{year:04}-{from_m:02}…{year:04}-{to_m:02}"));
-                row.text(
-                    "c",
-                    format!("Doanh thu bán hàng hóa, dịch vụ — {}", r.industry_name),
-                );
-                row.money("1", net);
-                rows.push(row);
             }
+
+            // (1) Mẫu gốc chỉ có một dòng tổng doanh thu; chi tiết theo từng
+            // ngành nghề đã nằm ở sổ S2a/S2b nên không lặp lại ở đây.
             let mut t = BookRow::subtotal();
-            t.text("c", "Tổng doanh thu bán hàng hóa, dịch vụ (1)");
+            t.text("c", "1. Doanh thu bán hàng hóa, dịch vụ");
             t.money("1", revenue);
             rows.push(t);
 
-            // (2) Chi phí hợp lý — ghi theo từng chứng từ, rồi mới cộng dòng 2.
-            for w in &warnings {
-                let mut row = BookRow::detail();
-                row.text("a", &w.voucher_no);
-                row.text("b", &w.posting_date);
-                row.text(
-                    "c",
-                    format!("KHÔNG được trừ: {} — {}", w.description, w.reason),
-                );
-                row.money("1", -round2(w.amount));
-                rows.push(row);
-            }
-            let mut t = BookRow::subtotal();
-            t.text(
-                "c",
-                "a) Chi phí nguyên vật liệu, dụng cụ, hàng hóa (giá vốn FIFO)",
-            );
-            t.money("1", -round2(cogs));
-            rows.push(t);
-            let mut t = BookRow::subtotal();
-            t.text("c", "Chi phí khác hợp lý có đủ chứng từ (b, d, e)");
-            t.money("1", -round2(cost_ok));
-            rows.push(t);
+            // (2) Chi phí hợp lý: tổng của (2) trước, sáu dòng a)–e) bên dưới
+            // đúng thứ tự và đúng từng chữ như mẫu in.
             let total_cost = round2(cogs + cost_ok);
             let mut t = BookRow::subtotal();
-            t.text("c", "Tổng chi phí hợp lý (2)");
-            t.money("1", -total_cost);
+            t.text("c", "2. Chi phí hợp lý");
+            t.money("1", total_cost);
             rows.push(t);
+            for (label, value) in s2c_cost_lines(cogs, cost_ok) {
+                let mut r = BookRow::detail();
+                r.text("c", label);
+                // Không có số thì để trống — đừng ghi "0" vào ô mẫu gốc bỏ trắng.
+                if value.abs() > 0.5 {
+                    r.money("1", value);
+                }
+                rows.push(r);
+            }
 
             let diff = round2(revenue - total_cost);
             let mut t = BookRow::total();
-            t.text("c", "Chênh lệch (3) = (1) − (2)");
+            t.text("c", "3. Chênh lệch {(3) = (1) − (2)}");
             t.money("1", diff);
             rows.push(t);
             // (4) Thuế TNCN theo thu nhập tính thuế — dùng cùng cách tính với
             // tờ khai để sổ và tờ khớp nhau.
             let pit = pit_on_income(&pool, year, diff).await?;
             let mut t = BookRow::total();
-            t.text("c", "Tổng số thuế TNCN phải nộp (4) = (3) × thuế suất");
+            t.text("c", "4. Tổng số thuế TNCN phải nộp {(4) = (3) × thuế suất}");
             t.money("1", pit.0);
             rows.push(t);
             notes.push(BookNote {
@@ -2299,9 +2556,27 @@ pub(crate) async fn get_tax_books(
                 action_book: None,
                 action_label: None,
             });
+            if !warnings.is_empty() {
+                let bad: f64 = warnings.iter().map(|w| round2(w.amount)).sum();
+                notes.push(BookNote {
+                    level: "warn",
+                    text: format!(
+                        "{} khoản chi không được trừ tổng {} đ (Điều 6 NĐ 68/2026): {}. Mẫu gốc không có dòng riêng nên sổ chỉ ghi các khoản được trừ vào (2).",
+                        warnings.len(),
+                        fmt_thousands(bad),
+                        warnings
+                            .iter()
+                            .map(|w| w.voucher_no.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    action_book: None,
+                    action_label: None,
+                });
+            }
             notes.push(BookNote {
                 level: "info",
-                text: "Dòng 'KHÔNG được trừ' là các khoản chi chưa đủ chứng từ theo Điều 6 Nghị định 68/2026; mẫu gốc yêu cầu tách theo mục a)–e), app gộp các mục đã có chứng từ vào một dòng.".into(),
+                text: "Chứng từ chưa gán mã nhóm chi phí nên chưa tách được từng dòng a)–e): giá vốn FIFO ghi vào dòng a), chi phí khác có đủ chứng từ ghi vào dòng e), dòng b)–d) để trống.".into(),
                 action_book: None,
                 action_label: None,
             });
@@ -2328,7 +2603,7 @@ pub(crate) async fn get_tax_books(
             let rows = cash_ledger_rows(&pool, &from, &to).await?;
             notes.push(BookNote {
                 level: "info",
-                text: "Sổ chia thành khối tiền mặt và khối tiền gửi không kỳ hạn (theo từng ngân hàng); mỗi khối có số dư đầu kỳ, tổng thu, tổng chi và số dư cuối kỳ. Số dư đầu kỳ lấy từ số dư tài khoản tiền tại màn Tài khoản.".into(),
+                text: "Sổ chia thành khối Tiền mặt và khối Tiền gửi không kỳ hạn; mỗi khối có dòng Ngân hàng (với tiền gửi), Tiền mặt/Tiền gửi đầu kỳ, Tổng tiền thu (gửi) vào, Tổng tiền chi (rút) ra và Tiền mặt tồn / Tiền gửi cuối kỳ. Số đầu kỳ lấy từ số dư tài khoản tiền tại màn Tài khoản.".into(),
                 action_book: None,
                 action_label: None,
             });
@@ -2361,12 +2636,27 @@ pub(crate) async fn get_tax_books(
         "dòng sổ có ô không thuộc bộ cột của mẫu {book}"
     );
 
+    // Khối "Mẫu số …" ở góc trên bên phải — mỗi mẫu một số, đúng như mẫu in
+    // kèm theo Thông tư 152/2025/TT-BTC.
+    let form_ref = format!(
+        "Mẫu số {book}-HKD (Kèm theo Thông tư số 152/2025/TT-BTC ngày 31 tháng 12 năm 2025 \
+         của Bộ trưởng Bộ Tài chính)"
+    );
+    // Dòng dưới tiêu đề: mỗi mẫu một nhãn khác nhau; S2e không có dòng này.
+    let (location_label, location) = match book.as_str() {
+        "S2c" => ("Tên địa điểm kinh doanh", owner.location.clone()),
+        "S2d" => ("Tên vật liệu, dụng cụ, sản phẩm, hàng hóa", String::new()),
+        "S2e" => ("", String::new()),
+        _ => ("Địa điểm kinh doanh", owner.location.clone()),
+    };
     let header = BookHeader {
         owner: owner.name,
         address: owner.address,
         tax_code: owner.tax_code,
-        location: owner.location,
+        location,
+        location_label: location_label.to_string(),
         period: period_label.clone(),
+        form_ref,
         unit: "VNĐ".to_string(),
         sign_date: today_vn(),
         signer: "NGƯỜI ĐẠI DIỆN HỘ KINH DOANH / CÁ NHÂN KINH DOANH".to_string(),
@@ -2428,6 +2718,50 @@ fn signed_amount(adjust_code: &str, amount: f64) -> f64 {
     } else {
         amount
     }
+}
+
+/// Sáu dòng chi phí a)–e) của mẫu S2c, chép đúng văn bản in kèm Thông tư
+/// 152/2025/TT-BTC (mẫu gốc đánh dấu hai lần chữ "d)" — giữ nguyên để sổ in ra
+/// khớp từng chữ với mẫu nộp cơ quan thuế).
+///
+/// App chưa gán mã nhóm chi phí cho từng chứng từ nên chỉ hai dòng có số:
+/// giá vốn FIFO vào dòng a), phần chi phí khác đã có chứng từ vào dòng e).
+/// Các dòng còn lại trả `0.0` và được để trống khi in.
+fn s2c_cost_lines(cogs: f64, other: f64) -> [(&'static str, f64); 6] {
+    [
+        (
+            "a) Chi phí nguyên vật liệu, vật liệu, nhiên liệu, năng lượng, hàng hóa sử dụng \
+             vào sản xuất, kinh doanh",
+            cogs,
+        ),
+        (
+            "b) Chi phí tiền lương, tiền công, các khoản phụ cấp, bảo hiểm bắt buộc và các \
+             khoản chi trả cho người lao động có đóng bảo hiểm bắt buộc theo quy định; chi phí \
+             tiền lương, tiền công, các khoản phụ cấp và các khoản chi trả cho người lao động \
+             làm việc dưới 01 tháng.",
+            0.0,
+        ),
+        (
+            "c) Chi phí khấu hao tài sản cố định phục vụ cho hoạt động sản xuất, kinh doanh theo \
+             chế độ quản lý, sử dụng và trích khấu hao tài sản cố định (nếu có).",
+            0.0,
+        ),
+        (
+            "d) Chi phí dịch vụ mua ngoài như điện, nước, điện thoại, internet, vận chuyển, thuê \
+             tài sản, sửa chữa, bảo dưỡng.",
+            0.0,
+        ),
+        (
+            "d) Chi phí trả lãi tiền vay vốn sản xuất, kinh doanh của tổ chức tín dụng theo lãi \
+             suất thực tế. Chi phí trả lãi tiền vay vốn sản xuất, kinh doanh của hộ gia đình \
+             không phải là tổ chức tín dụng không vượt quá mức quy định tại Bộ luật Dân sự.",
+            0.0,
+        ),
+        (
+            "e) Các khoản chi khác phục vụ trực tiếp hoạt động sản xuất, kinh doanh…",
+            other,
+        ),
+    ]
 }
 
 /// Thuế TNCN theo thu nhập tính thuế cho một khoảng lời lãi.
@@ -2532,11 +2866,12 @@ async fn stock_ledger_rows(
     let mut negative = false;
     for code in &order {
         let Some(list) = by_code.get(code) else {
-            // Số dư đầu kỳ có nhưng kỳ này không phát sinh gì — vẫn ghi hai dòng
-            // đầu/cuối để sổ khớp với thực tế hàng còn nằm trong kho.
+            // Số dư đầu kỳ có nhưng kỳ này không phát sinh gì — vẫn ghi ba dòng
+            // đầu / phát sinh / cuối để sổ khớp với hàng còn nằm trong kho.
             let (q, v) = open_map.remove(code).unwrap_or((0.0, 0.0));
             let unit = unit_of(pool, code).await?;
             rows.push(balance_row(code, &unit, "Số dư đầu kỳ", q, v));
+            rows.push(movement_row(code, 0.0, 0.0, 0.0, 0.0));
             rows.push(balance_row(code, &unit, "Số dư cuối kỳ", q, v));
             negative |= q < 0.0;
             continue;
@@ -2554,6 +2889,7 @@ async fn stock_ledger_rows(
         let (mut q, mut v) = open_map.remove(code).unwrap_or((0.0, 0.0));
         negative |= q < 0.0;
         rows.push(balance_row(&label, &unit, "Số dư đầu kỳ", q, v));
+        let (mut in_q, mut in_v, mut out_q, mut out_v) = (0.0, 0.0, 0.0, 0.0);
         for m in list {
             let qty = m.quantity;
             let value = qty * m.unit_price;
@@ -2567,11 +2903,15 @@ async fn stock_ledger_rows(
             if m.entry_type == "PN" {
                 q += qty;
                 v += value;
+                in_q += qty;
+                in_v += value;
                 r.qty("2", qty);
                 r.money("3", value);
             } else {
                 q -= qty;
                 v -= value;
+                out_q += qty;
+                out_v += value;
                 r.qty("4", qty);
                 r.money("5", value);
             }
@@ -2586,6 +2926,7 @@ async fn stock_ledger_rows(
             negative |= q < 0.0;
             rows.push(r);
         }
+        rows.push(movement_row(&label, in_q, in_v, out_q, out_v));
         rows.push(balance_row(&label, &unit, "Số dư cuối kỳ", q, v));
     }
 
@@ -2634,6 +2975,27 @@ fn balance_row(item: &str, unit: &str, label: &str, qty: f64, value: f64) -> Boo
     r.money("1", avg);
     r.qty("6", qty);
     r.money("7", value);
+    r
+}
+
+/// Dòng "Công phát sinh trong kỳ" của mẫu S2d — tổng cột 2/3 (nhập) và 4/5
+/// (xuất) của kỳ. Mẫu gốc đánh dấu cột D (đơn vị tính) và cột 1 (đơn giá) là `X`
+/// vì dòng tổng không có đơn vị, đơn giá riêng; không có số thì để trống ô đó
+/// thay vì ghi số 0 vào chỗ mẫu in để trắng.
+fn movement_row(item: &str, in_q: f64, in_v: f64, out_q: f64, out_v: f64) -> BookRow {
+    let mut r = BookRow::subtotal();
+    r.text("item", item);
+    r.text("c", "Công phát sinh trong kỳ");
+    r.text("d", "X");
+    r.text("1", "X");
+    if in_q != 0.0 || in_v != 0.0 {
+        r.qty("2", in_q);
+        r.money("3", in_v);
+    }
+    if out_q != 0.0 || out_v != 0.0 {
+        r.qty("4", out_q);
+        r.money("5", out_v);
+    }
     r
 }
 
@@ -2693,8 +3055,27 @@ async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec
             g
         };
 
+        // Mẫu gốc có một dòng khối in đậm "TIỀN MẶT" / "TIỀN GỬI KHÔNG KỲ HẠN"
+        // trước, riêng khối tiền gửi mới có thêm dòng "Ngân hàng …" cho từng ngân
+        // hàng bên dưới.
+        let mut sec = BookRow::section();
+        sec.text("c", title);
+        rows.push(sec);
+
         let group_count = groups.len();
-        for (bank, group_title) in groups {
+        for (bank, _group_title) in groups {
+            if code == "112" {
+                let mut r = BookRow::subtotal();
+                r.text(
+                    "c",
+                    if bank.is_empty() {
+                        "Ngân hàng ....".to_string()
+                    } else {
+                        format!("Ngân hàng {bank}")
+                    },
+                );
+                rows.push(r);
+            }
             let list: Vec<_> = moves
                 .iter()
                 .filter(|m| {
@@ -2719,12 +3100,15 @@ async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec
                 opening
             };
 
-            let mut sec = BookRow::section();
-            sec.text("c", group_title);
-            rows.push(sec);
-
             let mut r = BookRow::subtotal();
-            r.text("c", "Số dư đầu kỳ");
+            r.text(
+                "c",
+                if code == "111" {
+                    "Tiền mặt đầu kỳ"
+                } else {
+                    "Tiền gửi đầu kỳ"
+                },
+            );
             r.money("1", open_value);
             rows.push(r);
 
@@ -2752,11 +3136,25 @@ async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec
                 rows.push(r);
             }
             let mut r = BookRow::subtotal();
-            r.text("c", "Tổng tiền thu (gửi) vào trong kỳ");
+            r.text(
+                "c",
+                if code == "111" {
+                    "Tổng tiền thu vào trong kỳ"
+                } else {
+                    "Tổng gửi vào trong kỳ"
+                },
+            );
             r.money("1", total_in);
             rows.push(r);
             let mut r = BookRow::subtotal();
-            r.text("c", "Tổng tiền chi (rút) ra trong kỳ");
+            r.text(
+                "c",
+                if code == "111" {
+                    "Tổng tiền chi ra trong kỳ"
+                } else {
+                    "Tổng tiền rút ra trong kỳ"
+                },
+            );
             r.money("2", total_out);
             rows.push(r);
             let mut r = BookRow::total();
@@ -2765,7 +3163,7 @@ async fn cash_ledger_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec
                 if code == "111" {
                     "Tiền mặt tồn cuối kỳ"
                 } else {
-                    "Tiền gửi tồn cuối kỳ"
+                    "Tiền gửi cuối kỳ"
                 },
             );
             r.money("1", round2(open_value + total_in - total_out));
@@ -2843,14 +3241,19 @@ fn describe_tax_period(period: &str, no: i64, year: i64) -> String {
 }
 
 /// Tổng hợp doanh thu - chi phí (≡ Tong Hop DTCP sheet)
+///
+/// Chi phí gồm hai phần phải cộng vào với nhau: chứng từ chi trong kỳ **và** giá
+/// vốn của hàng đã xuất kho tính theo FIFO. Không cộng giá vốn thì hàng bán ra
+/// không hiện ở cột chi phí nào, nên "lợi nhuận trước thuế" in ra lớn hơn lợi
+/// nhuận thật (khác với số quyết toán trên cùng màn hình).
 #[tauri::command]
 pub(crate) async fn get_revenue_expense(
     state: State<'_, AppState>,
     from_date: String,
     to_date: String,
 ) -> Result<String, String> {
-    let row: RevenueExpenseRow = sqlx::query_as!(
-        RevenueExpenseRow,
+    let pool = state.pool.read().await;
+    let row = sqlx::query!(
         "SELECT
             COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code != 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_up,
             COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code = 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_down,
@@ -2862,10 +3265,18 @@ pub(crate) async fn get_revenue_expense(
         from_date,
         to_date
     )
-    .fetch_one(&*state.pool.read().await)
+    .fetch_one(&*pool)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(serde_json::to_string(&row).unwrap_or_default())
+    let cogs = load_fifo_cogs(&pool, &from_date, &to_date).await?;
+    Ok(serde_json::json!({
+        "revenue_up": row.revenue_up,
+        "revenue_down": row.revenue_down,
+        "expense_up": row.expense_up,
+        "expense_down": row.expense_down,
+        "cogs": round2(cogs),
+    })
+    .to_string())
 }
 
 /// Tổng hợp tồn kho theo sản phẩm (≡ Vat Tu NXT sheet)
@@ -3737,6 +4148,72 @@ mod tax_rules_tests {
     }
 
     #[test]
+    fn gia_von_tung_luot_xuat_cong_lai_khop_fifo_cogs() {
+        // Ghi bổ sung bút toán lịch sử cần giá vốn TỪNG lượt xuất (mỗi lượt một
+        // dòng 632/152), nhưng cộng lại vẫn phải ra đúng số tờ khai đang dùng.
+        let receipts = vec![
+            ("SP1".to_string(), 10.0, 100_000.0),
+            ("SP1".to_string(), 5.0, 200_000.0),
+        ];
+        let issues = vec![("SP1".to_string(), 12.0), ("SP1".to_string(), 15.0)];
+        let per_issue = fifo_cogs_per_issue(&receipts, &issues);
+        // Lượt 1: 10×100k + 2×200k. Lượt 2: hết lô nên chỉ lấy nốt 3×200k.
+        assert_eq!(per_issue, vec![1_400_000.0, 600_000.0]);
+        assert_eq!(
+            round2(per_issue.iter().sum::<f64>()),
+            fifo_cogs(&receipts, &issues)
+        );
+        // Lượt xuất âm không có giá vốn nhưng vẫn giữ chỗ → chỉ số luôn khớp
+        // với danh sách lượt xuất (không lệch nhầm dòng khi ghi bù).
+        let mixed = vec![("SP1".to_string(), -3.0), ("SP1".to_string(), 1.0)];
+        assert_eq!(fifo_cogs_per_issue(&receipts, &mixed), vec![0.0, 100_000.0]);
+    }
+
+    #[test]
+    fn ke_hoach_bo_sung_gia_von_bo_qua_lo_da_co_but_toan() {
+        let mk = |voucher: &str, code: &str, qty: f64| IssueRow {
+            voucher_no: voucher.to_string(),
+            posting_date: "2026-03-01".to_string(),
+            description: String::new(),
+            product_code: code.to_string(),
+            customer_code: String::new(),
+            unit_code: String::new(),
+            industry_code: String::new(),
+            quantity: qty,
+            note: String::new(),
+        };
+        // PX-1 đã ghi CP; PX-2, PX-3 còn thiếu.
+        let issues = vec![
+            mk("PX-1", "SP1", 1.0),
+            mk("PX-2", "SP1", 1.0),
+            mk("PX-3", "SP2", 1.0),
+        ];
+        let costs = vec![100.0, 200.0, 300.0];
+        let mut existing = std::collections::HashMap::new();
+        existing.insert(("PX-1".to_string(), "SP1".to_string()), 1);
+        assert_eq!(cogs_backfill_plan(&issues, &costs, &existing), vec![1, 2]);
+        // Không có giá vốn (hàng giá 0 / xuất vượt tồn) → không đưa vào kế hoạch,
+        // không bao giờ ghi bút toán 632/152 bằng 0 làm lệch bảng cân đối.
+        assert_eq!(
+            cogs_backfill_plan(&issues, &[100.0, 200.0, 0.0], &existing),
+            vec![1]
+        );
+        // Sau khi ghi bù → không còn lượt nào thiếu, chạy lại không trùng.
+        existing.insert(("PX-2".to_string(), "SP1".to_string()), 1);
+        existing.insert(("PX-3".to_string(), "SP2".to_string()), 1);
+        assert!(cogs_backfill_plan(&issues, &costs, &existing).is_empty());
+        // Cùng phiếu có hai dòng cùng mã hàng: mỗi dòng một bút toán CP nên đã
+        // ghi 1 dòng thì vẫn còn thiếu 1 (đúng như lúc lập phiếu xuất ghi).
+        let dup = vec![mk("PX-1", "SP1", 1.0), mk("PX-1", "SP1", 2.0)];
+        let dup_costs = vec![100.0, 200.0];
+        let mut dup_existing = std::collections::HashMap::new();
+        dup_existing.insert(("PX-1".to_string(), "SP1".to_string()), 1);
+        assert_eq!(cogs_backfill_plan(&dup, &dup_costs, &dup_existing), vec![1]);
+        // Chi phí không khớp danh sách lượt xuất → từ chối để không ghi nhầm số.
+        assert!(cogs_backfill_plan(&issues, &[100.0], &existing).is_empty());
+    }
+
+    #[test]
     fn canh_bao_khi_nhom_ho_lech_doanh_thu() {
         // Chưa chốt nhóm → không cảnh báo, app tự xếp.
         assert!(!group_mismatch(None, 1));
@@ -3900,5 +4377,82 @@ mod tax_rules_tests {
     fn s3a_khong_bia_so_khi_ung_thue_chua_luu_giao_dich() {
         // App chưa lưu giao dịch thuế khác → sổ rỗng để trống, đừng suy ra số.
         assert!(other_tax_ledger_rows().is_empty());
+    }
+
+    #[test]
+    fn quyet_toan_theo_doanh_thu_lay_tong_tam_nop() {
+        // Hộ nhóm 2 nộp TNCN theo tỷ lệ % doanh thu: số quyết toán = tổng tạm
+        // nộp cả năm. Trước đây luôn nhân thu nhập × thuế suất nên ra 1.374.866
+        // trong khi chênh lệch ép bằng 0 — hai ô mâu thuẫn nhau.
+        assert_eq!(settlement_tax(true, 0.0, false, 9_165_770.0, 0.15), 0.0);
+        assert_eq!(
+            settlement_tax(true, 1_500_000.0, true, 9_165_770.0, 0.15),
+            1_500_000.0
+        );
+        // Phương pháp thu nhập vẫn tính theo thu nhập tính thuế × thuế suất.
+        assert_eq!(
+            settlement_tax(false, 0.0, true, 9_165_770.0, 0.15),
+            1_374_865.5
+        );
+        // Cả năm không thuộc diện nộp thuế (Điều 8 khoản 1a) → 0 dù tạm nộp có
+        // phát sinh trong năm.
+        assert_eq!(
+            settlement_tax(false, 1_500_000.0, false, 9_165_770.0, 0.15),
+            0.0
+        );
+    }
+
+    #[test]
+    fn so_tien_so_kenh_lam_tron_nguyen_de_khop_to_khai() {
+        // Tờ khai ghi 122.020 đ, sổ mà in 122.019,99 thì hai giấy không khớp.
+        let mut r = BookRow::detail();
+        r.money("1", 122_019.99);
+        assert_eq!(r.cells.get("1"), Some(&BookCell::Num(122_020.0)));
+        // Số lượng vẫn giữ phần thập phân.
+        let mut r = BookRow::detail();
+        r.qty("4", 12.3456);
+        assert_eq!(r.cells.get("4"), Some(&BookCell::Num(12.346)));
+    }
+
+    #[test]
+    fn s2c_liet_ke_du_sau_dong_chi_phi_theo_mau_goc() {
+        let lines = s2c_cost_lines(2_877_257.0, 358_972.0);
+        // Đúng sáu dòng và đúng từng chữ cái a) b) c) d) d) e) như mẫu in kèm
+        // Thông tư (mẫu gốc đánh dấu hai lần chữ "d)" — giữ nguyên).
+        let marks: Vec<&str> = lines.iter().map(|(label, _)| &label[..3]).collect();
+        assert_eq!(marks, ["a) ", "b) ", "c) ", "d) ", "d) ", "e) "]);
+        // Giá vốn FIFO vào dòng a), chi phí khác có chứng từ vào dòng e),
+        // các dòng chưa có dữ liệu để 0 (frontend sẽ in trống).
+        assert_eq!(lines[0].1, 2_877_257.0);
+        assert_eq!(lines[5].1, 358_972.0);
+        assert_eq!(lines[1].1, 0.0);
+        assert_eq!(lines[2].1, 0.0);
+        assert_eq!(lines[3].1, 0.0);
+        assert_eq!(lines[4].1, 0.0);
+        // Tổng a)…e) phải khớp dòng (2) mà sổ cộng ra.
+        let sum: f64 = lines.iter().map(|(_, v)| v).sum();
+        assert_eq!(round2(sum), 3_236_229.0);
+    }
+
+    #[test]
+    fn dong_cong_phat_sinh_trong_ky_danh_dau_x_theo_mau_s2d() {
+        let r = movement_row("SP001 · Hàng A", 10.0, 100_000.0, 4.0, 40_000.0);
+        assert_eq!(
+            r.cells.get("c"),
+            Some(&BookCell::Text("Công phát sinh trong kỳ".into()))
+        );
+        // Mẫu gốc đánh dấu X vào cột Đơn vị tính và cột Đơn giá.
+        assert_eq!(r.cells.get("d"), Some(&BookCell::Text("X".into())));
+        assert_eq!(r.cells.get("1"), Some(&BookCell::Text("X".into())));
+        assert_eq!(r.cells.get("2"), Some(&BookCell::Num(10.0)));
+        assert_eq!(r.cells.get("3"), Some(&BookCell::Num(100_000.0)));
+        assert_eq!(r.cells.get("4"), Some(&BookCell::Num(4.0)));
+        assert_eq!(r.cells.get("5"), Some(&BookCell::Num(40_000.0)));
+        // Kỳ không phát sinh gì → không ghi số 0 vào ô mẫu gốc để trắng.
+        let r = movement_row("SP001 · Hàng A", 0.0, 0.0, 0.0, 0.0);
+        assert!(!r.cells.contains_key("2"));
+        assert!(!r.cells.contains_key("3"));
+        assert!(!r.cells.contains_key("4"));
+        assert!(!r.cells.contains_key("5"));
     }
 }

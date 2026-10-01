@@ -35,8 +35,10 @@ function render(row: { cells: Record<string, BookCell> }, col: BookColumn): stri
   if (v === null || v === "") return "";
   if (typeof v === "string") return v;
   switch (col.kind) {
+    // Sổ kế toán VN ghi bằng đồng nguyên — backend đã làm tròn, fmtInt chỉ việc
+    // định dạng theo dấu phẩy/thousand của tiếng Việt.
     case "money":
-      return fmtDec(v);
+      return fmtInt(v);
     case "qty":
       return fmtDec(v);
     case "rate":
@@ -81,21 +83,27 @@ const hasData = computed(() => props.book.rows.length > 0);
 
 <template>
   <div data-testid="tax-book-table" class="book">
-    <!-- Đầu sổ: tên hộ, mã số thuế, địa điểm kinh doanh, kỳ kê khai -->
+    <!-- Đầu sổ: tên hộ ở trái, khối "Mẫu số …" in nghiêng ở góc phải (đúng mẫu in) -->
     <div class="book-head">
-      <div class="book-head-row">
+      <div class="book-head-owner">
         <span>HỘ, CÁ NHÂN KINH DOANH: {{ book.header.owner || "…" }}</span>
         <span>Địa chỉ: {{ book.header.address || "…" }}</span>
         <span>Mã số thuế: {{ book.header.tax_code || "…" }}</span>
       </div>
-      <div class="book-head-row">
-        <span>Địa điểm kinh doanh: {{ book.header.location || "…" }}</span>
-        <span>Kỳ kê khai: {{ book.header.period || book.period_label }}</span>
-        <span>Đơn vị tính: {{ book.header.unit }}</span>
-      </div>
+      <span class="book-head-form">{{ book.header.form_ref }}</span>
     </div>
 
     <h4 class="book-title">{{ book.title }}</h4>
+
+    <!-- Hai dòng dưới tiêu đề: tên địa điểm kinh doanh (hoặc tên vật liệu) + kỳ kê khai -->
+    <div class="book-sub">
+      <span v-if="book.header.location_label">
+        {{ book.header.location_label }}: {{ book.header.location || "…" }}
+      </span>
+      <span>Kỳ kê khai: {{ book.header.period || book.period_label }}</span>
+    </div>
+
+    <div class="book-unit">Đơn vị tính: {{ book.header.unit }}</div>
 
     <table class="book-table">
       <thead>
@@ -169,16 +177,28 @@ const hasData = computed(() => props.book.rows.length > 0);
 }
 
 .book-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
   border: 1px solid var(--p-border-color);
   border-bottom: 0;
   padding: 0.4rem 0.5rem;
 }
 
-.book-head-row {
+.book-head-owner {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1.5rem;
+  flex-direction: column;
+  gap: 0.15rem;
   line-height: 1.5;
+}
+
+/* Khối "Mẫu số Sxx-HKD (Kèm theo Thông tư …)" in nghiêng, canh phải như mẫu in. */
+.book-head-form {
+  font-style: italic;
+  text-align: right;
+  max-width: 24rem;
+  line-height: 1.35;
 }
 
 .book-title {
@@ -187,6 +207,23 @@ const hasData = computed(() => props.book.rows.length > 0);
   font-weight: 700;
   text-transform: uppercase;
   margin: 0.6rem 0 0.35rem;
+}
+
+/* Tên địa điểm kinh doanh + kỳ kê khai — canh giữa ngay dưới tiêu đề. */
+.book-sub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* "Đơn vị tính:" in nghiêng canh phải, ngay trên bảng như mẫu gốc. */
+.book-unit {
+  font-style: italic;
+  text-align: right;
+  padding: 0.35rem 0.15rem;
 }
 
 .book-table {

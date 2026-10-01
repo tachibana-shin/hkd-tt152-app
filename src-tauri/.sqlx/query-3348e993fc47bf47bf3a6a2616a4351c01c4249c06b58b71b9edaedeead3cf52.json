@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT voucher_no AS \"voucher_no!\", product_code AS \"product_code!\", COUNT(*) AS \"count!: i64\"\n             FROM journal_entry\n            WHERE entry_type = 'CP'\n            GROUP BY voucher_no, product_code",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_code!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "count!: i64",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3348e993fc47bf47bf3a6a2616a4351c01c4249c06b58b71b9edaedeead3cf52"
+}

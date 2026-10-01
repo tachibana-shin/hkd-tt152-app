@@ -5,6 +5,7 @@ import { api } from "@/db";
 import { exportXlsx, type XlsxColumn } from "@/utils/excel";
 import type {
   RevenueExpenseRow,
+  CogsBackfillPending,
   TrialBalanceRow,
   TaxBook,
   TaxDeclarationRow,
@@ -30,7 +31,19 @@ const re = ref<RevenueExpenseRow>({
   revenue_down: 0,
   expense_up: 0,
   expense_down: 0,
+  cogs: 0,
 });
+// Phiếu xuất lịch sử chưa có bút toán Nợ 632 / Có 152 → bảng cân đối thiếu cột
+// giá vốn. Đếm trên TOÀN bộ lịch sử chứ không theo khoảng ngày đang xem.
+const cogsBackfill = ref<CogsBackfillPending>({ count: 0, amount: 0 });
+const backfilling = ref(false);
+
+// Chi phí kinh doanh = chứng từ chi trong kỳ + giá vốn hàng đã xuất kho (FIFO).
+// Không cộng giá vốn thì hàng bán ra không hiện ở cột chi phí nào nên lợi nhuận
+// trước thuế in ra cao hơn số quyết toán thuế ngay trên cùng màn hình.
+const expenseNet = () => re.value.expense_up - re.value.expense_down + re.value.cogs;
+const revenueNet = () => re.value.revenue_up - re.value.revenue_down;
+const profitNet = () => revenueNet() - expenseNet();
 
 const unitOptions = [
   { label: "Toàn bộ", value: "" },
@@ -58,12 +71,14 @@ async function loadReports() {
     const year = new Date().getFullYear();
     const f = toIsoDate(fromDate.value) || `${year}-01-01`;
     const t = toIsoDate(toDate.value) || `${year}-12-31`;
-    const [rev, balance] = await Promise.all([
+    const [rev, balance, pending] = await Promise.all([
       api.getRevenueExpense(f, t),
       api.getTrialBalance(f, t),
+      api.getCogsBackfillPending(),
     ]);
     re.value = rev;
     tb.value = balance;
+    cogsBackfill.value = pending;
   } catch (e) {
     toast.add({
       severity: "error",
@@ -72,6 +87,38 @@ async function loadReports() {
     });
   } finally {
     loading.value = false;
+  }
+}
+
+/** Ghi bút toán Nợ 632 / Có 152 cho các phiếu xuất lịch sử rồi nạp lại báo cáo. */
+async function doBackfillCogs() {
+  backfilling.value = true;
+  try {
+    const written = await api.backfillCogsEntries();
+    if (written.count > 0) {
+      toast.add({
+        severity: "success",
+        summary: "Đã ghi bút toán giá vốn",
+        detail: `${written.count} bút toán Nợ 632 / Có 152, tổng ${fmt(written.amount)} đ`,
+      });
+      // Bảng cân đối và card chi phí đọc từ sổ cái → phải nạp lại mới thấy.
+      await loadReports();
+    } else {
+      toast.add({
+        severity: "info",
+        summary: "Không còn bút toán nào thiếu",
+        detail: "Toàn bộ phiếu xuất đã có bút toán giá vốn.",
+      });
+      cogsBackfill.value = { count: 0, amount: 0 };
+    }
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Lỗi ghi bút toán giá vốn",
+      detail: String(e),
+    });
+  } finally {
+    backfilling.value = false;
   }
 }
 
@@ -897,7 +944,13 @@ useKeepAliveRefresh(reload);
           <Divider />
           <div class="flex justify-between items-center">
             <span class="text-sm text-gray-600">Chi phí kinh doanh</span>
-            <b class="text-red-600">{{ fmt(re.expense_up - re.expense_down) }} đ</b>
+            <b class="text-red-600">{{ fmt(expenseNet()) }} đ</b>
+          </div>
+          <div class="flex justify-between items-center text-xs text-gray-400">
+            <span>— trong đó giá vốn hàng đã xuất kho (FIFO): {{ fmt(re.cogs) }} đ</span>
+          </div>
+          <div class="flex justify-between items-center text-xs text-gray-400">
+            <span>— chứng từ chi: {{ fmt(re.expense_up) }} đ</span>
           </div>
           <div class="flex justify-between items-center text-xs text-gray-400">
             <span>— trong đó giảm trừ chi phí: {{ fmt(re.expense_down) }} đ</span>
@@ -905,10 +958,32 @@ useKeepAliveRefresh(reload);
           <Divider />
           <div class="flex justify-between items-center text-base">
             <span class="font-semibold">Lợi nhuận trước thuế</span>
-            <b class="text-primary-600">
-              {{ fmt(re.revenue_up - re.revenue_down - (re.expense_up - re.expense_down)) }}
-              đ
-            </b>
+            <b class="text-primary-600">{{ fmt(profitNet()) }} đ</b>
+          </div>
+          <!-- Phiếu xuất trước khi app ghi giá vốn chưa có bút toán 632/152 →
+               bảng cân đối thiếu cột giá vốn. Nút ghi bù một lần (idempotent). -->
+          <div
+            v-if="cogsBackfill.count > 0"
+            data-testid="cogs-backfill"
+            class="space-y-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800"
+          >
+            <div>
+              <b>{{ cogsBackfill.count }} lượt xuất lịch sử chưa có bút toán giá vốn</b>
+              ({{ fmt(cogsBackfill.amount) }} đ): bảng cân đối đang thiếu cột Nợ 632 / Có 152 cho
+              phần hàng đã bán này. Bấm ghi bổ sung — tính lại đúng FIFO nên khớp với số trên thẻ
+              chi phí; đã ghi rồi thì chạy lại không sinh trùng.
+            </div>
+            <Button
+              label="Ghi bổ sung bút toán 632/152"
+              icon="pi pi-plus-circle"
+              size="small"
+              severity="warning"
+              outlined
+              :loading="backfilling"
+              data-testid="cogs-backfill-run"
+              class="w-full"
+              @click="doBackfillCogs"
+            />
           </div>
         </div>
       </SectionCard>

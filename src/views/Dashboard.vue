@@ -11,7 +11,10 @@ const businessName = ref("...");
 const revExp = ref<RevenueExpenseRow | null>(null);
 
 const revenueNet = () => (revExp.value?.revenue_up ?? 0) - (revExp.value?.revenue_down ?? 0);
-const expenseNet = () => (revExp.value?.expense_up ?? 0) - (revExp.value?.expense_down ?? 0);
+// Chi phí gồm cả giá vốn hàng đã xuất kho (FIFO) — thiếu nó thì lợi nhuận
+// hiển thị trên Dashboard khác với số quyết toán thuế.
+const expenseNet = () =>
+  (revExp.value?.expense_up ?? 0) - (revExp.value?.expense_down ?? 0) + (revExp.value?.cogs ?? 0);
 const profitLoss = () => revenueNet() - expenseNet();
 
 async function reload() {

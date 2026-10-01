@@ -91,6 +91,8 @@ pub fn run() {
             commands::accounting::get_tax_books,
             commands::accounting::get_tax_group,
             commands::accounting::get_revenue_expense,
+            commands::accounting::cogs_backfill_pending,
+            commands::accounting::backfill_cogs_entries,
             commands::accounting::get_inventory_summary,
             commands::admin::create_backup,
             commands::admin::list_backups,

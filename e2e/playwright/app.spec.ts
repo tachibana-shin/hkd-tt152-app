@@ -2747,3 +2747,129 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
     "Thuế TNCN phải nộp (theo doanh thu) 0 đ",
   );
 });
+
+/**
+ * Xuất hàng phải để lại dấu vết trên BẢNG CÂN ĐỐI: bút Nợ 632 / Có 152 (giá vốn).
+ *
+ * Đo TRƯỚC/SAU bằng API với khoảng ngày cố định — dữ liệu E2E dùng chung một cơ sở
+ * dữ liệu nên không so con số tuyệt đối được. Đồng thời kiểm tra không còn lượt xuất
+ * nào thiếu bút toán giá vốn (không thì ô cảnh báo ghi bù sẽ treo hoài trên card).
+ */
+test("Bảng cân đối có bút giá vốn 632/152 và không còn phiếu nào thiếu bút toán", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  const read632 = async () => {
+    const res = await request.post("/api/get_trial_balance", {
+      data: { fromDate: "2026-01-01", toDate: "2026-12-31" },
+    });
+    const text = await res.text();
+    expect(res.ok(), `get_trial_balance: ${text}`).toBe(true);
+    const rows = JSON.parse(text) as { code: string; debit_mvmt: number }[];
+    return rows.find((r) => r.code === "632")?.debit_mvmt ?? 0;
+  };
+  const before = await read632();
+
+  // Tạo mặt hàng riêng cho test: SP001 đã có sẵn nhiều lô giá khác nhau từ các test
+  // trước nên FIFO lấy lô cũ, không tính được đúng số tiền.
+  const prod = await request.post("/api/save_product", {
+    data: {
+      code: "SP-GV632",
+      name: "Hàng tính giá vốn 632",
+      unit: "Cái",
+      salePrice: 3_000,
+      costPrice: 1_000,
+      minStock: 0,
+      vatRate: 0,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(prod.ok(), `save_product: ${await prod.text()}`).toBe(true);
+
+  // Nhập 10 × 1.000 đ rồi bán 5 × 3.000 đ → giá vốn FIFO = 5 × 1.000 = 5.000 đ.
+  const inbound = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-10",
+      voucher_no: "PN-GV632",
+      description: "Nhập hàng cho test bút giá vốn 632",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP-GV632", quantity: 10, unit_price: 1_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(inbound.ok(), `save_inbound: ${await inbound.text()}`).toBe(true);
+  const outbound = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-11",
+      voucher_no: "PX-GV632",
+      description: "Bán hàng cho test bút giá vốn 632",
+      customer_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      outbound_type: "sale",
+      adjust_dir: "up",
+      receive_now: false,
+      create_invoice: false,
+      invoice: { number: "", eInvoiceNo: "", eInvoiceSymbol: "", eInvoiceDate: "" },
+      items: [
+        {
+          product_code: "SP-GV632",
+          quantity: 5,
+          unit_price: 3_000,
+          discount: 0,
+          industry_code: "PPHH",
+        },
+      ],
+      note: "",
+    },
+  });
+  expect(outbound.ok(), `save_outbound: ${await outbound.text()}`).toBe(true);
+
+  expect((await read632()) - before, "xuất hàng phải ghi bút Nợ 632 / Có 152").toBe(5_000);
+
+  // Dòng giá vốn là bút toán kế toán, KHÔNG được cộng vào "Cộng thành tiền" của phiếu:
+  // phiếu xuất bán 5 × 3.000 = 15.000 đ, nếu cộng giá vốn thì thành 20.000 đ.
+  const voucher = (await (
+    await request.post("/api/get_voucher", { data: { voucherNo: "PX-GV632" } })
+  ).json()) as { entry_type: string; amount: number }[];
+  expect(
+    voucher.map((r) => r.entry_type).sort(),
+    "phiếu chỉ chứa dòng bán hàng, không chứa dòng giá vốn",
+  ).toEqual(["PX"]);
+  expect(
+    voucher.reduce((s, r) => s + r.amount, 0),
+    "tổng tiền trên phiếu = doanh thu, không cộng giá vốn",
+  ).toBe(15_000);
+
+  // Ghi bù chạy lại không sinh trùng và không còn lượt nào thiếu.
+  const pending = await request.post("/api/cogs_backfill_pending", { data: {} });
+  const pendingText = await pending.text();
+  expect(pending.ok(), `cogs_backfill_pending: ${pendingText}`).toBe(true);
+  expect(
+    (JSON.parse(pendingText) as { count: number }).count,
+    "không còn phiếu xuất nào thiếu bút toán giá vốn",
+  ).toBe(0);
+  const again = await request.post("/api/backfill_cogs_entries", { data: {} });
+  const againText = await again.text();
+  expect(again.ok(), `backfill_cogs_entries: ${againText}`).toBe(true);
+  expect((JSON.parse(againText) as { count: number }).count, "chạy lại không ghi trùng").toBe(0);
+
+  // Card Tổng hợp DT-CP chỉ hiện ô ghi bù khi còn thiếu.
+  await sidebarButton(page, "Kế toán HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+  await page.waitForTimeout(1500);
+  await expect(page.getByTestId("cogs-backfill")).toHaveCount(0);
+});
