@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.16.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.15.1...v0.16.0) (2026-10-01)
+
+
+### Features
+
+* **accounting:** filter TT 152 books by household group and fill location line ([24eca88](https://github.com/tachibana-shin/hkd-tt152-app/commit/24eca884397cb97ceea40a45b9bdd1ae766bab7e))
+
 ## [0.15.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.15.0...v0.15.1) (2026-10-01)
 
 
