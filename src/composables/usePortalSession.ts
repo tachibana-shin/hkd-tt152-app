@@ -1,3 +1,4 @@
+import { hasInjectionContext } from "vue";
 import { api } from "@/db";
 import type { HddtStatus } from "@/types";
 
@@ -36,8 +37,25 @@ const newPassword = ref("");
 const RELOGIN_AHEAD_SECONDS = 3600;
 let timer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * Toast phải "chộp" lúc còn trong setup() của component: inject() gọi từ callback
+ * bấm nút (không có instance) không resolve được → useToast() của PrimeVue ném
+ * "No PrimeVue Toast provided!" và làm hỏng chính luồng bấm nút — trước đây bấm
+ * "Lưu tài khoản" lưu xong vẫn hiện toast lỗi "Không lưu được" ảo, còn nút
+ * "Đăng xuất" ném unhandled error. App.vue gọi usePortalSession() lúc khởi động
+ * nên chắc chắn chộp được; các màn khác cũng gọi lại nên tự chộp thêm nếu cần.
+ */
+let toastService: Pick<ReturnType<typeof useToast>, "add"> | null = null;
+const NOOP_TOAST: Pick<ReturnType<typeof useToast>, "add"> = { add: () => {} };
+
+function captureToast() {
+  if (!toastService && hasInjectionContext()) toastService = useToast();
+}
+
 function toast() {
-  return useToast();
+  captureToast();
+  if (!toastService) console.warn("[HĐĐT] thiếu PrimeVue Toast — bỏ qua thông báo");
+  return toastService ?? NOOP_TOAST;
 }
 
 async function loadPortalStatus() {
@@ -227,6 +245,7 @@ function stopHeartbeat() {
 }
 
 export function usePortalSession() {
+  captureToast(); // đang trong setup component → giữ lại cho các callback async sau
   return {
     status,
     statusLoaded,

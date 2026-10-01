@@ -155,7 +155,10 @@ pub(crate) async fn hddt_get_password(state: State<'_, AppState>) -> Result<Stri
     if cfg.password.is_empty() {
         return Err("Chưa lưu mật khẩu.".into());
     }
-    Ok(cfg.password)
+    // Trả JSON-stringify (như mọi lệnh khác) — frontend đọc bằng `parse()` =
+    // JSON.parse đúng một lần; trả chuỗi thô sẽ làm JSON.parse ném SyntaxError
+    // với mật khẩu thường → app không bao giờ soi được mật khẩu đã lưu.
+    Ok(json!(cfg.password).to_string())
 }
 
 /// Store the HDDT account. An empty `password` keeps the existing one; an empty

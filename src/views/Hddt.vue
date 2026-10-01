@@ -17,8 +17,9 @@ const cfg = reactive({ username: "", password: "", base_url: "" });
 const hasPassword = ref(false);
 const configured = ref(false);
 const showPassword = ref(false);
+/** Mật khẩu đã lưu trong CSDL — lúc ẨN mà ô vẫn đúng giá trị này thì đưa về
+ *  trống ("để trống nếu không đổi"), không giữ plaintext trong ô. */
 const savedPassword = ref("");
-const showSavedPassword = ref(false);
 
 /** Tự đổi mật khẩu khi sắp hết hạn (mặc định tắt — khôi phục mật khẩu bị mất rất khó). */
 const autoChange = ref(false);
@@ -112,7 +113,7 @@ async function loadConfig() {
   }
 }
 
-/** Nạp lại mật khẩu đã lưu → nút "Xem mật khẩu đã lưu" luôn phản ánh dữ liệu thật
+/** Nạp lại mật khẩu đã lưu → mắt soi ở ô mật khẩu luôn phản ánh dữ liệu thật
  *  (sau khi lưu/đăng nhập/tự đổi mật khẩu, giá trị trong CSDL có thể đã thay đổi). */
 async function reloadSavedPassword() {
   try {
@@ -143,11 +144,19 @@ async function save() {
     cfg.password = "";
     portal.resumeAutoLogin();
     toast.add({ severity: "success", summary: "Đã lưu tài khoản HĐĐT", life: 2500 });
-    await refreshStatus();
-    if (c.configured) await portal.loginPortal();
-    await reloadSavedPassword(); // cập nhật để nút "Xem mật khẩu đã lưu" hiển thị đúng
   } catch (e) {
     toastError("Không lưu được", e);
+    saving.value = false;
+    return;
+  }
+  try {
+    // Lưu đã xong hẳn — lỗi ở bước đăng nhập lại KHÔNG được bọc thành
+    // "Không lưu được" nữa (trước đây người dùng thấy lỗi ảo dù CSDL đã ghi).
+    await refreshStatus();
+    if (configured.value) await portal.loginPortal();
+    await reloadSavedPassword(); // cập nhật để bấm mắt soi ra đúng mật khẩu mới
+  } catch (e) {
+    toastError("Đã lưu nhưng chưa đăng nhập lại được", e);
   } finally {
     saving.value = false;
   }
@@ -179,7 +188,7 @@ async function changePassword() {
     if (res.ok && res.new_password) {
       portal.newPassword.value = res.new_password; // hiện ở dialog dùng chung
       changeBusy.value = false;
-      await reloadSavedPassword(); // mật khẩu mới đã được lưu vào CSDL → cập nhật nút "Xem mật khẩu đã lưu"
+      await reloadSavedPassword(); // mật khẩu mới đã được lưu vào CSDL → cập nhật để mắt soi ra đúng
       toast.add({ severity: "success", summary: "Đã đổi mật khẩu & đăng nhập lại", life: 4000 });
     } else if (res.need_manual) {
       await portal.openManual();
@@ -198,14 +207,29 @@ async function changePassword() {
   }
 }
 
-/** Bấm "Xem" → đọc thẳng mật khẩu từ CSDL ngay lúc đó (không dùng cache mount). */
-async function toggleSavedPassword() {
-  if (showSavedPassword.value) {
-    showSavedPassword.value = false;
+/**
+ * Mắt ở ô mật khẩu — dùng NGAY ô đang có, không mở ô thứ hai.
+ *
+ * HIỆN: ô còn trống mà đã lưu mật khẩu thì đọc từ CSDL vào ô này ngay lúc bấm
+ *  (trước đây hiện ra ô trống vô ích vì sau khi lưu giá trị bị xoá);
+ * ẨN: nếu ô vẫn đúng mật khẩu đã lưu thì đưa về trống ("để trống nếu không
+ *  đổi"), còn người dùng đã sửa thành mật khẩu mới thì giữ lại để bấm Lưu.
+ */
+async function togglePassword() {
+  if (showPassword.value) {
+    showPassword.value = false;
+    if (cfg.password && cfg.password === savedPassword.value) cfg.password = "";
     return;
   }
-  await reloadSavedPassword(); // luôn đọc giá trị thật tại thời điểm bấm
-  showSavedPassword.value = true;
+  if (!cfg.password && hasPassword.value) {
+    try {
+      cfg.password = await api.hddtGetPassword();
+      savedPassword.value = cfg.password;
+    } catch {
+      // Không đọc được mật khẩu lưu → ô trống, người dùng tự gõ.
+    }
+  }
+  showPassword.value = true;
 }
 
 // App đã tự đăng nhập cổng lúc khởi động; màn này chỉ nạp cấu hình tài khoản
@@ -280,31 +304,12 @@ useKeepAliveRefresh(reload);
                   :aria-label="showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'"
                   :title="showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'"
                   tabindex="-1"
-                  @click="showPassword = !showPassword"
+                  @click="togglePassword"
                 >
                   <i :class="showPassword ? 'pi pi-eye-slash' : 'pi pi-eye'" />
                 </button>
               </div>
             </FormField>
-            <!-- Xem mật khẩu đã lưu (local only) -->
-            <div v-if="hasPassword" class="mt-2">
-              <Button
-                size="small"
-                :label="showSavedPassword ? 'Ẩn mật khẩu đã lưu' : 'Xem mật khẩu đã lưu'"
-                :icon="showSavedPassword ? 'pi pi-eye-slash' : 'pi pi-eye'"
-                text
-                severity="secondary"
-                :loading="busy"
-                @click="toggleSavedPassword"
-              />
-              <InputText
-                v-if="showSavedPassword"
-                v-model="savedPassword"
-                readonly
-                class="mt-2 w-full"
-                placeholder="Chưa lưu mật khẩu"
-              />
-            </div>
           </div>
 
           <div class="mt-4">

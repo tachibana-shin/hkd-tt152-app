@@ -1846,6 +1846,43 @@ test("HĐĐT: app tự đăng nhập cổng lúc khởi động, không cần m�
   await expect(page.getByRole("button", { name: "Đăng nhập cổng HĐĐT" })).toBeHidden();
 });
 
+// Lưu tài khoản qua UI từng hiện toast lỗi ảo "Không lưu được: No PrimeVue Toast
+// provided!" — useToast() của PrimeVue ném khi gọi ngoài setup, nên bấm Lưu chạy
+// xong hết, thậm chí đăng nhập xong, vẫn bị báo lỗi. Mắt soi mật khẩu từng hiện ô
+// trống (giá trị bị xoá sau lưu) và mở thêm ô nhập riêng thay vì dùng ô đang có.
+test("HĐĐT: lưu tài khoản qua UI không lỗi ảo, mắt soi mật khẩu dùng chung ô", async ({
+  page,
+  request,
+}) => {
+  test.skip(LIVE_PORTAL, "Test UI luôn trỏ mock portal — bỏ qua khi chạy cổng thật");
+  await request.post("/api/hddt_save_config", {
+    data: { username: "0100000000", password: "mock", baseUrl: MOCK_PORTAL_URL },
+  });
+  await ensureLoggedIn(page);
+  await openTab(page, "HĐĐT", "/hddt");
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
+
+  // Mắt HIỆN: đọc mật khẩu đã lưu vào NGAY ô mật khẩu, không mở ô thứ hai.
+  const pw = page.locator('input[placeholder="Đã lưu — để trống nếu không đổi"]');
+  await expect(pw).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Hiện mật khẩu" }).click();
+  await expect(pw).toHaveAttribute("type", "text");
+  await expect(pw).toHaveValue("mock");
+  await expect(page.getByText("Xem mật khẩu đã lưu")).toHaveCount(0);
+
+  // Mắt ẨN: ô vẫn đúng mật khẩu đã lưu → đưa về trống ("để trống nếu không đổi").
+  await page.getByRole("button", { name: "Ẩn mật khẩu" }).click();
+  await expect(pw).toHaveValue("");
+
+  // Lưu qua UI: toast thành công + loginPortal chạy đến nơi (mock portal) —
+  // chứng minh không còn ném giữa chừng, không còn "Không lưu được" ảo.
+  await page.getByRole("button", { name: "Lưu tài khoản" }).click();
+  await expect(page.getByText("Đã lưu tài khoản HĐĐT")).toBeVisible();
+  await expect(page.getByText("Đã đăng nhập cổng HĐĐT")).toBeVisible();
+  await expect(page.getByText("Không lưu được")).toHaveCount(0);
+  await expect(page.getByText("No PrimeVue Toast provided")).toHaveCount(0);
+});
+
 test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả về hóa đơn", async ({
   page,
   request,
