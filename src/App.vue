@@ -6,6 +6,10 @@ import { useThemeStore } from "@/stores/theme";
 import { usePortalSession } from "@/composables/usePortalSession";
 import { useViewport } from "@/composables/useViewport";
 import LoginView from "@/views/LoginView.vue";
+// Phiên bản hiển thị ở chân sidebar. Đọc thẳng package.json — `scripts/set-version.mjs`
+// giữ package.json / tauri.conf.json / Cargo.toml cùng một phiên bản (CI có
+// `version:check`) nên không phải hardcode (dòng này từng kẹt "v0.3.0" từ commit đầu).
+import { version as appVersion } from "../package.json";
 
 const route = useRoute();
 const router = useRouter();
@@ -341,7 +345,7 @@ onUnmounted(() => {
 
       <!-- Footer -->
       <div v-if="!sidebarCompact" class="px-4 py-3 border-t border-gray-700 text-xs text-gray-500">
-        v0.3.0 · SQLite
+        v{{ appVersion }} · SQLite
       </div>
     </aside>
 
