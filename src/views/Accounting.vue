@@ -825,15 +825,6 @@ useKeepAliveRefresh(reload);
       <!-- Tổng hợp doanh thu - chi phí -->
       <SectionCard title="Tổng hợp doanh thu - chi phí">
         <template #icon><i-mdi-chart-box class="text-emerald-500" /></template>
-        <AppDataTable
-          :value="[]"
-          :loading="loading"
-          class="hidden"
-          :resizable-columns="false"
-          :sortable="false"
-        >
-          <Column field="x" header="x" />
-        </AppDataTable>
         <div class="space-y-3">
           <div class="flex justify-between items-center">
             <span class="text-sm text-gray-600">Doanh thu bán hàng</span>
