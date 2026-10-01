@@ -172,9 +172,35 @@ const hasData = computed(() => props.book.rows.length > 0);
 
 <style scoped>
 /* Khung sổ in ra nộp cơ quan thuế: đường viền mảnh, chữ nhỏ, không bo góc. */
+/*
+ * Hai màu riêng của khung sổ, tự đổi theo giao diện sáng / tối:
+ *
+ * - `--book-line` — màu kẻ ô. `--p-border-color` **không tồn tại** trong PrimeVue
+ *   nên trước đây `var(--p-border-color)` rơi về `currentColor` = màu chữ →
+ *   dark mode kẻ ô trắng bệt trên nền tối. Giữ `#334155` (đúng màu lưới cũ ở
+ *   giao diện sáng) rồi override sang xám chìm bên dưới khi `.dark`.
+ *   Không viết bằng `light-dark(...)`: `vite build` hạ cấp nó thành
+ *   `var(--lightningcss-light, …)var(--lightningcss-dark, …)` — hai token dính
+ *   nhau ra màu hỏng nên khung viền lại rơi về `currentColor`.
+ * - `--book-band` — nền hàng cột và hàng khối. `--p-surface-100` là **bảng màu cố
+ *   định** (`#f4f4f5` kể cả khi đang dark) nên chữ trắng đè lên thành "trắng
+ *   xóa", không đọc nổi. `--p-content-hover-background` là token đổi theo giao
+ *   diện (sáng `#f1f5f9`, tối `#27272a`) và PrimeVue chèn CSS này lúc chạy nên
+ *   không bị hạ cấp khi build.
+ */
 .book {
+  --book-line: #334155;
+  --book-band: var(--p-content-hover-background);
+
   font-size: 0.75rem;
   color: var(--p-text-color);
+}
+
+/* dark mode: kẻ ô xám chìm thay vì trắng bệt. `html.dark` cho đặc hiệu cao hơn
+   rule scoped phía trên nên không phụ thuộc thứ tự (viết một selector global
+   trọn vẹn — viết `:global(html.dark) .book` thì vue-sfc cắt mất `.book`). */
+:global(html.dark .book) {
+  --book-line: #3f3f46;
 }
 
 .book-head {
@@ -182,7 +208,7 @@ const hasData = computed(() => props.book.rows.length > 0);
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid var(--p-border-color);
+  border: 1px solid var(--book-line);
   border-bottom: 0;
   padding: 0.4rem 0.5rem;
 }
@@ -235,14 +261,14 @@ const hasData = computed(() => props.book.rows.length > 0);
 
 .book-table th,
 .book-table td {
-  border: 1px solid var(--p-border-color);
+  border: 1px solid var(--book-line);
   padding: 0.2rem 0.35rem;
   vertical-align: top;
   word-break: break-word;
 }
 
 .book-table th {
-  background: var(--p-surface-100);
+  background: var(--book-band);
   font-weight: 600;
   font-size: 0.7rem;
 }
@@ -252,23 +278,25 @@ const hasData = computed(() => props.book.rows.length > 0);
 }
 
 .book-row-section td {
-  background: var(--p-surface-100);
+  background: var(--book-band);
   font-weight: 700;
   text-transform: uppercase;
   font-size: 0.7rem;
 }
 
 .book-row-subtotal td {
-  background: color-mix(in srgb, var(--p-surface-100) 55%, transparent);
+  background: color-mix(in srgb, var(--book-band) 55%, transparent);
 }
 
 .book-row-total td {
   font-weight: 700;
-  border-top: 1px solid var(--p-text-color);
+  /* Cùng màu kẻ ô thay vì `currentColor`: dark mode trước đây ra đường kẻ trắng
+     bệt, còn khi in thì theo `--book-line` (vốn đã là màu đậm trên nền trắng). */
+  border-top: 1px solid var(--book-line);
 }
 
 .book-empty {
-  border: 1px solid var(--p-border-color);
+  border: 1px solid var(--book-line);
   border-top: 0;
   padding: 0.75rem;
   text-align: center;
@@ -309,13 +337,24 @@ const hasData = computed(() => props.book.rows.length > 0);
 }
 
 @media print {
+  /*
+   * In từ giao diện tối vẫn phải ra mẫu đen trên trắng: ép nền lại bằng xám
+   * nhạt (đúng mẫu gốc) và ép chữ về đen. Không ép thì dark mode in ra chữ
+   * trắng trên nền trắng — cơ quan thuế không đọc được.
+   */
+  .book {
+    color: #111;
+  }
+
   .book-table th {
     background: #eee !important;
+    color: #111 !important;
   }
 
   .book-row-section td,
   .book-row-subtotal td {
     background: #f6f6f6 !important;
+    color: #111 !important;
   }
 }
 </style>
