@@ -4096,6 +4096,172 @@ mod tests {
         assert_eq!(labels.last().unwrap(), "Tổng số thuế TNCN phải nộp");
     }
 
+    // ── S2a: mỗi ngành một khối, thuế tính theo tỷ lệ % của đúng ngành đó ────
+    //
+    // Hai ngành thường gặp của hộ kinh doanh: phân phối, cung cấp hàng hóa
+    // (GTGT 1% – TNCN 0,5%) và dịch vụ, xây dựng có bao thầu vật liệu
+    // (GTGT 3% – TNCN 1,5%). Sổ phải mở riêng từng khối, gom đúng chứng từ của
+    // ngành vào đúng khối và tính thuế theo tỷ lệ của ngành đó — gộp hai ngành
+    // vào một chỗ, hoặc lấy tỷ lệ của ngành khác, là sai mẫu.
+
+    /// Hồ sơ hộ nhóm 2 nộp TNCN theo % doanh thu — dạng thì mở được mẫu S2a.
+    async fn ho_nhom_2_theo_doanh_thu(pool: &SqlitePool) {
+        sqlx::query("UPDATE business SET tax_group = 2")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO app_setting(key, value) VALUES('tax_method', 'revenue') \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// (kind, số hiệu, diễn giải, số tiền) của từng dòng sổ — soi đúng thứ tự in.
+    fn row_lines(book: &serde_json::Value) -> Vec<(&str, &str, &str, f64)> {
+        book["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["kind"].as_str().unwrap_or(""),
+                    text_cell(r, "a"),
+                    text_cell(r, "c"),
+                    r["cells"]["1"].as_f64().unwrap_or(0.0),
+                )
+            })
+            .collect()
+    }
+
+    /// Số tiền của dòng có diễn giải đúng bằng `label`.
+    ///
+    /// Chỉ dùng cho sổ một khối ngành (mỗi nhãn "Thuế GTGT"/"Thuế TNCN" mới
+    /// xuất hiện một lần); sổ nhiều ngành thì phải soi theo thứ tự `row_lines`.
+    fn line_money(book: &serde_json::Value, label: &str) -> f64 {
+        row_lines(book)
+            .into_iter()
+            .find(|(_, _, c, _)| *c == label)
+            .unwrap_or_else(|| panic!("sổ thiếu dòng {label:?}"))
+            .3
+    }
+
+    #[tokio::test]
+    async fn s2a_mo_tung_khoi_nganh_va_tinh_thue_theo_ty_le_cua_nganh_do() {
+        let pool = test_pool().await;
+        ho_nhom_2_theo_doanh_thu(&pool).await;
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        // Phân phối, cung cấp hàng hóa: 1% GTGT + 0,5% TNCN. Hai phiếu cùng
+        // ngành để kiểm tra cộng dồn bên trong một khối.
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-01",
+            "P1",
+            "PPHH",
+            1.0,
+            600_000.0,
+            600_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-07-06",
+            "PX-02",
+            "P1",
+            "PPHH",
+            1.0,
+            400_000.0,
+            400_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        // Dịch vụ, xây dựng có bao thầu vật liệu: 3% GTGT + 1,5% TNCN.
+        add_journal_px(
+            &pool,
+            "2026-07-10",
+            "PX-03",
+            "P1",
+            "DVXD-KL",
+            1.0,
+            2_000_000.0,
+            2_000_000.0,
+            0.03,
+            0.015,
+        )
+        .await;
+
+        let book = build_book(&pool, "S2a").await;
+        assert_eq!(
+            row_lines(&book),
+            vec![
+                (
+                    "section",
+                    "",
+                    "1. Ngành nghề Phân phối, cung cấp hàng hóa (PPHH)",
+                    0.0
+                ),
+                ("detail", "PX-01", "test", 600_000.0),
+                ("detail", "PX-02", "test", 400_000.0),
+                ("subtotal", "", "Tổng cộng (1)", 1_000_000.0),
+                ("subtotal", "", "Thuế GTGT", 10_000.0), // 1.000.000 × 1%
+                ("subtotal", "", "Thuế TNCN", 5_000.0),  // 1.000.000 × 0,5%
+                (
+                    "section",
+                    "",
+                    "2. Ngành nghề Dịch vụ, xây dựng có bao thầu NVL (DVXD-KL)",
+                    0.0
+                ),
+                ("detail", "PX-03", "test", 2_000_000.0),
+                ("subtotal", "", "Tổng cộng (2)", 2_000_000.0),
+                ("subtotal", "", "Thuế GTGT", 60_000.0), // 2.000.000 × 3%
+                ("subtotal", "", "Thuế TNCN", 30_000.0), // 2.000.000 × 1,5%
+                ("total", "", "Tổng số thuế GTGT phải nộp", 70_000.0),
+                ("total", "", "Tổng số thuế TNCN phải nộp", 35_000.0),
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn s2a_lay_ty_le_thu_tu_bang_nganh_neu_doi_ty_le_so_doi_theo() {
+        let pool = test_pool().await;
+        ho_nhom_2_theo_doanh_thu(&pool).await;
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-01",
+            "P1",
+            "PPHH",
+            1.0,
+            1_000_000.0,
+            1_000_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+
+        // Tỷ lệ PPHH đang là 1% → sổ ghi 10.000 đ.
+        let book = build_book(&pool, "S2a").await;
+        assert_eq!(line_money(&book, "Thuế GTGT"), 10_000.0);
+
+        // Hộ sửa tỷ lệ ở màn Danh mục (1% → 2%) thì số thuế đổi theo — tỷ lệ
+        // lấy từ bảng `industry_group`, không nằm cứng trong builder.
+        sqlx::query("UPDATE industry_group SET vat_rate = 0.02 WHERE code = 'PPHH'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let book = build_book(&pool, "S2a").await;
+        assert_eq!(line_money(&book, "Thuế GTGT"), 20_000.0);
+        // Tỷ lệ TNCN không đụng tới thì số thuế TNCN giữ nguyên.
+        assert_eq!(line_money(&book, "Thuế TNCN"), 5_000.0);
+    }
+
     #[test]
     fn danh_sach_so_ap_dung_theo_nhom_ho_va_phuong_phap_thue() {
         // Nhóm 1 (miễn thuế) → chỉ sổ doanh thu + sổ thuế khác.
