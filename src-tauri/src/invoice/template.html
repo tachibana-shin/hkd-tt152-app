@@ -15,7 +15,7 @@
         body {
             width: 100%;
             height: 100%;
-            margin: 0 auto;
+            margin: 0;
             padding: 0;
             font-size: 13pt;
         }
@@ -28,7 +28,7 @@
 
         .main-page {
             max-width: 210mm;
-            padding: 20px 20px 10px;
+            padding: 20px 0 10px;
             margin: auto;
             border: 3px double rgba(145, 87, 21, 0.69);
             line-height: 1.5;
@@ -55,11 +55,14 @@
             display: block;
             font-weight: bold;
             text-transform: uppercase;
+            /* Margin mặc định của <h2> làm đầu trang bị giãn quá lớn. */
+            margin: 8px 0 2px;
         }
 
         .heading-content p {
             font-size: 13pt;
             text-align: right;
+            margin: 0;
         }
 
         .heading-content p.day {
@@ -90,10 +93,6 @@
             width: 100%;
             height: 0;
             border-bottom: 1px solid rgba(145, 87, 21, 0.69);
-        }
-
-        .flex-li {
-            display: flex;
         }
 
         .content-info {
@@ -270,10 +269,26 @@
 
         .ft-sign {
             padding-top: 20px;
+            /* Giữ nguyên cả khối chữ ký: nếu để tự do thì htmltopdf cắt ngang
+               giữa 2 tiêu đề và ô chữ ký, đẩy PDF thành 3 trang. */
+            break-inside: avoid;
         }
 
         .ft-sign .sign-dx {
             width: 100%;
+        }
+
+        /* htmltopdf nở bảng theo max-content của ô nên table 2 cột không ra
+           được 50/50; đổi sang flex: 2 tiêu đề bị đẩy về 2 đầu trang, ô chữ ký
+           (thuộc người bán) nằm trong hàng riêng đẩy hết sang phải. */
+        .ft-sign .sign-row {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .ft-sign .sign-box-row {
+            display: flex;
+            justify-content: flex-end;
         }
 
         .ft-sign .sign-dx h3 p {
@@ -399,7 +414,10 @@
 
         @page {
             size: A4;
-            margin: 0 !important;
+            /* Lề ngang 21pt: htmltopdf luôn đặt <table> ở margin-left của trang,
+               nên lề trang phải bằng đúng khoảng thụt lề của khối nội dung thì
+               bảng mới ăn khớp với phần information. */
+            margin: 0 21pt !important;
         }
 
         @media print {
@@ -411,7 +429,7 @@
             body {
                 width: auto;
                 height: auto;
-                margin: 0 auto;
+                margin: 0;
             }
 
             table tr,
@@ -449,7 +467,7 @@
         body {
             width: 100%;
             height: 100%;
-            margin: 0 auto;
+            margin: 0;
             padding: 0;
             font-size: 13pt;
         }
@@ -476,7 +494,7 @@
 
         .main-page {
             font-family: "Times New Roman";
-            padding: 20px;
+            padding: 20px 0 10px;
             line-height: 1.5;
             position: relative;
             z-index: 1;
@@ -698,7 +716,10 @@
 
         @page {
             size: A4;
-            margin: 0 !important;
+            /* Lề ngang 21pt: htmltopdf luôn đặt <table> ở margin-left của trang,
+               nên lề trang phải bằng đúng khoảng thụt lề của khối nội dung thì
+               bảng mới ăn khớp với phần information. */
+            margin: 0 21pt !important;
         }
 
         @media print {
@@ -710,7 +731,7 @@
             body {
                 width: auto;
                 height: auto;
-                margin: 0 auto;
+                margin: 0;
             }
 
             table,
@@ -752,19 +773,7 @@
                 <div style="width: 80px; min-height: 20px">
                     <div id="qrcodeTable">{{QR_IMG}}</div>
                 </div>
-                <div class="code-content">
-                    <b>
-                        Mẫu số:
-                        {{KHMSHDON}}</b>
-                    <br>
-                    <b>
-                        Ký hiệu:
-                        {{KHHDON}}</b>
-                    <br>
-                    <b>
-                        Số:
-                        {{SHDON}}</b>
-                </div>
+                <div class="code-content"><b>Mẫu số: {{KHMSHDON}}</b><br><b>Ký hiệu: {{KHHDON}}</b><br><b>Số: {{SHDON}}</b></div>
             </div>
             <div class="title-heading">
                 <h2 class="main-title">
@@ -952,8 +961,8 @@
                         </div>
                     </div>
                 </div>
-                <div class="li-row flex-li">
-                    <div class="data-item" style="width: 50%">
+                <div class="li-row">
+                    <div class="data-item">
                         <div class="di-label">
                             <span>Số bảng kê:</span>
                         </div>
@@ -961,7 +970,9 @@
                             <div>{{DKSBKE}}</div>
                         </div>
                     </div>
-                    <div class="data-item" style="width: 50%">
+                </div>
+                <div class="li-row">
+                    <div class="data-item">
                         <div class="di-label">
                             <span>Ngày bảng kê:</span>
                         </div>
@@ -979,6 +990,7 @@
                         <th class="tb-dvt">Đơn vị tính</th>
                         <th class="tb-sl">Số lượng</th>
                         <th class="tb-dg">Đơn giá</th>
+                        {{DISCOUNT_HEAD}}
                         <th class="tb-ttct">Thành tiền chưa có thuế GTGT</th>
                         <th class="tb-ts">Thuế suất</th>
                         <th class="tb-ttct tb-tt">Tiền thuế</th>
@@ -1008,15 +1020,11 @@
                     <table class="res-tb">
                         <tbody>
                             <tr>
-                                <td class="tx-center">
-                                    Tổng tiền chưa thuế
-                                    <br>
-                                    (Tổng cộng thành tiền chưa có thuế)
-                                </td>
+                                <td class="tx-center">Tổng tiền chưa thuế</td>
                                 <td class="tx-center" style="min-width: 200px; max-width: 300px;">{{TGTCTHUE_VND}}</td>
                             </tr>
                             <tr>
-                                <td class="tx-center">Tổng tiền thuế (Tổng cộng tiền thuế)</td>
+                                <td class="tx-center">Tổng tiền thuế</td>
                                 <td class="tx-center" style="min-width: 200px; max-width: 300px">{{TGTTHUE_VND}}</td>
                             </tr>
                             <tr>
@@ -1049,19 +1057,22 @@
         <div class="vip-divide"></div>
         <div class="ft-sign">
             <div class="sign-dx">
-                <h3>
-                    <p>NGƯỜI MUA HÀNG</p>
-                    <p>
-                        <i>(Chữ ký số (nếu có))</i>
-                    </p>
-                </h3>
-                <h3>
-                    <p>NGƯỜI BÁN HÀNG</p>
-                    <p>
-                        <i>(Chữ ký điện tử, chữ ký số)</i>
-                    </p>
+                <!-- &nbsp; cuối mỗi tiêu đề: htmltopdf đo max-content hẹp hơn
+                     chút so với khi in ra nên chữ hoa 13pt bị vỡ 2 dòng; thêm
+                     1 khoảng trắng không ngắt để đủ chỗ. -->
+                <div class="sign-row">
+                    <h3>
+                        <p>NGƯỜI MUA HÀNG&nbsp;</p>
+                        <p><i>(Chữ ký số (nếu có))</i></p>
+                    </h3>
+                    <h3>
+                        <p>NGƯỜI BÁN HÀNG&nbsp;</p>
+                        <p><i>(Chữ ký điện tử, chữ ký số)</i></p>
+                    </h3>
+                </div>
+                <div class="sign-box-row">
                     {{SIGN_BOX}}
-                </h3>
+                </div>
             </div>
             <div class="fd-end">
                 <p>

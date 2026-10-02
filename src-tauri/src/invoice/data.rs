@@ -30,6 +30,10 @@ pub struct GoodsRow {
     /// Tỷ lệ thuế hiển thị (chuỗi `"8%"`).
     pub ltsuat: Value,
     pub thtien: Value,
+    /// Tiền chiết khấu của dòng (`null` khi không có).
+    pub stckhau: Value,
+    /// Tỷ lệ thuế dạng số (`0.08`) — dự phòng khi thiếu `ltsuat`.
+    pub tsuat: Value,
 }
 
 /// Một dòng trong bảng tổng hợp theo thuế suất.

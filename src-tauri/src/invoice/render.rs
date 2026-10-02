@@ -121,14 +121,28 @@ fn render(data: &InvoiceData) -> String {
     slots.insert("QR_IMG", qr_image(&js_string(&data.qrcode)));
 
     // ── Bảng ──
-    slots.insert("GOODS_ROWS", goods_rows(&data.hdhhdvu));
+    // Chỉ thêm cột "Chiết khấu" khi có ít nhất 1 mặt hàng thực sự được chiết
+    // khấu — không thì bảng 8 cột như cũ.
+    let has_discount = data
+        .hdhhdvu
+        .iter()
+        .any(|row| js_number(&row.stckhau).is_some_and(|v| v > 0.0));
+    slots.insert(
+        "DISCOUNT_HEAD",
+        if has_discount {
+            r#"<th class="tb-dg">Chiết khấu</th>"#.to_string()
+        } else {
+            String::new()
+        },
+    );
+    slots.insert("GOODS_ROWS", goods_rows(&data.hdhhdvu, has_discount));
     slots.insert("TAX_ROWS", tax_rows(&data.thttltsuat));
 
     // ── Chữ ký số ──
     let signature = parse_signature(&data.nbcks);
     slots.insert("SIGN_BOX", sign_box(&signature));
 
-    substitute(template(), &slots)
+    drop_empty_info_rows(&substitute(template(), &slots))
 }
 
 /// Thẻ `<img>` cho mã QR (chuỗi rỗng → để trống, đúng như `capture.js`).
@@ -162,14 +176,156 @@ fn substitute(template: &str, slots: &HashMap<&str, String>) -> String {
     out
 }
 
-/// Bảng chi tiết hàng hóa — cột "Tính chất" / "Loại hàng hóa đặc trưng" /
-/// "Chiết khấu" đã bỏ, thứ tự cột lấy theo Chrome sau khi `capture.js` chạy
-/// (Thuế suất đẩy xuống cuối, thêm cột "Tiền thuế" rỗng ở `thead`).
-fn goods_rows(rows: &[GoodsRow]) -> String {
+/// Bỏ information không có giá trị — đúng như `Kn()` của `capture.js`: một
+/// `.data-item` rỗng thì bỏ ô đó, `.li-row` không còn ô nào thì bỏ cả dòng.
+///
+/// Làm trên chuỗi HTML đã dựng (không chạy script trong trang) nên cần tự đi
+/// tìm cặp thẻ `<div>` cân bằng thay vì dùng DOM.
+fn drop_empty_info_rows(html: &str) -> String {
+    let marker = r#"class="li-row""#;
+    let mut out = String::with_capacity(html.len());
+    let mut written = 0;
+    let mut pos = 0;
+
+    while let Some(rel) = html[pos..].find(marker) {
+        let start = pos + rel;
+        let Some(open) = html[..start].rfind('<') else {
+            break;
+        };
+        let Some(end) = div_block_end(html, open) else {
+            break;
+        };
+        pos = end;
+
+        let block = &html[open..end];
+        out.push_str(&html[written..open]);
+        out.push_str(&filter_li_row(block));
+        written = end;
+    }
+    out.push_str(&html[written..]);
+    out
+}
+
+/// Giữ lại các `.data-item` còn giá trị trong 1 dòng; không còn gì thì xoá
+/// hẳn dòng đó.
+fn filter_li_row(block: &str) -> String {
+    let Some(open_end) = block.find('>') else {
+        return block.to_string();
+    };
+    let body_end = block.rfind("</div>").unwrap_or(block.len());
+    let body = &block[open_end + 1..body_end];
+
+    let mut kept = String::with_capacity(body.len());
+    let mut written = 0;
+    let mut pos = 0;
+    let mut found = 0;
+    let mut alive = 0;
+
+    while let Some(rel) = body[pos..].find(r#"class="data-item""#) {
+        let start = pos + rel;
+        let Some(open) = body[..start].rfind('<') else {
+            break;
+        };
+        let Some(end) = div_block_end(body, open) else {
+            break;
+        };
+        pos = end;
+
+        let item = &body[open..end];
+        found += 1;
+        // Giữ luôn text đứng trước ô (chỉ là khoảng trắng) rồi mới quyết định
+        // giữ/bỏ ô. Không đẩy `written` qua ô bị bỏ thì ô giữ sau đó sẽ copy
+        // lại chính ô đã bỏ.
+        kept.push_str(&body[written..open]);
+        if item_has_value(item) {
+            kept.push_str(item);
+            alive += 1;
+        }
+        written = end;
+    }
+
+    if found == 0 {
+        return block.to_string(); // cấu trúc lạ → không đụng vào
+    }
+    if alive == 0 {
+        return String::new();
+    }
+    kept.push_str(&body[written..]);
+    format!("{}{}</div>", &block[..open_end + 1], kept)
+}
+
+/// `.di-value` có nội dung (sau khi bỏ thẻ) hay không.
+fn item_has_value(item: &str) -> bool {
+    let Some(rel) = item.find(r#"class="di-value""#) else {
+        return true;
+    };
+    let Some(open) = item[..rel].rfind('<') else {
+        return true;
+    };
+    let Some(end) = div_block_end(item, open) else {
+        return true;
+    };
+    let close = end.saturating_sub("</div>".len());
+    if close <= open {
+        return true;
+    }
+    let Some(gt) = item[open..close].find('>') else {
+        return true;
+    };
+    !strip_tags(&item[open + gt + 1..close]).trim().is_empty()
+}
+
+/// Vị trí sau thẻ `</div>` khớp với `<div>` mở tại `start`.
+fn div_block_end(html: &str, start: usize) -> Option<usize> {
+    let bytes = html.as_bytes();
+    let mut i = start;
+    let mut depth = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if html[i..].starts_with("</div") {
+            depth = depth.saturating_sub(1);
+            i += 5;
+            if depth == 0 {
+                return html[i..].find('>').map(|k| i + k + 1);
+            }
+        } else if html[i..].starts_with("<div") {
+            depth += 1;
+            i += 4;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Bỏ mọi `...</...>` còn lại chỉ để kiểm tra text có rỗng hay không.
+fn strip_tags(fragment: &str) -> String {
+    let mut out = String::with_capacity(fragment.len());
+    let mut rest = fragment;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]);
+        match rest[i..].find('>') {
+            Some(k) => rest = &rest[i + k + 1..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Bảng chi tiết hàng hóa — cột "Tính chất" / "Loại hàng hóa đặc trưng" đã bỏ,
+/// thứ tự cột lấy theo Chrome sau khi `capture.js` chạy (Thuế suất đẩy xuống
+/// cuối, thêm cột "Tiền thuế" tính sẵn ở `thead`).
+///
+/// Cột "Chiết khấu" chỉ xuất hiện khi `with_discount` (xem [`render`]).
+fn goods_rows(rows: &[GoodsRow], with_discount: bool) -> String {
     let mut out = String::new();
     for row in rows {
         out.push_str(&format!(
-            r#"<tr t-chat="{}"><td class="tx-center">{}</td><td class="tx-left" style="max-width: 220px; min-width: 220px; word-wrap: break-word;">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td></tr>"#,
+            r#"<tr t-chat="{}"><td class="tx-center">{}</td><td class="tx-left" style="max-width: 220px; min-width: 220px; word-wrap: break-word;">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td>"#,
             escape(&js_string(&row.tchat)),
             escape(&js_string(&row.stt)),
             escape(&js_string(&row.ten)),
@@ -177,11 +333,47 @@ fn goods_rows(rows: &[GoodsRow]) -> String {
             escape(&js_string(&row.sluong)),
             format_vnd(&row.dgia),
             format_vnd(&row.thtien),
+        ));
+        if with_discount {
+            out.push_str(&format!(
+                r#"<td class="tx-center">{}</td>"#,
+                format_vnd(&row.stckhau)
+            ));
+        }
+        out.push_str(&format!(
+            r#"<td class="tx-center">{}</td><td class="tx-center">{}</td></tr>"#,
             escape(&js_string(&row.ltsuat)),
+            line_tax(row),
         ));
         out.push('\n');
     }
     out
+}
+
+/// Tiền thuế của 1 dòng — `capture.js` không lấy `tthue` (luôn `null`) mà tự
+/// tính `thành tiền × tỷ lệ / 100`, và chỉ với dòng có `tchat` 1 hoặc 5.
+fn line_tax(row: &GoodsRow) -> String {
+    let taxable = matches!(js_number(&row.tchat), Some(v) if v == 1.0 || v == 5.0);
+    if !taxable {
+        return String::new();
+    }
+    let thtien = js_number(&row.thtien).unwrap_or(0.0);
+    let tax = thtien * ltsuat_percent(row) / 100.0;
+    format_vnd(&serde_json::Value::from(tax))
+}
+
+/// Đọc tỷ lệ thuế từ chuỗi hiển thị `"8%"` đúng cách `capture.js` đọc ô bảng
+/// (bỏ dấu phân cách nhóm, phẩy thập phân thành dấu chấm). Không đọc được thì
+/// suy ra từ trường số `tsuat` (`0.08` → `8`).
+fn ltsuat_percent(row: &GoodsRow) -> f64 {
+    let raw = js_string(&row.ltsuat)
+        .replace('.', "")
+        .replace(',', ".")
+        .replace('%', "");
+    match raw.trim().parse::<f64>() {
+        Ok(v) => v,
+        Err(_) => js_number(&row.tsuat).map_or(0.0, |v| v * 100.0),
+    }
 }
 
 /// Bảng tổng hợp theo thuế suất.
@@ -307,8 +499,146 @@ mod tests {
 
         let row = html.split("<tr t-chat=").nth(1).expect("có dòng hàng hóa");
         let row = row.split("</tr>").next().unwrap();
-        assert_eq!(row.matches("<td").count(), 7, "dòng hàng hóa cũng phải 7 ô");
+        assert_eq!(
+            row.matches("<td").count(),
+            8,
+            "dòng hàng hóa 7 ô + Tiền thuế"
+        );
         assert!(!row.contains("Chiết khấu"), "không còn cột chiết khấu");
+        // Tiền thuế = thành tiền × 8% (tchat = 1) và format theo vi-VN.
+        assert!(row.contains(">160.000<"), "phải tính ra 160.000: {}", row);
+    }
+
+    #[test]
+    fn discount_column_appears_only_when_a_line_is_discounted() {
+        let plain = build_invoice_html(&fixture()).expect("dựng HTML được");
+        assert!(!plain.contains(">Chiết khấu<"), "không chiết khấu → bỏ cột");
+
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        data["hdhhdvu"][0]["stckhau"] = serde_json::json!(200_000);
+        let discounted = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+
+        let thead = goods_thead(&discounted);
+        assert_eq!(thead.matches("<th ").count(), 9, "thêm 1 cột Chiết khấu");
+        let dg = thead.find("Đơn giá").expect("có cột Đơn giá");
+        let ck = thead.find(">Chiết khấu<").expect("có cột Chiết khấu");
+        let ttct = thead
+            .find("Thành tiền chưa có thuế")
+            .expect("có cột Thành tiền");
+        assert!(
+            dg < ck && ck < ttct,
+            "Chiết khấu nằm giữa Đơn giá và Thành tiền"
+        );
+
+        let row = discounted
+            .split("<tr t-chat=")
+            .nth(1)
+            .expect("có dòng")
+            .split("</tr>")
+            .next()
+            .unwrap()
+            .to_string();
+        assert_eq!(row.matches("<td").count(), 9, "dòng cũng thêm ô Chiết khấu");
+        assert!(row.contains(">200.000<"), "giá trị chiết khấu phải in ra");
+    }
+
+    #[test]
+    fn info_rows_without_a_value_are_dropped() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        for gone in [
+            "Mã cửa hàng:",
+            "Tên cửa hàng:",
+            "Số hộ chiếu:",
+            "Mã ĐVCQHVNSNN:",
+            "CCCD người mua:",
+            "Số bảng kê:",
+            "Ngày bảng kê:",
+        ] {
+            assert!(!html.contains(gone), "dòng rỗng `{gone}` phải bị ẩn");
+        }
+        // Dòng có giá trị giữ nguyên.
+        for kept in ["Tên người bán:", "Địa chỉ:", "Hình thức thanh toán:"] {
+            assert!(html.contains(kept), "dòng `{kept}` không rỗng phải giữ");
+        }
+        // Nhãn đi kèm giá trị vẫn còn.
+        assert!(html.contains("HỘ KINH DOANH MOCK"));
+    }
+
+    /// "Số bảng kê" / "Ngày bảng kê" giờ là 2 dòng độc lập: dòng có giá trị
+    /// giữ nguyên, dòng rỗng biến mất — không ảnh hưởng đến nhau.
+    #[test]
+    fn valued_bang_ke_row_is_kept_while_the_empty_one_is_dropped() {
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        data["dknlbke"] = serde_json::json!("2026-09-15");
+        let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+        assert!(html.contains("Ngày bảng kê:"), "có giá trị thì phải giữ");
+        assert!(html.contains("2026-09-15"));
+        assert!(!html.contains("Số bảng kê:"), "dòng kia rỗng thì bỏ hẳn");
+    }
+
+    /// Một `.li-row` mà có nhiều `.data-item`: bỏ ô rỗng giữ ô còn giá trị,
+    /// hết ô thì xoá cả dòng. Template hiện mỗi dòng chỉ 1 ô nhưng `Kn()` của
+    /// `capture.js` vẫn lọc trên từng ô nên ta giữ đúng hành vi đó.
+    #[test]
+    fn filter_li_row_keeps_items_with_a_value_and_drops_the_rest() {
+        let item = |label: &str, value: &str| {
+            format!(
+                "<div class=\"data-item\"><div class=\"di-label\"><span>{label}</span></div>\
+                 <div class=\"di-value\"><div>{value}</div></div></div>"
+            )
+        };
+        let row = |body: &str| format!("<div class=\"li-row\">{body}</div>");
+
+        let mixed = row(&format!(
+            "{}{}",
+            item("Số bảng kê:", ""),
+            item("Ngày bảng kê:", "15/09/2026")
+        ));
+        let kept = filter_li_row(&mixed);
+        assert!(kept.contains("Ngày bảng kê:"), "ô còn giá trị phải giữ");
+        assert!(!kept.contains("Số bảng kê:"), "ô rỗng phải bỏ");
+        assert!(
+            kept.starts_with(r#"<div class="li-row">"#),
+            "còn ô thì dòng vẫn phải ở lại: {kept}"
+        );
+
+        let all_empty = row(&format!("{}{}", item("A:", ""), item("B:", "")));
+        assert_eq!(filter_li_row(&all_empty), "", "hết ô thì xoá cả dòng");
+    }
+
+    #[test]
+    fn taxable_line_gets_tax_and_other_lines_stay_blank() {
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        // tchat = 2 (không thuộc 1/5) → ô Tiền thuế để trống như capture.js.
+        data["hdhhdvu"][0]["tchat"] = serde_json::json!(2);
+        let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+        let row = html
+            .split("<tr t-chat=")
+            .nth(1)
+            .expect("có dòng")
+            .split("</tr>")
+            .next()
+            .unwrap();
+        assert!(
+            row.ends_with(r#"<td class="tx-center"></td>"#),
+            "tchat 2 không tính thuế: {row}"
+        );
+
+        // Thiếu ltsuat → suy từ tsuat.
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        data["hdhhdvu"][0]["ltsuat"] = serde_json::Value::Null;
+        let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+        assert!(html.contains(">160.000<"), "phải suy ra 8% từ tsuat");
+    }
+
+    fn goods_thead(html: &str) -> String {
+        html.split("<table class=\"res-tb\">")
+            .nth(1)
+            .expect("bảng hàng hóa là bảng đầu tiên")
+            .split("</thead>")
+            .next()
+            .unwrap_or_default()
+            .to_string()
     }
 
     #[test]
@@ -327,6 +657,32 @@ mod tests {
         assert!(
             !unsigned.contains("Signature Valid"),
             "thiếu chữ ký thì bỏ hẳn khối"
+        );
+    }
+
+    /// Khối chữ ký: 2 tiêu đề nằm trong 1 hàng nên ngang nhau (hai đầu trang),
+    /// ô chữ ký của người bán ở hàng riêng bên dưới, và cả khối không được vỡ
+    /// sang trang — htmltopdf cắt giữa khối thì PDF thành 3 trang.
+    #[test]
+    fn signature_headings_share_a_row_and_the_block_stays_whole() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+
+        let start = html
+            .find(r#"<div class="sign-row">"#)
+            .expect("phải có hàng tiêu đề chữ ký");
+        let end = div_block_end(&html, start).expect("hàng tiêu đề phải cân bằng thẻ");
+        let row = &html[start..end];
+        assert!(row.contains("NGƯỜI MUA HÀNG"), "thiếu tiêu đề người mua");
+        assert!(row.contains("NGƯỜI BÁN HÀNG"), "thiếu tiêu đề người bán");
+
+        let box_row = html
+            .find(r#"<div class="sign-box-row">"#)
+            .expect("phải có hàng ô chữ ký");
+        assert!(box_row > end, "ô chữ ký phải nằm sau hàng tiêu đề");
+
+        assert!(
+            template().contains("break-inside: avoid"),
+            ".ft-sign phải giữ nguyên cả khối chữ ký trên một trang"
         );
     }
 
