@@ -32,12 +32,35 @@ const sidebarButton = (page: Page, label: string) =>
 const ttxlySelect = (page: Page) => page.locator('label:text-is("Kết quả kiểm tra") + .p-select');
 
 /**
+ * Đưa trang về màn đăng nhập và CHỜ app thật sự render xong đó.
+ *
+ * Hai bẫy của test đầu tiên, đều do `isVisible()` kiểm tra TỨC THÌ:
+ *  - app còn đang bootstrap (spinner) → trả false sai, test tưởng đã đăng nhập
+ *    rồi chờ Dashboard;
+ *  - server đã thoát mà trang vẫn mở ra Dashboard → không có form để điền.
+ *
+ * `<header>` chỉ tồn tại trong nhánh app shell (chỉ render khi đã đăng nhập),
+ * LoginView không có `h2` → hai marker này loại trừ lẫn nhau. Chờ một trong hai
+ * rồi mới phân nhánh; nếu trang vào được Dashboard thì đăng xuất qua UI.
+ */
+async function gotoLogin(page: Page) {
+  const username = page.getByTestId("login-username");
+  const shell = page.locator("header h2");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(username.or(shell).first()).toBeVisible({ timeout: 30_000 });
+  if (await username.isVisible()) return;
+  await page.getByRole("button", { name: "Đăng xuất" }).click();
+  await expect(username).toBeVisible({ timeout: 20_000 });
+}
+
+/**
  * Đảm bảo phiên đăng nhập đã thực sự rời khỏi server trước khi mở trang.
  *
  * `POST /api/logout` là idempotent: nó luôn trả "ok" cả khi phiên đã tắt, nên
- * response không nói lên gì — có lúc page.goto("/") vẫn ra Dashboard (flake của
- * test đầu tiên). Poll `get_current_user` cho tới khi server thật sự trả `null`.
- * Hết chờ mà vẫn còn phiên (instance lạ, mạng chập chờn) thì đăng xuất qua UI.
+ * response không nói lên gì. Poll `get_current_user` cho tới khi server thật sự
+ * trả `null` — nhưng đó vẫn chỉ là lời khai của server: trang có thể mở ra
+ * Dashboard (phản hồi muộn, mạng chập chờn) → luôn kết thúc bằng `gotoLogin`
+ * để tự kiểm chứng trên UI và đăng xuất nếu cần.
  */
 async function ensureLoggedOut(request: APIRequestContext, page: Page) {
   await request.post("/api/logout", { data: {} });
@@ -45,29 +68,27 @@ async function ensureLoggedOut(request: APIRequestContext, page: Page) {
     const res = await request.post("/api/get_current_user", { data: {} }).catch(() => null);
     if (res?.ok()) {
       const body = (await res.text()).trim();
-      if (body === "null" || body === "") return;
+      if (body === "null" || body === "") break;
     }
     await page.waitForTimeout(250);
   }
-  // Fallback: vẫn còn phiên → đăng xuất trực tiếp trên giao diện.
-  await page.goto("/");
-  const logout = page.getByRole("button", { name: "Đăng xuất" });
-  if (await logout.isVisible().catch(() => false)) {
-    await logout.click();
-    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 10_000 });
-  }
+  await gotoLogin(page);
 }
 
 /** Ensure we are logged in via the UI: fill the login form if shown, then wait for the Dashboard. */
 async function ensureLoggedIn(page: Page) {
-  await page.goto("/");
   const username = page.getByTestId("login-username");
+  const shell = page.locator("header h2");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  // Chờ app xong bootstrap rồi mới phân nhánh — `isVisible()` tức thì sẽ trả
+  // false sai khi trang còn đang hiện spinner.
+  await expect(username.or(shell).first()).toBeVisible({ timeout: 30_000 });
   if (await username.isVisible()) {
     await username.fill(ADMIN.username);
     await page.getByTestId("login-password").fill(ADMIN.password);
     await page.getByRole("button", { name: "Đăng nhập" }).click();
   }
-  await expect(page.locator("header h2")).toHaveText("Tổng quan", { timeout: 20_000 });
+  await expect(shell).toHaveText("Tổng quan", { timeout: 20_000 });
 }
 
 test("login with a wrong password shows an error toast and stays on the login screen", async ({
@@ -76,9 +97,9 @@ test("login with a wrong password shows an error toast and stays on the login sc
 }) => {
   // Phiên đăng nhập của app là trạng thái chung trong tiến trình server, không
   // gắn cookie theo browser context → nếu instance cũ còn sống (hoặc test trước
-  // đã login) thì trang mở ra là Dashboard. Đảm bảo đã đăng xuất trước.
+  // đã login) thì trang mở ra là Dashboard. ensureLoggedOut đã kiểm chứng tới
+  // khi màn đăng nhập thật sự hiện ra.
   await ensureLoggedOut(request, page);
-  await page.goto("/");
   await page.getByTestId("login-username").fill(ADMIN.username);
   await page.getByTestId("login-password").fill("wrong-password");
   await page.getByRole("button", { name: "Đăng nhập" }).click();
@@ -178,6 +199,17 @@ test("Accounts tab renders the seeded chart of accounts (default accounts)", asy
   await expect(page.locator(".p-datatable")).toBeVisible();
   await expect(page.getByText("Tiền mặt", { exact: true })).toBeVisible();
   await expect(page.getByText("Phải trả cho người bán", { exact: true })).toBeVisible();
+});
+
+test("Catalogs kho hàng tab loads rows (wrong row type = 400 + empty table)", async ({ page }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Đối tác & Kho").click();
+  await expect(page.locator("header h2")).toHaveText("Danh mục đối tác & kho");
+  // Tab Kho hàng: `get_warehouses_page` decode sai kiểu row từng trả 400
+  // "no column found for name: address" → bảng rỗng + toast lỗi.
+  await page.getByRole("tab", { name: /Kho hàng/ }).click();
+  await expect(page.getByText("KHO-CHINH", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".p-toast-message")).toHaveCount(0);
 });
 
 test("no JS/console errors while navigating several tabs", async ({ page }) => {

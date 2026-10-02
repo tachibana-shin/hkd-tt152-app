@@ -1128,7 +1128,10 @@ export interface VoucherRow {
   customer_name: string;
   quantity: number;
   unit_price: number;
+  /** Thành tiền SAU chiết khấu (đã hạch toán). */
   amount: number;
+  /** Tiền chiết khấu của dòng (0 nếu không CK) — cộng lại với `amount` ra thành tiền GỐC. */
+  discount: number;
   debit_account: string;
   credit_account: string;
   industry_code: string;

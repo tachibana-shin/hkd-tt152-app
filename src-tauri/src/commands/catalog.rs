@@ -180,8 +180,14 @@ pub(crate) async fn get_warehouses_page(
     state: State<'_, AppState>,
     lazy_event: String,
 ) -> Result<String, String> {
+    warehouses_page(&*state.pool.read().await, &lazy_event).await
+}
+
+/// Core của `get_warehouses_page` — tách ra nhận `&SqlitePool` để test được
+/// (command nhận `State` không dựng nổi trong unit test).
+pub(crate) async fn warehouses_page(pool: &SqlitePool, lazy_event: &str) -> Result<String, String> {
     let ev: crate::commands::page::PageEvent =
-        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+        serde_json::from_str(lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
     let page = ev.page();
     // Ô tìm kiếm toàn cục + hàng lọc theo cột (các điều kiện AND với nhau).
     let (mut where_sql, params) =
@@ -200,14 +206,10 @@ pub(crate) async fn get_warehouses_page(
         where_sql, order
     );
     let count_sql = format!("SELECT COUNT(*) FROM warehouse{where_sql}");
-    let (rows, total): (Vec<SupplierRow>, i64) = crate::commands::page::fetch_page(
-        &*state.pool.read().await,
-        &sql,
-        &count_sql,
-        &params,
-        &page,
-    )
-    .await?;
+    // sqlx runtime (không macro) không kiểm tra cột lúc build → struct phải khớp
+    // đúng bảng: warehouse chỉ có id/code/name, dùng SupplierRow sẽ lỗi ColumnNotFound.
+    let (rows, total): (Vec<WarehouseRow>, i64) =
+        crate::commands::page::fetch_page(pool, &sql, &count_sql, &params, &page).await?;
     Ok(
         serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
             .unwrap_or_default(),
@@ -252,8 +254,13 @@ pub(crate) async fn get_suppliers_page(
     state: State<'_, AppState>,
     lazy_event: String,
 ) -> Result<String, String> {
+    suppliers_page(&*state.pool.read().await, &lazy_event).await
+}
+
+/// Core của `get_suppliers_page` — tách ra nhận `&SqlitePool` để test được.
+pub(crate) async fn suppliers_page(pool: &SqlitePool, lazy_event: &str) -> Result<String, String> {
     let ev: crate::commands::page::PageEvent =
-        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+        serde_json::from_str(lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
     let page = ev.page();
     // Ô tìm kiếm toàn cục + hàng lọc theo cột (các điều kiện AND với nhau).
     let (mut where_sql, params) = crate::commands::page::global_where(
@@ -275,14 +282,9 @@ pub(crate) async fn get_suppliers_page(
         where_sql, order
     );
     let count_sql = format!("SELECT COUNT(*) FROM supplier{where_sql}");
-    let (rows, total): (Vec<CustomerRow>, i64) = crate::commands::page::fetch_page(
-        &*state.pool.read().await,
-        &sql,
-        &count_sql,
-        &params,
-        &page,
-    )
-    .await?;
+    // Cùng hình dạng cột với CustomerRow nhưng dùng đúng kiểu bảng (đồng nhất, chống lệch sau này).
+    let (rows, total): (Vec<SupplierRow>, i64) =
+        crate::commands::page::fetch_page(pool, &sql, &count_sql, &params, &page).await?;
     Ok(
         serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
             .unwrap_or_default(),
@@ -1099,5 +1101,43 @@ mod tests {
         let q = build_product_page_query(&ev).unwrap();
         assert!(!q.sql.to_lowercase().contains("drop table"));
         assert!(q.sql.contains("ORDER BY code ASC"));
+    }
+
+    #[tokio::test]
+    async fn warehouse_page_dung_kieu_row_cua_warehouse() {
+        let pool = test_pool().await;
+        // init_database đã tạo sẵn kho mặc định — thêm 1 kho nữa để có nhiều dòng.
+        sqlx::query("INSERT OR IGNORE INTO warehouse (code, name) VALUES ('KHO-TEST', 'Kho test')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // SELECT chỉ có id/code/name → decode bằng struct thiếu/thừa cột sẽ lỗi
+        // ColumnNotFound lúc runtime (sqlx không kiểm tra được khi SQL dựng bằng format!).
+        let json = warehouses_page(&pool, "{}").await.expect("warehouses_page");
+        let page: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(page["total"].as_i64().unwrap() >= 1);
+        let rows = page["rows"].as_array().unwrap();
+        assert!(rows.iter().any(|r| r["code"] == "KHO-TEST"));
+        // Đúng cấu trúc: warehouse không có address/tax_code/phone.
+        assert!(rows.iter().all(|r| r.get("address").is_none()));
+    }
+
+    #[tokio::test]
+    async fn supplier_page_dung_kieu_row_cua_supplier() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO supplier (code, name, address, tax_code, phone)
+             VALUES ('NCC001', 'Nhà cung cấp A', 'Hà Nội', '0123456789', '0900000000')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let json = suppliers_page(&pool, "{}").await.expect("suppliers_page");
+        let page: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(page["total"], 1);
+        assert_eq!(page["rows"][0]["code"], "NCC001");
+        assert_eq!(page["rows"][0]["address"], "Hà Nội");
     }
 }

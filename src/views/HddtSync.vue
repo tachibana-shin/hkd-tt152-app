@@ -353,7 +353,10 @@ void (async () => {
         <Column header="Dòng / HH mới" :style="{ width: '8rem' }">
           <template #body="{ data }">{{ data.line_count }} / {{ data.new_product_count }}</template>
         </Column>
-        <Column header="Trạng thái" :style="{ width: '9rem' }">
+        <!-- Ba cột phải cùng `frozen align-frozen="right"`: PrimeVue tính
+             `inset-inline-end` theo cột frozen KẾ TIẾP nên pin cùng lúc mới không
+             chồng lên cột thao tác (pin riêng 2 cột sẽ giấu mất nút "Nhập kho"). -->
+        <Column header="Trạng thái" :frozen="true" align-frozen="right" :style="{ width: '9rem' }">
           <template #body="{ data }">
             <Tag
               :value="syncStatusLabel(data.status)"
@@ -362,7 +365,7 @@ void (async () => {
             />
           </template>
         </Column>
-        <Column header="Phiếu nhập" :style="{ width: '8rem' }">
+        <Column header="Phiếu nhập" :frozen="true" align-frozen="right" :style="{ width: '8rem' }">
           <template #body="{ data }">
             <Button
               v-if="data.voucher_no"
@@ -376,7 +379,13 @@ void (async () => {
             <span v-else class="text-xs text-gray-400">—</span>
           </template>
         </Column>
-        <Column v-if="!syncImporting" header="" :style="{ width: '7rem' }">
+        <Column
+          v-if="!syncImporting"
+          header=""
+          :frozen="true"
+          align-frozen="right"
+          :style="{ width: '7rem' }"
+        >
           <template #body="{ data }">
             <Button
               v-if="data.status === 'pending'"

@@ -30,9 +30,21 @@ const partnerCode = computed(() => first.value?.supplier_code || first.value?.cu
 const lines = computed(() => rows.value.filter((r) => r.product_code !== ""));
 /** Dòng bút toán không gắn hàng (chiết khấu/thuế tách riêng) — hiện dạng ghi chú. */
 const extraLines = computed(() => rows.value.filter((r) => r.product_code === ""));
-const total = computed(() =>
-  lines.value.reduce((s, r) => s + (r.amount !== 0 ? r.amount : r.quantity * r.unit_price), 0),
-);
+
+// `amount` trên sổ là thành tiền SAU chiết khấu; tiền CK lưu riêng cột `discount`.
+const disc = (r: VoucherRow) => r.discount || 0;
+// Dòng cũ chưa ghi `amount` (nhưng cũng không có CK) mới cần tính SL × ĐG;
+// amount = 0 mà có CK nghĩa là CK 100% → thành tiền sau CK đúng là 0.
+const lineNet = (r: VoucherRow) =>
+  r.amount !== 0 || disc(r) !== 0 ? r.amount : r.quantity * r.unit_price;
+/** Thành tiền TRƯỚC chiết khấu (giá gốc) = thành tiền sau CK + tiền CK. */
+const lineGross = (r: VoucherRow) => lineNet(r) + disc(r);
+/** Đơn giá GỐC / đơn vị — nhập kho lưu `unit_price` đã trừ CK nên phải tính lại. */
+const lineUnitGross = (r: VoucherRow) => (r.quantity ? lineGross(r) / r.quantity : r.unit_price);
+
+const grossTotal = computed(() => lines.value.reduce((s, r) => s + lineGross(r), 0));
+const discountTotal = computed(() => lines.value.reduce((s, r) => s + disc(r), 0));
+const netTotal = computed(() => grossTotal.value - discountTotal.value);
 
 /** "YYYY-MM-DD" → "dd/MM/yyyy" (ngày lập phiếu trong DB là ngày, không cần giờ). */
 const postingDate = computed(() => {
@@ -124,6 +136,7 @@ watch(
               <th class="w-24 px-2 py-1 text-right">SL</th>
               <th class="w-32 px-2 py-1 text-right">Đơn giá</th>
               <th class="w-36 px-2 py-1 text-right">Thành tiền</th>
+              <th class="w-28 px-2 py-1 text-right">Tiền CK</th>
             </tr>
           </thead>
           <tbody>
@@ -133,11 +146,15 @@ watch(
               <td class="px-2 py-1">{{ r.product_name }}</td>
               <td class="px-2 py-1">{{ r.unit }}</td>
               <td class="px-2 py-1 text-right">{{ fmt(r.quantity) }}</td>
-              <td class="px-2 py-1 text-right">{{ money(r.unit_price) }}</td>
-              <td class="px-2 py-1 text-right font-medium">{{ money(r.amount) }}</td>
+              <td class="px-2 py-1 text-right">{{ money(lineUnitGross(r)) }}</td>
+              <td class="px-2 py-1 text-right font-medium">{{ money(lineGross(r)) }}</td>
+              <td class="px-2 py-1 text-right">
+                <span v-if="r.discount" class="text-emerald-600">−{{ money(r.discount) }}</span>
+                <span v-else class="text-gray-400">—</span>
+              </td>
             </tr>
             <tr v-if="!lines.length">
-              <td colspan="7" class="px-2 py-3 text-center text-gray-400">
+              <td colspan="8" class="px-2 py-3 text-center text-gray-400">
                 Phiếu không có dòng hàng hóa
               </td>
             </tr>
@@ -145,7 +162,15 @@ watch(
           <tfoot>
             <tr class="border-t border-gray-200 font-semibold">
               <td colspan="6" class="px-2 py-1 text-right text-gray-500">Cộng thành tiền</td>
-              <td class="px-2 py-1 text-right">{{ money(total) }}</td>
+              <td class="px-2 py-1 text-right">{{ money(grossTotal) }}</td>
+              <td class="px-2 py-1 text-right text-emerald-600">
+                {{ discountTotal ? `−${money(discountTotal)}` : "" }}
+              </td>
+            </tr>
+            <tr class="font-semibold">
+              <td colspan="6" class="px-2 py-1 text-right text-gray-500">Thành tiền (sau CK)</td>
+              <td class="px-2 py-1 text-right">{{ money(netTotal) }}</td>
+              <td class="px-2 py-1 text-right"></td>
             </tr>
           </tfoot>
         </table>

@@ -1732,6 +1732,76 @@ mod tests {
             "giá trị nhập = thành tiền − tiền CK, thấy {}",
             amount
         );
+        // Cột `discount` phải được GHI LẠI (không chỉ trừ vào amount): nếu mất ở
+        // đây thì màn xem phiếu chỉ hiện thành tiền sau CK, không hiện chiết khấu.
+        let discount: f64 = sqlx::query_scalar(
+            "SELECT discount FROM journal_entry WHERE entry_type = 'PN' AND product_code <> ''",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            (discount - 2_860_000.0).abs() < 1.0,
+            "journal_entry.discount phải là tiền CK, thấy {}",
+            discount
+        );
+    }
+
+    #[tokio::test]
+    async fn backfill_restores_discount_lost_before_column_existed() {
+        // Hóa đơn import trước 30/09/2026 được trừ CK vào `amount` nhưng chưa có
+        // cột `discount` → màn xem phiếu hiện "Tiền CK —". Migration
+        // 20261002001 phải dựng lại được số tiền CK từ detail_json.
+        let pool = test_pool().await;
+        let lines = r#"{"ten":"Aptomat ABN203c","dvtinh":"Cái","mhhdvu":null,"sluong":2.0,
+                        "dgia":2860000.0,"stckhau":2860000.0,"tlckhau":50.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-ck-legacy", 1, lines).await;
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+
+        // Mô phỏng đúng dữ liệu cũ: amount đã là SAU chiết khấu, discount = 0.
+        sqlx::query("UPDATE journal_entry SET discount = 0 WHERE voucher_no = ?")
+            .bind(&out.voucher_no)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query(include_str!(
+            "../../migrations/20261002001_backfill_hddt_discount.sql"
+        ))
+        .execute(&pool)
+        .await
+        .expect("migration backfill phải chạy được");
+
+        let discount: f64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(discount), 0) FROM journal_entry
+              WHERE voucher_no = ? AND entry_type = 'PN' AND product_code <> ''",
+        )
+        .bind(&out.voucher_no)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            (discount - 2_860_000.0).abs() < 1.0,
+            "backfill phải dựng lại tiền CK 2.860.000, thấy {}",
+            discount
+        );
+
+        // amount KHÔNG được đổi — backfill chỉ ghi thêm cột chiết khấu.
+        let amount: f64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(amount), 0) FROM journal_entry
+              WHERE voucher_no = ? AND entry_type = 'PN' AND product_code <> ''",
+        )
+        .bind(&out.voucher_no)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            (amount - 2_860_000.0).abs() < 1.0,
+            "amount phải giữ nguyên là giá trị sau CK, thấy {}",
+            amount
+        );
     }
 
     #[tokio::test]

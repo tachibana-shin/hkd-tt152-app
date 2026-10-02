@@ -709,7 +709,11 @@ pub(crate) struct VoucherRow {
     pub(crate) customer_name: String,
     pub(crate) quantity: f64,
     pub(crate) unit_price: f64,
+    /// Thành tiền SAU chiết khấu (đã trừ `discount`).
     pub(crate) amount: f64,
+    /// Tiền chiết khấu của dòng (0 nếu không CK) — `amount` đã trừ nên cộng lại
+    /// được thành tiền GỐC để trình bày trên phiếu.
+    pub(crate) discount: f64,
     pub(crate) debit_account: String,
     pub(crate) credit_account: String,
     pub(crate) industry_code: String,
