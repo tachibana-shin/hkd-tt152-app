@@ -3062,14 +3062,41 @@ test("Bảng cân đối có bút giá vốn 632/152 và không còn phiếu nà
 });
 
 // ─── XEM PDF HÓA ĐƠN ĐIỆN TỬ ───
-// HTML được app dựng offline từ `detail_json` (font/ảnh/script QR nhúng base64)
-// rồi mở trong iframe; nút "Tải PDF" in bằng Chrome headless ở backend — phần
-// in ra file được phủ bởi test Rust `commands::pdf::html_to_pdf_returns_a_real_pdf_document`,
-// test e2e này chỉ chốt phần giao diện + dựng HTML.
+// Backend dựng HTML từ `detail_json` rồi render PDF ngay trong Rust
+// (`render_invoice_pdf`), frontend chỉ hiện bytes PDF qua `blob:` URL. Phần nội
+// dung + bố cục của PDF được phủ bởi test Rust `invoice::render::tests`
+// (đủ 7 cột bảng, chữ ký, mã QR, đúng 2 trang A4); test e2e này chốt phần
+// giao diện: dialog mở ra thì iframe thật sự chứa một file PDF.
 
 /** iframe xem trước hóa đơn (chỉ có khi dialog PDF đang mở). */
 const invoiceFrame = (page: Page) =>
   page.getByRole("dialog").filter({ has: page.locator('iframe[title="Hóa đơn điện tử"]') });
+
+/** URL `blob:` của PDF đang xem trước. */
+async function invoicePdfUrl(page: Page): Promise<string> {
+  const url = await invoiceFrame(page)
+    .locator('iframe[title="Hóa đơn điện tử"]')
+    .getAttribute("src");
+  expect(url, "iframe phải trỏ tới blob PDF").toMatch(/^blob:/);
+  return url as string;
+}
+
+/** Đọc blob PDF để chắc backend trả về file PDF thật chứ không rỗng/lỗi. */
+async function expectValidPdf(page: Page) {
+  const head = await invoicePdfUrl(page).then((url) =>
+    page.evaluate(async (u) => {
+      const bytes = new Uint8Array(await (await fetch(u)).arrayBuffer());
+      return {
+        head: String.fromCharCode(...bytes.slice(0, 5)),
+        size: bytes.length,
+        pages: (new TextDecoder("latin1").decode(bytes).match(/\/Type\s*\/Page[^s]/g) ?? []).length,
+      };
+    }, url),
+  );
+  expect(head.head, "phải là file PDF").toBe("%PDF-");
+  expect(head.size, "PDF quá nhỏ").toBeGreaterThan(5000);
+  expect(head.pages, "phải có ít nhất 1 trang").toBeGreaterThan(0);
+}
 
 test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập", async ({ page, request }) => {
   await ensureLoggedIn(page);
@@ -3152,9 +3179,7 @@ test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập"
   // ── 1. Từ bảng Đồng bộ: mở PDF ngay trên dòng hóa đơn ──
   await row.getByRole("button", { name: /Xem PDF hóa đơn/ }).click();
   await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
-  const frame = invoiceFrame(page).frameLocator('iframe[title="Hóa đơn điện tử"]');
-  await expect(frame.locator("body")).toContainText("Máy lọc nước PDF", { timeout: 30_000 });
-  await expect(frame.locator("body")).toContainText("HÓA ĐƠN GIÁ TRỊ GIA TĂNG");
+  await expectValidPdf(page);
   await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
   await expect(invoiceFrame(page)).toBeHidden();
 
@@ -3164,9 +3189,7 @@ test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập"
   await expect(vDlg.getByText("Hóa đơn điện tử")).toBeVisible();
   await vDlg.getByRole("button", { name: "Xem PDF" }).click();
   await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
-  await expect(
-    invoiceFrame(page).frameLocator('iframe[title="Hóa đơn điện tử"]').locator("body"),
-  ).toContainText("Máy lọc nước PDF", { timeout: 30_000 });
+  await expectValidPdf(page);
   await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
   await vDlg.getByRole("button", { name: "Đóng" }).click();
   await expect(vDlg).toBeHidden();
@@ -3186,15 +3209,13 @@ test("Xem PDF hóa đơn: mở từ tab Tra cứu HĐĐT", async ({ page, reques
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
 
   // Dòng tra cứu chưa có chi tiết trong DB → app phải gọi cổng lấy chi tiết rồi
-  // mới dựng HTML (nút có spinner trong lúc chờ).
+  // mới render PDF (nút có spinner trong lúc chờ).
   await table
     .getByRole("button", { name: /^Xem PDF hóa đơn/ })
     .first()
     .click();
   await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
-  const frame = invoiceFrame(page).frameLocator('iframe[title="Hóa đơn điện tử"]');
-  await expect(frame.locator("body")).toContainText("Bình nước MOCK", { timeout: 30_000 });
-  await expect(frame.locator("body")).toContainText("HÓA ĐƠN GIÁ TRỊ GIA TĂNG");
+  await expectValidPdf(page);
   await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
   await expect(invoiceFrame(page)).toBeHidden();
 });

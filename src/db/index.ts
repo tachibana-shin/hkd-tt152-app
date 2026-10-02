@@ -847,8 +847,8 @@ export const api = {
   hddtVoucherInvoiceDetail: (voucherNo: string) =>
     call<string>("hddt_voucher_invoice_detail", { voucherNo }),
 
-  /** In HTML hóa đơn (frontend đã dựng) thành PDF — trả về base64. */
-  renderInvoicePdf: (html: string) => call<string>("render_invoice_pdf", { html }),
+  /** Sinh PDF hóa đơn từ `detail_json` (backend dựng HTML + render) — base64. */
+  renderInvoicePdf: (detailJson: string) => call<string>("render_invoice_pdf", { detailJson }),
 
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>

@@ -617,8 +617,10 @@ pub async fn api_invoke(
             shdon: String,
             id: Option<String>
         ),
-        // HTML hóa đơn nhúng font/ảnh ≈ 5MB → cần nâng giới hạn body (xem `router`).
-        "render_invoice_pdf" => mx!(commands::pdf::render_invoice_pdf, body, html: String),
+        // Payload là `detail_json` (vài KB) — backend tự dựng HTML rồi render PDF.
+        "render_invoice_pdf" => {
+            mx!(commands::pdf::render_invoice_pdf, body, detail_json: String)
+        }
         "hddt_sync_import" => mx!(
             commands::hddt::hddt_sync_import,
             body,
@@ -786,9 +788,9 @@ pub fn router() -> Router {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/{cmd}", post(api_invoke))
-        // Mặc định axum chặn body > 2MB (HTTP 413 "length limit exceeded").
-        // HTML hóa đơn được nhúng font Times + ảnh nền base64 (~5MB) nên phải
-        // nới lên — server chỉ nghe trên 127.0.0.1 và mọi lệnh đều qua đăng nhập.
+        // Mặc định axum chặn body > 2MB (HTTP 413 "length limit exceeded"). Nới
+        // lên cho các lệnh gửi dữ liệu lớn — server chỉ nghe trên 127.0.0.1 và
+        // mọi lệnh đều qua đăng nhập.
         .layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024))
         .fallback(get(serve_assets))
 }

@@ -38,6 +38,14 @@ axum = "0.8"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-updater = "2.13.0"
 tauri-plugin-process = "2.4.0"
+# Render PDF hóa đơn 100% trong backend (không cần Chrome trên máy user).
+# Không có trên crates.io → lấy thẳng từ repo upstream; feature `js` tắt mặc
+# định nên không kéo theo engine JavaScript (boa_engine) vào binary.
+htmltopdf = { git = "https://github.com/SanzarRehman/HTML2PDF" }
+# Sinh mã QR cho hóa đơn (cùng mức hiệu chỉnh EC-low, 80px như bản frontend).
+qrcode = { version = "0.14.1", features = ["image"] }
+# Mã hoá PNG cho mã QR (chỉ cần codec PNG — htmltopdf tự giải mã PNG in-house).
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
