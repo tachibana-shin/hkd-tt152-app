@@ -822,6 +822,34 @@ export const api = {
     return { invoicesDeleted: r.invoices_deleted ?? 0, daysDeleted: r.days_deleted ?? 0 };
   },
 
+  // ─── XEM PDF HÓA ĐƠN ĐIỆN TỬ ───
+  /** Chi tiết hóa đơn lấy trực tiếp từ cổng — màn Tra cứu HĐĐT chưa có trong DB. */
+  hddtInvoiceDetail: (args: {
+    nbmst: string;
+    khmshdon: number;
+    khhdon: string;
+    shdon: string;
+    id?: string;
+  }) =>
+    call<string>("hddt_invoice_detail", {
+      nbmst: args.nbmst,
+      khmshdon: args.khmshdon,
+      khhdon: args.khhdon,
+      shdon: args.shdon,
+      id: args.id ?? null,
+    }),
+
+  /** Chi tiết hóa đơn đã lưu trong DB theo `portal_id` (màn Đồng bộ HĐĐT). */
+  hddtSyncInvoiceDetail: (portalId: string) =>
+    call<string>("hddt_sync_invoice_detail", { portalId }),
+
+  /** Chi tiết hóa đơn đã gắn với 1 phiếu nhập (dùng trong popup xem phiếu). */
+  hddtVoucherInvoiceDetail: (voucherNo: string) =>
+    call<string>("hddt_voucher_invoice_detail", { voucherNo }),
+
+  /** In HTML hóa đơn (frontend đã dựng) thành PDF — trả về base64. */
+  renderInvoicePdf: (html: string) => call<string>("render_invoice_pdf", { html }),
+
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>
     parse<AuditEntry[]>(await call<string>("get_audit_log", { limit })),

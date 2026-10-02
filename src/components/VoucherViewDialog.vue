@@ -19,6 +19,10 @@ const rows = ref<VoucherRow[]>([]);
 const loading = ref(false);
 const errorMsg = ref("");
 
+// Hóa đơn điện tử đã gắn với phiếu (nếu có) — bấm vào để xem/in PDF.
+const invoiceDetail = ref("");
+const invoicePdfVisible = ref(false);
+
 const first = computed(() => rows.value[0]);
 const isOutbound = computed(() => first.value?.entry_type === "PX");
 const title = computed(() => (isOutbound.value ? "PHIẾU XUẤT KHO" : "PHIẾU NHẬP KHO"));
@@ -67,6 +71,7 @@ watch(
     loading.value = true;
     errorMsg.value = "";
     rows.value = [];
+    invoiceDetail.value = "";
     try {
       rows.value = await api.getVoucher(no);
     } catch (e) {
@@ -74,6 +79,13 @@ watch(
       toast.add({ severity: "error", summary: "Không xem được phiếu", detail: String(e) });
     } finally {
       loading.value = false;
+    }
+    // Hỏi thêm hóa đơn đã gắn (phiếu nhập tay / phiếu xuất không có → lỗi và
+    // ẩn nút, không báo toast vì đây chỉ là tính năng bổ sung).
+    try {
+      invoiceDetail.value = await api.hddtVoucherInvoiceDetail(no);
+    } catch {
+      invoiceDetail.value = "";
     }
   },
   { immediate: true },
@@ -101,6 +113,22 @@ watch(
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <span class="text-sm text-gray-500">Số phiếu</span>
         <span class="text-base font-semibold">{{ first.voucher_no }}</span>
+      </div>
+
+      <!-- Phiếu tạo từ hóa đơn HĐĐT mới có chi tiết để xem (nhập tay thì không). -->
+      <div
+        v-if="invoiceDetail"
+        class="flex items-center justify-between rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+      >
+        <span class="text-gray-600"><i class="pi pi-file-pdf mr-2" />Hóa đơn điện tử</span>
+        <Button
+          label="Xem PDF"
+          icon="pi pi-eye"
+          link
+          size="small"
+          class="text-blue-700"
+          @click="invoicePdfVisible = true"
+        />
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm md:grid-cols-4">
@@ -187,4 +215,10 @@ watch(
 
     <p v-else-if="!loading" class="py-4 text-sm text-gray-500">Chứng từ không có dữ liệu.</p>
   </AppDialog>
+
+  <InvoicePdfDialog
+    v-model:visible="invoicePdfVisible"
+    :detail-json="invoiceDetail"
+    :title="`Hóa đơn của phiếu ${voucherNo}`"
+  />
 </template>

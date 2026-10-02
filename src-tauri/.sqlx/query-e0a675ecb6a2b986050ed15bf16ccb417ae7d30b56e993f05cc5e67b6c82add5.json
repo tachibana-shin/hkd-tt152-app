@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT detail_json FROM hddt_imported_invoice\n          WHERE portal_id = ? AND detail_json <> ''",
+  "describe": {
+    "columns": [
+      {
+        "name": "detail_json",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e0a675ecb6a2b986050ed15bf16ccb417ae7d30b56e993f05cc5e67b6c82add5"
+}

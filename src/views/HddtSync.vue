@@ -202,6 +202,24 @@ function openVoucher(no: string) {
   viewVoucherVisible.value = true;
 }
 
+// ─── Xem PDF hóa đơn điện tử ───
+// Chi tiết đọc từ DB theo portal_id (đã cache khi quét, hoặc hóa đơn đã nhập
+// kho) nên không cần gọi cổng.
+const pdfVisible = ref(false);
+const pdfDetail = ref("");
+const pdfTitle = ref("");
+
+async function openInvoicePdf(row: HddtSyncRow) {
+  try {
+    pdfDetail.value = await api.hddtSyncInvoiceDetail(row.portal_id);
+  } catch (e) {
+    toastError("Không lấy được chi tiết hóa đơn", e);
+    return;
+  }
+  pdfTitle.value = `Hóa đơn ${row.khhdon} ${row.shdon}`;
+  pdfVisible.value = true;
+}
+
 // Mốc bắt đầu = hddt_start_date của hộ → phải nạp config trước rồi mới tính;
 // mốc cuối = hôm nay (hôm nay quét nhưng không cache). Không dùng onMounted vì
 // không có thao tác ref/DOM ở đây.
@@ -330,7 +348,20 @@ void (async () => {
           <template #body="{ data }">{{ syncKindLabel(data.portal_kind) }}</template>
         </Column>
         <Column header="Số HĐ" :style="{ width: '9rem' }">
-          <template #body="{ data }">{{ data.khhdon }} {{ data.shdon }}</template>
+          <template #body="{ data }">
+            <span class="inline-flex items-center gap-1">
+              {{ data.khhdon }} {{ data.shdon }}
+              <Button
+                icon="pi pi-file-pdf"
+                text
+                size="small"
+                class="!p-1 text-gray-500"
+                :aria-label="`Xem PDF hóa đơn ${data.khhdon} ${data.shdon}`"
+                v-tooltip="'Xem PDF hóa đơn'"
+                @click="openInvoicePdf(data)"
+              />
+            </span>
+          </template>
         </Column>
         <Column header="Người bán">
           <template #body="{ data }">
@@ -400,5 +431,7 @@ void (async () => {
     </SectionCard>
 
     <VoucherViewDialog v-model:visible="viewVoucherVisible" :voucher-no="viewVoucherNo" />
+
+    <InvoicePdfDialog v-model:visible="pdfVisible" :detail-json="pdfDetail" :title="pdfTitle" />
   </div>
 </template>

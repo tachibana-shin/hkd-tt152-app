@@ -63,6 +63,7 @@ declare module 'vue' {
     InvoiceDraftDialog: typeof import('./components/InvoiceDraftDialog.vue')['default']
     InvoiceExportDialog: typeof import('./components/InvoiceExportDialog.vue')['default']
     InvoiceLinkDialog: typeof import('./components/InvoiceLinkDialog.vue')['default']
+    InvoicePdfDialog: typeof import('./components/InvoicePdfDialog.vue')['default']
     InvoiceStatusDialog: typeof import('./components/InvoiceStatusDialog.vue')['default']
     LineItemsEditor: typeof import('./components/LineItemsEditor.vue')['default']
     PartnerDialog: typeof import('./components/PartnerDialog.vue')['default']

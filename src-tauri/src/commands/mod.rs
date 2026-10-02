@@ -14,6 +14,7 @@ pub(crate) mod invoice;
 pub(crate) mod invoice_export;
 pub(crate) mod page;
 pub(crate) mod payroll;
+pub(crate) mod pdf;
 pub(crate) mod profile;
 pub(crate) mod settings;
 pub(crate) mod stock;

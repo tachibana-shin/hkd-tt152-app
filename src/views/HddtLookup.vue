@@ -292,6 +292,35 @@ const canNextPage = computed(() => {
 });
 const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
 
+// ─── Xem PDF hóa đơn điện tử ───
+// Dòng trong bảng là kết quả tra cứu của cổng nên CHƯA có chi tiết trong DB —
+// phải gọi `detail` một lần rồi dựng HTML offline. Lấy chi tiết từ cổng mất
+// vài giây nên ô nút có spinner.
+const pdfVisible = ref(false);
+const pdfDetail = ref("");
+const pdfTitle = ref("");
+const pdfLoadingId = ref("");
+
+async function openInvoicePdf(row: HddtInvoiceRow) {
+  if (pdfLoadingId.value) return;
+  pdfLoadingId.value = String(row.id ?? "");
+  try {
+    pdfDetail.value = await api.hddtInvoiceDetail({
+      nbmst: String(row.nbmst ?? ""),
+      khmshdon: Number(row.khmshdon ?? 0),
+      khhdon: String(row.khhdon ?? ""),
+      shdon: String(row.shdon ?? ""),
+      id: row.id === undefined || row.id === null ? undefined : String(row.id),
+    });
+    pdfTitle.value = `Hóa đơn ${row.khhdon ?? ""} ${row.shdon ?? ""}`.trim();
+    pdfVisible.value = true;
+  } catch (e) {
+    toastError("Không lấy được chi tiết hóa đơn", e);
+  } finally {
+    pdfLoadingId.value = "";
+  }
+}
+
 // Bộ lọc khởi tạo ở trên (ô mặc định "bán ra × máy tính tiền"); chỉ cần đọc
 // trạng thái phiên cổng — không có thao tác ref/DOM nên gọi thẳng ở root.
 // App đã đảm bảo phiên lúc khởi động; gọi thêm ở đây để màn này tự đăng nhập
@@ -522,10 +551,26 @@ void (async () => {
             <Tag v-else :value="ttxlyLabel(data)" severity="secondary" />
           </template>
         </Column>
+        <Column header="" :style="{ width: '4rem' }">
+          <template #body="{ data }">
+            <Button
+              icon="pi pi-file-pdf"
+              text
+              size="small"
+              class="!p-1 text-gray-500"
+              :aria-label="`Xem PDF hóa đơn ${data.khhdon ?? ''} ${data.shdon ?? ''}`"
+              v-tooltip="'Xem PDF hóa đơn'"
+              :loading="pdfLoadingId === String(data.id ?? '')"
+              @click="openInvoicePdf(data)"
+            />
+          </template>
+        </Column>
       </AppDataTable>
       <p v-if="searchTime" class="mt-2 text-xs text-gray-400">
         <i class="pi pi-clock mr-1" />Thời gian truy vấn cổng: {{ searchTime }} ms
       </p>
     </SectionCard>
+
+    <InvoicePdfDialog v-model:visible="pdfVisible" :detail-json="pdfDetail" :title="pdfTitle" />
   </div>
 </template>

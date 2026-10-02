@@ -749,3 +749,109 @@ pub(crate) async fn hddt_sync_clear_cache(state: State<'_, AppState>) -> Result<
     .await;
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
+
+// ─── Xem PDF hóa đơn điện tử ───
+//
+// Nguồn chi tiết hóa đơn (`detail_json`) theo từng màn hình:
+//   • Đồng bộ HĐĐT → cache `hddt_purchase_invoice` hoặc `hddt_imported_invoice`;
+//   • Phiếu nhập    → `hddt_imported_invoice` qua `inbound_voucher_id`;
+//   • Tra cứu HĐĐT  → chưa chắc đã lưu nên gọi thẳng cổng.
+// Chuỗi trả về được frontend dựng thành HTML rồi in ra PDF (`render_invoice_pdf`).
+
+/// Lấy `detail_json` của hóa đơn trong màn Đồng bộ HĐĐT (chưa nhập kho nằm ở
+/// cache, đã nhập kho nằm ở bảng hóa đơn chính thức — cache bị xoá khi import).
+#[tauri::command]
+pub(crate) async fn hddt_sync_invoice_detail(
+    state: State<'_, AppState>,
+    portal_id: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let cached = sqlx::query_scalar!(
+        "SELECT detail_json FROM hddt_purchase_invoice
+          WHERE portal_id = ? AND detail_json <> ''",
+        portal_id
+    )
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if let Some(detail) = cached {
+        return Ok(detail);
+    }
+    let imported = sqlx::query_scalar!(
+        "SELECT detail_json FROM hddt_imported_invoice
+          WHERE portal_id = ? AND detail_json <> ''",
+        portal_id
+    )
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    imported.ok_or_else(|| {
+        "Hóa đơn này chưa có chi tiết — hãy bấm \"Quét cổng\" để lấy chi tiết trước.".to_string()
+    })
+}
+
+/// Lấy `detail_json` của hóa đơn đã gắn với 1 phiếu nhập kho (dùng ở popup phiếu).
+#[tauri::command]
+pub(crate) async fn hddt_voucher_invoice_detail(
+    state: State<'_, AppState>,
+    voucher_no: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let detail = sqlx::query_scalar!(
+        "SELECT hi.detail_json
+           FROM inbound_voucher iv
+           JOIN hddt_imported_invoice hi ON hi.inbound_voucher_id = iv.id
+          WHERE iv.voucher_no = ? AND hi.detail_json <> ''
+          LIMIT 1",
+        voucher_no
+    )
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    detail.ok_or_else(|| format!("Phiếu {voucher_no} chưa gắn hóa đơn điện tử nào."))
+}
+
+/// Lấy chi tiết hóa đơn từ cổng HĐĐT cho màn Tra cứu HĐĐT (dòng list chưa có
+/// chi tiết trong DB nên phải gọi thật).
+#[tauri::command]
+pub(crate) async fn hddt_invoice_detail(
+    state: State<'_, AppState>,
+    nbmst: String,
+    khmshdon: i64,
+    khhdon: String,
+    shdon: String,
+    id: Option<String>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    if khmshdon <= 0 {
+        return Err("Thiếu mã mẫu số (khmshdon) — không lấy được chi tiết hóa đơn.".to_string());
+    }
+    let session = state
+        .portal
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
+    let cfg = read_config(&state).await?;
+    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
+    let detail = client
+        .invoice_detail(
+            &session.token,
+            &nbmst,
+            &khmshdon.to_string(),
+            &khhdon,
+            &shdon,
+            id.as_deref().unwrap_or(""),
+        )
+        .await?;
+    audit(
+        &state,
+        "hddt_invoice_detail",
+        "hddt",
+        &format!("{khhdon} {shdon}"),
+    )
+    .await;
+    Ok(detail.to_string())
+}

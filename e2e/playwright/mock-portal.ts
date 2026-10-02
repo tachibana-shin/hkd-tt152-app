@@ -46,15 +46,52 @@ const LIST_ROW = {
 /** Dòng hàng của hóa đơn (endpoint detail). */
 const DETAIL_LINES = [
   {
+    stt: 1,
+    tchat: 1,
     ten: "Bình nước MOCK",
     dvtinh: "Bình",
     mhhdvu: "SP-MOCK",
     sluong: 2,
     dgia: 50000,
+    thtien: 100000,
     stckhau: 0,
+    ltsuat: "8%",
     tsuat: 0.08,
   },
 ];
+
+/**
+ * Chi tiết hóa đơn trả về `/invoices/detail` — đủ trường mà bố cục PDF
+ * (`src/invoice-pdf`) in ra: tiêu đề, ngày, 2 bên, bảng tổng thuế và chữ ký số.
+ * Giữ tối giản ở mức test được, không mô phỏng cả 122 trường của cổng thật.
+ */
+const DETAIL = {
+  ...LIST_ROW,
+  tlhdon: "HÓA ĐƠN GIÁ TRỊ GIA TĂNG",
+  nky: "2026-09-01T10:00:00Z",
+  mhdon: "MOCK0001",
+  tchat: 1,
+  chma: "CQT-HN",
+  chten: "Cục Thuế Thành phố Hà Nội",
+  nbdchi: "12 Đường Mock, Quận Ba Đình, Hà Nội",
+  nbsdthoai: "0241234567",
+  nbstkhoan: "000123456789",
+  nbtnhang: "NGÂN HÀNG MOCK",
+  nmtnmua: "HỘ KINH DOANH MOCK",
+  nmten: "HỘ KINH DOANH MOCK",
+  nmdchi: "Số 409 Đường Mock, Hà Nội",
+  thtttoan: "Chuyển khoản",
+  hdhhdvu: DETAIL_LINES,
+  thttltsuat: [{ tsuat: "8%", thtien: 100000, tthue: 8000, gttsuat: null }],
+  tgtcthue: 100000,
+  tgtthue: 8000,
+  tgtphi: 0,
+  ttcktmai: 0,
+  tgtttbso: 108000,
+  tgtttbchu: "Một trăm lẻ tám nghìn đồng",
+  nbcks: JSON.stringify({ Subject: "CÔNG TY CỔ PHẦN MOCK", SigningTime: "01/09/2026 10:00:00" }),
+  qrcode: "https://hoadondientu.gdt.gov.vn/e2e/99999999",
+};
 
 const json = (res: import("node:http").ServerResponse, status: number, body: unknown) => {
   const text = JSON.stringify(body);
@@ -97,7 +134,7 @@ const server = createServer((req, res) => {
         path: "uri=/invoices/detail",
       });
     }
-    return json(res, 200, { hdhhdvu: DETAIL_LINES });
+    return json(res, 200, DETAIL);
   }
   if (path.endsWith("/invoices/sold") || path.endsWith("/invoices/purchase")) {
     return json(res, 200, { datas: [LIST_ROW], state: "", total: 1, time: 12 });

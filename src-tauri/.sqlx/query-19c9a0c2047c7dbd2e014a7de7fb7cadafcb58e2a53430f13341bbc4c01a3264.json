@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT hi.detail_json\n           FROM inbound_voucher iv\n           JOIN hddt_imported_invoice hi ON hi.inbound_voucher_id = iv.id\n          WHERE iv.voucher_no = ? AND hi.detail_json <> ''\n          LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "detail_json",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "19c9a0c2047c7dbd2e014a7de7fb7cadafcb58e2a53430f13341bbc4c01a3264"
+}

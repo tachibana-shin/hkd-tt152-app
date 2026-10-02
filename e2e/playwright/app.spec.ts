@@ -3060,3 +3060,141 @@ test("Bảng cân đối có bút giá vốn 632/152 và không còn phiếu nà
   await page.waitForTimeout(1500);
   await expect(page.getByTestId("cogs-backfill")).toHaveCount(0);
 });
+
+// ─── XEM PDF HÓA ĐƠN ĐIỆN TỬ ───
+// HTML được app dựng offline từ `detail_json` (font/ảnh/script QR nhúng base64)
+// rồi mở trong iframe; nút "Tải PDF" in bằng Chrome headless ở backend — phần
+// in ra file được phủ bởi test Rust `commands::pdf::html_to_pdf_returns_a_real_pdf_document`,
+// test e2e này chỉ chốt phần giao diện + dựng HTML.
+
+/** iframe xem trước hóa đơn (chỉ có khi dialog PDF đang mở). */
+const invoiceFrame = (page: Page) =>
+  page.getByRole("dialog").filter({ has: page.locator('iframe[title="Hóa đơn điện tử"]') });
+
+test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Đồng bộ HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+
+  // Chi tiết hóa đơn phải đủ trường mà bố cục PDF dùng (tiêu đề, 2 bên, tổng
+  // thuế, chữ ký số) — template đã được làm mềm nên thiếu trường cũng không ném.
+  const detail = {
+    tlhdon: "HÓA ĐƠN GIÁ TRỊ GIA TĂNG",
+    nky: "2026-09-15T03:00:00Z",
+    mhdon: "MOCKPDF01",
+    nbten: "CÔNG TY CỔ PHẦN PDF MOCK",
+    nmten: "HỘ KINH DOANH MOCK",
+    nbdchi: "12 Đường Mock, Ba Đình, Hà Nội",
+    nmdchi: "Số 409 Đường Mock, Hà Nội",
+    thtttoan: "Chuyển khoản",
+    tgtcthue: 2000000,
+    tgtthue: 160000,
+    tgtphi: 0,
+    ttcktmai: 0,
+    tgtttbso: 2160000,
+    tgtttbchu: "Hai triệu một trăm sáu mươi nghìn đồng",
+    thttltsuat: [{ tsuat: "8%", thtien: 2000000, tthue: 160000, gttsuat: null }],
+    nbcks: JSON.stringify({ Subject: "CÔNG TY PDF MOCK", SigningTime: "15/09/2026 10:00:00" }),
+    qrcode: "https://hoadondientu.gdt.gov.vn/e2e/pdf",
+    hdhhdvu: [
+      {
+        stt: 1,
+        tchat: 1,
+        ten: "Máy lọc nước PDF",
+        dvtinh: "Cái",
+        mhhdvu: "pdffilter",
+        sluong: 2,
+        dgia: 1000000,
+        thtien: 2000000,
+        stckhau: 0,
+        ltsuat: "8%",
+        tsuat: 0.08,
+      },
+    ],
+  };
+  const seed = await request.post("/api/hddt_sync_test_seed", {
+    data: { portal_id: "e2e-uuid-pdf", detail },
+  });
+  expect(seed.ok(), `seed hddt_sync_test_seed failed ${seed.status()}`).toBe(true);
+  // Nhập tất cả (idempotent) → hóa đơn vừa seed có số phiếu để tìm đúng dòng.
+  const imported = await request.post("/api/hddt_sync_import", {
+    data: {
+      ids: [],
+      warehouse_code: null,
+      unit_code: null,
+      debit_account: null,
+      credit_account: null,
+    },
+  });
+  expect(
+    imported.ok(),
+    `hddt_sync_import failed ${imported.status()}: ${await imported.text()}`,
+  ).toBe(true);
+
+  // Bảng có nhiều hóa đơn của các test trước — định vị bằng số phiếu mới tạo
+  // (mọi dòng seed đều dùng chung ký hiệu C26E2E nên không phân biệt được).
+  const preview = await request.post("/api/hddt_sync_preview", {
+    data: { from: null, to: null, retry_failed: false },
+  });
+  const mine = (
+    (await preview.json()).rows as Array<{ portal_id: string; voucher_no: string }>
+  ).find((r) => r.portal_id === "e2e-uuid-pdf");
+  const myVoucher = String(mine?.voucher_no ?? "");
+  expect(myVoucher, "hóa đơn seed phải được nhập kho").toMatch(/^PN\d+$/);
+
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+  const row = page.locator("tr", {
+    has: page.getByRole("button", { name: `Xem phiếu ${myVoucher}` }),
+  });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+
+  // ── 1. Từ bảng Đồng bộ: mở PDF ngay trên dòng hóa đơn ──
+  await row.getByRole("button", { name: /Xem PDF hóa đơn/ }).click();
+  await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
+  const frame = invoiceFrame(page).frameLocator('iframe[title="Hóa đơn điện tử"]');
+  await expect(frame.locator("body")).toContainText("Máy lọc nước PDF", { timeout: 30_000 });
+  await expect(frame.locator("body")).toContainText("HÓA ĐƠN GIÁ TRỊ GIA TĂNG");
+  await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await expect(invoiceFrame(page)).toBeHidden();
+
+  // ── 2. Từ popup phiếu nhập: chỉ hiện khi phiếu có gắn hóa đơn HĐĐT ──
+  await row.getByRole("button", { name: `Xem phiếu ${myVoucher}` }).click();
+  const vDlg = page.getByRole("dialog").filter({ hasText: "PHIẾU NHẬP KHO" });
+  await expect(vDlg.getByText("Hóa đơn điện tử")).toBeVisible();
+  await vDlg.getByRole("button", { name: "Xem PDF" }).click();
+  await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
+  await expect(
+    invoiceFrame(page).frameLocator('iframe[title="Hóa đơn điện tử"]').locator("body"),
+  ).toContainText("Máy lọc nước PDF", { timeout: 30_000 });
+  await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await vDlg.getByRole("button", { name: "Đóng" }).click();
+  await expect(vDlg).toBeHidden();
+});
+
+test("Xem PDF hóa đơn: mở từ tab Tra cứu HĐĐT", async ({ page, request }) => {
+  test.skip(LIVE_PORTAL, "Nội dung hóa đơn chỉ đúng với mock portal — bỏ qua khi chạy cổng thật");
+  await ensureLoggedIn(page);
+  const login = await loginPortal(request);
+  test.skip(login === null, "Không lấy được phiên cổng HĐĐT — bỏ qua");
+
+  await sidebarButton(page, "Tra cứu HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Tra cứu HĐĐT");
+  await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
+  const table = page.locator(".p-datatable");
+  await expect(table).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeVisible({ timeout: 30_000 });
+
+  // Dòng tra cứu chưa có chi tiết trong DB → app phải gọi cổng lấy chi tiết rồi
+  // mới dựng HTML (nút có spinner trong lúc chờ).
+  await table
+    .getByRole("button", { name: /^Xem PDF hóa đơn/ })
+    .first()
+    .click();
+  await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
+  const frame = invoiceFrame(page).frameLocator('iframe[title="Hóa đơn điện tử"]');
+  await expect(frame.locator("body")).toContainText("Bình nước MOCK", { timeout: 30_000 });
+  await expect(frame.locator("body")).toContainText("HÓA ĐƠN GIÁ TRỊ GIA TĂNG");
+  await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await expect(invoiceFrame(page)).toBeHidden();
+});
