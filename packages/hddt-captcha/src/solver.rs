@@ -11,15 +11,15 @@
 // xác nhận bằng các mẫu cổng chấp nhận. Measured: leave-one-out 756/756.
 // Mở rộng bộ mẫu: `cargo test --lib live_harvest_captcha_templates -- --ignored`
 
-use crate::hddt::captcha::{Captcha, CaptchaSolver};
-use crate::hddt::glyph::{glyph_min_x, render_glyph, Mask, MASK_BYTES};
+use crate::captcha::{Captcha, CaptchaSolver};
+use crate::glyph::{glyph_min_x, render_glyph, Mask, MASK_BYTES};
 use regex::Regex;
 use std::sync::OnceLock;
 
 /// The captcha's actual character set (30 characters). `P` chỉ xuất hiện rất hiếm
 /// (1/222 mẫu đầu tiên) nhưng có thật — 7 mẫu chứa P đều được cổng chấp nhận
 /// khi đăng nhập (25/09/2026), nên không được loại khỏi charset.
-pub(crate) const CHARSET: &str = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+pub const CHARSET: &str = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const TEMPLATE_BYTES: &[u8] = include_bytes!("templates.bin");
 const ENTRY_BYTES: usize = 1 + MASK_BYTES;
@@ -79,7 +79,7 @@ fn iou(a: &Mask, b: &Mask) -> f32 {
 
 /// Solve a captcha SVG → character string (left → right). Errors when the SVG
 /// has no glyph.
-pub(crate) fn classify_svg(svg: &str) -> Result<String, String> {
+pub fn classify_svg(svg: &str) -> Result<String, String> {
     let glyphs = extract_glyphs(svg);
     if glyphs.is_empty() {
         return Err("Captcha HĐĐT không có glyph nào để giải.".into());
@@ -104,7 +104,7 @@ pub(crate) fn classify_svg(svg: &str) -> Result<String, String> {
 
 /// Đo từng glyph: (ký tự dự đoán, IoU tối nhất với template khớp nhất). Dùng khi
 /// thu thập mẫu mới để biết glyph nào solver chưa vững — ứng viên cần thêm template.
-pub(crate) fn classify_glyphs_detailed(svg: &str) -> Vec<(char, f32)> {
+pub fn classify_glyphs_detailed(svg: &str) -> Vec<(char, f32)> {
     let tpl = templates();
     extract_glyphs(svg)
         .iter()
@@ -126,12 +126,12 @@ pub(crate) fn classify_glyphs_detailed(svg: &str) -> Vec<(char, f32)> {
 
 /// Các path glyph của captcha, đã loại nhiễu và sắp theo trục x (trái → phải).
 /// Dùng để render lại glyph khi gán nhãn cho mẫu mới.
-pub(crate) fn glyph_paths(svg: &str) -> Vec<String> {
+pub fn glyph_paths(svg: &str) -> Vec<String> {
     extract_glyphs(svg)
 }
 
 /// Đọc `templates.bin` (bytes thô) → danh sách (label, bitmap).
-pub(crate) fn parse_templates(bytes: &[u8]) -> Vec<(u8, Mask)> {
+pub fn parse_templates(bytes: &[u8]) -> Vec<(u8, Mask)> {
     let mut v = Vec::new();
     let mut i = 0;
     while i + ENTRY_BYTES <= bytes.len() {
@@ -145,7 +145,7 @@ pub(crate) fn parse_templates(bytes: &[u8]) -> Vec<(u8, Mask)> {
 
 /// Nối các entry `(label, bitmap)` thành định dạng `templates.bin` và bỏ trùng
 /// (trùng mask thì bỏ, kể cả khác nhãn — bitmap đã có thì không thêm lại).
-pub(crate) fn build_templates(entries: &[(u8, Mask)]) -> Vec<u8> {
+pub fn build_templates(entries: &[(u8, Mask)]) -> Vec<u8> {
     let mut out: Vec<u8> = TEMPLATE_BYTES.to_vec();
     let mut seen: Vec<Mask> = parse_templates(TEMPLATE_BYTES)
         .into_iter()
@@ -164,7 +164,7 @@ pub(crate) fn build_templates(entries: &[(u8, Mask)]) -> Vec<u8> {
 
 /// Leave-one-out: bỏ từng entry rồi xem các entry còn lại có đoán đúng label không.
 /// Báo cáo độ chính xác để quyết định có dùng bộ template mới hay không.
-pub(crate) fn leave_one_out_accuracy(entries: &[(u8, Mask)]) -> (usize, usize) {
+pub fn leave_one_out_accuracy(entries: &[(u8, Mask)]) -> (usize, usize) {
     let mut ok = 0;
     let mut total = 0;
     for (i, (label, mask)) in entries.iter().enumerate() {
@@ -192,7 +192,7 @@ pub(crate) fn leave_one_out_accuracy(entries: &[(u8, Mask)]) -> (usize, usize) {
 }
 
 /// Production solver: offline template matching, no external binary required.
-pub(crate) struct GlyphTemplateSolver;
+pub struct GlyphTemplateSolver;
 
 impl CaptchaSolver for GlyphTemplateSolver {
     fn solve(&self, captcha: &Captcha) -> Result<String, String> {

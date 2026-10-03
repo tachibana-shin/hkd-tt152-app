@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Captcha glyph rasterizer algorithm — the SOURCE OF TRUTH of the pipeline.
 
-The Rust implementation (`src-tauri/src/hddt/glyph.rs`) is a 1-1 port of this
+The Rust implementation (`packages/hddt-captcha/src/glyph.rs`) is a 1-1 port of this
 file; the `parity_with_python_reference` unit test compares each bitmap against
 a fixture generated here to guarantee the two never diverge.
 

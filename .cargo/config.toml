@@ -1,0 +1,6 @@
+# Giữ thư mục build ở chỗ cũ là `src-tauri/target` dù workspace root đã về gốc
+# repo: không phải dựng lại toàn bộ dependency sau khi tách `./packages`, và
+# `.gitignore` đã phủ sẵn đúng đường dẫn này. Đường dẫn tương đối tính từ
+# workspace root (Cargo resolve `build.target-dir` theo root của workspace).
+[build]
+target-dir = "src-tauri/target"

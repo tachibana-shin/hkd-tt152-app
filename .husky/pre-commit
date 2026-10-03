@@ -3,4 +3,5 @@
 bun run fmt:check
 bun run lint
 bun run typecheck
-cd src-tauri && SQLX_OFFLINE=true cargo test --lib
+# Test Rust ở mức workspace: app Tauri + 2 gói ./packages.
+SQLX_OFFLINE=true cargo test --workspace --lib

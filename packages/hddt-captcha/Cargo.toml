@@ -1,0 +1,16 @@
+[package]
+name = "hddt-captcha"
+version = "0.1.0"
+edition = "2021"
+description = "Giải captcha cổng HĐĐT bằng khớp mẫu glyph — chạy offline100%."
+publish = false
+
+[lib]
+name = "hddt_captcha"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+regex = "1"
+
+[dev-dependencies]
+serde_json = "1"

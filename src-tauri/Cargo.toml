@@ -38,20 +38,13 @@ axum = "0.8"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-updater = "2.13.0"
 tauri-plugin-process = "2.4.0"
-# Render PDF hóa đơn 100% trong backend (không cần Chrome trên máy user).
-# Không có trên crates.io → lấy thẳng từ repo upstream; feature `js` tắt mặc
-# định nên không kéo theo engine JavaScript (boa_engine) vào binary.
-htmltopdf = { git = "https://github.com/SanzarRehman/HTML2PDF" }
-# Sinh mã QR cho hóa đơn (cùng mức hiệu chỉnh EC-low, 80px như bản frontend).
-qrcode = { version = "0.14.1", features = ["image"] }
-# Mã hoá PNG cho mã QR (chỉ cần codec PNG — htmltopdf tự giải mã PNG in-house).
-image = { version = "0.25", default-features = false, features = ["png"] }
+# Hai gói tách ra ./packages — cùng workspace nên chỉ cần khai đường dẫn.
+# Render PDF hóa đơn (htmltopdf + template tiếng Việt)…
+invoice-pdf = { path = "../packages/invoice-pdf" }
+# …và solver captcha cổng HĐĐT chạy offline.
+hddt-captcha = { path = "../packages/hddt-captcha" }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = 3
-panic = "abort"
-strip = true
+# [profile.release] đã chuyển sang Cargo.toml ở gốc repo — profile chỉ có hiệu
+# lực ở workspace root.

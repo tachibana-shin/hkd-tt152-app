@@ -1,7 +1,7 @@
 /**
  * Khung dữ liệu chi tiết hóa đơn (`detail_json`) — port từ `tra-cuu-hd`
  * (`server/hddt.gdt/details.ts`). Tên trường giữ nguyên theo cổng HĐĐT để
- * module Rust `src-tauri/src/invoice/` khớp 100% với dữ liệu đã lưu trong DB.
+ * module Rust `packages/invoice-pdf/` khớp 100% với dữ liệu đã lưu trong DB.
  */
 
 export interface TtKhac {

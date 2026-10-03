@@ -1,0 +1,15 @@
+# Workspace Rust của repo: app Tauri (`src-tauri`) + các gói độc lập dưới
+# `./packages`. Cargo bắt buộc mọi member nằm NGAY DƯỚI workspace root, nên
+# root phải đặt ở đây chứ không thể đặt trong `src-tauri/`.
+[workspace]
+resolver = "2"
+members = ["src-tauri", "packages/*"]
+
+# Profile chỉ có hiệu lực ở workspace root (Cargo bỏ qua profile khai ở member) —
+# giữ nguyên tham số release của app Tauri: bundle gọn, không panic, LTO.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

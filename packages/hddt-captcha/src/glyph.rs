@@ -16,8 +16,8 @@
 // (`parity.txt`) to guarantee the two implementations never diverge.
 
 /// 48×48 pixels = 2304 bits = 288 bytes, row-major, MSB-first.
-pub(crate) const MASK_BYTES: usize = 288;
-pub(crate) type Mask = [u8; MASK_BYTES];
+pub const MASK_BYTES: usize = 288;
+pub type Mask = [u8; MASK_BYTES];
 
 #[derive(Clone, Copy)]
 enum Tok {
@@ -65,7 +65,7 @@ fn flat_numbers(s: &str) -> Vec<f64> {
 }
 
 /// Horizontal position of the glyph inside the captcha (for left → right order).
-pub(crate) fn glyph_min_x(d: &str) -> f64 {
+pub fn glyph_min_x(d: &str) -> f64 {
     let n = flat_numbers(d);
     n.iter().step_by(2).copied().fold(f64::INFINITY, f64::min)
 }
@@ -194,7 +194,7 @@ fn rasterize(contours: &[Vec<(f64, f64)>], gw: usize, gh: usize) -> Vec<u8> {
 
 /// Normalize + render one glyph path into a 48×48 bitmap (matches Python
 /// `render_glyph`).
-pub(crate) fn render_glyph(d: &str) -> Mask {
+pub fn render_glyph(d: &str) -> Mask {
     let nums = flat_numbers(d);
     if nums.len() < 2 {
         return [0u8; MASK_BYTES];
@@ -270,7 +270,7 @@ mod tests {
         }
         assert_eq!(
             n,
-            crate::hddt::CHARSET.chars().count(),
+            crate::solver::CHARSET.chars().count(),
             "fixture phải phủ đủ charset"
         );
     }

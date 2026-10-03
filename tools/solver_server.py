@@ -16,7 +16,7 @@ TOOLS = "./src-tauri/tools/hddt-captcha"
 sys.path.insert(0, TOOLS)
 from glyph_algo import glyph_paths, render_glyph  # noqa: E402
 
-TEMPLATES = "./src-tauri/src/hddt/templates.bin"
+TEMPLATES = "./packages/hddt-captcha/src/templates.bin"
 MASK_BYTES = 288
 
 

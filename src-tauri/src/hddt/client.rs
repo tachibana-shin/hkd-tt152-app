@@ -23,7 +23,7 @@
 // all of them require the same 3 anti-bot headers; add them to `HddtClient` as
 // needed.
 
-use crate::hddt::captcha::Captcha;
+use crate::hddt::Captcha;
 use reqwest::cookie::Jar;
 use reqwest::header::{HeaderValue, ACCEPT_LANGUAGE, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -616,7 +616,7 @@ impl HddtClient {
     /// Returns [`LoginError::Captcha`] when the solver never passed, so the caller
     /// can fall back to manual entry; any other failure is returned as
     /// [`LoginError::Other`].
-    pub(crate) async fn login_with_solver<S: crate::hddt::captcha::CaptchaSolver>(
+    pub(crate) async fn login_with_solver<S: crate::hddt::CaptchaSolver>(
         &self,
         solver: &S,
         max_attempts: usize,

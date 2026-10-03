@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the reference data for `GlyphTemplateSolver`:
 
-    templates.bin  →  src-tauri/src/hddt/templates.bin
-    parity.txt     →  src-tauri/src/hddt/parity.txt
+    templates.bin  →  packages/hddt-captcha/src/templates.bin
+    parity.txt     →  packages/hddt-captcha/src/parity.txt
 
 templates.bin format: repeated [label 1 byte][bitmap 288 bytes] (row-major,
 MSB-first). parity.txt: one line `label<TAB>path<TAB>hex288` per character — a
@@ -13,7 +13,7 @@ Data comes from `labeled/<index>_<key>_<ANSWER>.svg`; the characters are taken
 from the ANSWER in the filename, glyphs in left → right order.
 
 Usage (only numpy + python3):
-    python3 export_templates.py            # writes into src-tauri/src/hddt/
+    python3 export_templates.py            # writes into packages/hddt-captcha/src/
     python3 export_templates.py <outdir>   # write elsewhere (for comparison)
 """
 import glob
@@ -25,7 +25,7 @@ from glyph_algo import glyph_paths, pack, render_glyph  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LABELED = os.path.join(HERE, "labeled")
-DEFAULT_OUT = os.path.abspath(os.path.join(HERE, "..", "..", "src", "hddt"))
+DEFAULT_OUT = os.path.abspath(os.path.join(HERE, "..", "..", "..", "packages", "hddt-captcha", "src"))
 
 
 def main():

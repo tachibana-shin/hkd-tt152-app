@@ -258,7 +258,7 @@ mod live_tests {
     #[tokio::test]
     #[ignore = "cần portal live"]
     async fn captcha_for_browser() {
-        use crate::hddt::captcha::CaptchaSolver;
+        use crate::hddt::CaptchaSolver;
         let client = HddtClient::new("x", "x", None).expect("tạo client thất bại");
         for i in 1..=5 {
             let cap = client.fetch_captcha().await.expect("captcha thất bại");
@@ -322,7 +322,7 @@ fn load_portal_creds() -> Option<(String, String)> {
 #[tokio::test]
 #[ignore = "cần ../info.txt + portal live"]
 async fn live_capture_captcha_samples() {
-    use crate::hddt::solver::classify_glyphs_detailed;
+    use hddt_captcha::classify_glyphs_detailed;
     let Some((u, p)) = load_portal_creds() else {
         eprintln!("⚠️ thiếu ../info.txt");
         return;
@@ -409,7 +409,7 @@ async fn live_verify_captcha_labels() {
             continue;
         };
         // Số glyph phải khớp số ký tự để ghép nhãn đúng thứ tự trái→phải.
-        let n_glyph = crate::hddt::solver::glyph_paths(&svg).len();
+        let n_glyph = hddt_captcha::glyph_paths(&svg).len();
         if n_glyph != answer.chars().count() {
             eprintln!(
                 "⚠️ {idx}: SVG có {n_glyph} glyph, đáp án {} ký tự",
@@ -453,7 +453,7 @@ async fn live_verify_captcha_labels() {
 #[tokio::test]
 #[ignore = "cần ../info.txt + portal live"]
 async fn live_harvest_captcha_templates() {
-    use crate::hddt::solver::{classify_svg, glyph_paths};
+    use hddt_captcha::{classify_svg, glyph_paths};
     let Some((u, p)) = load_portal_creds() else {
         eprintln!("⚠️ thiếu ../info.txt");
         return;

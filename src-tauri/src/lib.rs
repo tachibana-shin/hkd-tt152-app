@@ -3,7 +3,6 @@
 mod commands;
 mod hddt;
 mod helpers;
-mod invoice;
 mod models;
 #[cfg(test)]
 mod test_support;

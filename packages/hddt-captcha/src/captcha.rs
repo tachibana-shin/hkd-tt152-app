@@ -21,7 +21,7 @@ use serde::Deserialize;
 
 /// Captcha returned by `GET /api/captcha`.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
-pub(crate) struct Captcha {
+pub struct Captcha {
     /// Captcha key — sent along with the answer (field `ckey` at login).
     pub key: String,
     /// SVG content (6 glyphs + noise) — shown to the user or fed to a solver.
@@ -30,7 +30,7 @@ pub(crate) struct Captcha {
 
 /// "Solve captcha" interface. Plug OCR/AI/paid solvers in here — the app's
 /// default flow is to show the SVG and let the user type the code manually.
-pub(crate) trait CaptchaSolver {
+pub trait CaptchaSolver {
     /// Return the captcha string (usually 6 characters) or an error.
     fn solve(&self, captcha: &Captcha) -> Result<String, String>;
 }

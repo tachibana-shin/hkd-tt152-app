@@ -1,0 +1,26 @@
+[package]
+name = "invoice-pdf"
+version = "0.1.0"
+edition = "2021"
+description = "Dựng HTML và render PDF hóa đơn điện tử hoàn toàn trong backend."
+publish = false
+
+[lib]
+name = "invoice_pdf"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+# Ngày trên hóa đơn phải ra đúng như `Date#getUTC*` của JS.
+chrono = "0.4"
+# Mã QR của cổng HĐĐT → data: URI nhúng thẳng vào HTML.
+base64 = "0.22"
+# Render PDF100% trong backend (không cần Chrome trên máy user).
+# Không có trên crates.io → lấy thẳng từ repo upstream; feature `js` tắt mặc
+# định nên không kéo theo engine JavaScript (boa_engine) vào binary.
+htmltopdf = { git = "https://github.com/SanzarRehman/HTML2PDF" }
+# Sinh mã QR cho hóa đơn (cùng mức hiệu chỉnh EC-low, 80px như bản frontend).
+qrcode = { version = "0.14.1", features = ["image"] }
+# Mã hoá PNG cho mã QR (chỉ cần codec PNG — htmltopdf tự giải mã PNG in-house).
+image = { version = "0.25", default-features = false, features = ["png"] }

@@ -4,12 +4,12 @@
 //! cần Chrome/Font nhúng — htmltopdf tự layout, tự nhúng font hệ thống và tự
 //! tách trang A4.
 
-use crate::invoice::data::{GoodsRow, InvoiceData};
-use crate::invoice::format::{
+use crate::data::{GoodsRow, InvoiceData};
+use crate::format::{
     escape, extract_cn, format_vietnamese_date, format_vnd, js_number, js_string, parse_signature,
     Signature,
 };
-use crate::invoice::qr::{qr_data_uri, QR_PX};
+use crate::qr::{qr_data_uri, QR_PX};
 use base64::Engine as _;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -48,14 +48,14 @@ fn template() -> &'static str {
 }
 
 /// Dựng HTML hoàn chỉnh (chưa render PDF) — dùng cho test đối chiếu.
-pub(crate) fn build_invoice_html(detail_json: &str) -> Result<String, String> {
+pub fn build_invoice_html(detail_json: &str) -> Result<String, String> {
     let data: InvoiceData = serde_json::from_str(detail_json)
         .map_err(|e| format!("Không đọc được chi tiết hóa đơn (detail_json): {e}"))?;
     Ok(render(&data))
 }
 
 /// Render PDF cho 1 hóa đơn từ chuỗi `detail_json`.
-pub(crate) fn render_pdf(detail_json: &str) -> Result<Vec<u8>, String> {
+pub fn render_pdf(detail_json: &str) -> Result<Vec<u8>, String> {
     let html = build_invoice_html(detail_json)?;
     htmltopdf::Engine::new()
         .render_html(&html, htmltopdf::RenderOptions::default())

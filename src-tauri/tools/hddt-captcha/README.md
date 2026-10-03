@@ -1,7 +1,7 @@
 # HDDT captcha reference-data pipeline
 
 Offline tooling that generates `templates.bin` + `parity.txt` for the Rust solver
-`src-tauri/src/hddt/solver.rs::GlyphTemplateSolver`.
+`packages/hddt-captcha/src/solver.rs::GlyphTemplateSolver`.
 
 ## Why this works
 
@@ -23,7 +23,7 @@ Measured on the live portal (25/09/2026): leave-one-out 1356/1356, and
 | File | Role |
 |---|---|
 | `glyph_algo.py` | **Source of truth** of the rasterizer (paths M/L/Q/Z, nonzero fill, normalize to 40px + pad 1, center in 48×48). The Rust implementation is a 1-1 port of this file. |
-| `export_templates.py` | Generates `templates.bin` + `parity.txt` from `labeled/`. Writes straight into `src-tauri/src/hddt/`. |
+| `export_templates.py` | Generates `templates.bin` + `parity.txt` from `labeled/`. Writes straight into `packages/hddt-captcha/src/`. |
 | `evaluate.py` | Re-classifies the labeled set through `templates.bin` + leave-one-out. Expects 100%. |
 | `collect_captchas.py` | Fetches fresh captchas from the portal (urllib, no browser) to grow the sample set. |
 | `hard/` | Captchas the solver got wrong; read them by hand to label (captcha keys expire in minutes, so these are for labeling only). |
