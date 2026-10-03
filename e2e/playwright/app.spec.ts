@@ -276,6 +276,41 @@ test("Cấu hình HKD: ngày bắt đầu HĐĐT là bắt buộc và được l
 
   const cfg = await (await request.post("/api/get_business_config")).json();
   expect(cfg.hddt_start_date).toBe("2026-03-15");
+
+  // Ngày TƯƠNG LAI cũng phải lưu được — không còn ép "không sau hôm nay".
+  await expect(page.getByText("Đã lưu thông tin hộ kinh doanh", { exact: true })).toBeHidden({
+    timeout: 10_000,
+  });
+  await page.getByRole("button", { name: "Cài đặt thông tin HKD" }).click();
+  const futureField = dialog.getByLabel("Ngày bắt đầu dùng HĐĐT");
+  await futureField.click();
+  await futureField.press("ControlOrMeta+a");
+  await futureField.pressSequentially("01/01/2076");
+  await futureField.press("Tab");
+  await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(page.getByText("Đã lưu thông tin hộ kinh doanh", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+  const cfgFuture = await (await request.post("/api/get_business_config")).json();
+  expect(cfgFuture.hddt_start_date).toBe("2076-01-01");
+
+  // Trả lại mốc cũ: các test Đồng bộ sau dùng ngày bắt đầu này làm mốc "Từ ngày"
+  // — để 2076 thì màn Đồng bộ lọc ra 0 hóa đơn.
+  await expect(page.getByText("Đã lưu thông tin hộ kinh doanh", { exact: true })).toBeHidden({
+    timeout: 10_000,
+  });
+  await page.getByRole("button", { name: "Cài đặt thông tin HKD" }).click();
+  const restoreField = dialog.getByLabel("Ngày bắt đầu dùng HĐĐT");
+  await restoreField.click();
+  await restoreField.press("ControlOrMeta+a");
+  await restoreField.pressSequentially("15/03/2026");
+  await restoreField.press("Tab");
+  await dialog.getByRole("button", { name: "Lưu cấu hình" }).click();
+  await expect(page.getByText("Đã lưu thông tin hộ kinh doanh", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+  const cfgRestored = await (await request.post("/api/get_business_config")).json();
+  expect(cfgRestored.hddt_start_date).toBe("2026-03-15");
 });
 
 test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu + mặt hàng", async ({

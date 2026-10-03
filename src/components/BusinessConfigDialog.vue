@@ -401,14 +401,14 @@ async function save() {
             v-model="form.hddt_start_date"
             :input-id="inputId"
             dateFormat="dd/mm/yy"
-            :maxDate="new Date()"
             showIcon
             showClear
             class="w-full"
             placeholder="Ngày bắt đầu phát hành hóa đơn điện tử"
           />
           <p class="mt-1 text-xs text-gray-500">
-            App dùng ngày này làm mốc bắt đầu khi lấp hóa đơn mua vào từ cổng HĐĐT.
+            Nhập bất kỳ ngày nào (kể cả trong quá khứ hoặc tương lai). App dùng ngày này làm mốc bắt
+            đầu khi lấp hóa đơn mua vào từ cổng HĐĐT.
           </p>
         </template>
       </FormField>

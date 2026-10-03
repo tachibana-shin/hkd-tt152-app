@@ -242,6 +242,12 @@ pub(crate) async fn scan(
     let start_date = resolve_start(pool, from).await?;
     let end_date = resolve_end(to).await?;
     if start_date > end_date {
+        // Mốc bắt đầu dùng HĐĐT được phép nằm TRONG TƯƠNG LAI (Cài đặt thông tin
+        // HKD nhận bất kỳ ngày nào) — tới mốc đó mới có gì để quét, nên im lặng
+        // trả về không ngày nào thay vì báo lỗi khoảng ngày.
+        if start_date > today {
+            return Ok(sum);
+        }
         return Err(format!(
             "Khoảng ngày không hợp lệ: {} → {}. Hãy chọn \"Từ ngày lập\" không sau \
              \"Đến ngày lập\".",
@@ -1834,5 +1840,42 @@ mod tests {
     #[test]
     fn day_format_roundtrip() {
         assert_eq!(iso_to_portal_day("2026-09-24"), "24/09/2026");
+    }
+
+    /// Cài đặt thông tin HKD nhận **bất kỳ ngày nào** làm mốc bắt đầu HĐĐT, kể cả
+    /// tương lai — khi đó chưa có gì để quét, nên vòng quét phải trả về im lặng
+    /// thay vì lỗi "Khoảng ngày không hợp lệ" (quan trọng khi quét tự động lúc mở app).
+    #[tokio::test]
+    async fn scan_voi_moc_bat_dau_tuong_lai_tra_ve_rong_khong_loi() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        sqlx::query!(
+            "INSERT INTO business (id, hddt_start_date) VALUES (1, '2076-01-01')
+             ON CONFLICT(id) DO UPDATE SET hddt_start_date = excluded.hddt_start_date"
+        )
+        .execute(&pool)
+        .await
+        .expect("khai mốc bắt đầu tương lai");
+
+        let sum = scan(
+            &pool,
+            &client,
+            "mock-token",
+            "",
+            "",
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect("mốc tương lai không được làm quét thất bại");
+        assert_eq!(sum.days_scanned, 0, "chưa tới mốc → không quét ngày nào");
+        assert_eq!(sum.days_today, 0);
+        assert_eq!(sum.invoices_new, 0);
+        assert_eq!(
+            portal.count("/invoices/purchase"),
+            0,
+            "không được gọi cổng khi chưa tới mốc bắt đầu"
+        );
     }
 }

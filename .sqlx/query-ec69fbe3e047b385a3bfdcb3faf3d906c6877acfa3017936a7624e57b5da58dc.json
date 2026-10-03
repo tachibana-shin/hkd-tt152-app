@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO business (id, hddt_start_date) VALUES (1, '2076-01-01')\n             ON CONFLICT(id) DO UPDATE SET hddt_start_date = excluded.hddt_start_date",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "ec69fbe3e047b385a3bfdcb3faf3d906c6877acfa3017936a7624e57b5da58dc"
+}
