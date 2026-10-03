@@ -122,6 +122,9 @@ const SETTING_DEFAULTS: AppSettings = {
   tax_threshold_exempt: 1_000_000_000, // Ngưỡng DT năm không phải nộp GTGT + TNCN
   tax_threshold_group3: 3_000_000_000, // Mốc Nhóm 3 (TNCN theo thu nhập 17%)
   tax_threshold_group4: 50_000_000_000, // Mốc Nhóm 4 (TNCN theo thu nhập 20%)
+  auto_check_update: true, // Tự kiểm tra cập nhật khi mở app (bản web thì tự bỏ qua)
+  auto_sync_enabled: false, // Tự quét cổng HĐĐT — mặc định TẮT, để người dùng tự bật
+  auto_sync_interval_min: 15, // Khoảng thời gian tự gọi lại (phút)
 };
 
 // Backend lưu mọi thứ dưới dạng chuỗi → chuẩn hóa về kiểu AppSettings.
@@ -182,6 +185,14 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     tax_threshold_exempt: exempt,
     tax_threshold_group3: group3,
     tax_threshold_group4: group4,
+    // Việc chạy nền: thiếu key thì lấy mặc định (bật kiểm tra cập nhật, tắt quét
+    // cổng); số phút ép về 1–1440 để timer không nhận giá trị rác từ DB.
+    auto_check_update: raw.auto_check_update === "0" ? false : true,
+    auto_sync_enabled: raw.auto_sync_enabled === "1",
+    auto_sync_interval_min: Math.min(
+      1440,
+      Math.max(1, num("auto_sync_interval_min", SETTING_DEFAULTS.auto_sync_interval_min)),
+    ),
   };
 }
 

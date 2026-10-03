@@ -5,6 +5,7 @@ import { useBusinessStore } from "@/stores/business";
 import { useThemeStore } from "@/stores/theme";
 import { usePortalSession } from "@/composables/usePortalSession";
 import { useViewport } from "@/composables/useViewport";
+import { startAutoTasks, stopAutoTasks } from "@/composables/useAutoTasks";
 import LoginView from "@/views/LoginView.vue";
 // Phiên bản hiển thị ở chân sidebar. Đọc thẳng package.json — `scripts/set-version.mjs`
 // giữ package.json / tauri.conf.json / Cargo.toml cùng một phiên bản (CI có
@@ -170,6 +171,20 @@ function onForceConfigSaved() {
   // Đã lưu xong → thông tin đủ → đóng dialog bắt buộc.
   forceBusinessConfig.value = false;
 }
+
+// Việc chạy nền (cài đặt ở màn Cài đặt): kiểm tra cập nhật + quét HĐĐT ngay khi
+// vào app rồi hẹn lại theo khoảng thời gian đã đặt. Đăng xuất / đổi hồ sơ → dừng.
+watch(
+  () => [auth.isLoggedIn, bootstrapped.value] as const,
+  ([loggedIn, booted]) => {
+    if (booted && loggedIn) {
+      void startAutoTasks((n) => toast.add({ severity: "info", life: 8000, ...n }));
+    } else {
+      stopAutoTasks();
+    }
+  },
+  { immediate: true },
+);
 
 type MenuItem = { label: string; icon: string; to: string; roles: string[] };
 

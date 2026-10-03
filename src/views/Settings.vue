@@ -3,6 +3,7 @@ import { api, inTauri } from "@/db";
 import { useSettingsStore } from "@/stores/settings";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useAppUpdater } from "@/composables/useAppUpdater";
+import { restartAutoTasks } from "@/composables/useAutoTasks";
 
 const settings = useSettingsStore();
 const toast = useToast();
@@ -22,6 +23,10 @@ const st = reactive({
   tax_exempt: 1_000_000_000,
   tax_group3: 3_000_000_000,
   tax_group4: 50_000_000_000,
+  // Việc chạy nền khi mở app (xem composable useAutoTasks).
+  auto_check_update: true,
+  auto_sync_enabled: false,
+  auto_sync_interval_min: 15,
 });
 
 const saving = ref(false);
@@ -79,6 +84,9 @@ async function load() {
     st.tax_exempt = s.tax_threshold_exempt;
     st.tax_group3 = s.tax_threshold_group3;
     st.tax_group4 = s.tax_threshold_group4;
+    st.auto_check_update = s.auto_check_update;
+    st.auto_sync_enabled = s.auto_sync_enabled;
+    st.auto_sync_interval_min = s.auto_sync_interval_min;
   } finally {
     loading.value = false;
   }
@@ -100,7 +108,15 @@ async function save() {
       tax_threshold_exempt: String(taxThresholds.value.exempt),
       tax_threshold_group3: String(taxThresholds.value.group3),
       tax_threshold_group4: String(taxThresholds.value.group4),
+      auto_check_update: st.auto_check_update ? "1" : "0",
+      auto_sync_enabled: st.auto_sync_enabled ? "1" : "0",
+      // Ép về 1–1440 phút: giá trị rác sẽ làm timer không bao giờ reo hoặc reo liên tục.
+      auto_sync_interval_min: String(
+        Math.min(1440, Math.max(1, Math.round(st.auto_sync_interval_min) || 15)),
+      ),
     });
+    // Áp dụng lại việc chạy nền ngay (không phải mở lại app mới có hiệu lực).
+    await restartAutoTasks();
     toast.add({
       severity: "success",
       summary: "Đã lưu cài đặt",
@@ -528,6 +544,59 @@ useKeepAliveRefresh(reload);
             <p v-if="updater.error.value" class="text-sm text-red-600">
               {{ updater.error.value }}
             </p>
+          </div>
+        </section>
+      </template>
+    </Card>
+
+    <!-- Việc chạy nền khi mở app: kiểm tra cập nhật + quét cổng HĐĐT (useAutoTasks). -->
+    <Card>
+      <template #content>
+        <section>
+          <h4 class="font-semibold text-gray-700 mb-1 flex items-center gap-2">
+            <i class="pi pi-sync" /> Tự động khi mở ứng dụng
+          </h4>
+          <p class="text-xs text-gray-500 mb-3">
+            Chạy ngay khi mở app rồi lặp lại sau mỗi khoảng thời gian bên dưới. Quét chỉ kéo danh
+            sách hóa đơn từ cổng về — việc nhập kho vẫn tự tay.
+          </p>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-4">
+              <label for="auto-check-update" class="cursor-pointer">
+                <span class="font-medium">Tự kiểm tra cập nhật</span>
+                <span class="block text-xs text-gray-500 mt-0.5">
+                  Chỉ bản cài (.exe / .dmg / .AppImage); không có bản mới hay lỗi mạng đều im lặng.
+                </span>
+              </label>
+              <ToggleSwitch input-id="auto-check-update" v-model="st.auto_check_update" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <label for="auto-sync-enabled" class="cursor-pointer">
+                <span class="font-medium">Tự đồng bộ hóa đơn HĐĐT</span>
+                <span class="block text-xs text-gray-500 mt-0.5">
+                  Cần đã đăng nhập cổng HĐĐT và khai ngày bắt đầu dùng HĐĐT trong hồ sơ.
+                </span>
+              </label>
+              <ToggleSwitch input-id="auto-sync-enabled" v-model="st.auto_sync_enabled" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <label for="auto-sync-interval" class="cursor-pointer">
+                <span class="font-medium">Khoảng thời gian tự gọi lại</span>
+                <span class="block text-xs text-gray-500 mt-0.5">
+                  Từ 1 tới 1440 phút, áp dụng cho cả hai việc trên.
+                </span>
+              </label>
+              <InputNumber
+                v-model="st.auto_sync_interval_min"
+                :min="1"
+                :max="1440"
+                :show-buttons="true"
+                :step="5"
+                suffix=" phút"
+                input-id="auto-sync-interval"
+                class="w-44"
+              />
+            </div>
           </div>
         </section>
       </template>

@@ -3029,6 +3029,52 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
   );
 });
 
+test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sau khi tải lại trang", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+  await openTab(page, "Cài đặt", "/settings");
+  await page.getByText("Tự động khi mở ứng dụng").scrollIntoViewIfNeeded();
+
+  const checkToggle = page.getByLabel(/Tự kiểm tra cập nhật/);
+  const syncToggle = page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/);
+  const interval = page.getByLabel(/Khoảng thời gian tự gọi lại/);
+  // Mặc định: kiểm tra cập nhật BẬT (bản web thì tự bỏ qua), quét cổng TẮT vì
+  // đây là gọi cổng thật nên để người dùng tự bật.
+  await expect(checkToggle).toBeChecked();
+  await expect(syncToggle).not.toBeChecked();
+
+  // Bật quét cổng + rút ngắn khoảng thời gian, rồi Lưu.
+  await syncToggle.click();
+  await interval.fill("30");
+  await page.keyboard.press("Tab");
+  await page.getByRole("button", { name: "Lưu cài đặt" }).click();
+  await expect(page.getByText("Đã lưu cài đặt")).toBeVisible({ timeout: 10_000 });
+
+  const readSettings = async () =>
+    (await (await request.post("/api/get_app_settings", { data: {} })).json()) as Record<
+      string,
+      string
+    >;
+  const saved = await readSettings();
+  expect(saved.auto_sync_enabled, "quét cổng phải được bật").toBe("1");
+  expect(saved.auto_check_update, "kiểm tra cập nhật vẫn bật").toBe("1");
+  expect(saved.auto_sync_interval_min, "khoảng thời gian lưu đúng").toBe("30");
+
+  // Tải lại trang → vẫn giữ (đọc lại từ app_setting, không phải state trên bộ nhớ).
+  await page.reload();
+  await openTab(page, "Cài đặt", "/settings");
+  await page.getByText("Tự động khi mở ứng dụng").scrollIntoViewIfNeeded();
+  await expect(page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/)).toBeChecked();
+
+  // Trả lại mặc định để các test sau không bị quét cổng khi app mở.
+  await page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/).click();
+  await page.getByRole("button", { name: "Lưu cài đặt" }).click();
+  await expect(page.getByText("Đã lưu cài đặt")).toBeVisible({ timeout: 10_000 });
+  expect((await readSettings()).auto_sync_enabled).toBe("0");
+});
+
 /**
  * Xuất hàng phải để lại dấu vết trên BẢNG CÂN ĐỐI: bút Nợ 632 / Có 152 (giá vốn).
  *

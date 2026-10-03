@@ -91,6 +91,11 @@ async function installUpdate() {
   }
 }
 
+/** Xóa cờ lỗi — việc kiểm tra chạy nền nuốt lỗi thay vì để đỏ ở màn Cài đặt. */
+function clearError() {
+  error.value = "";
+}
+
 export function useAppUpdater() {
   return {
     inTauri,
@@ -105,5 +110,6 @@ export function useAppUpdater() {
     error,
     checkUpdate,
     installUpdate,
+    clearError,
   };
 }

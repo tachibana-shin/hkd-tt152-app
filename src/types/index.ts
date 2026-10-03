@@ -616,6 +616,18 @@ export interface AppSettings {
   tax_threshold_group3: number;
   /** Mốc doanh thu năm của Nhóm 4 (thuế suất TNCN theo thu nhập 20%). Mặc định 50 tỷ. */
   tax_threshold_group4: number;
+  /**
+   * Tự kiểm tra cập nhật ngay khi mở app (và lặp theo khoảng thời gian dưới).
+   * Chỉ có tác dụng ở bản cài Tauri; lỗi mạng/không có bản mới thì im lặng.
+   */
+  auto_check_update: boolean;
+  /**
+   * Tự quét hóa đơn HĐĐT từ cổng khi mở app — chỉ kéo danh sách về cache,
+   * việc **nhập kho** vẫn thao tác tay. Mặc định TẮT vì đây là gọi cổng thật.
+   */
+  auto_sync_enabled: boolean;
+  /** Khoảng thời gian tự gọi lại (phút), áp dụng cho cả 2 việc trên. */
+  auto_sync_interval_min: number;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───
