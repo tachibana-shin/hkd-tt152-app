@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n            -- 'XuatNVL' = phiếu xuất NVL tự sinh theo định mức (F4): không phải\n            -- doanh thu nên LOẠI khỏi mọi sổ doanh thu / giá vốn / bán hàng.\n            COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code NOT IN ('GiamDT', 'XuatNVL') THEN amount ELSE 0.0 END), 0.0) AS revenue_up,\n            COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code = 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_down,\n            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP'\n                               AND COALESCE(debit_account, '') != '331' THEN amount ELSE 0.0 END), 0.0) AS expense_up,\n            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code = 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS expense_down\n         FROM journal_entry\n         WHERE posting_date >= ?\n           AND posting_date <= ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "revenue_up",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "revenue_down",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "expense_up",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "expense_down",
+        "ordinal": 3,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "59653edc35153308ba993e633cb0c7a0f4b1828e676d6faba79008ef499d558e"
+}

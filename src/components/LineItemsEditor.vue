@@ -13,6 +13,11 @@ interface LineItem {
   warehouse_code?: string;
   /** Số tiền chiết khấu thương mại (đ) — cột "Tiền CK" của CT MH (TT88). */
   discount?: number;
+  /**
+   * Tên hiển thị dòng (tên khác / alias người dùng chọn trên ô sản phẩm).
+   * Rỗng = tên chính. Hóa đơn giữ nguyên tên này khi in (F5).
+   */
+  line_name?: string;
 }
 
 const props = withDefaults(
@@ -117,6 +122,7 @@ function onProductSaved(code: string) {
   const row = last && !last.product_code ? last : null;
   if (row) {
     row.product_code = code;
+    row.line_name = ""; // hàng mới → dùng tên chính
     onProductPick(props.items.length - 1);
   } else {
     // Đủ các trường cho cả dòng nhập (discount) lẫn dòng xuất (ngành + kho).
@@ -130,6 +136,22 @@ function onProductSaved(code: string) {
     });
     onProductPick(props.items.length - 1);
   }
+}
+
+/**
+ * Đổi mã hàng trên dòng → bỏ tên hiển thị cũ (tên của hàng trước không còn
+ * nghĩa). Chạy TRƯỚC event `picked` để tên alias vừa chọn được ghi đè sau.
+ */
+function onProductChange(index: number, code: string) {
+  const it = props.items[index];
+  if (it.product_code === code) return;
+  it.product_code = code;
+  it.line_name = "";
+}
+
+/** Ghi tên người dùng chọn (tên chính → ""). */
+function onProductPicked(index: number, name: string) {
+  props.items[index].line_name = name;
 }
 
 function onProductPick(index: number) {
@@ -237,9 +259,12 @@ watch(
     >
       <template #body="{ index }">
         <ProductSelect
-          v-model="items[index].product_code"
+          :model-value="items[index].product_code"
+          :picked-name="items[index].line_name ?? ''"
           :warehouse-code="items[index].warehouse_code ?? ''"
           :size="compact || preInput ? 'small' : undefined"
+          @update:model-value="onProductChange(index, $event)"
+          @picked="onProductPicked(index, $event)"
           @change="onProductPick(index)"
         />
       </template>

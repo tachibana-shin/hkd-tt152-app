@@ -3,6 +3,7 @@
 // Dùng chung cho màn Danh mục sản phẩm, và mọi nơi cần thêm nhanh hàng hóa
 // (phiếu nhập kho…) — tận dụng: tự sinh mã SP, mặc định đơn vị/giá/thuế từ
 // cấu hình, nhóm ngành, thuế nhập khẩu.
+import { api } from "@/db";
 import { useCatalogStore } from "@/stores/catalog";
 import { useSettingsStore } from "@/stores/settings";
 import type { Product } from "@/types";
@@ -40,6 +41,8 @@ const form = reactive({
   import_tax_rate: 0,
   is_service: false,
   industry_code: "PPHH",
+  /** "Tên khác" của sản phẩm, người dùng gõ phân tách bằng phẩy (F5). */
+  aliases: "",
 });
 
 // Thuế nhập khẩu dùng AutoComplete: chọn nhanh từ danh sách cấu hình hoặc gõ tùy ý.
@@ -80,6 +83,7 @@ watch(
         import_tax_rate: p.import_tax_rate * 100,
         is_service: p.is_service ?? false,
         industry_code: p.industry_code ?? "PPHH",
+        aliases: p.aliases ?? "",
       });
     } else {
       // Thêm mới: tự sinh mã SP tiếp theo + mặc định từ cấu hình hộ kinh doanh.
@@ -97,6 +101,7 @@ watch(
           import_tax_rate: settings.importTaxDefault,
           is_service: false,
           industry_code: "PPHH",
+          aliases: "",
         });
       } catch {
         Object.assign(form, {
@@ -111,6 +116,7 @@ watch(
           import_tax_rate: 0,
           is_service: false,
           industry_code: "PPHH",
+          aliases: "",
         });
       }
     }
@@ -145,6 +151,13 @@ async function save() {
       is_service: form.is_service,
       industry_code: form.industry_code,
     });
+    // Tên khác (F5): tách theo phẩy rồi ghi thay toàn bộ danh sách. Lỗi trùng
+    // tên (đã gán cho sản phẩm khác) → báo ngay, dialog giữ nguyên để sửa.
+    const aliases = form.aliases
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    await api.saveProductAliases(form.code, aliases);
     toast.add({
       severity: "success",
       summary: "Đã lưu",
@@ -188,6 +201,17 @@ async function save() {
         <p v-if="product" class="text-xs text-gray-400 mt-1">
           Tên sản phẩm không đổi được sau khi tạo — tránh lệch với phiếu nhập / xuất và hóa đơn đã
           lập.
+        </p>
+      </FormField>
+      <FormField label="Tên khác" class="col-span-2">
+        <InputText
+          size="small"
+          v-model="form.aliases"
+          placeholder="Bột mì, Mì flour, Bột làm bánh"
+        />
+        <p class="text-xs text-gray-400 mt-1">
+          Nhiều tên cách nhau bằng phẩy. Dùng để tìm hàng và chọn tên trên hóa đơn — hóa đơn giữ
+          đúng tên bạn chọn, không đổi về tên chính. Mỗi tên chỉ gán cho 1 sản phẩm.
         </p>
       </FormField>
       <FormField label="Loại">

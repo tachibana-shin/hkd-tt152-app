@@ -72,6 +72,8 @@ const referencePlaceholder = computed(() =>
 //   adjust    → Nợ 152 / Có 331 (với hướng "Giảm" backend sẽ đảo ngược:
 //               Nợ TK đối ứng / Có 152 giảm hàng trả lại).
 function onTypeChange() {
+  // Ô "Tự xuất NVL theo định mức" chỉ dành cho loại sản xuất — đổi loại thì tắt.
+  form.auto_bom = false;
   if (form.inbound_type === "production") {
     form.debit_account = "155";
     form.credit_account = "154";
@@ -125,6 +127,7 @@ async function adjustFromVoucher(row: { voucher_no: string }) {
       debit_account: "152",
       credit_account: "331",
       pay_now: false,
+      auto_bom: false,
     });
     nextVoucherNo();
     dialog.value = true;
@@ -160,6 +163,9 @@ const form = reactive({
   adjust_dir: "up" as "up" | "down",
   // Trả tiền ngay: bật mặc định — khi lưu tự tạo phiếu chi (PC) thanh toán cho NCC.
   pay_now: true,
+  // F4 — Tự xuất NVL theo định mức: chỉ loại nhập "production". Bật → app tự
+  // tính NVL = định mức × SL, tự trừ tồn FIFO + tự sinh phiếu xuất (Nợ 154 / Có 152).
+  auto_bom: false,
 });
 
 /** Số phiếu do backend sinh (PN0001…) — không đoán từ danh sách đang lọc. */
@@ -182,6 +188,7 @@ function openCreate() {
     credit_account: "331",
     adjust_dir: "up",
     pay_now: true,
+    auto_bom: false,
   });
   dialog.value = true;
   // Điền số phiếu sau khi mở hộp thoại: lệnh sinh số là bất đồng bộ.
@@ -235,6 +242,8 @@ async function save() {
         // Trả tiền ngay: backend tự tạo + liên kết phiếu chi (PC) cho nhà cung cấp.
         pay_now: form.pay_now,
         adjust_dir: form.adjust_dir,
+        // F4: tự xuất NVL theo định mức (chỉ loại sản xuất backend mới chạy).
+        auto_bom: form.auto_bom,
       }),
     );
     toast.add({
@@ -242,7 +251,11 @@ async function save() {
       summary: `Đã nhập kho ${form.voucher_no}`,
       detail: `Giá trị nhập kho: ${fmt(res.total)} đ${
         res.vat ? ` · VAT khấu trừ: ${fmt(res.vat)} đ` : ""
-      }${res.pc_no ? ` · Đã tạo phiếu chi ${res.pc_no}` : ""}`,
+      }${res.pc_no ? ` · Đã tạo phiếu chi ${res.pc_no}` : ""}${
+        res.material_voucher
+          ? ` · Đã tạo phiếu xuất NVL ${res.material_voucher} (Nợ 154 / Có 152)`
+          : ""
+      }`,
     });
     dialog.value = false;
     // Danh sách gom theo phiếu không do store nạp → nạp lại sau khi lưu.
@@ -517,6 +530,18 @@ useKeepAliveRefresh(reload);
         <FormField label="Diễn giải">
           <InputText v-model="form.description" size="small" />
         </FormField>
+        <FormField v-if="form.inbound_type === 'production'" label="Tự xuất NVL theo định mức">
+          <div class="flex h-full items-center gap-1.5">
+            <ToggleSwitch v-model="form.auto_bom" class="shrink-0" />
+            <i
+              class="pi pi-info-circle cursor-help text-xs text-gray-400 shrink-0"
+              v-tooltip="
+                'Bật: khi lưu, app tự tính NVL = định mức × sản lượng từng mặt hàng, tự trừ tồn FIFO và tự sinh phiếu xuất NVL (Nợ 154 / Có 152) trong cùng lúc lưu phiếu nhập. Thiếu tồn NVL thì phiếu nhập KHÔNG được lưu. Khai định mức ở màn Sản phẩm → tab Định mức vật tư.'
+              "
+              aria-label="Trợ giúp"
+            />
+          </div>
+        </FormField>
         <FormField v-if="form.inbound_type === 'purchase'" label="Trả tiền ngay">
           <div class="flex h-full items-center gap-1.5">
             <ToggleSwitch v-model="form.pay_now" class="shrink-0" />
@@ -533,10 +558,12 @@ useKeepAliveRefresh(reload);
       <p class="mt-1 text-xs text-gray-400">
         Mua hàng ngoài: Nợ 152 / Có 331 — nhập số tiền chiết khấu ở cột Tiền CK, giá trị nhập kho =
         Thành tiền − Tiền CK. Tự sản xuất, gia công: nhập kho thành phẩm theo lệnh sản xuất (Nợ 155
-        / Có 154). Nhập khác: tùy chọn TK Nợ/Có (thừa kiểm kê, điều chỉnh…). Đơn giá nhập = giá sau
-        chiết khấu, chưa thuế khi bật khấu trừ GTGT, ngược lại là giá đã gồm thuế. Điều chỉnh hóa
-        đơn mua — Giảm: trả lại NCC, trừ lô FIFO theo ngày nhập, ghi Nợ TK đối ứng / Có TK hàng (kèm
-        giảm thuế 133 nếu khấu trừ); Tăng: nhập kho như phiếu thường.
+        / Có 154) — bật "Tự xuất NVL theo định mức" để app tự trừ NVL và tự sinh phiếu xuất NVL (Nợ
+        154 / Có 152) theo định mức đã khai ở màn Sản phẩm. Nhập khác: tùy chọn TK Nợ/Có (thừa kiểm
+        kê, điều chỉnh…). Đơn giá nhập = giá sau chiết khấu, chưa thuế khi bật khấu trừ GTGT, ngược
+        lại là giá đã gồm thuế. Điều chỉnh hóa đơn mua — Giảm: trả lại NCC, trừ lô FIFO theo ngày
+        nhập, ghi Nợ TK đối ứng / Có TK hàng (kèm giảm thuế 133 nếu khấu trừ); Tăng: nhập kho như
+        phiếu thường.
       </p>
 
       <LineItemsEditor

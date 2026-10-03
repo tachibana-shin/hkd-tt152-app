@@ -37,6 +37,8 @@ const form = reactive({
     industry_code?: string;
     discount?: number;
     warehouse_code?: string;
+    /** Tên hiển thị dòng (tên khác / alias) — rỗng = tên sản phẩm (F5). */
+    line_name?: string;
   }[],
 });
 
@@ -62,6 +64,7 @@ function addRow() {
     industry_code: "",
     discount: 0,
     warehouse_code: "",
+    line_name: "",
   });
 }
 
@@ -92,8 +95,20 @@ watch(
         customer: "",
         customer_tax_code: "",
         items: [],
+        // Số để trống tới khi gợi ý xong — tránh hiện tạm một số đã tồn tại
+        // (mở app mới thì store chưa nạp danh sách hóa đơn).
+        number: "",
       });
-      nextInvoiceNo();
+      saving.value = true;
+      try {
+        await invoiceStore.loadInvoices();
+        nextInvoiceNo();
+      } catch {
+        // Không tải được danh sách → vẫn gợi ý từ số đang có trong store.
+        nextInvoiceNo();
+      } finally {
+        saving.value = false;
+      }
       return;
     }
     saving.value = true;
@@ -113,6 +128,9 @@ watch(
           industry_code: it.industry_code ?? "",
           discount: it.discount ?? 0,
           warehouse_code: it.warehouse_code ?? "",
+          // Giữ nguyên TÊN người dùng đã chọn (có thể là tên khác / alias) —
+          // `product_name` trả về đã là tên hiển thị, nhưng cần bản gốc để lưu.
+          line_name: it.line_name ?? "",
         })),
       });
     } catch (e) {

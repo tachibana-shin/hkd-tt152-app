@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { FilterMatchMode } from "@primevue/core/api";
+import { api } from "@/db";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useSettingsStore } from "@/stores/settings";
 import ProductDialog from "@/components/ProductDialog.vue";
-import type { Product } from "@/types";
+import type { BomItem, Product } from "@/types";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
@@ -188,6 +189,80 @@ function assignGoodsIndustry() {
   });
 }
 
+// ─── TAB ĐỊNH MỨC VẬT TƯ (F4) ───
+// Khai "1 thành phẩm cần bao nhiêu NVL" — khi lưu PNK loại "Tự sản xuất / gia
+// công" và bật ô tick, app tự trừ tồn NVL + tự sinh phiếu xuất (Nợ 154 / Có 152).
+const tab = ref<"products" | "bom">("products");
+const boms = ref<BomItem[]>([]);
+/** Thành phẩm đang khai định mức (mã SP). */
+const bomProduct = ref("");
+/** Dòng đang sửa — bản sao từ `boms` để người dùng thêm / bớt / đổi số lượng. */
+const bomRows = ref<{ material_code: string; quantity: number }[]>([]);
+const bomSaving = ref(false);
+
+/** Dựng lại dòng đang sửa từ dữ liệu đã nạp theo thành phẩm đang chọn. */
+function syncBomRows() {
+  bomRows.value = boms.value
+    .filter((b) => b.product_code === bomProduct.value)
+    .map((b) => ({ material_code: b.material_code, quantity: b.quantity }));
+}
+
+watch(bomProduct, syncBomRows);
+
+/** Nạp định mức + danh mục SP đầy đủ (bộ chọn NVL cần mọi sản phẩm, không chỉ trang đang xem). */
+async function loadBomData() {
+  try {
+    const [list] = await Promise.all([api.getProductBoms(), catalog.loadAll()]);
+    boms.value = list;
+    syncBomRows();
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không tải được định mức", detail: String(e) });
+  }
+}
+
+watch(tab, (t) => {
+  if (t === "bom") void loadBomData();
+});
+
+async function saveBom() {
+  if (!bomProduct.value) return;
+  const rows = bomRows.value.filter((r) => r.material_code.trim());
+  if (rows.some((r) => !r.quantity || r.quantity <= 0)) {
+    toast.add({
+      severity: "warn",
+      summary: "Số lượng chưa hợp lệ",
+      detail: "Số lượng định mức của từng vật tư phải lớn hơn 0",
+    });
+    return;
+  }
+  bomSaving.value = true;
+  try {
+    await api.saveProductBom(
+      bomProduct.value,
+      rows.map((r) => ({ material_code: r.material_code.trim(), quantity: r.quantity })),
+    );
+    boms.value = await api.getProductBoms();
+    syncBomRows();
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu định mức",
+      detail: rows.length
+        ? `${rows.length} dòng vật tư cho ${bomProduct.value}`
+        : `Đã xóa định mức của ${bomProduct.value}`,
+    });
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không lưu được định mức", detail: String(e) });
+  } finally {
+    bomSaving.value = false;
+  }
+}
+
+/** Tồn của vật tư (mọi kho) — để người dùng thấy trước khi lưu PNK sản xuất. */
+function materialOnhand(code: string): number {
+  if (!code) return 0;
+  return catalog.onhandAt(code, "");
+}
+
 // ─── DIALOG THÊM / SỬA SẢN PHẨM (dùng chung ProductDialog) ───
 const dialog = ref(false);
 const editingProduct = ref<Product | null>(null);
@@ -250,7 +325,7 @@ useKeepAliveRefresh(reload);
       <template #end>
         <div class="flex items-center gap-2">
           <Button
-            v-if="auth.canStock"
+            v-if="auth.canStock && tab === 'products'"
             label="Sửa"
             icon="pi pi-pencil"
             severity="secondary"
@@ -259,7 +334,7 @@ useKeepAliveRefresh(reload);
             @click="openEdit"
           />
           <Button
-            v-if="auth.canStock && selectedCount > 0"
+            v-if="auth.canStock && tab === 'products' && selectedCount > 0"
             severity="danger"
             outlined
             icon="pi pi-trash"
@@ -267,7 +342,7 @@ useKeepAliveRefresh(reload);
             @click="removeSelected"
           />
           <Button
-            v-if="auth.canStock"
+            v-if="auth.canStock && tab === 'products'"
             label="Gán nhóm ngành hàng hóa"
             icon="pi pi-tags"
             severity="secondary"
@@ -277,7 +352,7 @@ useKeepAliveRefresh(reload);
             @click="assignGoodsIndustry"
           />
           <Button
-            v-if="auth.canStock"
+            v-if="auth.canStock && tab === 'products'"
             label="Thêm sản phẩm"
             icon="pi pi-plus"
             @click="openCreate"
@@ -288,162 +363,298 @@ useKeepAliveRefresh(reload);
 
     <Card>
       <template #content>
-        <AppDataTable
-          v-model:selection="selection"
-          v-model:filters="filters"
-          v-model:multiSortMeta="multiSortMeta"
-          :meta-key-selection="false"
-          :value="products"
-          :loading="loading"
-          :totalRecords="totalProducts"
-          :first="first"
-          :rows="rowsPerPage"
-          :rows-per-page-options="[20, 50, 100, 200]"
-          data-key="id"
-          sort-mode="multiple"
-          removable-sort
-          :global-filter-fields="['code', 'name', 'unit']"
-          filter-toggle
-          @page="onPage"
-          @sort="onSort"
-          @filter="onFilter"
-          @search="onSearch"
-        >
-          <template #header>
-            <span class="text-sm text-gray-500">
-              <template v-if="selectedCount > 0"> Đã chọn {{ selectedCount }} sản phẩm </template>
-              <template v-else>Tổng {{ totalProducts }} sản phẩm</template>
-            </span>
-          </template>
+        <Tabs v-model:value="tab">
+          <TabList>
+            <Tab value="products"><i class="pi pi-box mr-2" />Danh mục sản phẩm</Tab>
+            <Tab value="bom"><i class="pi pi-list-check mr-2" />Định mức vật tư</Tab>
+          </TabList>
+          <TabPanels>
+            <TabPanel value="products">
+              <AppDataTable
+                v-model:selection="selection"
+                v-model:filters="filters"
+                v-model:multiSortMeta="multiSortMeta"
+                :meta-key-selection="false"
+                :value="products"
+                :loading="loading"
+                :totalRecords="totalProducts"
+                :first="first"
+                :rows="rowsPerPage"
+                :rows-per-page-options="[20, 50, 100, 200]"
+                data-key="id"
+                sort-mode="multiple"
+                removable-sort
+                :global-filter-fields="['code', 'name', 'unit', 'aliases']"
+                filter-toggle
+                @page="onPage"
+                @sort="onSort"
+                @filter="onFilter"
+                @search="onSearch"
+              >
+                <template #header>
+                  <span class="text-sm text-gray-500">
+                    <template v-if="selectedCount > 0">
+                      Đã chọn {{ selectedCount }} sản phẩm
+                    </template>
+                    <template v-else>Tổng {{ totalProducts }} sản phẩm</template>
+                  </span>
+                </template>
 
-          <Column field="code" header="Mã SP" sortable />
-          <Column field="name" header="Tên sản phẩm" sortable>
-            <template #filter="{ filterModel, filterCallback }">
-              <InputText
-                size="small"
-                v-model="filterModel.value"
-                placeholder="Tên"
-                @input="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="unit" header="ĐVT" sortable>
-            <template #filter="{ filterModel, filterCallback }">
-              <InputText
-                size="small"
-                v-model="filterModel.value"
-                placeholder="ĐVT"
-                @input="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="sale_price" header="Giá bán" sortable>
-            <template #body="{ data }">{{ fmtVnd(data.sale_price) }}</template>
-            <template #filter="{ filterModel, filterCallback }">
-              <InputNumber
-                v-model="filterModel.value"
-                :min="0"
-                mode="currency"
-                currency="VND"
-                locale="vi-VN"
-                placeholder="Bằng"
-                @input="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="cost_price" header="Giá vốn" sortable>
-            <template #body="{ data }">{{ fmtVnd(data.cost_price) }}</template>
-            <template #filter="{ filterModel, filterCallback }">
-              <InputNumber
-                v-model="filterModel.value"
-                :min="0"
-                mode="currency"
-                currency="VND"
-                locale="vi-VN"
-                placeholder="Bằng"
-                @input="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="min_stock" header="Tồn tối thiểu" sortable>
-            <template #body="{ data }">{{ fmt(data.min_stock) }}</template>
-            <template #filter="{ filterModel, filterCallback }">
-              <InputNumber
-                v-model="filterModel.value"
-                :min="0"
-                placeholder="Bằng"
-                @input="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="is_service" header="Loại" sortable>
-            <template #body="{ data }">
-              <Tag
-                :value="data.is_service ? 'Dịch vụ' : 'Hàng hóa'"
-                :severity="data.is_service ? 'warning' : 'info'"
-              />
-            </template>
-          </Column>
-          <Column field="industry_code" header="Nhóm ngành" sortable>
-            <template #body="{ data }">
-              <Tag
-                v-if="data.industry_code"
-                :value="
-                  industryGroups.find((g) => g.code === data.industry_code)?.name ??
-                  data.industry_code
-                "
-                severity="secondary"
-              />
-              <span v-else class="text-gray-400">—</span>
-            </template>
-            <template #filter="{ filterModel, filterCallback }">
-              <Select
-                v-model="filterModel.value"
-                :options="industryGroups"
-                option-label="name"
-                option-value="code"
-                placeholder="Tất cả"
-                show-clear
-                @change="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="vat_rate" header="Thuế GTGT đầu vào" sortable>
-            <template #body="{ data }">
-              <Tag :value="data.vat_rate * 100 + '%'" severity="info" />
-            </template>
-            <template #filter="{ filterModel, filterCallback }">
-              <Select
-                v-model="filterModel.value"
-                :options="settings.vatRateOptions"
-                placeholder="Tất cả"
-                show-clear
-                @change="filterCallback()"
-              />
-            </template>
-          </Column>
-          <Column field="import_tax_rate" header="Thuế nhập" sortable>
-            <template #body="{ data }">
-              <Tag :value="data.import_tax_rate * 100 + '%'" severity="secondary" />
-            </template>
-            <template #filter="{ filterModel, filterCallback }">
-              <Select
-                v-model="filterModel.value"
-                :options="settings.importTaxOptions"
-                placeholder="Tất cả"
-                show-clear
-                @change="filterCallback()"
-              />
-            </template>
-          </Column>
+                <Column field="code" header="Mã SP" sortable />
+                <Column field="name" header="Tên sản phẩm" sortable>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="Tên"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="aliases" header="Tên khác">
+                  <template #body="{ data }">
+                    <span v-if="data.aliases" class="text-gray-600">{{ data.aliases }}</span>
+                    <span v-else class="text-gray-400">—</span>
+                  </template>
+                </Column>
+                <Column field="unit" header="ĐVT" sortable>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputText
+                      size="small"
+                      v-model="filterModel.value"
+                      placeholder="ĐVT"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="sale_price" header="Giá bán" sortable>
+                  <template #body="{ data }">{{ fmtVnd(data.sale_price) }}</template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputNumber
+                      v-model="filterModel.value"
+                      :min="0"
+                      mode="currency"
+                      currency="VND"
+                      locale="vi-VN"
+                      placeholder="Bằng"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="cost_price" header="Giá vốn" sortable>
+                  <template #body="{ data }">{{ fmtVnd(data.cost_price) }}</template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputNumber
+                      v-model="filterModel.value"
+                      :min="0"
+                      mode="currency"
+                      currency="VND"
+                      locale="vi-VN"
+                      placeholder="Bằng"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="min_stock" header="Tồn tối thiểu" sortable>
+                  <template #body="{ data }">{{ fmt(data.min_stock) }}</template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <InputNumber
+                      v-model="filterModel.value"
+                      :min="0"
+                      placeholder="Bằng"
+                      @input="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="is_service" header="Loại" sortable>
+                  <template #body="{ data }">
+                    <Tag
+                      :value="data.is_service ? 'Dịch vụ' : 'Hàng hóa'"
+                      :severity="data.is_service ? 'warning' : 'info'"
+                    />
+                  </template>
+                </Column>
+                <Column field="industry_code" header="Nhóm ngành" sortable>
+                  <template #body="{ data }">
+                    <Tag
+                      v-if="data.industry_code"
+                      :value="
+                        industryGroups.find((g) => g.code === data.industry_code)?.name ??
+                        data.industry_code
+                      "
+                      severity="secondary"
+                    />
+                    <span v-else class="text-gray-400">—</span>
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <Select
+                      v-model="filterModel.value"
+                      :options="industryGroups"
+                      option-label="name"
+                      option-value="code"
+                      placeholder="Tất cả"
+                      show-clear
+                      @change="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="vat_rate" header="Thuế GTGT đầu vào" sortable>
+                  <template #body="{ data }">
+                    <Tag :value="data.vat_rate * 100 + '%'" severity="info" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <Select
+                      v-model="filterModel.value"
+                      :options="settings.vatRateOptions"
+                      placeholder="Tất cả"
+                      show-clear
+                      @change="filterCallback()"
+                    />
+                  </template>
+                </Column>
+                <Column field="import_tax_rate" header="Thuế nhập" sortable>
+                  <template #body="{ data }">
+                    <Tag :value="data.import_tax_rate * 100 + '%'" severity="secondary" />
+                  </template>
+                  <template #filter="{ filterModel, filterCallback }">
+                    <Select
+                      v-model="filterModel.value"
+                      :options="settings.importTaxOptions"
+                      placeholder="Tất cả"
+                      show-clear
+                      @change="filterCallback()"
+                    />
+                  </template>
+                </Column>
 
-          <template #empty>
-            <EmptyState
-              :text="hasActiveFilter ? 'Không tìm thấy sản phẩm phù hợp.' : 'Chưa có sản phẩm.'"
-              icon="pi pi-box"
-            />
-          </template>
-        </AppDataTable>
+                <template #empty>
+                  <EmptyState
+                    :text="
+                      hasActiveFilter ? 'Không tìm thấy sản phẩm phù hợp.' : 'Chưa có sản phẩm.'
+                    "
+                    icon="pi pi-box"
+                  />
+                </template>
+              </AppDataTable>
+            </TabPanel>
+
+            <!-- ĐỊNH MỨC VẬT TƯ (F4) -->
+            <TabPanel value="bom">
+              <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+                <div class="flex items-end gap-2">
+                  <FormField label="Thành phẩm">
+                    <div class="w-72" data-testid="bom-fg">
+                      <ProductSelect v-model="bomProduct" size="small" />
+                    </div>
+                  </FormField>
+                </div>
+                <div class="flex items-center gap-2">
+                  <Button
+                    v-if="auth.canStock"
+                    label="Thêm dòng"
+                    icon="pi pi-plus"
+                    severity="secondary"
+                    outlined
+                    size="small"
+                    :disabled="!bomProduct"
+                    @click="bomRows.push({ material_code: '', quantity: 1 })"
+                  />
+                  <Button
+                    v-if="auth.canStock"
+                    label="Lưu định mức"
+                    icon="pi pi-save"
+                    size="small"
+                    :loading="bomSaving"
+                    :disabled="!bomProduct"
+                    @click="saveBom"
+                  />
+                </div>
+              </div>
+
+              <p class="mb-3 text-xs text-gray-500">
+                Khai <b>1 thành phẩm cần bao nhiêu vật tư</b>. Khi lưu phiếu nhập kho loại
+                <b>Tự sản xuất / gia công</b> và bật ô "Tự xuất NVL theo định mức", app tự tính số
+                NVL = định mức × sản lượng, tự trừ tồn FIFO và tự sinh phiếu xuất NVL (Nợ 154 / Có
+                152) ngay trong lúc lưu phiếu nhập.
+              </p>
+
+              <EmptyState
+                v-if="!bomProduct"
+                icon="pi pi-list-check"
+                text="Chọn một thành phẩm để xem hoặc khai định mức vật tư."
+              />
+              <div v-else data-testid="bom-table">
+                <DataTable
+                  :value="bomRows"
+                  size="small"
+                  :rows="50"
+                  :row-hover="false"
+                  class="p-datatable-sm"
+                >
+                  <template #empty>
+                    <EmptyState
+                      icon="pi pi-list-check"
+                      text="Chưa khai định mức cho sản phẩm này — bấm “Thêm dòng” để bắt đầu."
+                    />
+                  </template>
+                  <Column header="Vật tư" style="min-width: 260px">
+                    <template #body="{ index }">
+                      <ProductSelect
+                        :model-value="bomRows[index].material_code"
+                        size="small"
+                        @update:model-value="bomRows[index].material_code = $event"
+                      />
+                    </template>
+                  </Column>
+                  <Column header="ĐVT" style="width: 110px">
+                    <template #body="{ index }">
+                      <span class="text-gray-600">
+                        {{ catalog.productByCode(bomRows[index].material_code)?.unit || "—" }}
+                      </span>
+                    </template>
+                  </Column>
+                  <Column header="Tồn hiện tại" style="width: 130px">
+                    <template #body="{ index }">
+                      <span
+                        :class="
+                          materialOnhand(bomRows[index].material_code) > 0
+                            ? 'text-gray-600'
+                            : 'text-gray-400'
+                        "
+                      >
+                        {{ fmt(materialOnhand(bomRows[index].material_code)) }}
+                      </span>
+                    </template>
+                  </Column>
+                  <Column header="SL / 1 thành phẩm" style="width: 170px">
+                    <template #body="{ index }">
+                      <InputNumber
+                        v-model="bomRows[index].quantity"
+                        :min="0"
+                        :use-grouping="false"
+                        :max-fraction-digits="3"
+                        size="small"
+                        class="w-full"
+                        :disabled="!auth.canStock"
+                      />
+                    </template>
+                  </Column>
+                  <Column v-if="auth.canStock" header="" style="width: 60px">
+                    <template #body="{ index }">
+                      <Button
+                        icon="pi pi-trash"
+                        severity="danger"
+                        text
+                        size="small"
+                        @click="bomRows.splice(index, 1)"
+                      />
+                    </template>
+                  </Column>
+                </DataTable>
+              </div>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
       </template>
     </Card>
 

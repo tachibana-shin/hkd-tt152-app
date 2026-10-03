@@ -97,6 +97,20 @@ pub(crate) struct ProductRow {
     pub(crate) is_service: bool,
     /// Nhóm ngành mặc định của sản phẩm (cơ sở tính thuế bán ra).
     pub(crate) industry_code: String,
+    /// Danh sách "tên khác" (alias) — phân tách ", ". Rỗng nếu chưa khai.
+    /// Dùng để tìm sản phẩm theo mọi tên người dùng hay gõ (F5).
+    pub(crate) aliases: String,
+}
+
+/// Dòng định mức vật tư (BOM) đã join tên — payload của màn "Định mức" (F4).
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct BomRow {
+    pub(crate) product_code: String,
+    pub(crate) product_name: String,
+    pub(crate) material_code: String,
+    pub(crate) material_name: String,
+    pub(crate) material_unit: String,
+    pub(crate) quantity: f64,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -324,6 +338,9 @@ pub(crate) struct InvoiceItemRow {
     pub(crate) industry_code: String,
     pub(crate) vat_rate: f64,
     pub(crate) pit_rate: f64,
+    /// Tên người dùng CHỌN trên dòng hóa đơn (có thể là tên khác / alias).
+    /// Rỗng → dùng tên sản phẩm. Cho phép giữ đúng alias đã chọn khi in (F5).
+    pub(crate) line_name: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -356,6 +373,13 @@ pub(crate) struct InboundItemInput {
     pub(crate) discount: f64,
 }
 
+/// Một dòng định mức vật tư (BOM) gửi từ FE: NVL cần cho 1 đơn vị thành phẩm.
+#[derive(serde::Deserialize, Debug, Clone)]
+pub(crate) struct BomItemInput {
+    pub(crate) material_code: String,
+    pub(crate) quantity: f64,
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct OutboundItemInput {
     pub(crate) product_code: String,
@@ -370,6 +394,10 @@ pub(crate) struct OutboundItemInput {
     /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
     #[serde(default)]
     pub(crate) warehouse_code: String,
+    /// Tên hiển thị dòng (tên khác / alias người dùng đã chọn) — chép sang hóa
+    /// đơn lập kèm để in ra giữ đúng tên đó (F5). Rỗng → tên sản phẩm.
+    #[serde(default)]
+    pub(crate) line_name: String,
 }
 
 /// Thông tin hóa đơn bán hàng lập KÈM theo phiếu xuất (tab "Hóa đơn").
@@ -401,6 +429,10 @@ pub(crate) struct InvoiceItemInput {
     /// Kho xuất trên dòng (rỗng → kho mặc định của sản phẩm / kho đầu tiên).
     #[serde(default)]
     pub(crate) warehouse_code: String,
+    /// Tên hiển thị của dòng (tên khác / alias người dùng đã chọn). Rỗng → tên
+    /// sản phẩm. In/chi tiết hóa đơn dùng COALESCE(NULLIF(line_name,''), p.name).
+    #[serde(default)]
+    pub(crate) line_name: String,
 }
 
 #[derive(serde::Deserialize)]

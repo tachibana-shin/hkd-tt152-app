@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT line_name FROM invoice_item WHERE invoice_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "line_name",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b57fbfd7145d892ae2bcf2ed0495dcb0f8fe333e1975e505c3f66ff19a29bb5a"
+}

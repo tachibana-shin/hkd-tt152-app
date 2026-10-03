@@ -13,9 +13,9 @@ use crate::commands;
 use crate::helpers::require_role;
 use crate::models::AppState;
 use crate::models::{
-    AttendanceEntryInput, CashEntryInput, CountItemInput, EmployeeInput, ImportEntryInput,
-    InboundItemInput, InvoiceItemInput, OutboundInvoiceInput, OutboundItemInput, PayrollLineInput,
-    UserInput,
+    AttendanceEntryInput, BomItemInput, CashEntryInput, CountItemInput, EmployeeInput,
+    ImportEntryInput, InboundItemInput, InvoiceItemInput, OutboundInvoiceInput, OutboundItemInput,
+    PayrollLineInput, UserInput,
 };
 use axum::extract::Path;
 use axum::http::{header, HeaderValue, StatusCode, Uri};
@@ -295,6 +295,19 @@ pub async fn api_invoke(
             industry_code: String
         ),
         "delete_product" => mx!(commands::catalog::delete_product, body, id: i64),
+        "save_product_aliases" => mx!(
+            commands::catalog::save_product_aliases,
+            body,
+            code: String,
+            aliases: Vec<String>
+        ),
+        "get_product_boms" => mx!(commands::catalog::get_product_boms, body),
+        "save_product_bom" => mx!(
+            commands::catalog::save_product_bom,
+            body,
+            product_code: String,
+            items: Vec<BomItemInput>
+        ),
         "delete_products" => mx!(commands::catalog::delete_products, body, ids: Vec<i64>),
         "assign_goods_industry" => mx!(commands::catalog::assign_goods_industry, body),
         "next_product_code" => mx!(commands::catalog::next_product_code, body),
@@ -392,7 +405,8 @@ pub async fn api_invoke(
             debit_account: String,
             credit_account: String,
             pay_now: bool,
-            adjust_dir: String
+            adjust_dir: String,
+            auto_bom: bool
         ),
         "save_outbound" => mx!(
             commands::stock::save_outbound,

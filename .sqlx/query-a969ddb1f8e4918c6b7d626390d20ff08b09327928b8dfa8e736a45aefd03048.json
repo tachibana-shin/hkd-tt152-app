@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", is_service as \"is_service: bool\" FROM product WHERE code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_service: bool",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "a969ddb1f8e4918c6b7d626390d20ff08b09327928b8dfa8e736a45aefd03048"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,\n                  ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n            WHERE ii.invoice_id = ?\n            ORDER BY ii.id",
+  "query": "SELECT ii.invoice_id, p.code,\n                  -- Tên in = tên người dùng chọn trên dòng (alias) nếu có (F5).\n                  COALESCE(NULLIF(ii.line_name, ''), p.name) AS \"name!: String\",\n                  p.unit, ii.quantity, ii.unit_price,\n                  ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n            WHERE ii.invoice_id = ?\n            ORDER BY ii.id",
   "describe": {
     "columns": [
       {
@@ -14,9 +14,9 @@
         "type_info": "Text"
       },
       {
-        "name": "name",
+        "name": "name!: String",
         "ordinal": 2,
-        "type_info": "Text"
+        "type_info": "Null"
       },
       {
         "name": "unit",
@@ -65,7 +65,7 @@
     "nullable": [
       false,
       false,
-      false,
+      null,
       false,
       false,
       false,
@@ -76,5 +76,5 @@
       false
     ]
   },
-  "hash": "d2a0fe59450ac88cbb9fda993ca0a97d2033d61a2325a30dfbba9ca25be9b775"
+  "hash": "0e30185362bbd9a2612d91c1cce15b9c13ae7ca37d8e2e6dec7fb11fea18717e"
 }

@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.voucher_no AS \"voucher_no!\",\n                  je.posting_date AS \"posting_date!\",\n                  je.description AS \"description!\",\n                  je.product_code AS \"product_code!\",\n                  je.customer_code AS \"customer_code!\",\n                  je.unit_code AS \"unit_code!\",\n                  je.industry_code AS \"industry_code!\",\n                  je.quantity,\n                  je.note AS \"note!\"\n             FROM journal_entry je\n             JOIN product p ON p.code = je.product_code\n            WHERE je.entry_type = 'PX'\n              AND je.quantity > 0\n              -- Khách trả lại app đã ghi bút Nợ 152 / Có 632 rồi, không có dòng\n              -- 632/152 nào để bổ sung (ghi thêm thì sẽ sai chiều).\n              -- 'XuatNVL' = phiếu xuất NVL tự sinh theo định mức (F4): đã ghi Nợ\n              -- 154 / Có 152 rồi — bổ sung thêm Nợ 632 / Có 152 là credit 152 lần 2.\n              AND COALESCE(je.adjust_code, '') NOT IN ('GiamDT', 'XuatNVL')\n              AND COALESCE(p.is_service, 0) = 0\n            ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_code!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_code!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit_code!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "industry_code!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "note!",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9902e816b766df8de1340e91b7fb2ed295d763617ba2f0c4f57ea3bb3f5351ed"
+}

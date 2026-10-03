@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO product (code, name, unit, is_service) VALUES ('DV1', 'Dịch vụ', 'Lần', 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "7e39c7b68c05965ba593e2a2fd056fec89069ec110b94a11ede7623303af9f6d"
+}

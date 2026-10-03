@@ -488,6 +488,7 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
       credit_account: "331",
       pay_now: true,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(inbound.ok(), `save_inbound failed ${inbound.status()}`).toBe(true);
@@ -626,6 +627,7 @@ test("Liên kết HĐĐT: ngày hóa đơn đồng bộ theo ngày HĐĐT bên k
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -716,6 +718,7 @@ test("Ghi nhận HĐĐT: tự lập phiếu xuất để doanh thu vào sổ", a
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed: ${await stockIn.text()}`).toBe(true);
@@ -814,6 +817,7 @@ test("Nhap/Xuat kho: chặn số phiếu trùng, số phiếu mới không đụ
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
@@ -836,6 +840,7 @@ test("Nhap/Xuat kho: chặn số phiếu trùng, số phiếu mới không đụ
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(dup.status(), "phải chặn số phiếu nhập trùng").toBe(400);
@@ -990,6 +995,7 @@ test("Nhap/Xuat kho: 1 phiếu = 1 dòng, có số loại mặt hàng và chiế
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound: ${await stockIn.text()}`).toBe(true);
@@ -1037,6 +1043,7 @@ test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", asy
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
@@ -1200,6 +1207,7 @@ test("Hóa đơn: cảnh báo ⚠ chưa có phiếu xuất khi đã phát hành 
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -1334,6 +1342,7 @@ test("KeepAlive: quay lại màn đã xem thì nạp lại dữ liệu, không c
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}`).toBe(true);
@@ -1386,6 +1395,7 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -1509,6 +1519,7 @@ test("Chờ xuất HĐĐT: xem PDF hóa đơn nháp ngay trên hàng chờ", asy
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed: ${await stockIn.text()}`).toBe(true);
@@ -1569,6 +1580,7 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -1577,8 +1589,10 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
 
   await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
   const dlg = page.getByRole("dialog");
-  const number = await dlg.getByRole("textbox").first().inputValue();
-  expect(number).toMatch(/^HD\d+$/);
+  // Số gợi ý điền sau khi nạp xong danh sách hóa đơn → chờ có số rồi mới đọc.
+  const numberInput = dlg.getByRole("textbox").first();
+  await expect(numberInput).toHaveValue(/^HD\d+$/);
+  const number = await numberInput.inputValue();
 
   const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
   await custInput.fill("Khách Bấm Nhiều Lần");
@@ -1634,6 +1648,7 @@ test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async 
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -1715,6 +1730,7 @@ test("Hóa đơn nháp: nút xoá dọn cả dòng hàng, hóa đơn đã xử l
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -1790,6 +1806,7 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -2234,6 +2251,7 @@ test("Responsive: điện thoại thì sidebar thành ngăn kéo và bảng thà
         credit_account: "331",
         pay_now: false,
         adjust_dir: "up",
+        autoBom: false,
       },
     });
     expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
@@ -2651,6 +2669,7 @@ test("Phân trang server-side: bảng dài chỉ lấy đúng trang, sắp xếp
         credit_account: "331",
         pay_now: false,
         adjust_dir: "up",
+        autoBom: false,
       },
     });
     expect(res.ok(), `save_inbound ${i} failed ${res.status()}`).toBe(true);
@@ -2722,6 +2741,7 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound: ${await stockIn.text()}`).toBe(true);
@@ -2911,6 +2931,7 @@ test("Nhóm hộ trong hồ sơ được ưu tiên, ngưỡng thuế sửa đư�
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(stockIn.ok(), `save_inbound: ${await stockIn.text()}`).toBe(true);
@@ -3135,6 +3156,7 @@ test("Bảng cân đối có bút giá vốn 632/152 và không còn phiếu nà
       credit_account: "331",
       pay_now: false,
       adjust_dir: "up",
+      autoBom: false,
     },
   });
   expect(inbound.ok(), `save_inbound: ${await inbound.text()}`).toBe(true);
@@ -3358,4 +3380,275 @@ test("Xem PDF hóa đơn: mở từ tab Tra cứu HĐĐT", async ({ page, reques
   await expectValidPdf(page);
   await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
   await expect(invoiceFrame(page)).toBeHidden();
+});
+
+// ─── F5 — TÊN KHÁC (ALIAS): khai ở danh mục, tìm được, hóa đơn giữ đúng tên ───
+test("Tên khác của sản phẩm: tìm được ở danh mục và hóa đơn giữ tên đã chọn", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  const prod = await request.post("/api/save_product", {
+    data: {
+      code: "SP-AL1",
+      name: "Bột mì",
+      unit: "Gói",
+      salePrice: 20_000,
+      costPrice: 15_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(prod.ok(), `save_product: ${await prod.text()}`).toBe(true);
+  const stock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-03",
+      voucher_no: "PN-AL1",
+      description: "Nhập tồn cho test tên khác",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP-AL1", quantity: 12, unit_price: 15_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stock.ok(), `save_inbound: ${await stock.text()}`).toBe(true);
+
+  // ── 1) Khai "Tên khác" ngay trên dialog Sửa sản phẩm ──
+  await sidebarButton(page, "Sản phẩm").click();
+  await expect(page.locator("header h2")).toHaveText("Danh mục sản phẩm");
+  const search = page.getByPlaceholder("Tìm kiếm…").first();
+  await search.fill("SP-AL1");
+  const gridRow = page.locator("tr", { has: page.getByText("SP-AL1", { exact: true }) });
+  await expect(gridRow.first()).toBeVisible();
+  await gridRow.first().locator("td").first().click();
+  await page.getByRole("button", { name: "Sửa", exact: true }).click();
+
+  const pDlg = page.getByRole("dialog");
+  await pDlg.locator('label:text-is("Tên khác") + input').fill("Mì flour, Bột làm bánh");
+  await pDlg.getByRole("button", { name: "Lưu", exact: true }).click();
+  await expect(pDlg).toBeHidden();
+  await expect(gridRow.first()).toContainText("Mì flour, Bột làm bánh");
+
+  // ── 2) Tìm TOÀN CỤC bằng tên khác — server phải lọc ra đúng 1 sản phẩm ──
+  await search.fill("");
+  await expect
+    .poll(() => page.locator(".p-datatable tbody tr:visible").count(), { timeout: 15_000 })
+    .toBeGreaterThan(1);
+  await search.fill("mì flour");
+  await expect(page.locator(".p-datatable tbody tr:visible")).toHaveCount(1);
+  await expect(gridRow.first()).toBeVisible();
+
+  // ── 3) Hóa đơn: chọn TÊN ALIAS trong ô sản phẩm → lưu lại đúng tên đó ──
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog");
+  // Số gợi ý điền sau khi nạp xong danh sách hóa đơn → chờ có số rồi mới đọc.
+  const numberInput = dlg.getByRole("textbox").first();
+  await expect(numberInput).toHaveValue(/^HD\d+$/);
+  const number = await numberInput.inputValue();
+
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Tên Khác");
+  await custInput.press("Enter");
+
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("mì flour");
+  await page
+    .getByRole("option", { name: /Mì flour/ })
+    .first()
+    .click();
+  await line.getByRole("spinbutton").nth(1).fill("20000");
+
+  await dlg.getByRole("button", { name: "Lập hóa đơn" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText(`Đã lập hóa đơn ${number}`);
+  await expect(dlg).toBeHidden();
+
+  const invoices = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    id: number;
+    number: string;
+  }>;
+  const inv = invoices.find((i) => i.number === number);
+  expect(inv, `không thấy hóa đơn ${number}`).toBeTruthy();
+
+  const detail = (await (
+    await request.post("/api/get_invoice_detail", { data: { id: inv?.id } })
+  ).json()) as { items: Array<{ product_name: string; line_name: string }> };
+  expect(detail.items).toHaveLength(1);
+  // Tên hiển thị và tên gốc đều là alias đã chọn — KHÔNG fallback về tên chính.
+  expect(detail.items[0].product_name).toBe("Mì flour");
+  expect(detail.items[0].line_name).toBe("Mì flour");
+});
+
+// ─── F4 — ĐỊNH MỨC VẬT TƯ: PNK sản xuất tự sinh phiếu xuất NVL (Nợ 154 / Có 152) ───
+test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh phiếu PX theo định mức", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-FG1",
+      name: "Thành phẩm E2E",
+      unit: "Cái",
+      salePrice: 50_000,
+      costPrice: 30_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-FG1: ${await fg.text()}`).toBe(true);
+  const mat = await request.post("/api/save_product", {
+    data: {
+      code: "SP-NVL1",
+      name: "Vật tư E2E",
+      unit: "Kg",
+      salePrice: 0,
+      costPrice: 5_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(mat.ok(), `save_product SP-NVL1: ${await mat.text()}`).toBe(true);
+
+  // Tồn vật tư 100 Kg — PNK 10 thành phẩm sẽ phải tự xuất 10 × 2 = 20 Kg.
+  const matStock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-04",
+      voucher_no: "PN-NVL1",
+      description: "Nhập vật tư cho test định mức",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP-NVL1", quantity: 100, unit_price: 5_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(matStock.ok(), `save_inbound NVL: ${await matStock.text()}`).toBe(true);
+
+  // ── 1) Khai định mức: 1 thành phẩm = 2 Kg vật tư (Sản phẩm → Định mức vật tư) ──
+  await sidebarButton(page, "Sản phẩm").click();
+  await expect(page.locator("header h2")).toHaveText("Danh mục sản phẩm");
+  await page.getByRole("tab", { name: /Định mức vật tư/ }).click();
+
+  await page.locator('[data-testid="bom-fg"] .p-select').click();
+  await expect(page.locator('.p-select-overlay [role="searchbox"]').last()).toBeVisible();
+  await expect.poll(() => page.getByRole("option").count(), { timeout: 15_000 }).toBeGreaterThan(0);
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Thành phẩm E2E");
+  await page
+    .getByRole("option", { name: /Thành phẩm E2E/ })
+    .first()
+    .click();
+
+  await page.getByRole("button", { name: "Thêm dòng" }).click();
+  const bomRow = page.locator('[data-testid="bom-table"] tbody tr').first();
+  await bomRow.getByRole("combobox").click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Vật tư E2E");
+  await page
+    .getByRole("option", { name: /Vật tư E2E/ })
+    .first()
+    .click();
+  await bomRow.getByRole("spinbutton").fill("2");
+  await page.getByRole("button", { name: "Lưu định mức" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã lưu định mức");
+
+  // ── 2) PNK loại "Tự sản xuất / gia công" + ô "Tự xuất NVL theo định mức" ──
+  await sidebarButton(page, "Nhập kho").click();
+  await expect(page.locator("header h2")).toHaveText("Nhập kho");
+  await page.getByRole("button", { name: "Tạo phiếu nhập" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByText("Tạo phiếu nhập kho")).toBeVisible();
+
+  await dlg.locator('label:text-is("Loại nhập") + .p-select').click();
+  await page
+    .getByRole("option", { name: /Tự sản xuất/ })
+    .first()
+    .click();
+
+  // Số phiếu do backend sinh — chờ đúng số trước khi lưu để không lưu nhầm số tạm.
+  const expectedPn = await (
+    await request.post("/api/next_voucher_no", { data: { entryType: "PN" } })
+  ).text();
+  await expect(dlg.getByLabel("Số phiếu")).toHaveValue(expectedPn);
+
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Thành phẩm E2E");
+  await page
+    .getByRole("option", { name: /Thành phẩm E2E/ })
+    .first()
+    .click();
+  await line.getByRole("spinbutton").first().fill("10");
+  await line.getByRole("spinbutton").nth(1).fill("50000");
+
+  const autoBom = dlg
+    .locator('label:text-is("Tự xuất NVL theo định mức") + div')
+    .getByRole("switch");
+  await autoBom.click();
+  await expect(autoBom).toBeChecked();
+
+  await dlg.getByRole("button", { name: "Lưu phiếu" }).click();
+  await expect(dlg).toBeHidden();
+
+  // ── 3) Toast báo số phiếu PX tự sinh ──
+  const toastDetail = page.locator(".p-toast-detail").last();
+  await expect(toastDetail).toContainText(/Đã tạo phiếu xuất NVL PX\d+/);
+  const pxNo = (await toastDetail.textContent())?.match(/PX\d+/)?.[0] ?? "";
+  expect(pxNo, "phải lấy được số phiếu PX từ toast").not.toBe("");
+
+  // ── 4) Bút toán PX tự sinh: đúng 20 Kg NVL, Nợ 154 / Có 152, ghi chú liên kết ──
+  const voucher = (await (
+    await request.post("/api/get_voucher", { data: { voucherNo: pxNo } })
+  ).json()) as Array<{
+    entry_type: string;
+    product_code: string;
+    quantity: number;
+    debit_account: string;
+    credit_account: string;
+    note: string;
+  }>;
+  const pxLine = voucher.find((r) => r.product_code === "SP-NVL1");
+  expect(pxLine, `phiếu ${pxNo} phải có dòng xuất NVL SP-NVL1`).toBeTruthy();
+  expect(pxLine?.entry_type).toBe("PX");
+  expect(pxLine?.quantity, "SL xuất = định mức 2 × sản lượng 10").toBe(20);
+  expect(pxLine?.debit_account).toBe("154");
+  expect(pxLine?.credit_account).toBe("152");
+  expect(pxLine?.note).toContain(expectedPn);
+
+  // Dòng tự sinh phải được gắn marker để không rơi vào doanh thu / giá vốn bán.
+  const entries = (await (
+    await request.post("/api/get_journal_entries", {
+      data: { entryType: "PX", fromDate: "", toDate: "", search: pxNo },
+    })
+  ).json()) as Array<{ voucher_no: string; adjust_code: string }>;
+  expect(entries.find((r) => r.voucher_no === pxNo)?.adjust_code).toBe("XuatNVL");
 });

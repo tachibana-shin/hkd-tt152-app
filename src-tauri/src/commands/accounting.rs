@@ -958,7 +958,7 @@ pub(crate) async fn load_fifo_cogs(pool: &SqlitePool, from: &str, to: &str) -> R
             WHERE je.entry_type = 'PX'
               AND je.posting_date >= ? AND je.posting_date <= ?
               AND je.quantity > 0
-              AND COALESCE(je.adjust_code, '') != 'GiamDT'
+              AND COALESCE(je.adjust_code, '') NOT IN ('GiamDT', 'XuatNVL')
               AND COALESCE(p.is_service, 0) = 0
             ORDER BY je.posting_date, je.id"#,
         from,
@@ -1033,7 +1033,9 @@ async fn load_fifo_rows(pool: &SqlitePool) -> Result<(Vec<Receipt>, Vec<IssueRow
               AND je.quantity > 0
               -- Khách trả lại app đã ghi bút Nợ 152 / Có 632 rồi, không có dòng
               -- 632/152 nào để bổ sung (ghi thêm thì sẽ sai chiều).
-              AND COALESCE(je.adjust_code, '') != 'GiamDT'
+              -- 'XuatNVL' = phiếu xuất NVL tự sinh theo định mức (F4): đã ghi Nợ
+              -- 154 / Có 152 rồi — bổ sung thêm Nợ 632 / Có 152 là credit 152 lần 2.
+              AND COALESCE(je.adjust_code, '') NOT IN ('GiamDT', 'XuatNVL')
               AND COALESCE(p.is_service, 0) = 0
             ORDER BY je.posting_date, je.id"#,
     )
@@ -2781,6 +2783,7 @@ async fn sales_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec<Sales
             WHERE je.entry_type = 'PX'
               AND je.posting_date >= ? AND je.posting_date <= ?
               AND je.amount <> 0
+              AND COALESCE(je.adjust_code, '') != 'XuatNVL'
             ORDER BY je.posting_date, je.id"#,
         from,
         to
@@ -3357,7 +3360,9 @@ pub(crate) async fn get_revenue_expense_core(
 ) -> Result<serde_json::Value, String> {
     let row = sqlx::query!(
         "SELECT
-            COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code != 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_up,
+            -- 'XuatNVL' = phiếu xuất NVL tự sinh theo định mức (F4): không phải
+            -- doanh thu nên LOẠI khỏi mọi sổ doanh thu / giá vốn / bán hàng.
+            COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code NOT IN ('GiamDT', 'XuatNVL') THEN amount ELSE 0.0 END), 0.0) AS revenue_up,
             COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code = 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_down,
             COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP'
                                AND COALESCE(debit_account, '') != '331' THEN amount ELSE 0.0 END), 0.0) AS expense_up,
@@ -4424,6 +4429,8 @@ mod tests {
                 discount: 0.0,
                 industry_code: "TYLE-15".into(),
                 warehouse_code: "".into(),
+
+                line_name: String::new(),
             },
             OutboundItemInput {
                 product_code: "H2".into(),
@@ -4432,6 +4439,8 @@ mod tests {
                 discount: 0.0,
                 industry_code: "TYLE-7".into(),
                 warehouse_code: "".into(),
+
+                line_name: String::new(),
             },
         ];
         let r = save_outbound_core(
@@ -4592,6 +4601,115 @@ mod tests {
         // Không phải ngày ISO thì giữ nguyên — không bịa ngày cho chứng từ.
         assert_eq!(vn_date(""), "");
         assert_eq!(vn_date("05/07/2026"), "05/07/2026");
+    }
+
+    // ─── F4 — PHIẾU XUẤT NVL TỰ SINH KHÔNG PHẢI DOANH THU / GIÁ VỐN ───
+
+    /// Chèn 1 dòng sổ đầy đủ (PN / PX) với mã hàng, số lượng, giá, adjust_code.
+    #[allow(clippy::too_many_arguments)]
+    async fn add_row(
+        pool: &SqlitePool,
+        date: &str,
+        voucher: &str,
+        kind: &str,
+        code: &str,
+        qty: f64,
+        unit_price: f64,
+        industry: &str,
+        adjust: &str,
+    ) {
+        let amount = round2(qty * unit_price);
+        sqlx::query!(
+            "INSERT INTO journal_entry
+             (posting_date, voucher_no, doc_date, entry_type, description, product_code,
+              quantity, unit_price, amount, debit_account, credit_account,
+              industry_code, vat_rate, pit_rate, unit_code, adjust_code, note)
+             VALUES (?, ?, ?, ?, 'test', ?, ?, ?, ?, '152', '331', ?, 0.0, 0.0, 'HKD', ?, '')",
+            date,
+            voucher,
+            date,
+            kind,
+            code,
+            qty,
+            unit_price,
+            amount,
+            industry,
+            adjust
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn xuat_nvl_tu_sinh_khong_vao_doanh_thu_va_gia_von() {
+        let pool = test_pool().await;
+        seed_product(&pool, "XN1", "Vật tư", 0.01).await;
+
+        // Nhập 20 @ 6.000 (đầu vào FIFO).
+        add_row(
+            &pool,
+            "2026-03-01",
+            "PN-1",
+            "PN",
+            "XN1",
+            20.0,
+            6_000.0,
+            "",
+            "",
+        )
+        .await;
+        // Bán 10 @ 10.000 → doanh thu thật 100.000 (đặt trước để tiêu lô trước).
+        add_row(
+            &pool,
+            "2026-03-10",
+            "PX-BAN",
+            "PX",
+            "XN1",
+            10.0,
+            10_000.0,
+            "PPHH",
+            "",
+        )
+        .await;
+        // Xuất NVL tự sinh theo định mức 5 @ 5.000 → KHÔNG phải doanh thu.
+        add_row(
+            &pool,
+            "2026-03-11",
+            "PX001",
+            "PX",
+            "XN1",
+            5.0,
+            5_000.0,
+            "",
+            "XuatNVL",
+        )
+        .await;
+
+        // Sổ bán hàng: chỉ phiếu bán thường.
+        let rows = sales_rows(&pool, "2026-03-01", "2026-03-31").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].voucher_no, "PX-BAN");
+
+        // Sổ doanh thu / chi phí: chỉ 100.000 doanh thu.
+        let v = get_revenue_expense_core(&pool, "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert_eq!(v["revenue_up"].as_f64().unwrap(), 100_000.0);
+
+        // Giá vốn FIFO kỳ: chỉ bán 10 x 6.000 = 60.000 (không cộng dòng XuatNVL).
+        let cogs = load_fifo_cogs(&pool, "2026-03-01", "2026-03-31")
+            .await
+            .unwrap();
+        assert_eq!(cogs, 60_000.0);
+
+        // Kế hoạch ghi bổ sung giá vốn: dòng XuatNVL đã có Nợ 154 / Có 152 rồi
+        // → không được đề nghị ghi thêm Nợ 632 / Có 152 (credit 152 lần 2).
+        let (receipts, issues) = load_fifo_rows(&pool).await.unwrap();
+        assert_eq!(issues.len(), 1, "chỉ lượt xuất bán hàng cần giá vốn");
+        let costs = issue_costs(&receipts, &issues);
+        let plan = cogs_backfill_plan(&issues, &costs, &Default::default());
+        assert_eq!(plan, vec![0]);
     }
 }
 

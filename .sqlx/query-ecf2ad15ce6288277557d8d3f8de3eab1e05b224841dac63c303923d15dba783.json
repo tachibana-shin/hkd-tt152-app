@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, name FROM product WHERE code = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "ecf2ad15ce6288277557d8d3f8de3eab1e05b224841dac63c303923d15dba783"
+}

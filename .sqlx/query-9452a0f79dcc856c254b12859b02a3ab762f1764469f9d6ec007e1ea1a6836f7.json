@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.code AS product_code, p.name AS product_name,\n                m.code AS material_code, m.name AS material_name, m.unit AS material_unit,\n                b.quantity\n           FROM product_bom_item b\n           JOIN product p ON p.id = b.product_id\n           JOIN product m ON m.id = b.material_product_id\n          ORDER BY p.code, m.code",
+  "describe": {
+    "columns": [
+      {
+        "name": "product_code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "material_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "material_name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "material_unit",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 5,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9452a0f79dcc856c254b12859b02a3ab762f1764469f9d6ec007e1ea1a6836f7"
+}

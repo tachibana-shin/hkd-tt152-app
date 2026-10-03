@@ -58,6 +58,12 @@ export const useStockStore = defineStore("stock", () => {
     pay_now: boolean;
     /** Hướng điều chỉnh khi inbound_type = "adjust": up (tăng) | down (giảm — trả lại NCC). */
     adjust_dir: "" | "up" | "down";
+    /**
+     * F4 — Ô tick "Tự xuất NVL theo định mức" (chỉ inbound_type = "production"):
+     * backend tự tính NVL = định mức × SL, trừ tồn FIFO + tự sinh phiếu xuất
+     * (Nợ 154 / Có 152) trong cùng transaction. Trả về `material_voucher`.
+     */
+    auto_bom?: boolean;
   }) {
     const res = await api.saveInbound(args);
     await Promise.all([loadEntries("PN"), loadSummary(), loadLots()]);
@@ -76,6 +82,8 @@ export const useStockStore = defineStore("stock", () => {
       quantity: number;
       unit_price: number;
       industry_code: string;
+      /** Tên hiển thị dòng (tên khác / alias) — chép sang hóa đơn lập kèm (F5). */
+      line_name?: string;
     }[];
     /** Thu tiền ngay: tự tạo phiếu thu (PT) của khách hàng khi lưu. */
     receive_now: boolean;

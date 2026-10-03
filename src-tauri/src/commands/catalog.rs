@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 
+use crate::commands::invoice_export::fold_key;
 use crate::helpers::*;
 use crate::models::*;
 use serde_json::json;
@@ -69,9 +70,12 @@ pub(crate) async fn delete_account(state: State<'_, AppState>, id: i64) -> Resul
 #[tauri::command]
 pub(crate) async fn get_products(state: State<'_, AppState>) -> Result<String, String> {
     // `is_service` lưu INTEGER; ép kiểu bool để khớp ProductRow (macro check).
+    // `aliases`: danh sách tên khác của sản phẩm (subquery correlated — không
+    // nhân đôi dòng khi JOIN product_alias).
     let rows: Vec<ProductRow> = sqlx::query_as!(
         ProductRow,
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service as \"is_service: bool\", industry_code
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service as \"is_service: bool\", industry_code,
+                COALESCE((SELECT GROUP_CONCAT(alias, ', ') FROM product_alias pa WHERE pa.product_id = product.id), '') AS aliases
          FROM product ORDER BY code"
     )
     .fetch_all(&*state.pool.read().await)
@@ -464,6 +468,235 @@ pub(crate) async fn save_product(
     Ok("ok".into())
 }
 
+// ─── TÊN KHÁC (alias) CỦA SẢN PHẨM — F5 ───
+
+/// Chuẩn hóa 1 danh sách tên khác do người dùng gõ: tách theo phẩy, cắt khoảng
+/// trắng, bỏ tên rỗng, bỏ trùng theo khóa chuẩn hóa, bỏ tên trùng tên chính /
+/// mã sản phẩm (vô nghĩa — tìm bằng tên chính cũng ra rồi).
+///
+/// Trả về danh sách `(tên hiển thị, alias_key)` theo thứ tự người dùng nhập.
+fn normalize_aliases(raw: &[String], product_name: &str, code: &str) -> Vec<(String, String)> {
+    let own = [fold_key(product_name), fold_key(code)];
+    let mut out: Vec<(String, String)> = Vec::new();
+    for entry in raw {
+        for part in entry.split(',') {
+            let alias = part.trim();
+            if alias.is_empty() {
+                continue;
+            }
+            let key = fold_key(alias);
+            if key.is_empty() || own.contains(&key) {
+                continue;
+            }
+            if out.iter().any(|(_, k)| *k == key) {
+                continue;
+            }
+            out.push((alias.to_string(), key));
+        }
+    }
+    out
+}
+
+/// Lưu danh sách tên khác (alias) của 1 sản phẩm — thay TOÀN BỘ danh sách cũ.
+/// Trả về số tên đã giữ lại.
+///
+/// Mỗi tên chỉ gán cho MỘT sản phẩm (alias_key UNIQUE toàn bảng); nếu tên đã
+/// thuộc về sản phẩm khác thì báo lỗi kèm mã sản phẩm đang giữ tên đó.
+async fn save_product_aliases_core(
+    pool: &SqlitePool,
+    code: &str,
+    aliases: &[String],
+) -> Result<usize, String> {
+    let product = sqlx::query!("SELECT id, name FROM product WHERE code = ?", code)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(product) = product else {
+        return Err(format!("Không tìm thấy sản phẩm '{code}'"));
+    };
+    let keep = normalize_aliases(aliases, &product.name, code);
+    // Chặn tranh chấp TRƯỚC khi ghi: tên này đã gán cho sản phẩm khác?
+    for (alias, key) in &keep {
+        let owner: Option<String> = sqlx::query_scalar(
+            "SELECT p.code FROM product_alias pa
+               JOIN product p ON p.id = pa.product_id
+              WHERE pa.alias_key = ? AND pa.product_id <> ?",
+        )
+        .bind(key)
+        .bind(product.id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        if let Some(owner) = owner {
+            return Err(format!(
+                "Tên '{}' đã được gán cho sản phẩm {} — mỗi tên chỉ dùng cho 1 sản phẩm",
+                alias, owner
+            ));
+        }
+    }
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query!("DELETE FROM product_alias WHERE product_id = ?", product.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (alias, key) in &keep {
+        sqlx::query!(
+            "INSERT INTO product_alias (product_id, alias, alias_key) VALUES (?, ?, ?)",
+            product.id,
+            alias,
+            key
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Không lưu được tên khác '{}': {}", alias, e))?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(keep.len())
+}
+
+#[tauri::command]
+pub(crate) async fn save_product_aliases(
+    state: State<'_, AppState>,
+    code: String,
+    aliases: Vec<String>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let count = {
+        let pool = state.pool.read().await;
+        save_product_aliases_core(&pool, &code, &aliases).await?
+    };
+    audit(&state, "save", "product_alias", &code).await;
+    Ok(json!({ "ok": true, "count": count }).to_string())
+}
+
+// ─── ĐỊNH MỨC VẬT TƯ (BOM) — F4 ───
+
+/// Toàn bộ định mức vật tư của mọi sản phẩm (màn "Định mức" của Danh mục SP).
+#[tauri::command]
+pub(crate) async fn get_product_boms(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let rows: Vec<BomRow> = sqlx::query_as!(
+        BomRow,
+        "SELECT p.code AS product_code, p.name AS product_name,
+                m.code AS material_code, m.name AS material_name, m.unit AS material_unit,
+                b.quantity
+           FROM product_bom_item b
+           JOIN product p ON p.id = b.product_id
+           JOIN product m ON m.id = b.material_product_id
+          ORDER BY p.code, m.code"
+    )
+    .fetch_all(&*state.pool.read().await)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
+/// Lưu định mức vật tư của 1 sản phẩm — thay TOÀN BỘ dòng cũ (rỗng = xóa định mức).
+///
+/// Validate: thành phẩm và NVL phải là hàng hóa (không phải dịch vụ), số lượng
+/// > 0, không tự tham (SP làm NVL của chính mình), không trùng NVL.
+async fn save_product_bom_core(
+    pool: &SqlitePool,
+    product_code: &str,
+    items: &[BomItemInput],
+) -> Result<usize, String> {
+    let product = sqlx::query!(
+        "SELECT id as \"id!\", is_service as \"is_service: bool\" FROM product WHERE code = ?",
+        product_code
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(product) = product else {
+        return Err(format!("Không tìm thấy sản phẩm '{product_code}'"));
+    };
+    if product.is_service {
+        return Err(format!(
+            "Sản phẩm dịch vụ '{product_code}' không khai định mức vật tư được"
+        ));
+    }
+
+    // Resolve + validate từng dòng trước khi ghi (báo hết lỗi cho người dùng).
+    let mut resolved: Vec<(i64, f64)> = Vec::new();
+    for item in items {
+        let material_code = item.material_code.trim().to_string();
+        if material_code.is_empty() {
+            return Err("Dòng định mức thiếu mã vật tư".into());
+        }
+        if !item.quantity.is_finite() || item.quantity <= 0.0 {
+            return Err(format!(
+                "Số lượng định mức của '{material_code}' phải lớn hơn 0"
+            ));
+        }
+        let material = sqlx::query!(
+            "SELECT id as \"id!\", is_service as \"is_service: bool\" FROM product WHERE code = ?",
+            material_code
+        )
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        let Some(material) = material else {
+            return Err(format!("Không tìm thấy vật tư '{material_code}'"));
+        };
+        if material.is_service {
+            return Err(format!(
+                "'{material_code}' là dịch vụ — không theo dõi tồn kho nên không làm vật tư được"
+            ));
+        }
+        if material.id == product.id {
+            return Err(format!(
+                "Sản phẩm '{product_code}' không thể làm vật tư của chính nó"
+            ));
+        }
+        if resolved.iter().any(|(id, _)| *id == material.id) {
+            return Err(format!(
+                "Vật tư '{material_code}' bị lặp — mỗi vật tư chỉ 1 dòng định mức"
+            ));
+        }
+        resolved.push((material.id, item.quantity));
+    }
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query!(
+        "DELETE FROM product_bom_item WHERE product_id = ?",
+        product.id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    for (material_id, quantity) in &resolved {
+        sqlx::query!(
+            "INSERT INTO product_bom_item (product_id, material_product_id, quantity)
+             VALUES (?, ?, ?)",
+            product.id,
+            material_id,
+            quantity
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Không lưu được dòng định mức: {}", e))?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(resolved.len())
+}
+
+/// Lưu định mức vật tư (màn "Định mức" của Danh mục sản phẩm) — F4.
+#[tauri::command]
+pub(crate) async fn save_product_bom(
+    state: State<'_, AppState>,
+    product_code: String,
+    items: Vec<BomItemInput>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let count = {
+        let pool = state.pool.read().await;
+        save_product_bom_core(&pool, &product_code, &items).await?
+    };
+    audit(&state, "save", "product_bom", &product_code).await;
+    Ok(json!({ "ok": true, "count": count }).to_string())
+}
+
 /// Kiểm tra sản phẩm có đang được dùng ở nghiệp vụ nào không (phiếu kho / lô
 /// FIFO, hóa đơn, kiểm kê, bút toán nhập liệu). Trả về chuỗi mô tả nơi sử dụng;
 /// None = chưa nơi nào dùng → được phép xóa.
@@ -529,6 +762,20 @@ pub(crate) async fn delete_product(state: State<'_, AppState>, id: i64) -> Resul
             name, code, used
         ));
     }
+    // Dọn tên khác + định mức của chính sản phẩm này (và dòng định mức đang
+    // dùng nó làm vật tư) — FK có CASCADE nhưng xóa tường minh cho rõ ràng.
+    sqlx::query!("DELETE FROM product_alias WHERE product_id = ?", id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query!(
+        "DELETE FROM product_bom_item WHERE product_id = ? OR material_product_id = ?",
+        id,
+        id
+    )
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
     sqlx::query!("DELETE FROM product WHERE id = ?", id)
         .execute(&*pool)
         .await
@@ -581,6 +828,19 @@ pub(crate) async fn delete_products(
     // Không sản phẩm nào bị chặn → xóa hết trong 1 transaction.
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     for (id, _) in &delete_targets {
+        // Dọn tên khác + định mức trước (FK có CASCADE, xóa tường minh cho chắc).
+        sqlx::query!("DELETE FROM product_alias WHERE product_id = ?", id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Không thể xóa tên khác của sản phẩm: {}", e))?;
+        sqlx::query!(
+            "DELETE FROM product_bom_item WHERE product_id = ? OR material_product_id = ?",
+            id,
+            id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Không thể xóa định mức vật tư: {}", e))?;
         sqlx::query!("DELETE FROM product WHERE id = ?", id)
             .execute(&mut *tx)
             .await
@@ -828,11 +1088,19 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
             .map(str::trim)
             .filter(|s| !s.is_empty());
         if let Some(needle) = needle {
-            clauses.push("(code LIKE ? OR name LIKE ? OR unit LIKE ?)".to_string());
+            // Tìm khắp mã / tên / đơn vị + TÊN KHÁC (alias) — người dùng gõ
+            // tên nào của mặt hàng cũng ra (F5).
+            clauses.push(
+                "(code LIKE ? OR name LIKE ? OR unit LIKE ?
+                   OR EXISTS (SELECT 1 FROM product_alias pa
+                               WHERE pa.product_id = product.id AND pa.alias LIKE ?))"
+                    .to_string(),
+            );
             let pat = format!("%{}%", needle);
             params.push(BindVal::Str(pat.clone()));
+            params.push(BindVal::Str(pat.clone()));
+            params.push(BindVal::Str(pat.clone()));
             params.push(BindVal::Str(pat));
-            params.push(BindVal::Str(format!("%{}%", needle)));
         }
     }
 
@@ -957,7 +1225,8 @@ fn build_product_page_query(ev: &ProductPageEvent) -> Result<ProductPageQuery, S
     }
 
     let sql = format!(
-        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code
+        "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code,
+                COALESCE((SELECT GROUP_CONCAT(alias, ', ') FROM product_alias pa WHERE pa.product_id = product.id), '') AS aliases
          FROM product{} ORDER BY {} LIMIT ? OFFSET ?",
         where_sql,
         sorts.join(", ")
@@ -1139,5 +1408,163 @@ mod tests {
         assert_eq!(page["total"], 1);
         assert_eq!(page["rows"][0]["code"], "NCC001");
         assert_eq!(page["rows"][0]["address"], "Hà Nội");
+    }
+
+    // ─── F5 — TÊN KHÁC (ALIAS) CỦA SẢN PHẨM ───
+
+    #[tokio::test]
+    async fn ten_khac_luu_duoc_tim_duoc_va_chan_tranh_chanh() {
+        let pool = test_pool().await;
+        seed_product(&pool, "AL-A", "Bột mì", 0.01).await;
+        seed_product(&pool, "AL-B", "Đường", 0.01).await;
+
+        // Gõ lẫn phẩy / khoảng trắng / tên chính / trùng nhau → chỉ giữ tên thật.
+        let n = save_product_aliases_core(
+            &pool,
+            "AL-A",
+            &["  Mì flour , Bột mì , bột mì ,   ".to_string()],
+        )
+        .await
+        .expect("lưu tên khác");
+        assert_eq!(n, 1);
+
+        // Lọc toàn cục của lưới sản phẩm tìm ra nhờ TÊN KHÁC.
+        let ev: ProductPageEvent = serde_json::from_str(
+            r#"{"first":0,"rows":10,"filters":{"global":{"value":"mì flour","matchMode":"contains"}}}"#,
+        )
+        .unwrap();
+        let q = build_product_page_query(&ev).unwrap();
+        assert_eq!(run_count(&pool, &q).await, 1);
+        let rows = run_products(&pool, &q).await;
+        assert_eq!(rows[0].code, "AL-A");
+        assert_eq!(rows[0].aliases, "Mì flour");
+
+        // Ghi thay TOÀN BỘ (replace-all) — không cộng dồn lần trước.
+        save_product_aliases_core(&pool, "AL-A", &["Mì 2".to_string()])
+            .await
+            .expect("ghi đè danh sách cũ");
+        let ev: ProductPageEvent = serde_json::from_str(
+            r#"{"first":0,"rows":10,"filters":{"global":{"value":"mì 2","matchMode":"contains"}}}"#,
+        )
+        .unwrap();
+        let q = build_product_page_query(&ev).unwrap();
+        assert_eq!(run_count(&pool, &q).await, 1);
+        assert_eq!(run_products(&pool, &q).await[0].aliases, "Mì 2");
+
+        // Mỗi tên chỉ thuộc 1 sản phẩm — tranh chấp phải báo rõ ai đang giữ tên.
+        let err = save_product_aliases_core(&pool, "AL-B", &["Mì 2".to_string()])
+            .await
+            .unwrap_err();
+        assert!(err.contains("AL-A"), "{err}");
+        // Lỗi không được đụng tới dữ liệu cũ.
+        assert_eq!(run_products(&pool, &q).await[0].aliases, "Mì 2");
+    }
+
+    // ─── F4 — ĐỊNH MỨC VẬT TƯ (BOM) ───
+
+    #[tokio::test]
+    async fn dinh_muc_vat_tu_luu_duoc_va_dung_quy_tac_validate() {
+        let pool = test_pool().await;
+        seed_product(&pool, "TP1", "Thành phẩm", 0.01).await;
+        seed_product(&pool, "TP2", "Thành phẩm 2", 0.01).await;
+        seed_product(&pool, "NVL1", "Vật tư", 0.01).await;
+        sqlx::query!(
+            "INSERT INTO product (code, name, unit, is_service) VALUES ('DV1', 'Dịch vụ', 'Lần', 1)"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = vec![BomItemInput {
+            material_code: " NVL1 ".into(),
+            quantity: 2.0,
+        }];
+        assert_eq!(save_product_bom_core(&pool, "TP1", &rows).await.unwrap(), 1);
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM product_bom_item b
+                   JOIN product p ON p.id = b.product_id WHERE p.code = 'TP1'"
+            )
+            .await,
+            1
+        );
+
+        // Ghi thay toàn bộ: danh sách rỗng = xóa sạch định mức.
+        assert_eq!(save_product_bom_core(&pool, "TP1", &[]).await.unwrap(), 0);
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM product_bom_item b
+                   JOIN product p ON p.id = b.product_id WHERE p.code = 'TP1'"
+            )
+            .await,
+            0
+        );
+
+        // Dịch vụ không khai định mức được.
+        let err = save_product_bom_core(&pool, "DV1", &rows)
+            .await
+            .unwrap_err();
+        assert!(err.contains("dịch vụ"), "{err}");
+        // Số lượng phải > 0.
+        let err = save_product_bom_core(
+            &pool,
+            "TP2",
+            &[BomItemInput {
+                material_code: "NVL1".into(),
+                quantity: 0.0,
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("lớn hơn 0"), "{err}");
+        // Không tự tham (SP làm NVL của chính nó).
+        let err = save_product_bom_core(
+            &pool,
+            "TP2",
+            &[BomItemInput {
+                material_code: "TP2".into(),
+                quantity: 1.0,
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("chính nó"), "{err}");
+        // Không lặp vật tư.
+        let err = save_product_bom_core(
+            &pool,
+            "TP2",
+            &[
+                BomItemInput {
+                    material_code: "NVL1".into(),
+                    quantity: 1.0,
+                },
+                BomItemInput {
+                    material_code: "NVL1".into(),
+                    quantity: 2.0,
+                },
+            ],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("lặp"), "{err}");
+        // Dịch vụ không làm được vật tư.
+        let err = save_product_bom_core(
+            &pool,
+            "TP2",
+            &[BomItemInput {
+                material_code: "DV1".into(),
+                quantity: 1.0,
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("dịch vụ"), "{err}");
+        // Validate chạy TRƯỚC khi ghi → không để lại dòng nào dở dang.
+        assert_eq!(
+            scalar_i64(&pool, "SELECT COUNT(*) FROM product_bom_item").await,
+            0
+        );
     }
 }

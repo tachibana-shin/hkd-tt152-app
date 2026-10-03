@@ -808,6 +808,7 @@ pub(crate) async fn import_invoice(
         credit_account,
         false, // không tự tạo phiếu chi — thanh toán do người dùng quyết định
         "",
+        false, // không tự xuất NVL theo định mức — HĐĐT nhập là mua ngoài
     )
     .await?;
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice_item SET line_name = 'Mì flour'\n              WHERE invoice_id = (SELECT id FROM invoice WHERE number = 'HD-AL')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "23542e321c80fbba6b65301a5a570111e21126d24fc172c8c193013f5fae6975"
+}

@@ -56,6 +56,167 @@ pub(crate) struct InboundResult {
     pub(crate) vat: f64,
     /// Số phiếu chi (PC) tự tạo khi bật "Trả tiền ngay" (rỗng nếu không tạo).
     pub(crate) pc_no: String,
+    /// Số phiếu xuất NVL tự sinh theo định mức (rỗng nếu không tự xuất).
+    pub(crate) material_voucher: String,
+}
+
+// ─── F4 — TỰ XUẤT NVL THEO ĐỊNH MỨC KHI LƯU PNK SẢN XUẤT ───
+//
+// Đơn vị khai "1 thành phẩm cần bao nhiêu NVL" (product_bom_item). Khi lưu phiếu
+// nhập loại `production`, app tự:
+//   1. tính NVL cần = định mức × SL thành phẩm (cộng dồn nếu lặp dòng);
+//   2. xuất FIFO NVL khỏi kho của phiếu nhập (rỗng → kho mặc định của NVL);
+//   3. ghi 1 phiếu xuất (entry_type = 'PX') Nợ 154 / Có 152 ngay trong CÙNG
+//      transaction với phiếu nhập — thiếu tồn thì CẢ HAI không lưu gì.
+//
+// Vì sao Nợ 154 (chi phí SXKD dở dang) / Có 152 (hàng hóa): xuất NVL cho sản
+// xuất là chuyển giá trị hàng hóa vào chi phí dở dang, KHÔNG phải doanh thu và
+// KHÔNG phải giá vốn bán hàng. Phiếu nhập thành phẩm sau đó ghi Nợ 155 / Có 154
+// (mặc định) → dòng tiền 152 → 154 → 155 khép kín.
+//
+// `adjust_code = 'XuatNVL'` là dấu hiệu để báo cáo LOẠI dòng này khỏi:
+//   • doanh thu (`get_revenue_expense_core`, sổ bán hàng S1a/S2a/S2b);
+//   • giá vốn FIFO + kế hoạch bút toán Nợ 632 / Có 152 (nếu không loại, app sẽ
+//     ghi thêm 1 bút 632/152 → credit 152 lần thứ hai → sai tồn giá trị).
+// Sổ kho (`get_inventory_summary`, số đầu kỳ) và danh sách phiếu xuất vẫn TÍNH
+// (entry_type = 'PX') — đúng: tồn NVL thực tế đã giảm.
+async fn issue_materials_by_bom(
+    tx: &mut SqliteTransaction<'_>,
+    posting_date: &str,
+    pn_voucher_no: &str,
+    warehouse_code: &str,
+    unit_code: &str,
+    cost_account: &str,
+    items: &[InboundItemInput],
+) -> Result<String, String> {
+    // 1) Gom NVL cần cho từng mặt hàng của phiếu.
+    //    (id, mã, tên, số lượng cần) — thứ tự theo mã vật tư cho số liệu ổn định.
+    let mut needs: Vec<(i64, String, String, f64)> = Vec::new();
+    for item in items {
+        if !item.quantity.is_finite() || item.quantity <= 0.0 {
+            continue;
+        }
+        let product_id = resolve_product(tx, &item.product_code).await?.id;
+        let rows = sqlx::query!(
+            "SELECT b.material_product_id, m.code, m.name, b.quantity
+               FROM product_bom_item b
+               JOIN product m ON m.id = b.material_product_id
+              WHERE b.product_id = ?",
+            product_id
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
+        for r in rows {
+            // Làm tròn 6 chữ số thập phân — nhân float hay dính nhiễu (0.1×3).
+            let add = (r.quantity * item.quantity * 1e6).round() / 1e6;
+            match needs
+                .iter_mut()
+                .find(|(id, ..)| *id == r.material_product_id)
+            {
+                Some(n) => n.3 += add,
+                None => needs.push((r.material_product_id, r.code, r.name, add)),
+            }
+        }
+    }
+    needs.retain(|n| n.3 > 0.0);
+    needs.sort_by(|a, b| a.1.cmp(&b.1));
+    if needs.is_empty() {
+        return Ok(String::new());
+    }
+
+    // 2) TK dùng cho bút toán tự sinh phải có trong DMTK (152 = hàng hóa).
+    if cost_account.eq("152") {
+        return Err(
+            "TK Chi phí của phiếu nhập bằng TK Hàng hóa (152) — không thể tự xuất NVL theo định mức"
+                .into(),
+        );
+    }
+    for code in [cost_account, "152"] {
+        let exists: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM account WHERE code = ?", code)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        if exists == 0 {
+            return Err(format!(
+                "Tài khoản '{}' chưa có trong danh mục tài khoản — hãy thêm ở màn Tài khoản trước khi tự xuất NVL",
+                code
+            ));
+        }
+    }
+
+    // 3) Số phiếu PX tiếp theo — sinh TỪ DB trong transaction nên không đụng số.
+    let existing: Vec<String> =
+        sqlx::query_scalar!("SELECT voucher_no FROM journal_entry WHERE entry_type = 'PX'")
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    let px_no = format!("PX{:03}", max_voucher_seq(&existing) + 1);
+
+    let desc = format!("Xuất NVL theo định mức — {}", pn_voucher_no);
+    let note = format!("Theo {}", pn_voucher_no);
+
+    // 4) Xuất từng NVL: FIFO trong kho của phiếu nhập + 1 dòng bút toán PX.
+    for (material_id, code, name, need) in &needs {
+        let wh = resolve_warehouse(tx, warehouse_code, code).await?;
+        let lots: Vec<(i64, f64, f64)> = sqlx::query!(
+            r#"SELECT id as "id!", quantity, unit_cost FROM stock_lot
+               WHERE product_id = ? AND warehouse_id = ? AND depleted = 0
+               ORDER BY received_at ASC, id ASC"#,
+            material_id,
+            wh
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|r| (r.id, r.quantity, r.unit_cost))
+        .collect();
+        let (cogs, takes) = allocate_fifo(&lots, *need).map_err(|short| {
+            format!(
+                "Không đủ tồn kho vật tư '{}' ({}): cần {}, còn thiếu {} — bỏ ô \"Tự xuất NVL theo định mức\" hoặc nhập thêm kho",
+                code,
+                name,
+                crate::commands::invoice_export::fmt_qty(*need),
+                crate::commands::invoice_export::fmt_qty(short),
+            )
+        })?;
+        for t in takes {
+            sqlx::query!(
+                "UPDATE stock_lot SET quantity = ?, depleted = ? WHERE id = ?",
+                t.new_qty,
+                t.depleted,
+                t.lot_id
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        insert_journal_entry(
+            tx,
+            posting_date,
+            &px_no,
+            "PX",
+            &desc,
+            code,
+            "",
+            "",
+            *need,
+            cogs / need,
+            round2(cogs),
+            cost_account,
+            "152",
+            "",
+            0.0,
+            0.0,
+            unit_code,
+            "XuatNVL",
+            &note,
+            0.0,
+        )
+        .await?;
+    }
+    Ok(px_no)
 }
 
 /// Lõi nhập kho (không phụ thuộc Tauri State → test trực tiếp):
@@ -81,6 +242,9 @@ pub(crate) async fn save_inbound_core(
     credit_account: &str,
     pay_now: bool,
     adjust_dir: &str,
+    // Bật "Tự xuất NVL theo định mức" — chỉ có ý nghĩa với loại nhập
+    // `production` (màn PNK có ô tick). HĐĐT đồng bộ / phiếu nhập khác → false.
+    auto_bom: bool,
 ) -> Result<InboundResult, String> {
     let voucher_no = voucher_no.trim();
     if voucher_no.is_empty() {
@@ -385,6 +549,23 @@ pub(crate) async fn save_inbound_core(
         }
     }
 
+    // F4 — Tự xuất NVL theo định mức (chỉ loại nhập sản xuất + người dùng bật ô
+    // tick). Chạy NGAY TRONG transaction này: thiếu tồn NVL thì `?` làm roll back
+    // CẢ phiếu nhập → không bao giờ có PNK đã lưu mà NVL chưa trừ.
+    let mut material_voucher = String::new();
+    if auto_bom && inbound_type == "production" {
+        material_voucher = issue_materials_by_bom(
+            &mut tx,
+            posting_date,
+            voucher_no,
+            warehouse_code,
+            unit_code,
+            credit,
+            items,
+        )
+        .await?;
+    }
+
     // Gắn id đầu phiếu vào các dòng bút toán của chính phiếu này + chốt tổng.
     // (Lọc theo voucher_no + entry_type để không đụng phiếu khác trùng số.)
     sqlx::query!(
@@ -419,6 +600,7 @@ pub(crate) async fn save_inbound_core(
         total,
         vat: vat_total,
         pc_no,
+        material_voucher,
     })
 }
 
@@ -546,7 +728,8 @@ pub(crate) async fn save_outbound_core(
     let mut revenue_total = 0.0;
     let mut cogs_total = 0.0;
     // Dòng mặt hàng của hóa đơn lập kèm (chỉ các phiếu thực tăng doanh thu).
-    let mut invoice_lines: Vec<(i64, f64, f64, String, f64, f64)> = Vec::new();
+    // (mã SP, SL, ĐG, nhóm ngành, thuế GTGT, thuế TNCN, TÊN hiển thị dòng)
+    let mut invoice_lines: Vec<(i64, f64, f64, String, f64, f64, String)> = Vec::new();
 
     // Điều chỉnh GIẢM hóa đơn bán (khách trả lại / giảm doanh thu): ghi đảo doanh
     // thu và nhập lại hàng về kho, KHÔNG xuất FIFO và không tạo phiếu thu.
@@ -616,6 +799,7 @@ pub(crate) async fn save_outbound_core(
                     industry.clone(),
                     vat_rate,
                     pit_rate,
+                    item.line_name.clone(),
                 ));
             }
             insert_journal_entry(
@@ -814,6 +998,7 @@ pub(crate) async fn save_outbound_core(
             industry.clone(),
             vat_rate,
             pit_rate,
+            item.line_name.clone(),
         ));
         revenue_total += amount;
         cogs_total += cogs;
@@ -909,14 +1094,14 @@ pub(crate) async fn save_outbound_core(
         .map_err(|e| e.to_string())?;
         let inv_id = res.last_insert_rowid();
         // Dòng chi tiết hóa đơn — giữ nguyên nhóm ngành / tỷ lệ thuế đã hạch toán.
-        for (pid, qty, price, ind, vat, pit) in &invoice_lines {
+        for (pid, qty, price, ind, vat, pit, line_name) in &invoice_lines {
             let subtotal = qty * price;
             let (pid, qty, price) = (*pid, *qty, *price);
             let (ind, vat, pit) = (ind.clone(), *vat, *pit);
             sqlx::query!(
                 "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
-                                           industry_code, vat_rate, pit_rate)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                           industry_code, vat_rate, pit_rate, line_name)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 inv_id,
                 pid,
                 qty,
@@ -924,7 +1109,8 @@ pub(crate) async fn save_outbound_core(
                 subtotal,
                 ind,
                 vat,
-                pit
+                pit,
+                line_name
             )
             .execute(&mut *tx)
             .await
@@ -965,6 +1151,8 @@ pub(crate) async fn save_inbound(
     credit_account: String,
     pay_now: bool,
     adjust_dir: String,
+    // Ô tick "Tự xuất NVL theo định mức" của màn PNK sản xuất.
+    auto_bom: bool,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;
     if items.is_empty() {
@@ -1071,6 +1259,7 @@ pub(crate) async fn save_inbound(
         credit,
         pay_now,
         adjust_dir,
+        auto_bom,
     )
     .await?;
     audit(&state, "save", "inbound", &voucher_no).await;
@@ -1080,6 +1269,7 @@ pub(crate) async fn save_inbound(
         "total": r.total,
         "vat": r.vat,
         "pc_no": r.pc_no,
+        "material_voucher": r.material_voucher,
     })
     .to_string())
 }
@@ -1658,6 +1848,7 @@ mod tests {
             discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: "".into(), // rỗng → kho mặc định / kho đầu tiên
+            line_name: String::new(),
         }
     }
 
@@ -1674,6 +1865,7 @@ mod tests {
             discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: warehouse_code.into(),
+            line_name: String::new(),
         }
     }
 
@@ -1933,6 +2125,8 @@ mod tests {
                 discount: 0.0,
                 industry_code: "".into(), // rỗng → lấy nhóm ngành của sản phẩm
                 warehouse_code: "".into(),
+
+                line_name: String::new(),
             }],
             "",
             false,
@@ -2167,6 +2361,7 @@ mod tests {
             "331",
             false,
             "",
+            false,
         )
         .await
         .expect("nhập kho có chiết khấu");
@@ -2237,6 +2432,7 @@ mod tests {
             "331",
             false,
             "",
+            false,
         )
         .await
         .expect("nhập kho");
@@ -2287,6 +2483,7 @@ mod tests {
             "331",
             false,
             "",
+            false,
         )
         .await
         .expect("nhập kho khấu trừ");
@@ -2345,6 +2542,7 @@ mod tests {
             "154",
             false,
             "",
+            false,
         )
         .await
         .expect("nhập kho sản xuất");
@@ -2398,6 +2596,7 @@ mod tests {
             "331",
             false,
             "",
+            false,
         )
         .await
         .expect("nhập kho chiết khấu");
@@ -2450,6 +2649,7 @@ mod tests {
             "331",
             true,
             "",
+            false,
         )
         .await
         .expect("nhập kho trả tiền ngay");
@@ -2493,6 +2693,7 @@ mod tests {
             "331",
             true,
             "",
+            false,
         )
         .await
         .expect("nhập kho 2");
@@ -2523,6 +2724,7 @@ mod tests {
             "331",
             true,
             "",
+            false,
         )
         .await
         .expect("nhập kho");
@@ -2561,6 +2763,7 @@ mod tests {
             "111",
             true,
             "",
+            false,
         )
         .await
         .expect("nhập kho");
@@ -2606,6 +2809,7 @@ mod tests {
             "331",
             false,
             "down",
+            false,
         )
         .await
         .expect("điều chỉnh giảm hóa đơn mua");
@@ -2687,6 +2891,7 @@ mod tests {
             "331",
             false,
             "down",
+            false,
         )
         .await
         .unwrap_err();
@@ -2727,6 +2932,7 @@ mod tests {
             "331",
             false,
             "up",
+            false,
         )
         .await
         .expect("điều chỉnh tăng hóa đơn mua");
@@ -2932,6 +3138,8 @@ mod tests {
             discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: "W-VN".into(),
+
+            line_name: String::new(),
         }];
 
         save_inbound_core(
@@ -2951,6 +3159,7 @@ mod tests {
             "",
             false,
             "up",
+            false,
         )
         .await
         .unwrap();
@@ -2971,6 +3180,7 @@ mod tests {
             "",
             false,
             "up",
+            false,
         )
         .await
         .unwrap_err();
@@ -2993,6 +3203,7 @@ mod tests {
             "",
             false,
             "up",
+            false,
         )
         .await
         .unwrap_err();
@@ -3068,6 +3279,8 @@ mod tests {
             discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: "W-T1".into(),
+
+            line_name: String::new(),
         };
         let px2 = OutboundItemInput {
             product_code: "SP-T2".into(),
@@ -3076,6 +3289,8 @@ mod tests {
             discount: 0.0,
             industry_code: "PPHH".into(),
             warehouse_code: "W-T1".into(),
+
+            line_name: String::new(),
         };
 
         let old = save_outbound_core(
@@ -3362,6 +3577,199 @@ mod tests {
         assert_eq!(
             scalar_f64(&pool, "SELECT total FROM invoice").await,
             6_000.0 // 2 x 3000
+        );
+    }
+
+    // ─── F4 — TỰ XUẤT NVL THEO ĐỊNH MỨC KHI LƯU PNK SẢN XUẤT ───
+
+    /// Dựng định mức 1 TP = 2 NVL + tồn NVL trong kho.
+    async fn seed_bom(pool: &SqlitePool, stock: f64) -> (i64, i64) {
+        let tp = seed_product(pool, "TP1", "Thành phẩm A", 0.01).await;
+        let nvl = seed_product(pool, "NVL1", "Vật tư B", 0.01).await;
+        let w = seed_warehouse(pool, "W1", "Kho 1").await;
+        sqlx::query!(
+            "INSERT INTO product_bom_item (product_id, material_product_id, quantity)
+             VALUES (?, ?, 2.0)",
+            tp,
+            nvl
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        add_stock_lot(pool, nvl, w, stock, 5_000.0, "2026-01-01").await;
+        (tp, nvl)
+    }
+
+    #[tokio::test]
+    async fn pnk_san_xuat_tu_sinh_phieu_xuat_nvl_theo_dinh_muc() {
+        let pool = test_pool().await;
+        seed_bom(&pool, 100.0).await;
+
+        let r = save_inbound_core(
+            &pool,
+            "2026-03-15",
+            "PNK-BOM",
+            "Nhập thành phẩm lệnh 01",
+            "",
+            "W1",
+            "HKD",
+            &[inp("TP1", 10.0, 8_000.0)],
+            "",
+            "production",
+            "",
+            0.0,
+            "155",
+            "154",
+            false,
+            "",
+            true,
+        )
+        .await
+        .expect("nhập sản xuất tự xuất NVL theo định mức");
+
+        // Số phiếu PX tự sinh trả về cho người dùng biết để tra sổ.
+        assert_eq!(r.material_voucher, "PX001");
+        assert_eq!(r.total, 80_000.0);
+
+        // Bút toán tự sinh: Nợ TK chi phí của PNK (154) / Có 152 hàng hóa.
+        let px = sqlx::query!(
+            r#"SELECT product_code, amount, quantity, debit_account, credit_account,
+                      adjust_code, industry_code, note, description
+                 FROM journal_entry
+                WHERE voucher_no = 'PX001' AND entry_type = 'PX'"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(px.product_code, "NVL1");
+        assert_eq!(px.debit_account, "154");
+        assert_eq!(px.credit_account, "152");
+        assert_eq!(px.adjust_code, "XuatNVL");
+        assert_eq!(px.industry_code, "");
+        assert_eq!(px.quantity, 20.0); // 2 NVL x 10 thành phẩm
+        assert_eq!(px.amount, 100_000.0); // 20 x 5.000 (giá vốn FIFO)
+        assert_eq!(px.note, "Theo PNK-BOM");
+        assert!(px.description.contains("PNK-BOM"), "{}", px.description);
+
+        // Tồn NVL: 100 → 80.
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT COALESCE(SUM(sl.quantity), 0) FROM stock_lot sl
+                   JOIN product p ON p.id = sl.product_id WHERE p.code = 'NVL1'"
+            )
+            .await,
+            80.0
+        );
+
+        // Phiếu tự sinh KHÔNG phải doanh thu → sổ doanh thu kỳ này = 0.
+        let v = crate::commands::accounting::get_revenue_expense_core(
+            &pool,
+            "2026-03-01",
+            "2026-03-31",
+        )
+        .await
+        .unwrap();
+        assert_eq!(v["revenue_up"].as_f64().unwrap(), 0.0);
+    }
+
+    #[tokio::test]
+    async fn khong_bat_o_tu_xuat_nvl_thi_khong_sinh_phieu_xuat() {
+        let pool = test_pool().await;
+        seed_bom(&pool, 100.0).await;
+
+        let r = save_inbound_core(
+            &pool,
+            "2026-03-15",
+            "PNK-KHONGO",
+            "",
+            "",
+            "W1",
+            "HKD",
+            &[inp("TP1", 10.0, 8_000.0)],
+            "",
+            "production",
+            "",
+            0.0,
+            "155",
+            "154",
+            false,
+            "",
+            false, // không bật ô tick
+        )
+        .await
+        .expect("nhập sản xuất không tự xuất NVL");
+
+        assert_eq!(r.material_voucher, "");
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PX'"
+            )
+            .await,
+            0
+        );
+        // Tồn NVL giữ nguyên.
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT COALESCE(SUM(sl.quantity), 0) FROM stock_lot sl
+                   JOIN product p ON p.id = sl.product_id WHERE p.code = 'NVL1'"
+            )
+            .await,
+            100.0
+        );
+    }
+
+    #[tokio::test]
+    async fn pnk_san_xuat_thieu_nvl_thi_tra_luong_toan_bo() {
+        let pool = test_pool().await;
+        // Tồn 10 nhưng cần 20 → thiếu.
+        seed_bom(&pool, 10.0).await;
+
+        let err = save_inbound_core(
+            &pool,
+            "2026-03-15",
+            "PNK-THIEU",
+            "",
+            "",
+            "W1",
+            "HKD",
+            &[inp("TP1", 10.0, 8_000.0)],
+            "",
+            "production",
+            "",
+            0.0,
+            "155",
+            "154",
+            false,
+            "",
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Không đủ tồn kho vật tư"), "{err}");
+
+        // Rollback CẢ phiếu nhập: không PN, không PX, tồn không đổi.
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type IN ('PN', 'PX')"
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM inbound_voucher WHERE voucher_no = 'PNK-THIEU'"
+            )
+            .await,
+            0
+        );
+        assert_eq!(
+            scalar_f64(&pool, "SELECT COALESCE(SUM(quantity), 0) FROM stock_lot").await,
+            10.0
         );
     }
 }

@@ -95,10 +95,13 @@ pub(crate) async fn get_invoice_detail(
     .await
     .map_err(|e| e.to_string())?;
     let items: Vec<InvoiceItemRow> = sqlx::query_as::<_, InvoiceItemRow>(
-        "SELECT ii.id, ii.invoice_id, p.code AS product_code, p.name AS product_name,
+        "SELECT ii.id, ii.invoice_id, p.code AS product_code,
+                -- Tên hiển thị: ưu tiên tên người dùng chọn trên dòng (có thể là
+                -- tên khác / alias) — không fallback về tên chính (F5).
+                COALESCE(NULLIF(ii.line_name, ''), p.name) AS product_name,
                 p.unit, ii.quantity, ii.unit_price, ii.subtotal,
                 ii.discount, ii.warehouse_code,
-                ii.industry_code, ii.vat_rate, ii.pit_rate
+                ii.industry_code, ii.vat_rate, ii.pit_rate, ii.line_name
          FROM invoice_item ii
          JOIN product p ON p.id = ii.product_id
          WHERE ii.invoice_id = ?
@@ -158,7 +161,8 @@ pub(crate) async fn invoice_draft_detail_json(
     };
 
     let items = sqlx::query!(
-        "SELECT p.name AS name, p.unit AS unit, ii.quantity, ii.unit_price,
+        "SELECT COALESCE(NULLIF(ii.line_name, ''), p.name) AS \"name!: String\", p.unit AS unit,
+                ii.quantity, ii.unit_price,
                 ii.subtotal, ii.discount, ii.vat_rate
            FROM invoice_item ii
            JOIN product p ON p.id = ii.product_id
@@ -245,6 +249,8 @@ struct PreparedLine {
     pit_rate: f64,
     discount: f64,
     warehouse_code: String,
+    /// Tên người dùng chọn trên dòng (tên khác / alias) — rỗng = tên sản phẩm.
+    line_name: String,
 }
 
 struct PreparedInvoice {
@@ -356,6 +362,7 @@ async fn prepare_invoice(
             pit_rate: basis_pit,
             discount: item.discount,
             warehouse_code: item.warehouse_code.clone(),
+            line_name: item.line_name.clone(),
         });
     }
 
@@ -375,8 +382,9 @@ async fn insert_invoice_items(
     for l in lines {
         sqlx::query!(
             "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
-                                       industry_code, vat_rate, pit_rate, discount, warehouse_code)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                       industry_code, vat_rate, pit_rate, discount, warehouse_code,
+                                       line_name)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             invoice_id,
             l.product_id,
             l.quantity,
@@ -386,7 +394,8 @@ async fn insert_invoice_items(
             l.vat_rate,
             l.pit_rate,
             l.discount,
-            l.warehouse_code
+            l.warehouse_code,
+            l.line_name
         )
         .execute(&mut **tx)
         .await
@@ -884,7 +893,7 @@ pub(crate) async fn replace_invoice_core(
     // hóa đơn thay thế kê lại là cân bằng.
     let lines = sqlx::query!(
         r#"SELECT ii.product_id, ii.quantity, ii.unit_price, ii.subtotal, ii.discount,
-                  ii.industry_code, ii.vat_rate, ii.pit_rate
+                  ii.industry_code, ii.vat_rate, ii.pit_rate, ii.line_name
              FROM invoice_item ii WHERE ii.invoice_id = ? ORDER BY ii.id"#,
         invoice_id
     )
@@ -984,8 +993,8 @@ pub(crate) async fn replace_invoice_core(
     for l in &lines {
         sqlx::query!(
             r#"INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
-                                        industry_code, vat_rate, pit_rate, discount)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                                        industry_code, vat_rate, pit_rate, discount, line_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
             new_id,
             l.product_id,
             l.quantity,
@@ -994,7 +1003,8 @@ pub(crate) async fn replace_invoice_core(
             l.industry_code,
             l.vat_rate,
             l.pit_rate,
-            l.discount
+            l.discount,
+            l.line_name
         )
         .execute(&mut *tx)
         .await
@@ -1153,6 +1163,9 @@ pub(crate) async fn create_outbound_from_invoice(
             discount: r.discount,
             industry_code: r.industry_code.clone(),
             warehouse_code: r.warehouse_code.clone(),
+            // Phiếu xuất không hiển thị tên dòng — tên(alias) chỉ cần khi LẬP HÓA
+            // ĐƠN kèm theo, trường hợp này không tạo hóa đơn nên để rỗng.
+            line_name: String::new(),
         })
         .collect();
 
@@ -1227,6 +1240,7 @@ mod tests {
             industry_code: "PPHH".into(),
             discount,
             warehouse_code: warehouse_code.into(),
+            line_name: String::new(),
         }
     }
 
@@ -2237,5 +2251,54 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("lập phiếu xuất trước"), "{err}");
+    }
+
+    // ─── F5 — DÒNG HÓA ĐƠN GIỮ NGUYÊN TÊN NGƯỜI DÙNG CHỌN (TÊN KHÁC) ───
+
+    #[tokio::test]
+    async fn hoa_don_giu_ten_duoc_chon_khong_fallback_ve_ten_chinh() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-AL", "Bột mì", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 100.0, 1_000.0, "2026-01-01").await;
+
+        // Dòng 1: người dùng chọn tên khác "Mì flour".
+        let mut alias_line = line("HD-AL", 2.0, 10_000.0, 0.0, "W1");
+        alias_line.line_name = "Mì flour".into();
+        // Dòng 2: không chọn gì → dùng tên chính.
+        let plain_line = line("HD-AL", 1.0, 10_000.0, 0.0, "W1");
+        let res = save_invoice_core(
+            &pool,
+            "HD-AL1",
+            "2026-03-10",
+            "Khách Y",
+            "",
+            &[alias_line, plain_line],
+        )
+        .await
+        .expect("lưu hóa đơn có dòng đặt tên khác");
+        let id = res["invoice_id"].as_i64().unwrap();
+
+        // Lưu đúng tên đã chọn (không ghi đè bằng tên sản phẩm).
+        let stored: Vec<String> = sqlx::query_scalar!(
+            r#"SELECT line_name FROM invoice_item WHERE invoice_id = ?"#,
+            id
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored, vec!["Mì flour".to_string(), String::new()]);
+
+        // Chi tiết in (khối HĐĐT "hdhhdvu"): dòng alias vẫn hiện "Mì flour",
+        // dòng không chọn tên khác hiện tên sản phẩm.
+        let detail: serde_json::Value =
+            serde_json::from_str(&invoice_draft_detail_json(&pool, id).await.unwrap()).unwrap();
+        let names: Vec<&str> = detail["hdhhdvu"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|it| it["ten"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["Mì flour", "Bột mì"]);
     }
 }

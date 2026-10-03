@@ -86,7 +86,7 @@ fn fmt_money(v: f64) -> String {
     }
 }
 
-fn fmt_qty(v: f64) -> String {
+pub(crate) fn fmt_qty(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 {
         format!("{}", v.round() as i64)
     } else {
@@ -334,7 +334,10 @@ async fn load_header_and_lines(
 
     let items: Vec<RawItem> = sqlx::query_as!(
         RawItem,
-        r#"SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,
+        r#"SELECT ii.invoice_id, p.code,
+                  -- Tên in = tên người dùng chọn trên dòng (alias) nếu có (F5).
+                  COALESCE(NULLIF(ii.line_name, ''), p.name) AS "name!: String",
+                  p.unit, ii.quantity, ii.unit_price,
                   ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
              FROM invoice_item ii
              JOIN product p ON p.id = ii.product_id
@@ -837,7 +840,9 @@ async fn assemble_queue_items(
     // Ba truy vấn phụ dưới đây dùng QueryBuilder vì danh sách id của trang là
     // động — mọi giá trị đều được bind, không ghép chuỗi SQL.
     let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
-        "SELECT ii.invoice_id, p.code, p.name, p.unit, ii.quantity, ii.unit_price,
+        "SELECT ii.invoice_id, p.code,
+                COALESCE(NULLIF(ii.line_name, ''), p.name) AS name,
+                p.unit, ii.quantity, ii.unit_price,
                 ii.discount, ii.subtotal, ii.industry_code, ii.vat_rate, ii.warehouse_code
            FROM invoice_item ii
            JOIN product p ON p.id = ii.product_id
@@ -1521,5 +1526,31 @@ mod tests {
             q[0].edited_after_export,
             "phải phát hiện hóa đơn lệch với bản chốt"
         );
+    }
+
+    // ─── F5 — GÓI XUẤT HĐĐT / IN DÙNG TÊN NGƯỜI DÙNG CHỌN TRÊN DÒNG ───
+
+    #[tokio::test]
+    async fn goi_xuat_dung_ten_duoc_chon_khong_fallback_ten_chinh() {
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "HD-AL", 20_000.0).await;
+        add_line(&pool, id, "PAL", "Bột mì", 2.0, 10_000.0).await;
+        // Người dùng đã chọn tên khác trên dòng hóa đơn.
+        sqlx::query!(
+            "UPDATE invoice_item SET line_name = 'Mì flour'
+              WHERE invoice_id = (SELECT id FROM invoice WHERE number = 'HD-AL')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (_, lines) = load_header_and_lines(&pool, id).await.unwrap();
+        assert_eq!(lines[0].product_name, "Mì flour");
+
+        // Dòng chưa chọn tên khác → dùng tên sản phẩm.
+        let id2 = seed_invoice(&pool, "HD-AL2", 10_000.0).await;
+        add_line(&pool, id2, "PAL2", "Đường", 1.0, 10_000.0).await;
+        let (_, lines2) = load_header_and_lines(&pool, id2).await.unwrap();
+        assert_eq!(lines2[0].product_name, "Đường");
     }
 }

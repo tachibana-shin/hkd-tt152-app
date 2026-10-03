@@ -107,6 +107,8 @@ const form = reactive({
     discount: number;
     industry_code: string;
     warehouse_code: string;
+    /** Tên hiển thị dòng (tên khác / alias) — chép sang hóa đơn lập kèm (F5). */
+    line_name?: string;
   }[],
 });
 

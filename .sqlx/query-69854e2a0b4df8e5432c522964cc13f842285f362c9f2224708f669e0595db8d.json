@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO product_alias (product_id, alias, alias_key) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "69854e2a0b4df8e5432c522964cc13f842285f362c9f2224708f669e0595db8d"
+}

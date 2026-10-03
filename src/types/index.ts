@@ -15,6 +15,18 @@ export interface Product {
   is_service?: boolean;
   /** Nhóm ngành mặc định (cơ sở tỷ lệ thuế bán ra). */
   industry_code?: string;
+  /** Danh sách "tên khác" của sản phẩm, phân tách ", " (F5). */
+  aliases?: string;
+}
+
+/** 1 dòng định mức vật tư (BOM) đã join tên — payload màn "Định mức" (F4). */
+export interface BomItem {
+  product_code: string;
+  product_name: string;
+  material_code: string;
+  material_name: string;
+  material_unit: string;
+  quantity: number;
 }
 
 export interface Warehouse {
@@ -444,10 +456,14 @@ export interface InvoiceItem {
   industry_code?: string;
   vat_rate?: number;
   pit_rate?: number;
+  /**
+   * Tên người dùng CHỌN trên dòng hóa đơn (có thể là tên khác / alias).
+   * Rỗng → tên sản phẩm. In/chi tiết luôn giữ tên đã chọn (F5).
+   */
+  line_name?: string;
 }
 
 // ─── Kiểm kê ───
-
 export interface InventoryCount {
   id: number;
   date: string;

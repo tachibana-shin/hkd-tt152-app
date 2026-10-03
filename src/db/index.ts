@@ -48,6 +48,7 @@ import type {
   BusinessConfig,
   AppSettings,
   Account,
+  BomItem,
   Product,
   IndustryGroup,
   Warehouse,
@@ -262,6 +263,14 @@ export const api = {
       isService: p.is_service ?? false,
       industryCode: p.industry_code ?? "",
     }),
+  /** Lưu danh sách "tên khác" (alias) của sản phẩm — thay toàn bộ danh sách cũ (F5). */
+  saveProductAliases: (code: string, aliases: string[]) =>
+    call<string>("save_product_aliases", { code, aliases }),
+  /** Toàn bộ định mức vật tư của mọi sản phẩm (màn "Định mức" — F4). */
+  getProductBoms: async () => parse<BomItem[]>(await call<string>("get_product_boms")),
+  /** Lưu định mức vật tư của 1 sản phẩm — thay toàn bộ dòng cũ (rỗng = xóa). */
+  saveProductBom: (productCode: string, items: { material_code: string; quantity: number }[]) =>
+    call<string>("save_product_bom", { productCode, items }),
   deleteProduct: (id: number) => call<string>("delete_product", { id }),
   deleteProducts: (ids: number[]) => call<string>("delete_products", { ids }),
   /**
@@ -397,6 +406,11 @@ export const api = {
     pay_now: boolean;
     /** Hướng điều chỉnh khi loại nhập = "adjust": up = bên bán thêm hàng, down = bên bán trừ bớt (trả lại NCC). */
     adjust_dir: "" | "up" | "down";
+    /**
+     * Ô tick "Tự xuất NVL theo định mức" (F4) — chỉ loại nhập `production`.
+     * Bật → app tự tính NVL = định mức × SL, tự sinh phiếu xuất Nợ 154 / Có 152.
+     */
+    auto_bom?: boolean;
   }) =>
     call<string>("save_inbound", {
       postingDate: args.posting_date,
@@ -414,6 +428,7 @@ export const api = {
       creditAccount: args.credit_account,
       payNow: args.pay_now,
       adjustDir: args.adjust_dir,
+      autoBom: args.auto_bom ?? false,
     }),
 
   saveOutbound: (args: {
@@ -428,6 +443,8 @@ export const api = {
       quantity: number;
       unit_price: number;
       industry_code: string;
+      /** Tên hiển thị dòng (tên khác / alias người dùng chọn) — F5. */
+      line_name?: string;
     }[];
     /** Thu tiền ngay: tự tạo phiếu thu (PT) của khách hàng khi lưu. */
     receive_now: boolean;

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM product_alias WHERE product_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "3ab3ada85e76515acf7df4838089185fa6e35b4269811bea564dde2560b28e02"
+}

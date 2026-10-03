@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM product_bom_item WHERE product_id = ? OR material_product_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "77e769e40c73c34c7a3f2977f856502b5e191a9e468dd309affb0f586429f5bd"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service as \"is_service: bool\", industry_code\n         FROM product ORDER BY code",
+  "query": "SELECT id, code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service as \"is_service: bool\", industry_code,\n                COALESCE((SELECT GROUP_CONCAT(alias, ', ') FROM product_alias pa WHERE pa.product_id = product.id), '') AS aliases\n         FROM product ORDER BY code",
   "describe": {
     "columns": [
       {
@@ -57,6 +57,11 @@
         "name": "industry_code",
         "ordinal": 10,
         "type_info": "Text"
+      },
+      {
+        "name": "aliases",
+        "ordinal": 11,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -73,8 +78,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d168c4a5654e201616596bfd0eb5f75e3f80dbc13557993a32380f88e39a1864"
+  "hash": "41ce9625cc8f90fe4dba6732926f68aaa62b88f9f27810c89835273990c96534"
 }
