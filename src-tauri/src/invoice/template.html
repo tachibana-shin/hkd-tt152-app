@@ -65,9 +65,11 @@
             margin: 0;
         }
 
-        .heading-content p.day {
+        .heading-content .day {
+            font-size: 13pt;
             text-align: center;
             display: block;
+            margin: 0;
         }
 
         .day .mg-bottom {
@@ -78,10 +80,31 @@
         .heading-content .top-content {
             display: flex;
             justify-content: space-between;
+            align-items: flex-start;
         }
 
+        /* 2 ô ngoài giữ nguyên bề rộng, ô giữa `flex: 1` lấy hết phần còn lại
+           → tâm ô giữa trùng tâm trang tuyệt đối, và ô giữa rộng đủ để tiêu đề
+           không bị vỡ dòng. */
+        .heading-content .top-title {
+            flex: 1;
+            text-align: center;
+        }
+
+        .heading-content .top-qr,
+        .heading-content .top-code {
+            flex: 0 0 120pt;
+        }
+
+        .heading-content .top-code {
+            text-align: right;
+        }
+
+        /* htmltopdf không kế thừa `text-align` của ô cha xuống block con, và
+           `inline-block` làm ô code bị tính sai bề rộng khi nằm trong flex. */
         .heading-content .code-content {
-            display: inline-block;
+            display: block;
+            text-align: right;
         }
 
         .heading-content .code-ms {
@@ -279,11 +302,15 @@
         }
 
         /* htmltopdf nở bảng theo max-content của ô nên table 2 cột không ra
-           được 50/50; đổi sang flex: 2 tiêu đề bị đẩy về 2 đầu trang, ô chữ ký
-           (thuộc người bán) nằm trong hàng riêng đẩy hết sang phải. */
+           được 50/50; đổi sang flex: mỗi tiêu đề chiếm đúng 50% khung và tự
+           căn giữa trong phần của nó (thay vì bị đẩy về 2 đầu trang). */
         .ft-sign .sign-row {
             display: flex;
-            justify-content: space-between;
+        }
+
+        .ft-sign .sign-row h3 {
+            flex: 1;
+            text-align: center;
         }
 
         .ft-sign .sign-box-row {
@@ -337,7 +364,9 @@
             font-weight: 500;
         }
 
-        .sign-box span {
+        /* htmltopdf bỏ qua `display: block` trên <span> — phải là <div> thì
+           mỗi mục mới thực sự nằm trên 1 dòng. */
+        .sign-box div {
             color: #23b709 !important;
             font-size: 13pt !important;
             text-align: left !important;
@@ -633,11 +662,9 @@
             font-weight: 500;
         }
 
-        .span-sign-box {
-            display: inline !important;
-        }
-
-        .sign-box span {
+        /* htmltopdf bỏ qua `display: block` trên <span> — phải là <div> thì
+           mỗi mục mới thực sự nằm trên 1 dòng. */
+        .sign-box div {
             color: #23b709 !important;
             font-size: 13pt !important;
             text-align: left !important;
@@ -769,24 +796,21 @@
 <body>
     <div class="main-page">
         <div class="heading-content">
+            <!-- Hàng đầu: QR (trái) | tiêu đề (giữa, tâm đúng 50% chiều rộng
+                 trang) | mẫu số (phải) — 2 ô ngoài bề rộng bằng nhau nên ô
+                 giữa bao giờ cũng nằm giữa trang. -->
             <div class="top-content">
-                <div style="width: 80px; min-height: 20px">
+                <div class="top-cell top-qr">
                     <div id="qrcodeTable">{{QR_IMG}}</div>
                 </div>
-                <div class="code-content"><b>Mẫu số: {{KHMSHDON}}</b><br><b>Ký hiệu: {{KHHDON}}</b><br><b>Số: {{SHDON}}</b></div>
-            </div>
-            <div class="title-heading">
-                <h2 class="main-title">
-                    {{INVOICE_TITLE}}
-                </h2>
-                <p class="day">
-                <div class="day">
-                    <p class="day">{{INVOICE_DATE}}</p>
-                    <p class="day">
-                        MCCQT:
-                        {{MHDON}}</p>
+                <div class="top-cell top-title">
+                    <div class="main-title">{{INVOICE_TITLE}}</div>
+                    <div class="day">{{INVOICE_DATE}}</div>
+                    <div class="day">MCCQT: {{MHDON}}</div>
                 </div>
-                </p>
+                <div class="top-cell top-code">
+                    <div class="code-content"><b>Mẫu số: {{KHMSHDON}}</b><br><b>Ký hiệu: {{KHHDON}}</b><br><b>Số: {{SHDON}}</b></div>
+                </div>
             </div>
         </div>
         <div class="vip-divide"></div>
@@ -987,72 +1011,19 @@
                     <tr>
                         <th class="tb-stt">STT</th>
                         <th class="tb-thh">Tên hàng hóa, dịch vụ</th>
-                        <th class="tb-dvt">Đơn vị tính</th>
+                        <th class="tb-dvt">ĐVT</th>
                         <th class="tb-sl">Số lượng</th>
                         <th class="tb-dg">Đơn giá</th>
                         {{DISCOUNT_HEAD}}
-                        <th class="tb-ttct">Thành tiền chưa có thuế GTGT</th>
-                        <th class="tb-ts">Thuế suất</th>
-                        <th class="tb-ttct tb-tt">Tiền thuế</th>
+                        <th class="tb-ttct">Thành tiền</th>
+                        {{RATE_HEAD}}
                     </tr>
                 </thead>
                 <tbody>
-
                     {{GOODS_ROWS}}
+                    {{SUMMARY_ROWS}}
                 </tbody>
             </table>
-            <div class="table-horizontal-wrapper">
-                <div style="margin-right: 10;">
-                    <table class="res-tb">
-                        <thead style="text-align: center">
-                            <tr>
-                                <th>Thuế suất</th>
-                                <th>Tổng tiền chưa thuế</th>
-                                <th>Tổng tiền thuế</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{TAX_ROWS}}
-                        </tbody>
-                    </table>
-                </div>
-                <div style="flex: 1">
-                    <table class="res-tb">
-                        <tbody>
-                            <tr>
-                                <td class="tx-center">Tổng tiền chưa thuế</td>
-                                <td class="tx-center" style="min-width: 200px; max-width: 300px;">{{TGTCTHUE_VND}}</td>
-                            </tr>
-                            <tr>
-                                <td class="tx-center">Tổng tiền thuế</td>
-                                <td class="tx-center" style="min-width: 200px; max-width: 300px">{{TGTTHUE_VND}}</td>
-                            </tr>
-                            <tr>
-                                <td class="tx-center">Tổng tiền phí</td>
-                                <td class="tx-center" style="min-width: 200px; max-width: 300px">{{TGTPHI_VND}}</td>
-                            </tr>
-                            <tr>
-                                <td class="tx-center">
-                                    Tổng tiền chiết khấu thương mại
-                                </td>
-                                <td class="tx-center" style="min-width: 200px; max-width: 300px">{{TTCKTMAI_VND}}</td>
-                            </tr>
-                            <tr>
-                                <td class="tx-center">
-                                    Tổng tiền thanh toán bằng số
-                                </td>
-                                <td class="tx-center" style="min-width: 200px; max-width: 300px">{{TGTTTBSO_VND}}</td>
-                            </tr>
-                            <tr>
-                                <td class="tx-center">
-                                    Tổng tiền thanh toán bằng chữ
-                                </td>
-                                <td class="tx-center" style="min-width: 200px; max-width: 300px">{{TGTTTBCHU}}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
         </div>
         <div class="vip-divide"></div>
         <div class="ft-sign">

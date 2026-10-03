@@ -4,7 +4,7 @@
 //! cần Chrome/Font nhúng — htmltopdf tự layout, tự nhúng font hệ thống và tự
 //! tách trang A4.
 
-use crate::invoice::data::{GoodsRow, InvoiceData, TaxRow};
+use crate::invoice::data::{GoodsRow, InvoiceData};
 use crate::invoice::format::{
     escape, extract_cn, format_vietnamese_date, format_vnd, js_number, js_string, parse_signature,
     Signature,
@@ -102,19 +102,8 @@ fn render(data: &InvoiceData) -> String {
         ("DKNLBKE", &data.dknlbke),
         // ── Thanh toán ──
         ("THTTTOAN", &data.thtttoan),
-        ("TGTTTBCHU", &data.tgtttbchu),
     ] {
         slots.insert(key, escape(&js_string(value)));
-    }
-
-    for (key, value) in [
-        ("TGTCTHUE_VND", &data.tgtcthue),
-        ("TGTTHUE_VND", &data.tgtthue),
-        ("TGTPHI_VND", &data.tgtphi),
-        ("TTCKTMAI_VND", &data.ttcktmai),
-        ("TGTTTBSO_VND", &data.tgtttbso),
-    ] {
-        slots.insert(key, format_vnd(value));
     }
 
     // ── Mã QR ──
@@ -122,11 +111,14 @@ fn render(data: &InvoiceData) -> String {
 
     // ── Bảng ──
     // Chỉ thêm cột "Chiết khấu" khi có ít nhất 1 mặt hàng thực sự được chiết
-    // khấu — không thì bảng 8 cột như cũ.
+    // khấu — không thì bảng gọn lại như cũ.
     let has_discount = data
         .hdhhdvu
         .iter()
         .any(|row| js_number(&row.stckhau).is_some_and(|v| v > 0.0));
+    // Cột "Thuế suất" chỉ cần khi hàng hóa xài nhiều tỉ lệ khác nhau; còn 1
+    // tỉ lệ duy nhất thì con số đó nói được ngay ở dòng tổng cộng.
+    let has_rate = has_multiple_rates(&data.hdhhdvu);
     slots.insert(
         "DISCOUNT_HEAD",
         if has_discount {
@@ -135,8 +127,21 @@ fn render(data: &InvoiceData) -> String {
             String::new()
         },
     );
-    slots.insert("GOODS_ROWS", goods_rows(&data.hdhhdvu, has_discount));
-    slots.insert("TAX_ROWS", tax_rows(&data.thttltsuat));
+    slots.insert(
+        "RATE_HEAD",
+        if has_rate {
+            r#"<th class="tb-ts">Thuế suất</th>"#.to_string()
+        } else {
+            String::new()
+        },
+    );
+    slots.insert(
+        "GOODS_ROWS",
+        goods_rows(&data.hdhhdvu, has_discount, has_rate),
+    );
+    // Tổng cộng nằm ngay trong bảng hàng hóa — 2 bảng con (thuế suất + thành
+    // tiền) đã gộp vào đây.
+    slots.insert("SUMMARY_ROWS", summary_rows(data, has_discount, has_rate));
 
     // ── Chữ ký số ──
     let signature = parse_signature(&data.nbcks);
@@ -317,15 +322,18 @@ fn strip_tags(fragment: &str) -> String {
 }
 
 /// Bảng chi tiết hàng hóa — cột "Tính chất" / "Loại hàng hóa đặc trưng" đã bỏ,
-/// thứ tự cột lấy theo Chrome sau khi `capture.js` chạy (Thuế suất đẩy xuống
-/// cuối, thêm cột "Tiền thuế" tính sẵn ở `thead`).
+/// "Đơn vị tính" viết tắt thành "ĐVT", "Thành tiền" lược bỏ phần "chưa có thuế
+/// GTGT". Không còn cột "Tiền thuế": tổng tiền thuế nằm ở dòng tổng cộng dưới
+/// cùng của bảng.
 ///
-/// Cột "Chiết khấu" chỉ xuất hiện khi `with_discount` (xem [`render`]).
-fn goods_rows(rows: &[GoodsRow], with_discount: bool) -> String {
+/// Cột "Chiết khấu" / "Thuế suất" lần lượt hiện khi `with_discount` /
+/// `with_rate` (xem [`render`]). Tên hàng không ép bề rộng — cột này tự nở theo
+/// nội dung nên luôn là cột rộng nhất.
+fn goods_rows(rows: &[GoodsRow], with_discount: bool, with_rate: bool) -> String {
     let mut out = String::new();
     for row in rows {
         out.push_str(&format!(
-            r#"<tr t-chat="{}"><td class="tx-center">{}</td><td class="tx-left" style="max-width: 220px; min-width: 220px; word-wrap: break-word;">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td>"#,
+            r#"<tr t-chat="{}"><td class="tx-center">{}</td><td class="tx-left">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td>"#,
             escape(&js_string(&row.tchat)),
             escape(&js_string(&row.stt)),
             escape(&js_string(&row.ten)),
@@ -340,26 +348,100 @@ fn goods_rows(rows: &[GoodsRow], with_discount: bool) -> String {
                 format_vnd(&row.stckhau)
             ));
         }
-        out.push_str(&format!(
-            r#"<td class="tx-center">{}</td><td class="tx-center">{}</td></tr>"#,
-            escape(&js_string(&row.ltsuat)),
-            line_tax(row),
-        ));
-        out.push('\n');
+        if with_rate {
+            out.push_str(&format!(
+                r#"<td class="tx-center">{}</td>"#,
+                escape(&rate_label(row))
+            ));
+        }
+        out.push_str("</tr>\n");
     }
     out
 }
 
-/// Tiền thuế của 1 dòng — `capture.js` không lấy `tthue` (luôn `null`) mà tự
-/// tính `thành tiền × tỷ lệ / 100`, và chỉ với dòng có `tchat` 1 hoặc 5.
-fn line_tax(row: &GoodsRow) -> String {
-    let taxable = matches!(js_number(&row.tchat), Some(v) if v == 1.0 || v == 5.0);
-    if !taxable {
-        return String::new();
+/// Các dòng tổng cộng — nối ngay sau hàng hóa để gộp 2 bảng con cũ (thuế suất
+/// và thành tiền) thành 1 bảng.
+///
+/// Cột chia đôi bảng: nhãn chiếm nửa trái (căn trái, tất cả các nhãn nằm trên
+/// cùng 1 đường), giá trị chiếm nửa phải (căn phải, các giá trị kết thúc trên
+/// cùng 1 đường). Hàng thuế tách thêm 1 nhãn riêng cho từng bên nên thành 4 ô —
+/// "Thuế suất GTGT" và "Tiền thuế GTGT" mỗi nhãn chỉ viết 1 lần, các giá trị
+/// xếp chồng nhau trong ô (nhiều tỉ lệ thuế → nhiều dòng).
+fn summary_rows(data: &InvoiceData, with_discount: bool, with_rate: bool) -> String {
+    let cols = 6 + usize::from(with_discount) + usize::from(with_rate);
+    let half = cols / 2;
+
+    let mut out = String::new();
+    let line = |label: &str, value: String| {
+        format!(
+            r#"<tr><td colspan="{half}" class="tx-left">{label}</td><td colspan="{}" class="tx-right">{value}</td></tr>"#,
+            cols - half
+        )
+    };
+    out.push_str(&line("Cộng tiền hàng", format_vnd(&data.tgtcthue)));
+    out.push('\n');
+
+    if !data.thttltsuat.is_empty() {
+        let rates = data
+            .thttltsuat
+            .iter()
+            .map(|row| escape(&js_string(&row.tsuat)))
+            .collect::<Vec<_>>()
+            .join("<br>");
+        let taxes = data
+            .thttltsuat
+            .iter()
+            .map(|row| format_vnd(&row.tthue))
+            .collect::<Vec<_>>()
+            .join("<br>");
+        out.push_str(&format!(
+            r#"<tr><td colspan="{}" class="tx-left">Thuế suất GTGT</td><td class="tx-center">{rates}</td><td colspan="{}" class="tx-left">Tiền thuế GTGT</td><td class="tx-right">{taxes}</td></tr>"#,
+            half - 1,
+            cols - half - 1
+        ));
+        out.push('\n');
     }
-    let thtien = js_number(&row.thtien).unwrap_or(0.0);
-    let tax = thtien * ltsuat_percent(row) / 100.0;
-    format_vnd(&serde_json::Value::from(tax))
+
+    out.push_str(&line(
+        "Tổng tiền thanh toán bằng số",
+        format_vnd(&data.tgtttbso),
+    ));
+    out.push('\n');
+    out.push_str(&line(
+        "Số tiền viết bằng chữ",
+        escape(&js_string(&data.tgtttbchu)),
+    ));
+    out
+}
+
+/// Hàng hóa có xài từ 2 tỉ lệ thuế GTGT khác nhau trở lên hay không — chỉ khi
+/// đó cột "Thuế suất" mới đáng để xuất hiện.
+fn has_multiple_rates(rows: &[GoodsRow]) -> bool {
+    let mut seen: Vec<f64> = Vec::new();
+    for row in rows {
+        let percent = ltsuat_percent(row);
+        if seen
+            .iter()
+            .any(|other| (*other - percent).abs() < f64::EPSILON)
+        {
+            continue;
+        }
+        seen.push(percent);
+        if seen.len() >= 2 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Nhãn hiển thị của tỉ lệ thuế: dùng chuỗi `ltsuat` có sẵn (`"8%"`), thiếu thì
+/// suy ra từ `tsuat` (`0.08` → `"8%"`).
+fn rate_label(row: &GoodsRow) -> String {
+    let raw = js_string(&row.ltsuat);
+    if !raw.trim().is_empty() {
+        return raw;
+    }
+    format!("{}%", ltsuat_percent(row))
 }
 
 /// Đọc tỷ lệ thuế từ chuỗi hiển thị `"8%"` đúng cách `capture.js` đọc ô bảng
@@ -376,38 +458,33 @@ fn ltsuat_percent(row: &GoodsRow) -> f64 {
     }
 }
 
-/// Bảng tổng hợp theo thuế suất.
-fn tax_rows(rows: &[TaxRow]) -> String {
-    let mut out = String::new();
-    for row in rows {
-        out.push_str(&format!(
-            r#"<tr><td class="tx-center">{}</td><td class="tx-center">{}</td><td class="tx-center">{}</td></tr>"#,
-            escape(&js_string(&row.tsuat)),
-            format_vnd(&row.thtien),
-            format_vnd(&row.tthue),
-        ));
-        out.push('\n');
-    }
-    out
-}
-
 /// Khối "Signature Valid" — không có Subject/SigningTime thì bỏ hẳn (hiển thị
-/// ô chữ ký trống sẽ như thể hóa đơn đã được ký).
+/// ô chữ ký trống sẽ như thể hóa đơn đã được ký). Mỗi mục 1 dòng có nhãn, đúng
+/// kiểu `Signature Valid` / `Ký bởi: …` / `Ký ngày: …`.
 fn sign_box(signature: &Signature) -> String {
     if !signature.is_signed() {
         return String::new();
     }
     format!(
         concat!(
-            r#"<div class="sign-box"><span>Signature Valid</span>"#,
-            r#"<span class="span-sign-box">Ký bởi</span>"#,
-            r#"<span id="cks" class="span-sign-box">{cn}</span>"#,
-            r#"<span></span><span class="span-sign-box">Ký ngày</span>"#,
-            r#"<span class="span-sign-box">{time}</span></div>"#,
+            r#"<div class="sign-box"><div>Signature Valid</div>"#,
+            r#"<div>Ký bởi: {cn}</div>"#,
+            r#"<div>Ký ngày: {date}</div></div>"#,
         ),
         cn = escape(&extract_cn(&signature.subject)),
-        time = escape(&signature.signing_time),
+        date = escape(&format_sign_day(&signature.signing_time)),
     )
+}
+
+/// Ngày ký `"2026-09-15T10:00:00"` → `"15/09/2026"`; không phải ngày ISO thì
+/// giữ nguyên chuỗi gốc.
+fn format_sign_day(iso: &str) -> String {
+    let b = iso.as_bytes();
+    if b.len() >= 10 && b[4] == b'-' && b[7] == b'-' {
+        format!("{}/{}/{}", &iso[8..10], &iso[5..7], &iso[0..4])
+    } else {
+        iso.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -472,41 +549,42 @@ mod tests {
     #[test]
     fn goods_table_matches_chrome_baseline_layout() {
         let html = build_invoice_html(&fixture()).expect("dựng HTML được");
-        let thead = html
-            .split("<table class=\"res-tb\">")
-            .nth(1)
-            .expect("bảng hàng hóa là bảng đầu tiên")
-            .split("</thead>")
-            .next()
-            .unwrap_or_default();
+        let thead = goods_thead(&html);
         assert_eq!(
             thead.matches("<th ").count(),
-            8,
-            "thead có 7 cột dữ liệu + Tiền thuế"
+            6,
+            "cột cơ bản: STT, Tên, ĐVT, Số lượng, Đơn giá, Thành tiền"
         );
         for (before, after) in [
             ("Tên hàng hóa, dịch vụ", "Số lượng"),
-            ("Thành tiền chưa có thuế", "Thuế suất"),
-            ("Thuế suất", "Tiền thuế"),
+            ("Số lượng", "Đơn giá"),
+            ("Đơn giá", "Thành tiền"),
         ] {
             let b = thead.find(before).expect(before);
             let a = thead.find(after).expect(after);
             assert!(b < a, "`{before}` phải đứng trước `{after}` trong thead");
         }
-        for gone in ["Tính chất", "Loại hàng hóa đặc trưng", "Chiết khấu"] {
-            assert!(!thead.contains(gone), "cột {gone} đã bị bỏ");
+        for gone in [
+            "Tính chất",
+            "Loại hàng hóa đặc trưng",
+            "Chiết khấu",
+            "Tiền thuế",
+            "Đơn vị tính", // viết tắt thành ĐVT
+            "Thành tiền chưa có thuế",
+        ] {
+            assert!(!thead.contains(gone), "cột {gone} đã bị bỏ/đổi");
         }
+        assert!(thead.contains(">ĐVT<"), "Đơn vị tính viết tắt là ĐVT");
 
         let row = html.split("<tr t-chat=").nth(1).expect("có dòng hàng hóa");
         let row = row.split("</tr>").next().unwrap();
-        assert_eq!(
-            row.matches("<td").count(),
-            8,
-            "dòng hàng hóa 7 ô + Tiền thuế"
+        assert_eq!(row.matches("<td").count(), 6, "dòng hàng hóa đúng 6 ô");
+        assert!(!row.contains("Chiết khấu"), "không có chiết khấu → bỏ ô");
+        // Tên hàng không bị ép bề rộng: cột này tự nở và là cột rộng nhất.
+        assert!(
+            !row.contains("max-width"),
+            "không ép width lên ô Tên hàng hóa: {row}"
         );
-        assert!(!row.contains("Chiết khấu"), "không còn cột chiết khấu");
-        // Tiền thuế = thành tiền × 8% (tchat = 1) và format theo vi-VN.
-        assert!(row.contains(">160.000<"), "phải tính ra 160.000: {}", row);
     }
 
     #[test]
@@ -519,12 +597,10 @@ mod tests {
         let discounted = build_invoice_html(&data.to_string()).expect("dựng HTML được");
 
         let thead = goods_thead(&discounted);
-        assert_eq!(thead.matches("<th ").count(), 9, "thêm 1 cột Chiết khấu");
+        assert_eq!(thead.matches("<th ").count(), 7, "thêm 1 cột Chiết khấu");
         let dg = thead.find("Đơn giá").expect("có cột Đơn giá");
         let ck = thead.find(">Chiết khấu<").expect("có cột Chiết khấu");
-        let ttct = thead
-            .find("Thành tiền chưa có thuế")
-            .expect("có cột Thành tiền");
+        let ttct = thead.find(">Thành tiền<").expect("có cột Thành tiền");
         assert!(
             dg < ck && ck < ttct,
             "Chiết khấu nằm giữa Đơn giá và Thành tiền"
@@ -538,8 +614,191 @@ mod tests {
             .next()
             .unwrap()
             .to_string();
-        assert_eq!(row.matches("<td").count(), 9, "dòng cũng thêm ô Chiết khấu");
+        assert_eq!(row.matches("<td").count(), 7, "dòng cũng thêm ô Chiết khấu");
         assert!(row.contains(">200.000<"), "giá trị chiết khấu phải in ra");
+    }
+
+    /// Cột "Thuế suất" chỉ xuất hiện khi hàng hóa xài từ 2 tỉ lệ thuế khác
+    /// nhau; 1 tỉ lệ duy nhất thì con số đó nói được ở dòng tổng cộng.
+    #[test]
+    fn rate_column_shows_up_only_for_two_different_rates() {
+        let plain = build_invoice_html(&fixture()).expect("dựng HTML được");
+        assert!(
+            !goods_thead(&plain).contains(">Thuế suất<"),
+            "một tỉ lệ duy nhất → không cần cột Thuế suất"
+        );
+        assert!(
+            plain.split("<tr t-chat=").count() - 1 == 1,
+            "dòng hàng hóa không kèm ô tỉ lệ"
+        );
+
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        data["hdhhdvu"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "stt": 2, "tchat": 1, "ten": "Khác tỉ lệ", "dvtinh": "Cái",
+                "sluong": 1, "dgia": 500000, "thtien": 500000,
+                "stckhau": 0, "ltsuat": "5%", "tsuat": 0.05
+            }));
+        let two_rates = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+        assert!(
+            goods_thead(&two_rates).contains(">Thuế suất<"),
+            "2 tỉ lệ khác nhau → hiện cột Thuế suất"
+        );
+        let row = two_rates
+            .split("<tr t-chat=")
+            .nth(2)
+            .expect("có dòng thứ 2");
+        assert!(
+            row.split("</tr>").next().unwrap().contains(">5%"),
+            "dòng thứ 2 mang tỉ lệ 5%: {row}"
+        );
+    }
+
+    /// 2 bảng con (thuế suất + thành tiền) đã gộp vào bảng hàng hóa.
+    #[test]
+    fn summary_rows_join_the_goods_table() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+
+        for gone in [
+            r#"<div class="table-horizontal-wrapper">"#,
+            "Tổng tiền phí",
+            "Tổng tiền chiết khấu thương mại",
+            "Tổng tiền chưa thuế",
+            "Tổng tiền thuế",
+        ] {
+            assert!(!html.contains(gone), "`{gone}` đã bị gộp/bỏ");
+        }
+        // Các dòng tổng cộng giờ nằm trong bảng hàng hóa.
+        let table = html
+            .split("<table class=\"res-tb\">")
+            .nth(1)
+            .expect("bảng hàng hóa")
+            .split("</table>")
+            .next()
+            .unwrap();
+        for kept in [
+            "Cộng tiền hàng",
+            "Thuế suất GTGT",
+            "Tiền thuế GTGT",
+            "Tổng tiền thanh toán bằng số",
+            "Số tiền viết bằng chữ",
+        ] {
+            assert!(table.contains(kept), "thiếu dòng `{kept}` trong bảng");
+        }
+        assert!(table.contains(">2.000.000<"), "Cộng tiền hàng = chưa thuế");
+        assert!(table.contains(">2.160.000<"), "tổng thanh toán bằng số");
+        assert!(table.contains("Hai triệu một trăm sáu mươi nghìn đồng"));
+        // Nhãn căn trái, giá trị căn phải: các nhãn thẳng cùng 1 đường bên
+        // trái, các giá trị kết thúc trên cùng 1 đường bên phải.
+        for (label, value) in [
+            ("Cộng tiền hàng", "2.000.000"),
+            ("Tổng tiền thanh toán bằng số", "2.160.000"),
+        ] {
+            assert!(
+                table.contains(&format!(r#"class="tx-left">{label}"#)),
+                "nhãn {label} phải căn trái"
+            );
+            assert!(
+                table.contains(&format!(r#"class="tx-right">{value}"#)),
+                "giá trị {value} phải căn phải"
+            );
+        }
+        assert!(
+            table.contains(r#"class="tx-right">160.000"#),
+            "tiền thuế căn phải cùng đường với các giá trị khác"
+        );
+        // Hàng thuế: 1 nhãn, các giá trị nằm trong ô của nó.
+        assert!(table.contains(">8%<"), "tỉ lệ thuế trong ô value");
+        assert!(table.contains(">160.000<"), "tiền thuế trong ô value");
+
+        // Nhiều tỉ lệ → nhiều value chồng nhau, nhãn vẫn chỉ 1 lần.
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        data["hdhhdvu"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "stt": 2, "tchat": 1, "ten": "Khác tỉ lệ", "dvtinh": "Cái",
+                "sluong": 1, "dgia": 500000, "thtien": 500000,
+                "stckhau": 0, "ltsuat": "5%", "tsuat": 0.05
+            }));
+        data["thttltsuat"] = serde_json::json!([
+            {"tsuat": "8%", "thtien": 2000000, "tthue": 160000},
+            {"tsuat": "5%", "thtien": 500000, "tthue": 25000}
+        ]);
+        let two_rates = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+        let tax_row = two_rates
+            .split("Thuế suất GTGT")
+            .nth(1)
+            .expect("có dòng thuế suất")
+            .split("</tr>")
+            .next()
+            .unwrap();
+        assert_eq!(
+            two_rates.matches(">Thuế suất GTGT<").count(),
+            1,
+            "nhãn Thuế suất GTGT chỉ 1 lần"
+        );
+        assert_eq!(
+            two_rates.matches(">Tiền thuế GTGT<").count(),
+            1,
+            "nhãn Tiền thuế GTGT chỉ 1 lần"
+        );
+        assert_eq!(
+            tax_row.matches("<br>").count(),
+            2,
+            "2 giá trị xếp chồng nhau trong ô: {tax_row}"
+        );
+    }
+
+    /// Tiêu đề đi cùng hàng với QR (trái) và mẫu số (phải): 2 ô ngoài giữ
+    /// bề rộng bằng nhau nên tâm ô giữa trùng tâm trang tuyệt đối, và ô giữa
+    /// rộng đủ để tiêu đề/MCCQT không bị vỡ dòng.
+    #[test]
+    fn title_sits_between_qr_and_invoice_number_on_one_row() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        for cell in ["top-qr", "top-title", "top-code"] {
+            assert!(
+                html.contains(&format!(r#"class="top-cell {cell}""#)),
+                "thiếu ô {cell}"
+            );
+        }
+        let qr = html.find(r#"class="top-cell top-qr""#).expect("có ô QR");
+        let title = html
+            .find(r#"class="top-cell top-title""#)
+            .expect("có ô tiêu đề");
+        let code = html
+            .find(r#"class="top-cell top-code""#)
+            .expect("có ô mẫu số");
+        assert!(qr < title && title < code, "thứ tự QR | tiêu đề | mẫu số");
+
+        let css = template();
+        assert!(
+            css.contains(".heading-content .top-title {\n            flex: 1;"),
+            "ô tiêu đề phải flex: 1 để lấy hết phần còn lại"
+        );
+        assert!(
+            css.contains("flex: 0 0 120pt;"),
+            "2 ô ngoài phải giữ bề rộng bằng nhau (120pt mỗi bên)"
+        );
+        // htmltopdf không kế thừa `text-align` của ô cha xuống block con, và
+        // `inline-block` làm ô code bị tính sai bề rộng khi ở trong flex.
+        let code_css = css
+            .split(".heading-content .code-content {")
+            .nth(1)
+            .expect("có rule .code-content")
+            .split('}')
+            .next()
+            .unwrap();
+        assert!(
+            code_css.contains("display: block"),
+            "ô code phải là block: {code_css}"
+        );
+        assert!(
+            code_css.contains("text-align: right"),
+            "số hóa đơn phải căn phải: {code_css}"
+        );
     }
 
     #[test]
@@ -606,29 +865,19 @@ mod tests {
         assert_eq!(filter_li_row(&all_empty), "", "hết ô thì xoá cả dòng");
     }
 
+    /// Thiếu `ltsuat` thì tỉ lệ vẫn đọc được từ `tsuat` (`0.08` → `"8%"`).
     #[test]
-    fn taxable_line_gets_tax_and_other_lines_stay_blank() {
-        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
-        // tchat = 2 (không thuộc 1/5) → ô Tiền thuế để trống như capture.js.
-        data["hdhhdvu"][0]["tchat"] = serde_json::json!(2);
-        let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
-        let row = html
-            .split("<tr t-chat=")
-            .nth(1)
-            .expect("có dòng")
-            .split("</tr>")
-            .next()
-            .unwrap();
-        assert!(
-            row.ends_with(r#"<td class="tx-center"></td>"#),
-            "tchat 2 không tính thuế: {row}"
-        );
-
-        // Thiếu ltsuat → suy từ tsuat.
-        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
-        data["hdhhdvu"][0]["ltsuat"] = serde_json::Value::Null;
-        let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
-        assert!(html.contains(">160.000<"), "phải suy ra 8% từ tsuat");
+    fn rate_label_falls_back_to_the_numeric_tsuat() {
+        let rate = |ltsuat: serde_json::Value, tsuat: serde_json::Value| {
+            let row: GoodsRow = serde_json::from_value(serde_json::json!({
+                "ltsuat": ltsuat, "tsuat": tsuat
+            }))
+            .expect("đọc được GoodsRow");
+            rate_label(&row)
+        };
+        assert_eq!(rate(serde_json::json!("8%"), serde_json::Value::Null), "8%");
+        assert_eq!(rate(serde_json::Value::Null, serde_json::json!(0.08)), "8%");
+        assert_eq!(rate(serde_json::json!("5%"), serde_json::json!(0.05)), "5%");
     }
 
     fn goods_thead(html: &str) -> String {
@@ -641,13 +890,32 @@ mod tests {
             .to_string()
     }
 
+    /// Ngày ký trong khối chữ ký định dạng `dd/mm/yyyy` như ví dụ
+    /// `Ký ngày: 31/01/2020`, còn CN vẫn trích đúng.
     #[test]
     fn signature_box_only_when_signed_and_cn_is_extracted() {
         let signed = build_invoice_html(&fixture()).expect("dựng HTML được");
         assert!(signed.contains("Signature Valid"));
         assert!(
-            signed.contains(">MOCK CONG TY<"),
+            signed.contains("Ký bởi: MOCK CONG TY"),
             "phải trích đúng CN: {}",
+            cn_of(&signed)
+        );
+        assert!(
+            signed.contains("Ký ngày: 15/09/2026"),
+            "ngày ký phải dd/mm/yyyy: {}",
+            cn_of(&signed)
+        );
+        // Mỗi mục 1 dòng: htmltopdf bỏ qua `display: block` trên <span> nên
+        // khối chữ ký bắt buộc dùng <div>.
+        assert!(
+            signed.contains("</div><div>Ký ngày: "),
+            "3 div block liên tiếp: {0}",
+            cn_of(&signed)
+        );
+        assert!(
+            !signed.contains(r#"<div class="sign-box"><span>"#),
+            "không dùng <span> trong khối chữ ký: {0}",
             cn_of(&signed)
         );
 
@@ -684,6 +952,14 @@ mod tests {
             template().contains("break-inside: avoid"),
             ".ft-sign phải giữ nguyên cả khối chữ ký trên một trang"
         );
+        // Tiêu đề không còn bị đẩy về 2 đầu trang: mỗi tiêu đề chiếm 50% khung
+        // và căn giữa trong phần của nó.
+        assert!(
+            template().contains(
+                ".ft-sign .sign-row h3 {\n            flex: 1;\n            text-align: center;"
+            ),
+            "tiêu đề chữ ký phải căn giữa trong 50% mỗi bên"
+        );
     }
 
     #[test]
@@ -717,17 +993,22 @@ mod tests {
             .join(" · ")
     }
 
+    /// Giá trị sau nhãn "Ký ngày: " — CN thì lấy sau "Ký bởi: ".
     fn cn_of(html: &str) -> String {
-        let start = html.find(r#"id="cks""#).unwrap_or(0);
+        let start = html
+            .find("Ký bởi: ")
+            .map(|i| i + "Ký bởi: ".len())
+            .unwrap_or(0);
         let seg = &html[start..html.len().min(start + 200)];
-        let a = seg.find('>').map(|i| i + 1).unwrap_or(0);
-        let b = seg[a..].find('<').map(|i| a + i).unwrap_or(a);
-        seg[a..b].to_string()
+        let b = seg.find('<').unwrap_or(0);
+        seg[..b].to_string()
     }
 
-    /// Số trang trong file PDF htmltopdf vừa sinh (đếm thẻ `<Page>`).
+    /// Số trang trong file PDF htmltopdf vừa sinh (đếm thẻ `<Page>`). Bảng tổng
+    /// cộng đã gộp vào bảng hàng hóa nên hóa đơn gọn đi — hóa đơn mẫu 1 trang,
+    /// hóa đơn nhiều dòng vẫn tối đa 2 trang (khối chữ ký không bị vỡ).
     #[test]
-    fn renders_two_a4_pages() {
+    fn renders_at_most_two_a4_pages() {
         let pdf = match render_pdf(&fixture()) {
             Ok(pdf) => pdf,
             Err(e) => {
@@ -737,7 +1018,10 @@ mod tests {
         };
         assert!(pdf.starts_with(b"%PDF"), "phải là file PDF hợp lệ");
         let pages = count_pages(&pdf);
-        assert_eq!(pages, 2, "hóa đơn mẫu phải là 2 trang A4 (đã có {pages})");
+        assert!(
+            (1..=2).contains(&pages),
+            "hóa đơn mẫu phải chiếm 1–2 trang A4 (đã có {pages})"
+        );
         assert!(pdf.len() > 10_000, "PDF quá nhỏ ({} byte)", pdf.len());
     }
 
