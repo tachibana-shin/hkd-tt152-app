@@ -4,11 +4,12 @@
 //! cần Chrome/Font nhúng — htmltopdf tự layout, tự nhúng font hệ thống và tự
 //! tách trang A4.
 
-use crate::data::{GoodsRow, InvoiceData};
+use crate::data::{GoodsRow, InvoiceData, TtKhac};
 use crate::format::{
     escape, extract_cn, format_vietnamese_date, format_vnd, js_number, js_string, parse_signature,
     Signature,
 };
+use crate::kind::Kind;
 use crate::qr::{qr_data_uri, QR_PX};
 use base64::Engine as _;
 use std::collections::HashMap;
@@ -66,12 +67,9 @@ fn render(data: &InvoiceData) -> String {
     let mut slots: HashMap<&'static str, String> = HashMap::new();
 
     // ── Đầu hóa đơn ──
-    let title = if matches!(data.tlhdon, serde_json::Value::Null) {
-        "HÓA ĐƠN".to_string()
-    } else {
-        js_string(&data.tlhdon)
-    };
-    slots.insert("INVOICE_TITLE", escape(&title.to_uppercase()));
+    // Tiêu đề lấy theo dữ liệu; thiếu thì tra tên loại theo ký hiệu mẫu
+    // (Phụ lục I Thông tư 91/2026/TT-BTC) — mọi kiểu hóa đơn đều có tên.
+    slots.insert("INVOICE_TITLE", escape(&invoice_title(data).to_uppercase()));
     slots.insert("INVOICE_DATE", escape(&format_vietnamese_date(&data.nky)));
 
     for (key, value) in [
@@ -105,6 +103,9 @@ fn render(data: &InvoiceData) -> String {
     ] {
         slots.insert(key, escape(&js_string(value)));
     }
+
+    // ── Thông tin đặc thù theo kiểu hóa đơn ──
+    slots.insert("EXTRA_INFO_ROWS", extra_info_rows(data));
 
     // ── Mã QR ──
     slots.insert("QR_IMG", qr_image(&js_string(&data.qrcode)));
@@ -184,6 +185,131 @@ fn substitute(template: &str, slots: &HashMap<&str, String>) -> String {
         }
     }
     out.push_str(rest);
+    out
+}
+
+/// Tiêu đề hóa đơn: `tlhdon` → `thdon` → tên loại theo ký hiệu mẫu → `"HÓA ĐƠN"`.
+///
+/// Cổng HĐĐT luôn gửi `tlhdon`, nhưng dữ liệu thiếu/sai kiểu thì vẫn còn 2 lớp
+/// dự phòng để không in ra một dòng trống.
+fn invoice_title(data: &InvoiceData) -> String {
+    let kind = Kind::detect(&data.khmshdon);
+    [
+        js_string(&data.tlhdon),
+        js_string(&data.thdon),
+        kind.name(&data.khhdon).to_string(),
+    ]
+    .into_iter()
+    .find(|title| !title.trim().is_empty())
+    .unwrap_or_else(|| "HÓA ĐƠN".to_string())
+}
+
+/// Danh sách thông tin được phép in ra: (nhãn hiển thị, khóa thay thế).
+///
+/// Cổng HĐĐT không định nghĩa sẵn nội dung của `ttkhac` — đó là túi mở rộng do
+/// phần mềm người bán điền, và thực tế chứa cả khóa **nội bộ**
+/// (`StockTotalAmount`, `RowType`, `SellerAddress`…). Chỉ những `ttruong` khớp
+/// đúng nhãn dưới đây mới được in; mọi khóa khác bị bỏ qua tuyệt đối.
+///
+/// Nhãn lấy theo bài tham khảo mục 3 (vận tải, khách sạn, tiền điện/nước, vé
+/// máy bay); thêm một dòng ở đây là thêm một trường hiển thị.
+const EXTRA_FIELDS: &[(&str, &[&str])] = &[
+    // Vận tải (mục 3.3): tên tàu, vận đơn, quốc tịch, ngày đến, ngày đi.
+    ("Tên tàu", &["tentau", "shipname", "vesselname"]),
+    ("Vận đơn", &["vandon", "waybill"]),
+    ("Quốc tịch", &["quoctich", "nationality"]),
+    ("Ngày đến", &["ngayden", "checkindate", "arrivaldate"]),
+    ("Ngày đi", &["ngaydi", "checkoutdate", "departuredate"]),
+    // Khách sạn (mục 3.4): số phòng, ngày đến, ngày đi.
+    ("Số phòng", &["sophong", "roomnumber", "roomno"]),
+    // Tiền điện, tiền nước (mục 3.1, 3.2): chỉ số và sản lượng.
+    ("Chỉ số điện", &["chisodien", "meterelectric"]),
+    ("Sản lượng điện", &["sanluongdien"]),
+    ("Chỉ số nước", &["chisonuoc", "meternuoc"]),
+    ("Sản lượng nước", &["sanluongnuoc"]),
+    // Đại lý vé máy bay (mục 3.5): thông tin đặc thù của vé máy bay.
+    ("Số hiệu chuyến bay", &["sohieuchuyenbay", "flightno"]),
+    ("Điểm đi", &["diemdi", "departure"]),
+    ("Điểm đến", &["diemden", "arrival"]),
+];
+
+/// Khối `.li-row` cho một dòng thông tin — cùng khuôn với khối trong template
+/// để `drop_empty_info_rows` xử lý như nhau.
+fn info_row(label: &str, value: &str) -> String {
+    format!(
+        r#"<div class="li-row"><div class="data-item"><div class="di-label"><span>{label}:</span></div><div class="di-value"><div>{value}</div></div></div></div>"#,
+        label = escape(label),
+        value = escape(value),
+    )
+}
+
+/// Tìm giá trị của một nhãn trong `ttkhac` — khớp không phân biệt hoa thường,
+/// kể cả chữ Việt hoa/thường.
+fn find_extra(items: &[TtKhac], label: &str, aliases: &[&str]) -> Option<String> {
+    let wanted: Vec<String> = std::iter::once(label)
+        .chain(aliases.iter().copied())
+        .map(|key| key.trim().to_lowercase())
+        .collect();
+    items.iter().find_map(|item| {
+        let key = js_string(&item.ttruong).trim().to_lowercase();
+        if !wanted.contains(&key) {
+            return None;
+        }
+        // Bỏ qua mục rỗng để còn lấy mục sau trùng tên — dữ liệu thật có cả
+        // "Ghi chú" rỗng lẫn "Ghi chú hóa đơn" có nội dung trên cùng hóa đơn.
+        let value = js_string(&item.dlieu).trim().to_string();
+        (!value.is_empty()).then_some(value)
+    })
+}
+
+/// Dòng thông tin thêm vào cuối khối thông tin (ngay trước bảng hàng hóa):
+///
+/// - thông tin đặc thù theo lĩnh vực lấy từ `ttkhac` (xem [`EXTRA_FIELDS`]);
+/// - đồng tiền + tỷ giá (Điều 10.7 NĐ 254/2026) khi hóa đơn không bằng VND;
+/// - phí, lệ phí (Điều 10.6 NĐ 254/2026) khi có và khác 0;
+/// - ghi chú của người bán (`Ghi chú` / `Ghi chú hóa đơn`) khi có nội dung.
+///
+/// Chỉ sinh dòng khi có giá trị thật — dòng rỗng không bao giờ được tạo ra.
+fn extra_info_rows(data: &InvoiceData) -> String {
+    let mut out = String::new();
+
+    for (label, aliases) in EXTRA_FIELDS {
+        if let Some(value) = find_extra(&data.ttkhac, label, aliases) {
+            out.push_str(&info_row(label, &value));
+        }
+    }
+
+    // Điều 10.7 — đồng tiền thể hiện trên hóa đơn.
+    let dvtte = js_string(&data.dvtte);
+    if !dvtte.trim().is_empty() && !dvtte.eq_ignore_ascii_case("VND") {
+        out.push_str(&info_row("Đơn vị tiền tệ", &dvtte));
+        let tgia = js_number(&data.tgia).unwrap_or(1.0);
+        if (tgia - 1.0).abs() > f64::EPSILON {
+            out.push_str(&info_row(
+                "Tỷ giá",
+                &format_vnd(&serde_json::Value::from(tgia)),
+            ));
+        }
+    }
+
+    // Điều 10.6 — phí, lệ phí thuộc ngân sách nhà nước.
+    if let Some(phi) = js_number(&data.tgtphi).filter(|phi| *phi > 0.0) {
+        out.push_str(&info_row(
+            "Phí, lệ phí",
+            &format_vnd(&serde_json::Value::from(phi)),
+        ));
+    }
+
+    // "Nội dung khác liên quan (nếu có)" (Điều 10.7) — ghi chú của người bán,
+    // đặt cuối cùng vì nó là câu chữ chứ không phải ô thông tin.
+    if let Some(note) = find_extra(
+        &data.ttkhac,
+        "Ghi chú",
+        &["ghichu", "ghi chu", "ghi chú hóa đơn", "ghichuhoadon"],
+    ) {
+        out.push_str(&info_row("Ghi chú", &note));
+    }
+
     out
 }
 
@@ -1471,5 +1597,190 @@ mod tests {
         );
         assert_eq!(format_vietnamese_date(&n(r#""hỏng""#)), "");
         assert_eq!(js_number(&n("2")), Some(2.0));
+    }
+
+    /// `detail_json` của fixture với túi `ttkhac` do test chỉ định.
+    fn with_tt_khac(items: serde_json::Value) -> String {
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).expect("fixture hợp lệ");
+        data["ttkhac"] = items;
+        data.to_string()
+    }
+
+    /// `detail_json` của fixture với vài trường do test ghi đè.
+    fn with(overrides: serde_json::Value) -> String {
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).expect("fixture hợp lệ");
+        for (key, value) in overrides.as_object().expect("phải là object") {
+            data[key] = value.clone();
+        }
+        data.to_string()
+    }
+
+    #[test]
+    fn sector_fields_render_before_the_goods_table() {
+        // Bài tham khảo mục 3.3 (vận tải) + 3.4 (khách sạn), ghép cùng một
+        // hóa đơn để kiểm tra cả hai nhóm trong một lần dựng.
+        let html = build_invoice_html(&with_tt_khac(serde_json::json!([
+            {"ttruong": "Tên tàu", "kdlieu": "string", "dlieu": "Thuyền Đào Kính"},
+            {"ttruong": "Vận đơn", "kdlieu": "string", "dlieu": "WB-2026-01"},
+            {"ttruong": "Quốc tịch", "kdlieu": "string", "dlieu": "Việt Nam"},
+            {"ttruong": "NGÀY ĐẾN", "kdlieu": "string", "dlieu": "2026-10-05"},
+            {"ttruong": "Ngày đi", "kdlieu": "string", "dlieu": "2026-10-07"},
+            {"ttruong": "số phòng", "kdlieu": "string", "dlieu": "101"},
+            {"ttruong": "RowType", "kdlieu": "numberic", "dlieu": "1"}
+        ])))
+        .expect("dựng HTML được");
+
+        for text in [
+            "Tên tàu",
+            "Thuyền Đào Kính",
+            "Vận đơn",
+            "WB-2026-01",
+            "Quốc tịch",
+            "Việt Nam",
+            "Ngày đến",
+            "2026-10-05",
+            "Ngày đi",
+            "Số phòng",
+            "<div>101</div>",
+        ] {
+            assert!(html.contains(text), "thiếu thông tin {text}");
+        }
+        let extra = html.find("Thuyền Đào Kính").expect("có dòng vận tải");
+        let table = html
+            .find(r#"<table class="res-tb""#)
+            .expect("có bảng hàng hóa");
+        assert!(extra < table, "thông tin đặc thù nằm trước bảng hàng hóa");
+        assert!(!html.contains("{{"), "không sót placeholder");
+    }
+
+    #[test]
+    fn internal_tt_khac_keys_are_never_printed() {
+        // `ttkhac` thực tế của cổng HĐĐT toàn khóa nội bộ — không được in ra.
+        let html = build_invoice_html(&with_tt_khac(serde_json::json!([
+            {"ttruong": "StockTotalAmount", "kdlieu": "numeric", "dlieu": "6949800.0"},
+            {"ttruong": "RowType", "kdlieu": "numberic", "dlieu": "1"},
+            {"ttruong": "SellerAddress", "kdlieu": "string", "dlieu": "Số 1 ngõ 184 Văn Minh"},
+            {"ttruong": "AccountObjectID", "kdlieu": "string", "dlieu": "7d20d6d5-8a91"},
+            {"ttruong": "Mã TC", "kdlieu": "string", "dlieu": "RW874AUDAD9"},
+            {"ttruong": "ĐCTC", "kdlieu": "string", "dlieu": "https://spv.tracuuhoadon.online/"},
+            {"ttruong": "Tiền thuế", "kdlieu": "numeric", "dlieu": "11896"}
+        ])))
+        .expect("dựng HTML được");
+
+        for leak in [
+            "StockTotalAmount",
+            ">6949800.0<",
+            "SellerAddress",
+            "Văn Minh",
+            "AccountObjectID",
+            "RW874AUDAD9",
+            "spv.tracuuhoadon.online",
+            ">11896<",
+        ] {
+            assert!(!html.contains(leak), "khóa nội bộ {leak} không được in ra");
+        }
+    }
+
+    #[test]
+    fn title_falls_back_to_the_type_name_when_the_data_has_none() {
+        let html = build_invoice_html(&with(serde_json::json!({
+            "tlhdon": null, "thdon": null, "khhdon": "C26MOC"
+        })))
+        .expect("dựng HTML được");
+        assert!(
+            html.contains(r#"<div class="main-title">HÓA ĐƠN GIÁ TRỊ GIA TĂNG</div>"#),
+            "tiêu đề lấy theo ký hiệu mẫu 1"
+        );
+
+        // Không tra được loại hóa đơn thì vẫn còn một tiêu đề chung.
+        let html = build_invoice_html(&with(serde_json::json!({
+            "tlhdon": null, "thdon": null, "khmshdon": null
+        })))
+        .expect("dựng HTML được");
+        assert!(
+            html.contains(r#"<div class="main-title">HÓA ĐƠN</div>"#),
+            "tiêu đề chung khi không nhận diện được loại"
+        );
+    }
+
+    #[test]
+    fn title_prefers_the_invoice_name_over_the_sample_number() {
+        let html = build_invoice_html(&with(serde_json::json!({
+            "tlhdon": null,
+            "thdon": "Hóa đơn bán hàng khởi tạo từ máy tính tiền",
+            "khmshdon": 2
+        })))
+        .expect("dựng HTML được");
+        assert!(
+            html.contains(
+                r#"<div class="main-title">HÓA ĐƠN BÁN HÀNG KHỞI TẠO TỪ MÁY TÍNH TIỀN</div>"#
+            ),
+            "tên hóa đơn do người bán đặt thắng ký hiệu mẫu"
+        );
+    }
+
+    #[test]
+    fn foreign_currency_shows_the_unit_and_the_rate() {
+        let html = build_invoice_html(&with(serde_json::json!({
+            "dvtte": "USD", "tgia": 25_400
+        })))
+        .expect("dựng HTML được");
+        assert!(html.contains("Đơn vị tiền tệ"), "thiếu tên đồng tiền");
+        assert!(html.contains("<div>USD</div>"), "thiếu mã tiền tệ");
+        assert!(html.contains("Tỷ giá"), "thiếu nhãn tỷ giá");
+        assert!(html.contains("<div>25.400</div>"), "thiếu số tỷ giá");
+    }
+
+    #[test]
+    fn vnd_keeps_the_currency_rows_out() {
+        // Fixture không gửi `dvtte` → không có dòng đồng tiền.
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        assert!(!html.contains("Đơn vị tiền tệ"), "không có dòng tiền tệ");
+        assert!(!html.contains("Tỷ giá"), "không có dòng tỷ giá");
+
+        // VND với tỷ giá 1 cũng vậy.
+        let html = build_invoice_html(&with(serde_json::json!({
+            "dvtte": "VND", "tgia": 1.0
+        })))
+        .expect("dựng HTML được");
+        assert!(!html.contains("Đơn vị tiền tệ"), "VND không cần đổi tiền");
+        assert!(!html.contains("Tỷ giá"), "VND thì tỷ giá 1 không hiển thị");
+    }
+
+    #[test]
+    fn fee_row_only_when_there_is_a_fee() {
+        // Fixture có `tgtphi: 0` → không có dòng phí.
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        assert!(!html.contains("Phí, lệ phí"), "phí bằng 0 thì không in");
+
+        let html = build_invoice_html(&with(serde_json::json!({ "tgtphi": 150_000 })))
+            .expect("dựng HTML được");
+        assert!(html.contains("Phí, lệ phí"), "thiếu dòng phí");
+        assert!(html.contains("<div>150.000</div>"), "thiếu số tiền phí");
+    }
+
+    #[test]
+    fn note_renders_its_first_non_empty_value_and_hides_secrets() {
+        // Dữ liệu thật: "Ghi chú" rỗng đứng trước "Ghi chú hóa đơn" có nội
+        // dung, và "Mã số bí mật" là khóa nội bộ không được in ra.
+        let html = build_invoice_html(&with_tt_khac(serde_json::json!([
+            {"ttruong": "Ghi chú", "kdlieu": "string", "dlieu": ""},
+            {"ttruong": "Ghi chú hóa đơn", "kdlieu": "string", "dlieu": "Khách hàng trả sau"},
+            {"ttruong": "Mã số bí mật", "kdlieu": "string", "dlieu": "NA18WIOXVE638UG"}
+        ])))
+        .expect("dựng HTML được");
+        assert!(html.contains(">Ghi chú:<"), "thiếu dòng ghi chú");
+        assert!(
+            html.contains("Khách hàng trả sau"),
+            "phải lấy mục ghi chú có nội dung"
+        );
+        assert!(
+            !html.contains("NA18WIOXVE638UG"),
+            "khóa bí mật không được in ra"
+        );
+
+        // Không có ghi chú thì không có dòng.
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        assert!(!html.contains(">Ghi chú:<"), "fixture không có ghi chú");
     }
 }

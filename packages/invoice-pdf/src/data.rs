@@ -45,6 +45,19 @@ pub struct TaxRow {
     pub tthue: Value,
 }
 
+/// Một mục trong `ttkhac` — túi thông tin mở rộng người bán điền thêm.
+///
+/// Cổng HĐĐT không định nghĩa sẵn trường nào ở đây: nội dung tùy từng loại hóa
+/// đơn / từng lĩnh vực (vận tải, khách sạn, tiện ích…). [`crate::render`] chỉ
+/// in ra những mục có `ttruong` khớp danh sách hiển thị, không in khóa nội bộ.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct TtKhac {
+    pub ttruong: Value,
+    pub kdlieu: Value,
+    pub dlieu: Value,
+}
+
 /// Chi tiết hóa đơn đọc từ `detail_json`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -54,6 +67,8 @@ pub struct InvoiceData {
     pub khhdon: Value,
     pub shdon: Value,
     pub tlhdon: Value,
+    /// Tên hóa đơn (`thdon`) — nguồn dự phòng thứ hai của tiêu đề.
+    pub thdon: Value,
     pub nky: Value,
     pub mhdon: Value,
     pub tchat: Value,
@@ -90,11 +105,23 @@ pub struct InvoiceData {
     pub tgtttbso: Value,
     pub tgtttbchu: Value,
 
+    // ── Đồng tiền (Điều 10.7 NĐ 254/2026) ──
+    /// Đơn vị tiền tệ — `"VND"` (hoặc rỗng) là mặc định.
+    pub dvtte: Value,
+    /// Tỷ giá so với VND — `1` khi hóa đơn bằng đồng Việt Nam.
+    pub tgia: Value,
+
     // ── Chữ ký số + mã QR ──
     /// Chuỗi JSON (không phải object) chứa `Subject` / `SigningTime`.
     pub nbcks: Value,
     /// Chuỗi mã QR theo chuẩn của cổng HĐĐT; rỗng thì không vẽ QR.
     pub qrcode: Value,
+
+    // ── Thông tin mở rộng ──
+    /// Thông tin khác của hóa đơn (`ttkhac`) — nơi cõng thông tin đặc thù theo
+    /// lĩnh vực. Khóa nội bộ không được in ra; xem [`crate::render`].
+    #[serde(deserialize_with = "vec_or_empty")]
+    pub ttkhac: Vec<TtKhac>,
 
     // ── Bảng ──
     #[serde(deserialize_with = "vec_or_empty")]

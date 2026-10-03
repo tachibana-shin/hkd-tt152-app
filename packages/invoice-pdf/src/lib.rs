@@ -9,6 +9,7 @@
 
 mod data;
 mod format;
+mod kind;
 mod qr;
 mod render;
 
