@@ -1200,6 +1200,10 @@ pub(crate) async fn load_period_costs(
             WHERE je.entry_type = 'PC'
               AND je.posting_date >= ? AND je.posting_date <= ?
               AND COALESCE(je.adjust_code, '') != 'GiamCP'
+              -- PC trả nhà cung cấp (Nợ 331 / Có 111) là **thanh toán phải trả**,
+              -- không phải chi phí: tiền hàng đã nằm ở giá vốn khi xuất kho. Cộng
+              -- vào đây là tính trùng hàng mua (vd. PC001 = đúng tổng PN0131).
+              AND COALESCE(je.debit_account, '') != '331'
             ORDER BY je.posting_date, je.id"#,
         from,
         to
@@ -3340,11 +3344,23 @@ pub(crate) async fn get_revenue_expense(
     to_date: String,
 ) -> Result<String, String> {
     let pool = state.pool.read().await;
+    Ok(get_revenue_expense_core(&pool, &from_date, &to_date)
+        .await?
+        .to_string())
+}
+
+/// Phần lõi của [`get_revenue_expense`] — tách ra để test được với `test_pool`.
+pub(crate) async fn get_revenue_expense_core(
+    pool: &SqlitePool,
+    from_date: &str,
+    to_date: &str,
+) -> Result<serde_json::Value, String> {
     let row = sqlx::query!(
         "SELECT
             COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code != 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_up,
             COALESCE(SUM(CASE WHEN entry_type = 'PX' AND adjust_code = 'GiamDT' THEN amount ELSE 0.0 END), 0.0) AS revenue_down,
-            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS expense_up,
+            COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code != 'GiamCP'
+                               AND COALESCE(debit_account, '') != '331' THEN amount ELSE 0.0 END), 0.0) AS expense_up,
             COALESCE(SUM(CASE WHEN entry_type = 'PC' AND adjust_code = 'GiamCP' THEN amount ELSE 0.0 END), 0.0) AS expense_down
          FROM journal_entry
          WHERE posting_date >= ?
@@ -3352,18 +3368,17 @@ pub(crate) async fn get_revenue_expense(
         from_date,
         to_date
     )
-    .fetch_one(&*pool)
+    .fetch_one(pool)
     .await
     .map_err(|e| e.to_string())?;
-    let cogs = load_fifo_cogs(&pool, &from_date, &to_date).await?;
+    let cogs = load_fifo_cogs(pool, from_date, to_date).await?;
     Ok(serde_json::json!({
         "revenue_up": row.revenue_up,
         "revenue_down": row.revenue_down,
         "expense_up": row.expense_up,
         "expense_down": row.expense_down,
         "cogs": round2(cogs),
-    })
-    .to_string())
+    }))
 }
 
 /// Tổng hợp tồn kho theo sản phẩm (≡ Vat Tu NXT sheet)
@@ -3413,6 +3428,62 @@ mod tests {
     /// Doanh thu tính thuế TNCN = toàn bộ doanh thu của kỳ (chưa trừ ngưỡng 01 tỷ).
     fn full(code: &str, value: f64) -> std::collections::HashMap<String, f64> {
         [(code.to_string(), value)].into_iter().collect()
+    }
+
+    /// Chèn 1 dòng sổ với cặp Nợ/Có tự chọn — dùng cho test chi phí.
+    async fn add_journal_row(
+        pool: &SqlitePool,
+        posting_date: &str,
+        voucher_no: &str,
+        entry_type: &str,
+        debit: &str,
+        credit: &str,
+        amount: f64,
+    ) {
+        sqlx::query!(
+            "INSERT INTO journal_entry
+             (posting_date, voucher_no, doc_date, entry_type, description,
+              quantity, unit_price, amount, debit_account, credit_account,
+              industry_code, vat_rate, pit_rate, unit_code, adjust_code, note)
+             VALUES (?, ?, ?, ?, 'test', 1.0, ?, ?, ?, ?, '', 0.0, 0.0, 'HKD', '', '')",
+            posting_date,
+            voucher_no,
+            posting_date,
+            entry_type,
+            amount,
+            amount,
+            debit,
+            credit
+        )
+        .execute(pool)
+        .await
+        .expect("add journal row");
+    }
+
+    /// PC trả nhà cung cấp là **thanh toán phải trả** (Nợ 331), không phải chi phí:
+    /// tiền hàng đã nằm ở giá vốn khi xuất kho. Trước đây cả hai đều bị cộng vào
+    /// → hàng mua bị tính hai lần (PC001 đúng bằng tổng PN0131 trong dữ liệu thật).
+    #[tokio::test]
+    async fn pc_tra_nha_cung_cap_khong_vao_chi_phi() {
+        let pool = test_pool().await;
+        add_journal_row(&pool, "2026-03-01", "PN001", "PN", "152", "331", 500_000.0).await;
+        add_journal_row(&pool, "2026-03-02", "PC001", "PC", "331", "111", 500_000.0).await;
+        add_journal_row(&pool, "2026-03-03", "PC002", "PC", "642", "111", 150_000.0).await;
+
+        let (cost_ok, cost_no, _) = load_period_costs(&pool, "2026-03-01", "2026-03-31")
+            .await
+            .expect("chi phí kỳ");
+        assert_eq!(cost_ok, 150_000.0, "chỉ chi phí thật mới vào chi phí kỳ");
+        assert_eq!(cost_no, 0.0);
+
+        let out = get_revenue_expense_core(&pool, "2026-03-01", "2026-03-31")
+            .await
+            .expect("tổng hợp DT-CP");
+        assert_eq!(
+            out["expense_up"].as_f64().expect("expense_up"),
+            150_000.0,
+            "màn Tổng hợp DT-CP cũng phải loại PC trả nhà cung cấp"
+        );
     }
 
     #[test]

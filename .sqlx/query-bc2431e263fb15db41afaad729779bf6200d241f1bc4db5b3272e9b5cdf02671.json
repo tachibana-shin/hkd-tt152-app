@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT je.posting_date AS \"posting_date!\", je.voucher_no AS \"voucher_no!\",\n                  je.description AS \"description!\", je.amount, je.bank_code AS \"bank_code!\",\n                  je.deductible,\n                  je.non_deductible_reason AS \"non_deductible_reason!\"\n             FROM journal_entry je\n            WHERE je.entry_type = 'PC'\n              AND je.posting_date >= ? AND je.posting_date <= ?\n              AND COALESCE(je.adjust_code, '') != 'GiamCP'\n              -- PC trả nhà cung cấp (Nợ 331 / Có 111) là **thanh toán phải trả**,\n              -- không phải chi phí: tiền hàng đã nằm ở giá vốn khi xuất kho. Cộng\n              -- vào đây là tính trùng hàng mua (vd. PC001 = đúng tổng PN0131).\n              AND COALESCE(je.debit_account, '') != '331'\n            ORDER BY je.posting_date, je.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "posting_date!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "bank_code!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "deductible",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "non_deductible_reason!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "bc2431e263fb15db41afaad729779bf6200d241f1bc4db5b3272e9b5cdf02671"
+}
