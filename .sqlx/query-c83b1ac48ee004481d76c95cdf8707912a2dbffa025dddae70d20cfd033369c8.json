@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT name, tax_code, address, phone, hddt_symbol FROM business WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "tax_code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "address",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "phone",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "hddt_symbol",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c83b1ac48ee004481d76c95cdf8707912a2dbffa025dddae70d20cfd033369c8"
+}

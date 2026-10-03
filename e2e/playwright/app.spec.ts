@@ -1488,6 +1488,65 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   await nextDlg.getByRole("button", { name: "Đóng" }).click();
 });
 
+test("Chờ xuất HĐĐT: xem PDF hóa đơn nháp ngay trên hàng chờ", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Tồn kho + hóa đơn nháp riêng cho test này (không phụ thuộc test khác đã chạy).
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-18",
+      voucher_no: "PN9360",
+      description: "Nhập tồn cho test xem PDF nháp",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 20, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed: ${await stockIn.text()}`).toBe(true);
+  const mkInvoice = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9360",
+      date: "2026-09-18",
+      customer: "Khách xem PDF",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 2,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(mkInvoice.ok(), `save_invoice failed: ${await mkInvoice.text()}`).toBe(true);
+
+  await sidebarButton(page, "Chờ xuất HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Chờ xuất HĐĐT");
+  await page.getByPlaceholder("Số hóa đơn, khách hàng, MST…").fill("HD9360");
+  await page.getByPlaceholder("Số hóa đơn, khách hàng, MST…").press("Enter");
+  const row = page.locator("tr", { has: page.getByText("HD9360", { exact: true }) }).first();
+  await expect(row).toBeVisible();
+
+  // Nút PDF dựng `detail_json` từ hóa đơn nội bộ (backend) rồi render ngay trong Rust.
+  await row.getByRole("button", { name: "Xem PDF hóa đơn" }).click();
+  await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
+  await expectValidPdf(page);
+  await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await expect(invoiceFrame(page)).toBeHidden();
+});
+
 test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa đơn", async ({ page, request }) => {
   await ensureLoggedIn(page);
   await sidebarButton(page, "Hóa đơn").click();

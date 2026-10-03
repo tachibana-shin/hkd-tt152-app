@@ -517,6 +517,7 @@ pub async fn api_invoke(
             items: Vec<InvoiceItemInput>
         ),
         "get_invoice_detail" => mx!(commands::invoice::get_invoice_detail, body, id: i64),
+        "invoice_draft_detail" => mx!(commands::invoice::invoice_draft_detail, body, id: i64),
         "save_invoice" => mx!(
             commands::invoice::save_invoice,
             body,

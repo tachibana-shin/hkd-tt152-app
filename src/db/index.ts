@@ -850,6 +850,9 @@ export const api = {
   /** Sinh PDF hóa đơn từ `detail_json` (backend dựng HTML + render) — base64. */
   renderInvoicePdf: (detailJson: string) => call<string>("render_invoice_pdf", { detailJson }),
 
+  /** `detail_json` dựng từ hóa đơn nội bộ — để xem trước PDF ở Chờ xuất HĐĐT. */
+  invoiceDraftDetail: (id: number) => call<string>("invoice_draft_detail", { id }),
+
   // ─── AUDIT LOG ───
   getAuditLog: async (limit = 200) =>
     parse<AuditEntry[]>(await call<string>("get_audit_log", { limit })),

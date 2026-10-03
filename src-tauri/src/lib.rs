@@ -180,6 +180,7 @@ pub fn run() {
             commands::invoice::get_invoices,
             commands::invoice::get_invoices_page,
             commands::invoice::get_invoice_detail,
+            commands::invoice::invoice_draft_detail,
             commands::invoice::save_invoice,
             commands::invoice::link_hddt,
             commands::payroll::get_employees,

@@ -59,6 +59,9 @@ const linkVisible = ref(false);
 const linkTarget = ref<Invoice | null>(null);
 const draftVisible = ref(false);
 const draftTarget = ref<Invoice | null>(null);
+const pdfVisible = ref(false);
+const pdfDetail = ref("");
+const pdfTitle = ref("");
 
 function openExport(inv: Invoice) {
   exportTarget.value = inv;
@@ -71,6 +74,22 @@ function openLink(inv: Invoice) {
 function openDraft(inv: Invoice) {
   draftTarget.value = inv;
   draftVisible.value = true;
+}
+
+/** Xem trước PDF hóa đơn ở hàng chờ — backend dựng `detail_json` từ hóa đơn nội bộ. */
+async function openPdf(inv: Invoice) {
+  try {
+    pdfDetail.value = await api.invoiceDraftDetail(inv.id);
+    pdfTitle.value = `Hóa đơn ${inv.number}`;
+    pdfVisible.value = true;
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không mở được PDF",
+      detail: String(e),
+      life: 4000,
+    });
+  }
 }
 
 function removeItem(inv: Invoice) {
@@ -318,6 +337,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             <template #body="{ data }">
               <div class="flex items-center justify-center gap-1">
                 <Button
+                  icon="pi pi-file-pdf"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Xem PDF hóa đơn"
+                  v-tooltip="'Xem PDF hóa đơn'"
+                  @click="openPdf(data.invoice)"
+                />
+                <Button
                   icon="pi pi-copy"
                   text
                   rounded
@@ -380,5 +408,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     <InvoiceExportDialog v-model:visible="exportVisible" :invoice="exportTarget" @done="load" />
     <InvoiceLinkDialog v-model:visible="linkVisible" :invoice="linkTarget" @done="load" />
     <InvoiceDraftDialog v-model:visible="draftVisible" :edit-invoice="draftTarget" @done="load" />
+    <InvoicePdfDialog v-model:visible="pdfVisible" :detail-json="pdfDetail" :title="pdfTitle" />
   </div>
 </template>

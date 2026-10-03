@@ -111,6 +111,128 @@ pub(crate) async fn get_invoice_detail(
     Ok(serde_json::json!({ "invoice": inv, "items": items }).to_string())
 }
 
+/// Nhãn thuế suất hiển thị trên cột "Thuế suất" — đúng dạng chuỗi `"8%"` mà
+/// bảng tổng hợp của cổng HĐĐT (`thttltsuat.tsuat`) đang dùng.
+fn vat_rate_label(rate: f64) -> String {
+    format!("{}%", (rate * 100.0).round() as i64)
+}
+
+/// Dựng `detail_json` cho hóa đơn **nội bộ** để xem trước PDF ngay ở màn
+/// Chờ xuất HĐĐT — cùng khung dữ liệu với chi tiết tải từ cổng HĐĐT
+/// (`hddt_purchase_invoice.detail_json`), render qua [`crate::commands::pdf`].
+///
+/// Khác hóa đơn của cổng ở chỗ hộ kinh doanh **không tách thuế GTGT** trên hóa
+/// đơn (`invoice.vat_amount` luôn 0, xem `save_invoice_core`) nên bảng tổng hợp
+/// theo thuế suất để trống — chỉ cột "Thuế suất" từng dòng (khi xài nhiều tỉ lệ)
+/// và bảng thành tiền + chiết khấu là giữ lại cho đúng khung in.
+pub(crate) async fn invoice_draft_detail_json(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<String, String> {
+    let invoice = sqlx::query!(
+        "SELECT number, date, customer, customer_tax_code, total, vat_amount
+           FROM invoice WHERE id = ?",
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("Không tìm thấy hóa đơn #{id}"))?;
+
+    // Bên bán: hồ sơ hộ kinh doanh (ký hiệu HĐĐT của hộ = ký hiệu hóa đơn).
+    let (nb_name, nb_tax_code, nb_address, nb_phone, nb_symbol) = match sqlx::query!(
+        "SELECT name, tax_code, address, phone, hddt_symbol FROM business WHERE id = 1"
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    {
+        Some(b) => (b.name, b.tax_code, b.address, b.phone, b.hddt_symbol),
+        None => (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
+    };
+
+    let items = sqlx::query!(
+        "SELECT p.name AS name, p.unit AS unit, ii.quantity, ii.unit_price,
+                ii.subtotal, ii.discount, ii.vat_rate
+           FROM invoice_item ii
+           JOIN product p ON p.id = ii.product_id
+          WHERE ii.invoice_id = ?
+          ORDER BY ii.id",
+        id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // `thtien` = thành tiền TRƯỚC chiết khấu, `stckhau` = tiền chiết khấu (như
+    // hóa đơn cổng) → "Cộng tiền hàng" là cộng thành tiền, tổng thanh toán là
+    // `invoice.total` đã trừ chiết khấu.
+    let mut rows = Vec::with_capacity(items.len());
+    let mut gross = 0.0;
+    for (i, item) in items.iter().enumerate() {
+        let line_gross = round2(item.quantity * item.unit_price);
+        gross += line_gross;
+        rows.push(json!({
+            "stt": i + 1,
+            "tchat": 1,
+            "ten": item.name,
+            "dvtinh": item.unit,
+            "sluong": item.quantity,
+            "dgia": round2(item.unit_price),
+            "thtien": line_gross,
+            "stckhau": round2(item.discount),
+            "ltsuat": vat_rate_label(item.vat_rate),
+            "tsuat": item.vat_rate,
+        }));
+    }
+    let gross = round2(gross);
+    let total = round2(invoice.total);
+
+    Ok(json!({
+        // Mẫu số để trống (hộ chưa khai trong hồ sơ), ký hiệu lấy từ hồ sơ HKD.
+        "khmshdon": "",
+        "khhdon": nb_symbol,
+        "shdon": invoice.number,
+        "nky": invoice.date,
+        "tchat": 1,
+        "nbten": nb_name,
+        "nbmst": nb_tax_code,
+        "nbdchi": nb_address,
+        "nbsdthoai": nb_phone,
+        "nmten": invoice.customer,
+        "nmmst": invoice.customer_tax_code,
+        "tgtcthue": gross,
+        "tgtthue": round2(invoice.vat_amount),
+        "tgtphi": 0,
+        "ttcktmai": round2(gross - total),
+        "tgtttbso": total,
+        "tgtttbchu": vietnamese_amount_in_words(total),
+        "dvtte": "VND",
+        "tgia": 1,
+        "qrcode": "",
+        "hdhhdvu": rows,
+        "thttltsuat": Vec::<serde_json::Value>::new(),
+    })
+    .to_string())
+}
+
+/// Xem trước PDF hóa đơn nội bộ (nháp hoặc đã chép) ở màn Chờ xuất HĐĐT.
+#[tauri::command]
+pub(crate) async fn invoice_draft_detail(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    invoice_draft_detail_json(&pool, id).await
+}
+
 /// 1 dòng hóa đơn đã qua kiểm tra (có sẵn mã sản phẩm, nhóm ngành, tỷ lệ thuế).
 struct PreparedLine {
     product_id: i64,
@@ -1231,6 +1353,67 @@ mod tests {
         .await
         .unwrap();
         id
+    }
+
+    /// Hóa đơn nội bộ → `detail_json` đủ khung để render PDF ở màn Chờ xuất HĐĐT.
+    #[tokio::test]
+    async fn xem_truoc_pdf_dung_detail_json_cua_hoa_don_noi_bo() {
+        let pool = test_pool().await;
+        sqlx::query!(
+            "INSERT INTO business (id, name, tax_code, address, phone, hddt_symbol)
+             VALUES (1, 'Hộ KD Test', '0123456789', 'Số 1 Đường A', '0241112223', 'C26TST')
+             ON CONFLICT(id) DO UPDATE SET
+                 name = excluded.name, tax_code = excluded.tax_code,
+                 address = excluded.address, phone = excluded.phone,
+                 hddt_symbol = excluded.hddt_symbol"
+        )
+        .execute(&pool)
+        .await
+        .expect("hồ sơ hộ kinh doanh");
+
+        let id = seed_draft(&pool, "HDPDF").await;
+        let raw = invoice_draft_detail_json(&pool, id)
+            .await
+            .expect("dựng được detail_json");
+        let data: serde_json::Value = serde_json::from_str(&raw).expect("JSON hợp lệ");
+
+        // Bên bán lấy từ hồ sơ, ký hiệu = ký hiệu HĐĐT của hộ.
+        assert_eq!(data["nbten"], "Hộ KD Test");
+        assert_eq!(data["nbmst"], "0123456789");
+        assert_eq!(data["nbdchi"], "Số 1 Đường A");
+        assert_eq!(data["khhdon"], "C26TST");
+        assert_eq!(data["shdon"], "HDPDF");
+        assert_eq!(
+            data["nky"], "2026-03-10",
+            "ngày hóa đơn → dòng \"Ngày …\" in PDF"
+        );
+        // Bên mua.
+        assert_eq!(data["nmten"], "Khách X");
+        assert_eq!(data["nmmst"], "MST-X");
+
+        // 1 dòng 1 × 1.000đ không chiết khấu → cộng tiền hàng = tổng thanh toán.
+        assert_eq!(data["tgtcthue"], 1000.0);
+        assert_eq!(data["tgtttbso"], 1000.0);
+        assert_eq!(data["tgtttbchu"], "Một nghìn đồng");
+        assert_eq!(data["tgtthue"], 0.0, "hộ kinh doanh không tách thuế GTGT");
+        assert!(data["thttltsuat"].as_array().expect("mảng").is_empty());
+
+        let rows = data["hdhhdvu"].as_array().expect("dòng hàng");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ten"], "Hàng nháp");
+        assert_eq!(rows[0]["thtien"], 1000.0);
+        assert_eq!(rows[0]["ltsuat"], "1%", "tỷ lệ thuế từ sản phẩm");
+        assert_eq!(rows[0]["sluong"], 1.0);
+    }
+
+    /// Không thấy hóa đơn → báo lỗi rõ ràng, không im lặng trả JSON rỗng.
+    #[tokio::test]
+    async fn xem_truoc_pdf_bao_loi_khi_khong_thay_hoa_don() {
+        let pool = test_pool().await;
+        let err = invoice_draft_detail_json(&pool, 999_999)
+            .await
+            .expect_err("hóa đơn không tồn tại phải lỗi");
+        assert!(err.contains("999999"), "{err}");
     }
 
     #[tokio::test]
