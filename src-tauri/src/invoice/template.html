@@ -31,16 +31,9 @@
             padding: 20px 0 10px;
             margin: auto;
             border: 3px double rgba(145, 87, 21, 0.69);
-            line-height: 1.5;
+            line-height: 1.3;
             box-shadow: rgb(222 226 230 / 70%) 0px 0px 9px 2px;
         }
-        .main-page > div {
-            background-image: url(viewinvoice-bg.jpg);
-            background-repeat: no-repeat;
-            background-position: center center;
-            background-size: 180%;
-        }
-
         canvas {
             display: inline-block
         }
@@ -172,13 +165,19 @@
             border-spacing: 0px;
             width: 100%;
             overflow-x: auto;
-            margin: 10px 0px;
+            margin: 6px 0px;
             min-width: 250px;
+            /* htmltopdf tính bề rộng cột nhỏ nhất theo chữ dài nhất không tách
+               được — số tiền như "1.234.567.890" sẽ ép cột số nở to ra. Cho
+               phép ngắt trong từ để nó đo theo từng ký tự thay vì cả chuỗi. */
+            overflow-wrap: break-word;
         }
 
         .res-tb tr td {
-            border: 1px solid black;
-            padding: 6px 4px 6px 4px;
+            /* Mọi đường kẻ NỘI BỘ của bảng (ngang lẫn dọc) đều nét đứt; bốn
+               lề ngoài bảng giữ nét liền ở các rule bên dưới. */
+            border: 0.5px dashed black;
+            padding: 3px 4px;
             vertical-align: baseline;
         }
 
@@ -195,9 +194,28 @@
         }
 
         .res-tb thead tr th {
-            border: 1px solid black;
+            border: 0.5px dashed black;
+            /* Viền trên bảng (đỉnh của bảng) vẫn nét liền. */
+            border-top: 0.5px solid black;
             vertical-align: middle;
-            padding: 6px 4px 6px 4px;
+            padding: 3px 4px;
+        }
+
+        .res-tb tbody tr:last-child td {
+            /* Viền dưới bảng (đáy của bảng) vẫn nét liền. */
+            border-bottom: 0.5px solid black;
+        }
+
+        /* Viền trái/phải của bảng cũng nét liền — đó là biên của ô đầu và ô
+           cuối trong mỗi hàng; các cột ở giữa đều kẻ dọc bằng nét đứt. */
+        .res-tb tr th:first-child,
+        .res-tb tr td:first-child {
+            border-left: 0.5px solid black;
+        }
+
+        .res-tb tr th:last-child,
+        .res-tb tr td:last-child {
+            border-right: 0.5px solid black;
         }
 
         .res-tb thead tr th.tb-stt {
@@ -221,6 +239,11 @@
         }
 
         .res-tb thead tr th.tb-dg {
+            width: 80px;
+            text-align: center;
+        }
+
+        .res-tb thead tr th.tb-ck {
             width: 80px;
             text-align: center;
         }
@@ -382,7 +405,7 @@
         }
 
         .data-item-auto-w .di-label {
-            min-height: 25px;
+            min-height: 18px;
             height: auto;
             border-bottom: 1px dashed transparent;
             display: flex;
@@ -392,7 +415,7 @@
         .data-item-auto-w .di-value {
             box-sizing: border-box;
             flex: 1;
-            min-height: 25px;
+            min-height: 18px;
             display: flex;
             align-items: flex-start;
             padding-left: 5px;
@@ -410,7 +433,7 @@
         }
 
         .data-item .di-label {
-            min-height: 25px;
+            min-height: 18px;
             height: auto;
             border-bottom: 1px dashed transparent;
             display: flex;
@@ -420,7 +443,7 @@
         .data-item .di-value {
             box-sizing: border-box;
             flex: 1;
-            min-height: 25px;
+            min-height: 18px;
             /* // border-bottom: 1px dashed #e8e8e8; */
             display: block;
             align-items: flex-start;
@@ -440,6 +463,13 @@
             font-size: 13pt;
             color: rgba(0, 0, 0, 0.85);
         }
+
+        /* htmltopdf bỏ qua `width` trên <th>: cách duy nhất nó tôn trọng bề
+           rộng cột là bộ quy tắc col.colN dưới đây (nó đọc từ CSS text, không
+           cần tới thẻ <col> thật). render.rs điền đúng bằng số cột đang có và
+           tổng bằng bề rộng khung 553pt; không đạt đủ điều kiện đó thì engine
+           tự quay về auto layout như cũ. */
+{{COL_WIDTHS}}
 
         @page {
             size: A4;
@@ -501,18 +531,30 @@
             font-size: 13pt;
         }
 
+        /* Nền trang: một khối duy nhất phủ trọn khung in của tờ giấy — lề trên/
+           dưới của @page bằng 0 nên khối cao 297mm là hết chiều cao A4, còn lề
+           ngang 21pt do htmltopdf tự trừ khi đặt khối `position: fixed` (nền
+           không tràn vào lề trang). Engine lặp lại khối fixed trên MỖI trang nên
+           trang 2, 3... vẫn có nền, và `z-index` âm để nền nằm dưới chữ.
+
+           Lưu ý ba điểm htmltopdf khác Chrome:
+           - `height: 100%` bị bỏ qua (engine không tính % cho chiều cao) →
+             khai báo 297mm;
+           - gắn nền vào `.main-page > div` như trước thì mỗi khối con một tấm
+             ảnh (ảnh bị nhân bản và chỉ phủ đúng khối đó) → gỡ hẳn;
+           - `background-repeat: no-repeat` + `size: 250%` + căn giữa: một tấm
+             ảnh lớn hơn khung, cắt giữa, phủ kín mà không lặp lại. */
         .bg-container {
             position: fixed;
+            top: 0px;
+            left: 0px;
             width: 100%;
-            height: 100%;
-            z-index: 0;
+            height: 297mm;
+            z-index: -1;
             background-image: url("viewinvoice-bg.jpg");
             background-repeat: no-repeat;
             background-position: center;
             background-size: 250%;
-            border: 3px double rgba(145, 87, 21, 0.69);
-            top: 0px;
-            left: 0px;
         }
 
         .print-page {
@@ -524,7 +566,7 @@
         .main-page {
             font-family: "Times New Roman";
             padding: 20px 0 10px;
-            line-height: 1.5;
+            line-height: 1.3;
             position: relative;
             z-index: 1;
             border: 3px double rgba(145, 87, 21, 0.69);
@@ -597,31 +639,6 @@
             padding-top: 14px;
         }
 
-        .res-tb {
-            border-collapse: collapse;
-            border-spacing: 0;
-            width: 100%;
-            margin-top: 10px;
-            margin-bottom: 10px;
-        }
-
-        .res-tb tr td {
-            border: 1px solid black;
-            padding: 6px 4px 6px 4px;
-            vertical-align: baseline;
-        }
-
-        .res-tb tr td.tx-center {
-            text-align: center;
-        }
-
-        .res-tb thead tr th {
-            border: 1px solid black;
-            vertical-align: middle;
-            /* white-space: nowrap; */
-            padding: 6px 4px 6px 4px;
-        }
-
         .res-tb thead tr th.tb-rs-nb {
             width: 150px;
         }
@@ -678,18 +695,18 @@
             align-items: flex-start;
             font-size: 13pt;
             color: #000;
-            margin-bottom: 10px;
+            margin-bottom: 4px;
         }
 
         .data-item .di-label {
-            min-height: 25px;
+            min-height: 18px;
             border-bottom: 1px dashed transparent;
             display: flex;
             align-items: flex-start;
         }
 
         .data-item .di-value {
-            min-height: 25px;
+            min-height: 18px;
             box-sizing: border-box;
             flex: 1;
             border-bottom: 1px dashed #e8e8e8;
@@ -794,6 +811,9 @@
 </head>
 
 <body>
+    <!-- Nền trang phủ hết khung in: `position: fixed` nên htmltopdf vẽ lại trên
+         mọi trang và không đẩy nội dung (xem CSS .bg-container). -->
+    <div class="bg-container"></div>
     <div class="main-page">
         <div class="heading-content">
             <!-- Hàng đầu: QR (trái) | tiêu đề (giữa, tâm đúng 50% chiều rộng
@@ -1014,8 +1034,8 @@
                         <th class="tb-dvt">ĐVT</th>
                         <th class="tb-sl">Số lượng</th>
                         <th class="tb-dg">Đơn giá</th>
-                        {{DISCOUNT_HEAD}}
                         <th class="tb-ttct">Thành tiền</th>
+                        {{DISCOUNT_HEAD}}
                         {{RATE_HEAD}}
                     </tr>
                 </thead>

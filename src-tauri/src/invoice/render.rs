@@ -119,10 +119,13 @@ fn render(data: &InvoiceData) -> String {
     // Cột "Thuế suất" chỉ cần khi hàng hóa xài nhiều tỉ lệ khác nhau; còn 1
     // tỉ lệ duy nhất thì con số đó nói được ngay ở dòng tổng cộng.
     let has_rate = has_multiple_rates(&data.hdhhdvu);
+    // Cột "Chiết khấu" chỉ thêm khi có ít nhất 1 mặt hàng thực sự được chiết
+    // khấu — không thì bảng gọn lại như cũ. Tiêu đề đứng sau "Thành tiền" cho
+    // đúng thứ tự xuất dữ liệu của `goods_rows` (thành tiền trước chiết khấu).
     slots.insert(
         "DISCOUNT_HEAD",
         if has_discount {
-            r#"<th class="tb-dg">Chiết khấu</th>"#.to_string()
+            r#"<th class="tb-ck">Chiết khấu</th>"#.to_string()
         } else {
             String::new()
         },
@@ -135,6 +138,9 @@ fn render(data: &InvoiceData) -> String {
             String::new()
         },
     );
+    // Bề rộng cột: htmltopdf bỏ qua `width` trên `<th>`, chỉ bộ quy tắc
+    // `col.colN { width }` đọc từ CSS mới được nó dùng.
+    slots.insert("COL_WIDTHS", col_width_css(data, has_discount, has_rate));
     slots.insert(
         "GOODS_ROWS",
         goods_rows(&data.hdhhdvu, has_discount, has_rate),
@@ -365,8 +371,10 @@ fn goods_rows(rows: &[GoodsRow], with_discount: bool, with_rate: bool) -> String
 /// Cột chia đôi bảng: nhãn chiếm nửa trái (căn trái, tất cả các nhãn nằm trên
 /// cùng 1 đường), giá trị chiếm nửa phải (căn phải, các giá trị kết thúc trên
 /// cùng 1 đường). Hàng thuế tách thêm 1 nhãn riêng cho từng bên nên thành 4 ô —
-/// "Thuế suất GTGT" và "Tiền thuế GTGT" mỗi nhãn chỉ viết 1 lần, các giá trị
-/// xếp chồng nhau trong ô (nhiều tỉ lệ thuế → nhiều dòng).
+/// "Thuế suất GTGT" và "Tiền thuế GTGT" mỗi nhãn chỉ viết 1 lần; nhiều tỉ lệ
+/// thuế thì mỗi tỉ lệ ra 1 dòng riêng (nhãn các dòng sau để trống cho thẳng
+/// hàng) — không xếp chồng trong 1 ô được vì htmltopdf bỏ `<br>` khi dựng ô
+/// bảng (`collect_cell_runs_into` trong `html.rs`) làm các giá trị dính nhau.
 fn summary_rows(data: &InvoiceData, with_discount: bool, with_rate: bool) -> String {
     let cols = 6 + usize::from(with_discount) + usize::from(with_rate);
     let half = cols / 2;
@@ -381,23 +389,16 @@ fn summary_rows(data: &InvoiceData, with_discount: bool, with_rate: bool) -> Str
     out.push_str(&line("Cộng tiền hàng", format_vnd(&data.tgtcthue)));
     out.push('\n');
 
-    if !data.thttltsuat.is_empty() {
-        let rates = data
-            .thttltsuat
-            .iter()
-            .map(|row| escape(&js_string(&row.tsuat)))
-            .collect::<Vec<_>>()
-            .join("<br>");
-        let taxes = data
-            .thttltsuat
-            .iter()
-            .map(|row| format_vnd(&row.tthue))
-            .collect::<Vec<_>>()
-            .join("<br>");
+    for (i, rate) in data.thttltsuat.iter().enumerate() {
+        let first = i == 0;
         out.push_str(&format!(
-            r#"<tr><td colspan="{}" class="tx-left">Thuế suất GTGT</td><td class="tx-center">{rates}</td><td colspan="{}" class="tx-left">Tiền thuế GTGT</td><td class="tx-right">{taxes}</td></tr>"#,
+            r#"<tr><td colspan="{}" class="tx-left">{}</td><td class="tx-center">{}</td><td colspan="{}" class="tx-left">{}</td><td class="tx-right">{}</td></tr>"#,
             half - 1,
-            cols - half - 1
+            if first { "Thuế suất GTGT" } else { "" },
+            escape(&js_string(&rate.tsuat)),
+            cols - half - 1,
+            if first { "Tiền thuế GTGT" } else { "" },
+            format_vnd(&rate.tthue),
         ));
         out.push('\n');
     }
@@ -412,6 +413,159 @@ fn summary_rows(data: &InvoiceData, with_discount: bool, with_rate: bool) -> Str
         escape(&js_string(&data.tgtttbchu)),
     ));
     out
+}
+
+/// Bề rộng khung nội dung của trang A4 với lề ngang 21pt: 595 − 2 × 21 = 553.
+/// htmltopdf chỉ dùng bộ `col.colN { width }` khi tổng của chúng **không lớn
+/// hơn** bề rộng này nên nó cũng là ngân sách cho cả bảng.
+const FRAME_WIDTH_PT: u32 = 553;
+
+/// Cỡ chữ mà htmltopdf dùng để đo ô bảng — bằng cỡ chữ thân trang (13pt).
+const CELL_FONT_PT: f32 = 13.0;
+
+/// Padding ngang của 1 ô: `padding: 3px 4px` = 4px mỗi bên = 6pt. Engine trừ
+/// phần này khỏi bề rộng cột trước khi ngắt dòng nên phải cộng lại.
+const CELL_PADDING_X_PT: f32 = 6.0;
+
+/// Sàn cho cột Tên hàng hóa (pt). Bề rộng các cột còn lại vượt ngân sách thì
+/// cắt về sàn của từng cột để giữ được mức này — dưới đó tên hàng vỡ nát thì
+/// thà nhường chỗ cho engine tự bố trí còn hơn.
+const MIN_NAME_WIDTH_PT: u32 = 100;
+
+/// Bề rộng từng cột bảng hàng hóa (pt), đúng thứ tự `<th>` trong template:
+/// STT, Tên hàng hóa, ĐVT, Số lượng, Đơn giá, Thành tiền, [Chiết khấu],
+/// [Thuế suất].
+///
+/// Cột số lấy bề rộng theo **số liệu thật của hóa đơn**: htmltopdf chỉ chịu
+/// xếp bộ `col.colN` khi mỗi cột rộng ít nhất bằng bề rộng nó tự đo (xem
+/// [`estimate_text_width_pt`]), hẹp hơn là nó bỏ hết và tự bố trí lại — khi
+/// đấy các dòng tổng cộng có chữ dài sẽ kéo cột số nở to ra. Sàn mỗi cột thì đủ
+/// để tiêu đề không vỡ dòng (đã đo trực tiếp trên engine); cột Tên hàng hóa
+/// nhận phần dư nên luôn rộng nhất.
+fn column_widths(data: &InvoiceData, has_discount: bool, has_rate: bool) -> Vec<u32> {
+    let cols = 6 + usize::from(has_discount) + usize::from(has_rate);
+    // Sàn theo thứ tự cột, đo trực tiếp trên htmltopdf: số lượng 56pt là vỡ
+    // tiêu đề "Số lượng", chiết khấu 60pt vỡ "Chiết khấu"…
+    let mut floors = vec![32, 0, 36, 60, 64, 64]; // STT, Tên, ĐVT, SL, ĐG, TT
+    if has_discount {
+        floors.push(65); // Chiết khấu
+    }
+    if has_rate {
+        floors.push(64); // Thuế suất
+    }
+    debug_assert_eq!(floors.len(), cols, "sàn cột khớp số cột");
+
+    let mut needs = vec![0f32; cols];
+    for row in &data.hdhhdvu {
+        widen(&mut needs[0], &js_string(&row.stt));
+        widen(&mut needs[2], &js_string(&row.dvtinh));
+        widen(&mut needs[3], &js_string(&row.sluong));
+        widen(&mut needs[4], &format_vnd(&row.dgia));
+        widen(&mut needs[5], &format_vnd(&row.thtien));
+        if has_discount {
+            widen(&mut needs[6], &format_vnd(&row.stckhau));
+        }
+        if has_rate {
+            widen(&mut needs[cols - 1], &rate_label(row));
+        }
+    }
+    // Dòng tổng hợp: ô tỉ lệ thuế nằm ở cột cuối bên trái, ô tiền thuế nằm ở
+    // cột cuối cùng (cùng vị trí với `summary_rows`).
+    let half = cols / 2;
+    for rate in &data.thttltsuat {
+        widen(&mut needs[half - 1], &js_string(&rate.tsuat));
+        widen(&mut needs[cols - 1], &format_vnd(&rate.tthue));
+    }
+
+    let mut widths: Vec<u32> = needs
+        .iter()
+        .zip(&floors)
+        .map(|(need, floor)| (*need as u32).max(*floor))
+        .collect();
+    // Bắt buộc chừa đủ chỗ cho cột Tên: cắt dần phần dư của cột rộng nhất
+    // (trừ Tên) về tới sàn của nó.
+    let mut others: u32 = widths
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != 1)
+        .map(|(_, w)| *w)
+        .sum();
+    let mut over = (others + MIN_NAME_WIDTH_PT).saturating_sub(FRAME_WIDTH_PT);
+    while over > 0 {
+        let widest = (0..cols)
+            .filter(|i| *i != 1)
+            .max_by_key(|i| widths[*i] - floors[*i])
+            .expect("bảng có cột ngoài Tên hàng hóa");
+        let surplus = widths[widest] - floors[widest];
+        if surplus == 0 {
+            break; // mọi cột đã về sàn — số liệu quá khổ, đành chịu vỡ chữ
+        }
+        let cut = surplus.min(over);
+        widths[widest] -= cut;
+        others -= cut;
+        over -= cut;
+    }
+    widths[1] = FRAME_WIDTH_PT - others;
+    widths
+}
+
+/// Ghi nhớ bề rộng lớn nhất mà 1 chuỗi đòi hỏi cho ô của nó.
+fn widen(slot: &mut f32, text: &str) {
+    *slot = slot.max(cell_width_pt(text));
+}
+
+/// Bề rộng khai báo cho 1 ô chứa `text` (pt) — làm tròn lên và cộng 1pt dư để
+/// việc làm tròn không làm htmltopdf tưởng chữ chưa vừa rồi ngắt giữa chừng.
+fn cell_width_pt(text: &str) -> f32 {
+    (estimate_text_width_pt(text) + CELL_PADDING_X_PT + 1.0).ceil()
+}
+
+/// Ước bề rộng của `text` khi htmltopdf đo (pt).
+///
+/// Engine không lộ API đo chữ nên mình tái hiện cách nó đo: bảng ký tự kiểu
+/// Helvetica ở cỡ 13pt. Hiệu chuẩn bằng cách bisect bề rộng khai báo cho tới
+/// khi engine chịu xếp (xem test `col_width_rules_cover_every_column_…`):
+/// `"2.860.000"` ≈ 57.8pt và `"1.234.567.890"` ≈ 83.1pt — khớp đúng
+/// 0.556em/chữ số và 0.278em/dấu chấm. Ký tự tiếng Việt không có trong bảng
+/// lấy 0.65em (hơi rộng hơn thật → dư an toàn).
+fn estimate_text_width_pt(text: &str) -> f32 {
+    text.chars().map(|c| char_em(c) * CELL_FONT_PT).sum()
+}
+
+/// Bề rộng 1 ký tự tính bằng em (theo bảng Helvetica).
+fn char_em(c: char) -> f32 {
+    const UPPER: [f32; 26] = [
+        0.667, 0.667, 0.722, 0.722, 0.667, 0.611, 0.778, 0.722, 0.278, 0.5, 0.667, 0.556, 0.833,
+        0.722, 0.778, 0.667, 0.778, 0.722, 0.667, 0.611, 0.722, 0.667, 0.944, 0.667, 0.667, 0.611,
+    ];
+    const LOWER: [f32; 26] = [
+        0.556, 0.556, 0.5, 0.556, 0.556, 0.278, 0.556, 0.556, 0.222, 0.222, 0.5, 0.222, 0.833,
+        0.556, 0.556, 0.556, 0.556, 0.333, 0.5, 0.278, 0.556, 0.5, 0.722, 0.5, 0.5, 0.5,
+    ];
+    match c {
+        '0'..='9' => 0.556,
+        '.' | ',' => 0.278,
+        '%' => 0.889,
+        ' ' => 0.278,
+        'A'..='Z' => UPPER[(c as u8 - b'A') as usize],
+        'a'..='z' => LOWER[(c as u8 - b'a') as usize],
+        c if c.is_ascii() => 0.278, // gạch, hai chấm, ngoặc… đều hẹp
+        _ => 0.65,                  // tiếng Việt có dấu: dư một chút
+    }
+}
+
+/// Bộ quy tắc `col.colN { width }` mà htmltopdf đọc từ CSS text, hoặc chuỗi
+/// rỗng khi cột Tên hàng hóa không còn chỗ (lúc đó để engine tự bố trí).
+fn col_width_css(data: &InvoiceData, has_discount: bool, has_rate: bool) -> String {
+    let widths = column_widths(data, has_discount, has_rate);
+    if widths[1] < MIN_NAME_WIDTH_PT {
+        return String::new();
+    }
+    widths
+        .iter()
+        .enumerate()
+        .map(|(i, w)| format!("        col.col{i} {{ width: {w}pt }}\n"))
+        .collect()
 }
 
 /// Hàng hóa có xài từ 2 tỉ lệ thuế GTGT khác nhau trở lên hay không — chỉ khi
@@ -602,8 +756,8 @@ mod tests {
         let ck = thead.find(">Chiết khấu<").expect("có cột Chiết khấu");
         let ttct = thead.find(">Thành tiền<").expect("có cột Thành tiền");
         assert!(
-            dg < ck && ck < ttct,
-            "Chiết khấu nằm giữa Đơn giá và Thành tiền"
+            dg < ttct && ttct < ck,
+            "Thành tiền nằm giữa Đơn giá và Chiết khấu"
         );
 
         let row = discounted
@@ -616,6 +770,11 @@ mod tests {
             .to_string();
         assert_eq!(row.matches("<td").count(), 7, "dòng cũng thêm ô Chiết khấu");
         assert!(row.contains(">200.000<"), "giá trị chiết khấu phải in ra");
+        // Số liệu phải rơi đúng cột: thành tiền (2.000.000) đứng trước ô
+        // chiết khấu (200.000) — cùng thứ tự với hàng tiêu đề phía trên.
+        let tt = row.find(">2.000.000<").expect("có số thành tiền");
+        let ck_at = row.find(">200.000<").expect("có số chiết khấu");
+        assert!(tt < ck_at, "ô thành tiền trước ô chiết khấu trong dòng");
     }
 
     /// Cột "Thuế suất" chỉ xuất hiện khi hàng hóa xài từ 2 tỉ lệ thuế khác
@@ -654,6 +813,255 @@ mod tests {
             row.split("</tr>").next().unwrap().contains(">5%"),
             "dòng thứ 2 mang tỉ lệ 5%: {row}"
         );
+    }
+
+    /// htmltopdf bỏ qua `width` trên `<th>` — chỉ bộ `col.colN { width }` đọc
+    /// từ CSS mới được nó dùng, và chỉ khi tổng bằng đúng bề rộng khung. Mỗi
+    /// biến thể cột đều phải có đủ quy tắc, cột Tên hàng hóa rộng nhất, còn
+    /// các cột số thì bám sát bề rộng chữ của số liệu (sàn = bề rộng tiêu đề).
+    #[test]
+    fn col_width_rules_cover_every_column_and_fill_the_frame() {
+        let base: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        let mut discounted = base.clone();
+        discounted["hdhhdvu"][0]["stckhau"] = serde_json::json!(200_000);
+        let mut two_rates = base.clone();
+        two_rates["hdhhdvu"]
+            .as_array_mut()
+            .expect("mảng hàng hóa")
+            .push(serde_json::json!({
+                "stt": 2, "tchat": 1, "ten": "Khác tỉ lệ", "dvtinh": "Cái",
+                "sluong": 1, "dgia": 500000, "thtien": 500000,
+                "stckhau": 0, "ltsuat": "5%", "tsuat": 0.05
+            }));
+        let mut both = two_rates.clone();
+        both["hdhhdvu"][0]["stckhau"] = serde_json::json!(200_000);
+
+        for (name, data) in [
+            ("cơ bản", &base),
+            ("có Chiết khấu", &discounted),
+            ("có Thuế suất", &two_rates),
+            ("đủ hai cột tăng thêm", &both),
+        ] {
+            let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+            let columns = goods_thead(&html).matches("<th ").count();
+            let widths = col_widths_of(&html);
+            assert_eq!(
+                widths.len(),
+                columns,
+                "{name}: đủ quy tắc cho {columns} cột"
+            );
+            assert_eq!(
+                widths.iter().sum::<u32>(),
+                FRAME_WIDTH_PT,
+                "{name}: tổng bằng bề rộng khung"
+            );
+            // Sàn từng cột — bề rộng tối thiểu để tiêu đề không vỡ dòng.
+            assert!(
+                widths[0] >= 32 && widths[2] >= 36,
+                "{name}: cột STT/ĐVT không dưới sàn {widths:?}"
+            );
+            assert!(
+                widths[3] >= 60 && widths[4] >= 64 && widths[5] >= 64,
+                "{name}: Số lượng/Đơn giá/Thành tiền không dưới sàn {widths:?}"
+            );
+            match columns {
+                8 => assert!(
+                    widths[6] >= 65 && widths[7] >= 64,
+                    "{name}: Chiết khấu/Thuế suất không dưới sàn {widths:?}"
+                ),
+                7 => assert!(
+                    widths[6] >= 64,
+                    "{name}: cột tăng thêm không dưới sàn {widths:?}"
+                ),
+                _ => {}
+            }
+            assert!(
+                widths.iter().skip(3).all(|w| *w <= 66),
+                "{name}: cột số bám sát số liệu trong fixture {widths:?}"
+            );
+            let widest_other = widths
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != 1)
+                .map(|(_, w)| *w)
+                .max()
+                .expect("có cột khác");
+            assert!(
+                widths[1] >= 160 && widths[1] > widest_other,
+                "{name}: cột Tên hàng hóa rộng nhất {widths:?}"
+            );
+        }
+    }
+
+    /// Số liệu lớn phải nở cột theo: htmltopdf chỉ chịu xếp bộ `col.colN`
+    /// khi mỗi cột rộng ít nhất bằng bề rộng nó tự đo, hẹp hơn là nó bỏ hết
+    /// rồi tự bố trí lại — khi đấy các dòng tổng cộng có chữ dài sẽ kéo cột
+    /// số nở to ra (và tên hàng ngắn thì các cột số bị chia phần dư).
+    #[test]
+    fn column_widths_grow_to_hold_big_numbers() {
+        let mut data: serde_json::Value = serde_json::from_str(&fixture()).unwrap();
+        data["hdhhdvu"][0]["dgia"] = serde_json::json!(1_234_567_890);
+        data["hdhhdvu"][0]["thtien"] = serde_json::json!(1_234_567_890);
+        let html = build_invoice_html(&data.to_string()).expect("dựng HTML được");
+        let widths = col_widths_of(&html);
+        // "1.234.567.890" htmltopdf đo ≈ 83.1pt + 6pt padding → ≥ 91pt.
+        assert!(
+            widths[4] >= 91 && widths[5] >= 91,
+            "cột Đơn giá/Thành tiền nở theo số lớn: {widths:?}"
+        );
+        assert_eq!(
+            widths.iter().sum::<u32>(),
+            FRAME_WIDTH_PT,
+            "vẫn đầy khung sau khi nở"
+        );
+        assert!(
+            widths[1] >= MIN_NAME_WIDTH_PT,
+            "cột Tên vẫn giữ được sàn: {widths:?}"
+        );
+    }
+
+    /// Số liệu hiệu chuẩn đo trực tiếp trên htmltopdf: bisect bề rộng khai
+    /// báo cho tới khi engine chịu xếp, suy ra nó ước `"2.860.000"` lớn hơn
+    /// 56.5pt và `"1.234.567.890"` lớn hơn 82.5pt. Ước của mình không được
+    /// thấp hơn mức đó, nếu không bộ quy tắc sẽ bị engine bỏ.
+    #[test]
+    fn estimate_is_never_below_what_htmltopdf_demands() {
+        for (text, demanded) in [("2.860.000", 56.5), ("1.234.567.890", 82.5)] {
+            let estimate = estimate_text_width_pt(text);
+            assert!(
+                estimate > demanded,
+                "{text}: ước {estimate}pt không vượt {demanded}pt mà engine đòi"
+            );
+        }
+    }
+
+    /// htmltopdf tính bề rộng cột nhỏ nhất theo chữ không tách được — số tiền
+    /// như `"1.234.567.890"` sẽ ép cột số nở to. Cho phép ngắt trong từng từ
+    /// thì nó đo theo từng ký tự và không bao giờ bỏ bộ `col.colN`.
+    #[test]
+    fn table_cells_may_break_inside_a_long_token() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        let table_css = css_block(&html, ".res-tb {");
+        assert!(
+            table_css.contains("overflow-wrap: break-word"),
+            "bảng phải cho ngắt giữa từ: {table_css}"
+        );
+    }
+
+    /// Toàn bộ đường kẻ bên trong bảng (ngang lẫn dọc) là nét đứt; riêng 4 lề
+    /// ngoài — trên, dưới, trái, phải — vẫn nét liền. Khối CSS không được lặp:
+    /// một khối `.res-tb` sao chép ở sau sẽ ghi đè mất khai báo nét đứt.
+    #[test]
+    fn inner_borders_are_dashed_and_the_four_outer_edges_are_solid() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        for selector in [".res-tb {", ".res-tb tr td {", ".res-tb thead tr th {"] {
+            assert_eq!(
+                html.matches(selector).count(),
+                1,
+                "khối {selector} chỉ được viết 1 lần trong stylesheet"
+            );
+        }
+        for selector in [".res-tb tr td {", ".res-tb thead tr th {"] {
+            let css = css_block(&html, selector);
+            assert!(
+                css.contains("border: 0.5px dashed black"),
+                "{selector} phải kẻ mọi biên bằng nét đứt: {css}"
+            );
+        }
+        let top = css_block(&html, ".res-tb thead tr th {");
+        assert!(
+            top.contains("border-top: 0.5px solid black"),
+            "viền trên bảng nét liền: {top}"
+        );
+        let bottom = css_block(&html, ".res-tb tbody tr:last-child td {");
+        assert!(
+            bottom.contains("border-bottom: 0.5px solid black"),
+            "viền dưới bảng nét liền: {bottom}"
+        );
+        let first = css_block(&html, ".res-tb tr td:first-child {");
+        assert!(
+            first.contains("border-left: 0.5px solid black"),
+            "viền trái bảng nét liền: {first}"
+        );
+        let last = css_block(&html, ".res-tb tr td:last-child {");
+        assert!(
+            last.contains("border-right: 0.5px solid black"),
+            "viền phải bảng nét liền: {last}"
+        );
+    }
+
+    /// Nền trang là một khối `position: fixed` phủ hết khung in: htmltopdf đặt
+    /// khối fixed vào đúng khung in của tờ giấy (lề ngang 21pt của `@page` tự
+    /// bị trừ ra) và vẽ lại nó trên mỗi trang. `height: 100%` bị engine bỏ qua
+    /// nên phải khai 297mm — chiều cao A4 trừ lề trên/dưới (= 0).
+    #[test]
+    fn the_page_background_fills_the_print_area() {
+        let html = build_invoice_html(&fixture()).expect("dựng HTML được");
+        let bg = css_block(&html, ".bg-container {");
+        assert!(bg.contains("position: fixed"), "khối nền là fixed: {bg}");
+        assert!(bg.contains("height: 297mm"), "cao đúng khung in A4: {bg}");
+        assert!(bg.contains("z-index: -1"), "nền nằm dưới chữ: {bg}");
+        assert!(
+            bg.contains("background-repeat: no-repeat"),
+            "một tấm ảnh, không lặp: {bg}"
+        );
+        assert!(
+            html.contains(r#"class="bg-container""#),
+            "trang phải có khối .bg-container"
+        );
+        assert!(
+            !html.contains(".main-page > div {"),
+            "không còn gắn nền vào từng khối con (ảnh bị nhân bản)"
+        );
+    }
+
+    /// Ảnh nền chỉ được nhúng tối đa 1 tấm mỗi trang. Gắn nền vào từng khối nội
+    /// dung thì mỗi khối một tấm (hóa đơn mẫu trước đây in ra 5 tấm ảnh giống
+    /// hệt nhau); gắn vào khối fixed thì mỗi trang đúng 1 tấm.
+    #[test]
+    fn the_page_background_is_painted_once_per_page() {
+        let pdf = match render_pdf(&fixture()) {
+            Ok(pdf) => pdf,
+            Err(e) => {
+                eprintln!("bỏ qua test render PDF: {e}");
+                return;
+            }
+        };
+        let bg = include_bytes!("assets/viewinvoice-bg.jpg");
+        let seg = &bg[bg.len() / 3..bg.len() / 3 + 256];
+        let embedded = pdf.windows(seg.len()).filter(|w| *w == seg).count();
+        let pages = count_pages(&pdf);
+        assert!(
+            embedded >= 1 && embedded <= pages,
+            "mỗi trang tối đa 1 tấm nền, đã nhúng {embedded} tấm cho {pages} trang"
+        );
+    }
+
+    /// Lấy nội dung 1 khối CSS từ `selector {` tới ngoặc đóng của nó.
+    fn css_block<'a>(html: &'a str, selector: &str) -> &'a str {
+        let at = html.find(selector).expect("selector có trong CSS");
+        let rest = &html[at + selector.len()..];
+        &rest[..rest.find('}').expect("khối CSS có ngoặc đóng")]
+    }
+
+    /// Đọc các quy tắc `col.colN { width: NNpt }` đã dựng trong HTML.
+    fn col_widths_of(html: &str) -> Vec<u32> {
+        let mut widths = Vec::new();
+        let mut rest = html;
+        while let Some(at) = rest.find("col.col") {
+            rest = &rest[at + "col.col".len()..];
+            if !rest.starts_with(|c: char| c.is_ascii_digit()) {
+                continue; // ghi chú CSS nhắc tới `col.colN` — không phải quy tắc
+            }
+            let end = rest.find('}').expect("quy tắc col.colN có ngoặc đóng");
+            let width = rest[..end]
+                .split_once("width:")
+                .map(|(_, v)| v.trim().trim_end_matches("pt").trim())
+                .and_then(|v| v.parse::<u32>().ok())
+                .expect("width của cột là số pt");
+            widths.push(width);
+        }
+        widths
     }
 
     /// 2 bảng con (thuế suất + thành tiền) đã gộp vào bảng hàng hóa.
@@ -728,11 +1136,11 @@ mod tests {
             {"tsuat": "5%", "thtien": 500000, "tthue": 25000}
         ]);
         let two_rates = build_invoice_html(&data.to_string()).expect("dựng HTML được");
-        let tax_row = two_rates
-            .split("Thuế suất GTGT")
+        let taxes = two_rates
+            .split("Cộng tiền hàng")
             .nth(1)
-            .expect("có dòng thuế suất")
-            .split("</tr>")
+            .expect("có dòng tổng hợp")
+            .split("Tổng tiền thanh toán")
             .next()
             .unwrap();
         assert_eq!(
@@ -745,11 +1153,23 @@ mod tests {
             1,
             "nhãn Tiền thuế GTGT chỉ 1 lần"
         );
+        // htmltopdf bỏ `<br>` khi dựng ô bảng nên 2 giá trị sẽ dính vào nhau;
+        // mỗi tỉ lệ thuế phải ra một dòng riêng với nhãn để trống bên trái.
         assert_eq!(
-            tax_row.matches("<br>").count(),
+            taxes.matches(r#"class="tx-center">"#).count(),
             2,
-            "2 giá trị xếp chồng nhau trong ô: {tax_row}"
+            "mỗi tỉ lệ thuế 1 dòng: {taxes}"
         );
+        assert!(
+            !taxes.contains("<br>"),
+            "không xếp chồng bằng <br>: {taxes}"
+        );
+        for cell in ["8%", "160.000", "5%", "25.000"] {
+            assert!(
+                taxes.contains(&format!(">{cell}<")),
+                "thiếu ô {cell}: {taxes}"
+            );
+        }
     }
 
     /// Tiêu đề đi cùng hàng với QR (trái) và mẫu số (phải): 2 ô ngoài giữ
