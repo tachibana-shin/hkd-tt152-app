@@ -3922,6 +3922,120 @@ test("Tên khác của sản phẩm: tìm được ở danh mục và hóa đơn
   expect(detail.items[0].line_name).toBe("Mì flour");
 });
 
+// ─── TẠO NHANH MẶT HÀNG + THÊM "TÊN KHÁC" NGAY TRÊN DÒNG CỦA POPUP HÓA ĐƠN ───
+test("Popup hóa đơn: gõ tên mới là tạo nhanh mặt hàng, thêm tên khác ngay trên dòng", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog").first();
+  // Số gợi ý điền sau khi nạp xong danh sách hóa đơn → chờ có số rồi mới đọc.
+  const numberInput = dlg.getByRole("textbox").first();
+  await expect(numberInput).toHaveValue(/^HD\d+$/);
+  const number = await numberInput.inputValue();
+
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Tạo Nhanh");
+  await custInput.press("Enter");
+
+  // ── 1) Gõ tên CHƯA có trong danh mục → dropdown hiện dòng "Tạo nhanh" ──
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Bột năng Tân An");
+  const quick = page.getByTestId("product-quick-create");
+  await expect(quick).toContainText("Tạo nhanh");
+  await expect(quick).toContainText("Bột năng Tân An");
+  await quick.click();
+
+  // ── 2) Form rút gọn: tên đã gõ sẵn, chỉ cần giá bán + lưu ──
+  const qDlg = page.getByRole("dialog", { name: "Tạo nhanh mặt hàng" });
+  await expect(qDlg).toBeVisible();
+  await expect(qDlg.locator('label:text-is("Tên sản phẩm") + input')).toHaveValue(
+    "Bột năng Tân An",
+  );
+  await qDlg.getByRole("spinbutton").fill("35000");
+  await qDlg.getByRole("button", { name: "Lưu", exact: true }).click();
+  await expect(qDlg).toBeHidden();
+
+  // Dòng đang đứng được điền ngay hàng vừa tạo (giá bán tự đưa vào đơn giá).
+  await expect(line).toContainText("Bột năng Tân An");
+  await expect(line.getByRole("spinbutton").nth(1)).toHaveValue(/35/);
+
+  const products = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
+    code: string;
+    name: string;
+    sale_price: number;
+    aliases: string;
+  }>;
+  const made = products.find((p) => p.name === "Bột năng Tân An");
+  expect(made, "không thấy hàng tạo nhanh trong danh mục").toBeTruthy();
+  expect(made?.sale_price).toBe(35_000);
+
+  // Hàng hóa phải có tồn mới bán được — nhập 10 cho hàng vừa tạo nhanh.
+  const restock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-05",
+      voucher_no: "PN-QC1",
+      description: "Nhập tồn cho hàng tạo nhanh",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: made?.code ?? "", quantity: 10, unit_price: 20_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(restock.ok(), `save_inbound: ${await restock.text()}`).toBe(true);
+
+  // ── 3) Thêm "tên khác" NGAY trên dòng → dòng giữ tên vừa thêm ──
+  await line.getByTestId("line-add-alias").click();
+  const aDlg = page.getByRole("dialog", { name: "Thêm tên khác" });
+  await expect(aDlg).toBeVisible();
+  await expect(aDlg).toContainText("Bột năng Tân An");
+  await aDlg.getByTestId("alias-input").fill("Tapioca Tân An");
+  await aDlg.getByRole("button", { name: "Lưu", exact: true }).click();
+  await expect(aDlg).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã thêm tên khác");
+  await expect(line).toContainText("Tapioca Tân An");
+
+  // ── 4) Lưu hóa đơn → dòng giữ ĐÚNG tên vừa thêm, danh mục có tên đó ──
+  await line.getByRole("spinbutton").first().fill("2");
+  await dlg.getByRole("button", { name: "Lập hóa đơn" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText(`Đã lập hóa đơn ${number}`);
+  await expect(dlg).toBeHidden();
+
+  const invoices = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    id: number;
+    number: string;
+  }>;
+  const inv = invoices.find((i) => i.number === number);
+  expect(inv, `không thấy hóa đơn ${number}`).toBeTruthy();
+
+  const detail = (await (
+    await request.post("/api/get_invoice_detail", { data: { id: inv?.id } })
+  ).json()) as { items: Array<{ product_name: string; line_name: string }> };
+  expect(detail.items).toHaveLength(1);
+  expect(detail.items[0].product_name).toBe("Tapioca Tân An");
+  expect(detail.items[0].line_name).toBe("Tapioca Tân An");
+
+  const after = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
+    name: string;
+    aliases: string;
+  }>;
+  expect(after.find((p) => p.name === "Bột năng Tân An")?.aliases).toContain("Tapioca Tân An");
+});
+
 // ─── F4 — ĐỊNH MỨC VẬT TƯ: PNK sản xuất tự sinh phiếu xuất NVL (Nợ 154 / Có 152) ───
 test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh phiếu PX theo định mức", async ({
   page,

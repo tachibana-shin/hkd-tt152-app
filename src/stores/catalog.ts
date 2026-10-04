@@ -87,6 +87,31 @@ export const useCatalogStore = defineStore("catalog", () => {
     products.value = await api.getProducts();
   }
 
+  /**
+   * Thêm "tên khác" cho sản phẩm ngay từ dòng hóa đơn (không cần ra màn Danh
+   * mục). Chỉ THÊM, giữ nguyên tên đã có — backend ghi THAY toàn bộ danh sách
+   * nên luôn gửi kèm tên cũ. Nạp lại danh sách rồi trả về các tên THỰC SỰ đã
+   * lưu (bị bỏ nếu trùng tên chính / mã sản phẩm).
+   */
+  async function addProductAliases(code: string, names: string[]): Promise<string[]> {
+    const product = productByCode(code);
+    const current = (product?.aliases ?? "")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    const next = [...current];
+    for (const name of names) {
+      if (!next.some((a) => a.toLowerCase() === name.toLowerCase())) next.push(name);
+    }
+    await api.saveProductAliases(code, next);
+    products.value = await api.getProducts();
+    const saved = (productByCode(code)?.aliases ?? "")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    return names.filter((n) => saved.includes(n));
+  }
+
   async function deleteProduct(id: number) {
     await api.deleteProduct(id);
   }
@@ -154,6 +179,7 @@ export const useCatalogStore = defineStore("catalog", () => {
     loadIndustryGroups,
     loadProductsPage,
     saveProduct,
+    addProductAliases,
     deleteProduct,
     deleteProducts,
     assignGoodsIndustry,

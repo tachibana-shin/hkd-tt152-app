@@ -81,6 +81,7 @@ const emit = defineEmits<{
 }>();
 
 const catalog = useCatalogStore();
+const toast = useToast();
 
 // Cảnh báo thiếu tồn realtime (báo đỏ ngay trên dòng khi SL > tồn đúng kho):
 // chỉ bật khi bảng có cột Kho xuất (kho trên dòng quyết định tồn so sánh).
@@ -135,6 +136,93 @@ function onProductSaved(code: string) {
       warehouse_code: "",
     });
     onProductPick(props.items.length - 1);
+  }
+}
+
+// Tạo nhanh mặt hàng từ ô Sản phẩm (gõ tên CHƯA có trong danh mục → bấm dòng
+// "Tạo nhanh"): mở form rút gọn, lưu xong gắn vào ĐÚNG dòng đang đứng.
+const quickDialog = ref(false);
+const quickName = ref("");
+const quickRow = ref<number | null>(null);
+
+function onQuickCreate(index: number, name: string) {
+  quickRow.value = index;
+  quickName.value = name;
+  quickDialog.value = true;
+}
+
+function onQuickSaved(code: string) {
+  const index = quickRow.value;
+  quickRow.value = null;
+  if (index != null && props.items[index]) {
+    const row = props.items[index];
+    // Dòng đang đứng đã có hàng khác → đổi sang hàng vừa tạo.
+    row.product_code = code;
+    row.line_name = ""; // hàng mới → dùng tên chính
+    onProductPick(index);
+    return;
+  }
+  onProductSaved(code);
+}
+
+// ─── Thêm "tên khác" ngay trên dòng (không phải ra màn Danh mục sản phẩm) ───
+const aliasDialog = ref(false);
+const aliasRow = ref<number | null>(null);
+const aliasText = ref("");
+const aliasSaving = ref(false);
+
+/** Sản phẩm của dòng đang thêm tên khác (hiện tên + mã ở dialog). */
+const aliasProduct = computed<Product | undefined>(() => {
+  const index = aliasRow.value;
+  const code = index == null ? "" : (props.items[index]?.product_code ?? "");
+  return catalog.productByCode(code);
+});
+
+const aliasHeader = computed(() =>
+  aliasProduct.value ? `Thêm tên khác — ${aliasProduct.value.name}` : "Thêm tên khác",
+);
+
+function openAlias(index: number) {
+  aliasRow.value = index;
+  aliasText.value = "";
+  aliasDialog.value = true;
+}
+
+async function saveAlias() {
+  const index = aliasRow.value;
+  const row = index == null ? null : props.items[index];
+  const wanted = aliasText.value
+    .split(",")
+    .map((a) => a.trim())
+    .filter(Boolean);
+  if (!row || !row.product_code || !wanted.length) {
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu tên",
+      detail: "Gõ tên khác muốn gán cho mặt hàng này",
+    });
+    return;
+  }
+  const code = row.product_code;
+  const product = catalog.productByCode(code);
+  aliasSaving.value = true;
+  try {
+    // Thêm (giữ tên cũ), nạp lại danh mục — backend bỏ tên trùng tên chính/mã.
+    const added = await catalog.addProductAliases(code, wanted);
+    // Dòng giữ NGAY tên vừa thêm — hóa đơn in đúng tên người dùng chọn.
+    if (added[0]) row.line_name = added[0];
+    toast.add({
+      severity: added.length ? "success" : "warn",
+      summary: added.length ? "Đã thêm tên khác" : "Tên này không cần thêm",
+      detail: added.length
+        ? `${added.join(", ")} → ${product?.name ?? code}`
+        : `${wanted[0]} đã là tên chính hoặc tên khác của ${product?.name ?? code}`,
+    });
+    aliasDialog.value = false;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
+  } finally {
+    aliasSaving.value = false;
   }
 }
 
@@ -255,18 +343,37 @@ watch(
   >
     <Column
       header="Sản phẩm"
-      :style="compact ? 'min-width: 200px' : preInput ? 'min-width: 240px' : undefined"
+      :style="compact ? 'min-width: 230px' : preInput ? 'min-width: 260px' : undefined"
     >
       <template #body="{ index }">
-        <ProductSelect
-          :model-value="items[index].product_code"
-          :picked-name="items[index].line_name ?? ''"
-          :warehouse-code="items[index].warehouse_code ?? ''"
-          :size="compact || preInput ? 'small' : undefined"
-          @update:model-value="onProductChange(index, $event)"
-          @picked="onProductPicked(index, $event)"
-          @change="onProductPick(index)"
-        />
+        <div class="flex items-center gap-1">
+          <ProductSelect
+            class="min-w-0 flex-1"
+            :model-value="items[index].product_code"
+            :picked-name="items[index].line_name ?? ''"
+            :warehouse-code="items[index].warehouse_code ?? ''"
+            :size="compact || preInput ? 'small' : undefined"
+            :allow-create="showAddProduct && canEdit"
+            @update:model-value="onProductChange(index, $event)"
+            @picked="onProductPicked(index, $event)"
+            @change="onProductPick(index)"
+            @create="onQuickCreate(index, $event)"
+          />
+          <!-- Thêm "tên khác" ngay trên dòng: gán tên cho CHÍNH mã hàng này. -->
+          <Button
+            v-if="canEdit && items[index].product_code"
+            icon="pi pi-tag"
+            severity="secondary"
+            text
+            rounded
+            size="small"
+            class="shrink-0"
+            data-testid="line-add-alias"
+            aria-label="Thêm tên khác"
+            v-tooltip="'Thêm tên khác cho mặt hàng này'"
+            @click="openAlias(index)"
+          />
+        </div>
       </template>
     </Column>
     <Column
@@ -434,4 +541,43 @@ watch(
 
   <!-- Thêm hàng hóa nhanh — dùng chung dialog chuẩn (tự sinh mã + nhóm ngành + thuế) -->
   <ProductDialog v-model:visible="productDialog" :show-action="canEdit" @saved="onProductSaved" />
+  <!-- Tạo nhanh từ ô Sản phẩm: form rút gọn, tên đã gõ sẵn. -->
+  <ProductDialog
+    v-model:visible="quickDialog"
+    quick
+    :preset-name="quickName"
+    :show-action="canEdit"
+    @saved="onQuickSaved"
+  />
+  <!-- Thêm "tên khác" ngay trên dòng hóa đơn. -->
+  <AppDialog
+    :visible="aliasDialog"
+    :header="aliasHeader"
+    width="max-w-md"
+    action-label="Lưu"
+    :saving="aliasSaving"
+    @update:visible="aliasDialog = $event"
+    @action="saveAlias"
+  >
+    <div class="flex flex-col gap-3 py-2">
+      <p class="text-sm text-gray-600">
+        Mặt hàng:
+        <b>{{ aliasProduct?.name ?? "" }}</b>
+        <span class="text-gray-400">({{ aliasProduct?.code ?? "" }})</span>
+      </p>
+      <FormField label="Tên khác" required>
+        <InputText
+          v-model="aliasText"
+          size="small"
+          placeholder="Tapioca, Bột mì"
+          data-testid="alias-input"
+          @keyup.enter="saveAlias"
+        />
+      </FormField>
+      <p class="text-xs text-gray-400">
+        Gõ 1 tên hoặc nhiều tên cách nhau bằng phẩy. Mỗi tên chỉ gán cho 1 sản phẩm; dòng hóa đơn
+        giữ ngay tên vừa thêm.
+      </p>
+    </div>
+  </AppDialog>
 </template>

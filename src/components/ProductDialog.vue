@@ -14,8 +14,16 @@ const props = withDefaults(
     /** Đang sửa sản phẩm (null = thêm mới — tự sinh mã). */
     product?: Product | null;
     showAction?: boolean;
+    /**
+     * Form rút gọn "Tạo nhanh" (mở từ ô Sản phẩm ở popup hóa đơn): chỉ giữ các
+     * ô cần cho hạch toán — tên, ĐVT, giá bán, loại, nhóm ngành, tên khác.
+     * Các ô còn lại (giá vốn, tồn tối thiểu, thuế đầu vào…) vẫn lưu mặc định.
+     */
+    quick?: boolean;
+    /** Tên người dùng vừa gõ trên dòng hóa đơn — điền thẳng vào ô Tên. */
+    presetName?: string;
   }>(),
-  { product: null, showAction: true },
+  { product: null, showAction: true, quick: false, presetName: "" },
 );
 
 const emit = defineEmits<{
@@ -28,7 +36,9 @@ const settings = useSettingsStore();
 const toast = useToast();
 
 const saving = ref(false);
-const dialogTitle = computed(() => (props.product ? "Sửa sản phẩm" : "Thêm sản phẩm"));
+const dialogTitle = computed(() =>
+  props.quick ? "Tạo nhanh mặt hàng" : props.product ? "Sửa sản phẩm" : "Thêm sản phẩm",
+);
 const form = reactive({
   id: null as number | null,
   code: "",
@@ -121,6 +131,8 @@ watch(
       }
     }
     syncImportTaxText();
+    // Tạo nhanh từ dòng hóa đơn: giữ nguyên tên người dùng vừa gõ.
+    if (!p && props.quick && props.presetName) form.name = props.presetName;
     // Select Nhóm ngành cần dữ liệu — khi gọi từ phiếu nhập (chưa load) thì nạp thêm.
     catalog.loadIndustryGroups();
   },
@@ -184,7 +196,75 @@ async function save() {
     @update:visible="emit('update:visible', $event)"
     @action="save"
   >
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+    <!-- Tạo nhanh (từ popup hóa đơn): 6 ô cần cho hạch toán, bỏ mã/giá vốn/tồn/thuế. -->
+    <div v-if="quick" class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2" data-testid="quick-form">
+      <FormField label="Tên sản phẩm" required class="col-span-2">
+        <InputText
+          size="small"
+          v-model="form.name"
+          placeholder="Tên hàng hóa / dịch vụ"
+          autofocus
+        />
+      </FormField>
+      <FormField label="Đơn vị tính">
+        <InputText size="small" v-model="form.unit" placeholder="Cái" />
+      </FormField>
+      <FormField label="Giá bán">
+        <InputNumber
+          v-model="form.sale_price"
+          :min="0"
+          mode="currency"
+          currency="VND"
+          locale="vi-VN"
+          size="small"
+          class="w-full"
+        />
+      </FormField>
+      <FormField label="Loại">
+        <Select
+          v-model="form.is_service"
+          :options="[
+            { label: 'Hàng hóa (theo dõi tồn kho)', value: false },
+            {
+              label: 'Dịch vụ (không nhập/xuất kho — vd nhân công)',
+              value: true,
+            },
+          ]"
+          option-label="label"
+          option-value="value"
+          size="small"
+          class="w-full"
+        />
+      </FormField>
+      <FormField label="Nhóm ngành (cơ sở tính thuế bán ra)">
+        <Select
+          v-model="form.industry_code"
+          :options="catalog.industryGroups"
+          option-label="name"
+          option-value="code"
+          show-clear
+          size="small"
+          class="w-full"
+        />
+        <p class="text-xs text-gray-400 mt-1">Tự điền vào dòng phiếu xuất / hóa đơn.</p>
+      </FormField>
+      <FormField label="Tên khác" class="col-span-2">
+        <InputText
+          size="small"
+          v-model="form.aliases"
+          placeholder="Bột mì, Mì flour, Bột làm bánh"
+        />
+        <p class="text-xs text-gray-400 mt-1">
+          Nhiều tên cách nhau bằng phẩy — hóa đơn giữ đúng tên bạn chọn. Mỗi tên chỉ gán cho 1 sản
+          phẩm.
+        </p>
+      </FormField>
+      <p class="text-xs text-gray-500 col-span-2 pb-1" data-testid="quick-hint">
+        Mã {{ form.code || "…" }} tự sinh • giá vốn, tồn tối thiểu, thuế GTGT đầu vào — sửa sau ở
+        Danh mục sản phẩm.
+      </p>
+    </div>
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
       <FormField label="Mã sản phẩm" required>
         <InputText size="small" v-model="form.code" placeholder="SP001" :disabled="!!product" />
       </FormField>
