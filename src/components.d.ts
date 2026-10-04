@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AppDataTable: typeof import('./components/AppDataTable.vue')['default']
     AppDialog: typeof import('./components/AppDialog.vue')['default']
+    AppUpdateDialog: typeof import('./components/AppUpdateDialog.vue')['default']
     AutoComplete: typeof import('primevue/autocomplete')['default']
     Avatar: typeof import('primevue/avatar')['default']
     BackupDialog: typeof import('./components/BackupDialog.vue')['default']

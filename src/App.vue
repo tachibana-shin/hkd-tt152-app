@@ -6,6 +6,7 @@ import { useThemeStore } from "@/stores/theme";
 import { usePortalSession } from "@/composables/usePortalSession";
 import { useViewport } from "@/composables/useViewport";
 import { startAutoTasks, stopAutoTasks } from "@/composables/useAutoTasks";
+import AppUpdateDialog from "@/components/AppUpdateDialog.vue";
 import LoginView from "@/views/LoginView.vue";
 // Phiên bản hiển thị ở chân sidebar. Đọc thẳng package.json — `scripts/set-version.mjs`
 // giữ package.json / tauri.conf.json / Cargo.toml cùng một phiên bản (CI có
@@ -178,7 +179,7 @@ watch(
   () => [auth.isLoggedIn, bootstrapped.value] as const,
   ([loggedIn, booted]) => {
     if (booted && loggedIn) {
-      void startAutoTasks((n) => toast.add({ severity: "info", life: 8000, ...n }));
+      void startAutoTasks();
     } else {
       stopAutoTasks();
     }
@@ -456,6 +457,9 @@ onUnmounted(() => {
 
   <!-- Captcha tay + mật khẩu mới của cổng HĐĐT: một bản dùng chung cho cả app -->
   <HddtPortalDialogs />
+
+  <!-- Popup "Có bản cập nhật" — việc chạy nền tự mở khi thấy bản mới. -->
+  <AppUpdateDialog />
 
   <!-- Bắt buộc cập nhật thông tin hộ kinh doanh ngay sau khi đăng nhập (chỉ admin) -->
   <BusinessConfigDialog

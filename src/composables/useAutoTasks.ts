@@ -12,12 +12,14 @@ import type { AppSettings } from "@/types";
  * đỏ vì một việc chạy nền. Và auto sync chỉ *quét* (kéo danh sách hóa đơn về
  * cache): việc nhập kho tạo phiếu vẫn là thao tác tay, nên tuyệt đối không sinh
  * bút toán khi app khởi động.
+ *
+ * Riêng CẬP NHẬT thì mở popup (không phải toast): gặp bản mới là hiện ngay
+ * hộp thoại có nhật ký từng bước + nút "Tải và cài", người dùng bấm một cái là
+ * xong — không phải tự nhớ đường vào màn Cài đặt.
  */
-export type AutoTaskNotice = { summary: string; detail?: string };
 
-/** Timer + thông báo giữ ở module: app mở 1 lần, Settings/App cùng dùng chung. */
+/** Timer giữ ở module: app mở 1 lần, Settings/App cùng dùng chung. */
 let timer: ReturnType<typeof setInterval> | null = null;
-let notice: ((n: AutoTaskNotice) => void) | null = null;
 
 /** Cài đặt chạy nền; lỗi khi đọc → coi như không bật gì. */
 async function loadSettings(): Promise<AppSettings | null> {
@@ -41,10 +43,13 @@ async function syncPortal(): Promise<void> {
   }
 }
 
-/** Hỏi server có bản mới không — chỉ báo khi THẬT SỰ có, lỗi thì im lặng. */
+/** Hỏi server có bản mới — THẬT SỰ có thì mở popup, lỗi thì im lặng. */
 async function checkUpdate(): Promise<void> {
   const updater = useAppUpdater();
   if (!updater.inTauri) return; // bản web mở bằng trình duyệt không có updater
+  // Popup đang mở hoặc đang tải dở → đừng hỏi lại: hỏi sẽ xóa nhật ký người
+  // dùng đang đọc và hỏi trùng khi họ chưa kịp bấm "Tải và cài".
+  if (updater.prompt.value || updater.busy.value) return;
   const update = await updater.checkUpdate();
   if (updater.error.value) {
     // Repo riêng tư trả 404, máy offline… là chuyện của việc chạy nền: xóa cờ
@@ -53,10 +58,9 @@ async function checkUpdate(): Promise<void> {
     return;
   }
   if (update) {
-    notice?.({
-      summary: `Có bản cập nhật ${update.version}`,
-      detail: "Mở Cài đặt → Cập nhật ứng dụng để tải và cài.",
-    });
+    // Thay toast "Mở Cài đặt → Cập nhật": mở popup ngay, ở đó có sẵn nhật ký
+    // các bước và nút "Tải và cài" làm luôn một lượt.
+    updater.prompt.value = true;
   }
 }
 
@@ -69,12 +73,8 @@ async function run(settings?: AppSettings | null): Promise<void> {
 
 /**
  * Bật chạy nền: chạy ngay 1 lượt rồi hẹn lại theo cài đặt.
- *
- * `onNotice` do component truyền vào (`useToast()` cần injection context nên
- * composable tự lấy không được).
  */
-export async function startAutoTasks(onNotice: (n: AutoTaskNotice) => void): Promise<void> {
-  notice = onNotice;
+export async function startAutoTasks(): Promise<void> {
   stopAutoTasks();
   const s = await loadSettings();
   if (!s || (!s.auto_check_update && !s.auto_sync_enabled)) return;
@@ -92,5 +92,5 @@ export function stopAutoTasks(): void {
 
 /** Chạy lại theo cài đặt vừa lưu ở màn Cài đặt. */
 export async function restartAutoTasks(): Promise<void> {
-  await startAutoTasks(notice ?? (() => {}));
+  await startAutoTasks();
 }
