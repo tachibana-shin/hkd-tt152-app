@@ -19,3 +19,4 @@ pub(crate) mod profile;
 pub(crate) mod settings;
 pub(crate) mod stock;
 pub(crate) mod tax_lookup;
+pub(crate) mod tax_report;

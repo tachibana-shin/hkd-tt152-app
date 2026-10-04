@@ -1,4 +1,5 @@
 import { Workbook } from "exceljs";
+import type { TaxBook } from "@/types";
 
 export interface XlsxColumn {
   header: string;
@@ -56,4 +57,21 @@ export async function exportXlsx(
   a.remove();
   // Gỡ link trễ — revoke sớm là trình duyệt huỷ blob khi đang tải dở.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/**
+ * Dựng file Excel của **MỘT sổ kế toán** theo đúng bộ cột của mẫu (không tải
+ * về — trả Blob để gộp vào gói "Xuất báo cáo kỳ thuế").
+ *
+ * Bộ cột mỗi mẫu một bộ (S1a 3 cột, S2d 12 cột…) nên lấy nguyên `columns`
+ * backend trả về; ô trống xuất rỗng.
+ */
+export async function buildTaxBookXlsx(b: TaxBook): Promise<Blob> {
+  const cols: XlsxColumn[] = b.columns.map((c) => ({ header: c.label, key: c.key }));
+  const rows = b.rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const c of b.columns) out[c.key] = r.cells[c.key] ?? "";
+    return out;
+  });
+  return buildXlsxBlob(cols, rows);
 }

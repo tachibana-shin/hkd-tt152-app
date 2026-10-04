@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT portal_id, posting_date, khhdon, shdon, detail_json\n             FROM hddt_purchase_invoice\n            WHERE posting_date >= ? AND posting_date <= ?\n              AND detail_json <> '' AND detail_error = ''",
+  "describe": {
+    "columns": [
+      {
+        "name": "portal_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "khhdon",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "shdon",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "detail_json",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "98c150d54b489f3aa6669401c11a01c80b130bbe639576f16ac1cbd1ea87fcc4"
+}

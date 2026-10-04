@@ -3,7 +3,8 @@ import { useToast } from "primevue/usetoast";
 import { api } from "@/db";
 import type { TaxBook } from "@/types";
 import { exportBookDocx } from "@/utils/bookDoc";
-import { exportXlsx, type XlsxColumn } from "@/utils/excel";
+import { buildTaxBookXlsx } from "@/utils/excel";
+import { downloadBlob } from "@/utils/download";
 
 /**
  * Trạng thái SỔ KẾ TOÁN theo mẫu TT 152/2025/TT-BTC — tab "Sổ kế toán"
@@ -26,6 +27,13 @@ const allBookOptions = [
   { label: "S2e-HKD · Sổ chi tiết tiền", value: "S2e" },
   { label: "S3a-HKD · Sổ theo dõi nghĩa vụ thuế khác", value: "S3a" },
 ];
+
+/**
+ * Cả 7 mẫu sổ **không lọc theo hồ sơ** — riêng chức năng "Xuất báo cáo kỳ
+ * thuế" phải gộp **tất cả** sổ kế toán theo năm vào một ZIP, kể cả sổ hộ chưa
+ * áp dụng (thiếu thì hồ sơ thiếu sổ).
+ */
+export const TT152_BOOKS = allBookOptions;
 
 /**
  * Danh sách mẫu sổ áp dụng cho hồ sơ (Điều 4 TT 152) do backend trả.
@@ -226,14 +234,8 @@ export function useTaxBooks() {
   async function exportBookExcel() {
     const b = bookData.value;
     if (!b) return;
-    const cols: XlsxColumn[] = b.columns.map((c) => ({ header: c.label, key: c.key }));
-    const rows = b.rows.map((r) => {
-      const out: Record<string, unknown> = {};
-      for (const c of b.columns) out[c.key] = r.cells[c.key] ?? "";
-      return out;
-    });
     try {
-      await exportXlsx(`so-ke-toan-${b.book}-${bookYear.value}`, cols, rows);
+      await downloadBlob(`so-ke-toan-${b.book}-${bookYear.value}.xlsx`, await buildTaxBookXlsx(b));
     } catch (e) {
       toast.add({ severity: "error", summary: "Lỗi xuất file Excel", detail: String(e) });
     }

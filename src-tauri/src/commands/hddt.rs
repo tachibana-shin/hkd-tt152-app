@@ -574,7 +574,7 @@ async fn portal_client(state: &State<'_, AppState>) -> Result<(HddtClient, Strin
 
 /// Thư mục `hddt_xml/` của hồ sơ đang mở (file XML sống cùng DB nên đi theo
 /// hồ sơ khi đổi/backup).
-fn xml_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+pub(crate) fn xml_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let db = crate::commands::profile::active_db_path(app)?;
     let profile = db
         .parent()

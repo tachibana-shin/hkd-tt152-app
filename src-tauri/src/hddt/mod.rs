@@ -29,7 +29,8 @@ pub(crate) use session::{days_left_until, now_unix, rfc3339_to_unix, PortalSessi
 pub(crate) use sync::CachedInvoice;
 pub(crate) use xml::{
     export_zip, fill_missing_after_scan, fill_missing_before_import, list_saved, save_from_zip,
-    save_manual, xml_dir_under, FillOutcome, SavedXml, SavedXmlRow, XmlInvoiceKey,
+    save_manual, xml_dir_under, xml_report_entries, FillOutcome, SavedXml, SavedXmlRow,
+    XmlInvoiceKey,
 };
 
 #[cfg(test)]

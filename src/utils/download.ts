@@ -12,6 +12,25 @@ export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
+ * Byte → base64 để **gửi file dựng sẵn sang backend** (vd đóng gói báo cáo kỳ
+ * thuế: tờ khai Excel, sổ kế toán). Chia khối `0x8000` vì `String.fromCharCode`
+ * bị giới hạn số đối số — `apply`/spread trên mảng hàng trăm MB là sập tab.
+ */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+/** `Blob` → base64 (xem [`bytesToBase64`]). */
+export async function blobToBase64(blob: Blob): Promise<string> {
+  return bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
+}
+
+/**
  * Tải 1 file về máy. `revokeDelayMs` giữ link đủ lâu cho trình duyệt tải xong —
  * revoke sớm là trình duyệt huỷ blob khi đang tải dở.
  */
@@ -34,4 +53,9 @@ export function downloadBinary(
 /** Tải ZIP gộp file XML hóa đơn (mime `application/zip`). */
 export function downloadZip(filename: string, base64: string): void {
   downloadBinary(filename, base64ToBytes(base64), "application/zip");
+}
+
+/** Tải file đã dựng sẵn dạng `Blob` (Excel/Word từ thư viện tạo file). */
+export async function downloadBlob(filename: string, blob: Blob): Promise<void> {
+  downloadBinary(filename, new Uint8Array(await blob.arrayBuffer()), blob.type);
 }

@@ -72,6 +72,7 @@ import type {
   ImportResult,
   AttendanceRow,
   AttendanceWorkDay,
+  IndustryRevenue,
   TaxBook,
   TaxDeclarationRow,
   TaxOverview,
@@ -232,6 +233,10 @@ export const api = {
     normalizeAppSettings(parse<Record<string, string>>(await call<string>("get_app_settings"))),
   saveAppSettings: (settings: Record<string, string>) =>
     call<string>("save_app_settings", { settings }),
+  /** `app_setting` dạng chuỗi thô — cho các key nằm ngoài `AppSettings` (vd bản
+   *  ghi tay của tờ khai kê khai). `getAppSettings` đã chuẩn hoá nên mất key lạ. */
+  getRawAppSettings: async () =>
+    parse<Record<string, string>>(await call<string>("get_app_settings")),
   nextProductCode: () => call<string>("next_product_code"),
 
   // ─── MASTER DATA ───
@@ -1016,6 +1021,30 @@ export const api = {
    */
   getTaxOverview: async (fromDate: string, toDate: string, unitCode: string) =>
     parse<TaxOverview>(await call<string>("get_tax_overview", { fromDate, toDate, unitCode })),
+
+  /** Doanh thu từng nhóm ngành trong khoảng ngày — **cả nhóm chưa phát sinh**,
+   *  dùng cho màn kê khai 6 dòng theo mẫu (cùng khoảng ngày với tờ khai). */
+  getRevenueDeclaration: async (fromDate: string, toDate: string, unitCode: string) =>
+    parse<IndustryRevenue[]>(
+      await call<string>("get_revenue_by_industry", { fromDate, toDate, unitCode }),
+    ),
+  /**
+   * Đóng gói **báo cáo kỳ thuế** thành 1 file ZIP rồi trả về base64.
+   *
+   * `extraFiles` = tờ khai + sổ kế toán do frontend dựng (`{path, data}` base64);
+   * backend tự thêm phần frontend không với tới được: PDF hóa đơn render trong
+   * kỳ, XML đã lưu và bản sao lưu CSDL — xem `commands/tax_report.rs`.
+   */
+  exportTaxReport: (args: {
+    fromDate: string;
+    toDate: string;
+    extraFiles: { path: string; data: string }[];
+  }): Promise<string> =>
+    call<string>("export_tax_report", {
+      fromDate: args.fromDate,
+      toDate: args.toDate,
+      extraFiles: args.extraFiles,
+    }),
   /** Nhóm hộ hiện hành + doanh thu cả năm dùng xếp nhóm (hộp cấu hình HKD tự điền). */
   getTaxGroup: async (year: number) =>
     parse<TaxGroupInfo>(await call<string>("get_tax_group", { year })),

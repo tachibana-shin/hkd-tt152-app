@@ -516,6 +516,48 @@ pub(crate) async fn list_saved(pool: &SqlitePool) -> Result<Vec<SavedXmlRow>, St
     .map_err(|e| format!("Danh sách file XML lỗi: {e}"))
 }
 
+// ─── Gói XML vào báo cáo kỳ thuế ───
+
+/// Toàn bộ XML đã lưu, gom sẵn vào **thư mục trong ZIP theo chiều** hóa đơn.
+///
+/// Trả `(đường dẫn trong ZIP, nội dung)`; blob thiếu (dòng lưu trước khi thêm
+/// cột `xml_body`) lây từ bản sao file — file cũng mất thì đếm vào số trả về
+/// thứ hai để báo cáo ghi vào `CHU-THICH.txt`.
+///
+/// Không lọc theo kỳ: file là bản gốc tải từ cổng lúc bấm "Tải XML", giữ nguyên
+/// toàn bộ để hồ sơ nộp/luu trữ không bị hụt file.
+pub(crate) async fn xml_report_entries(
+    pool: &SqlitePool,
+    dir: &Path,
+) -> Result<(Vec<(String, Vec<u8>)>, usize), String> {
+    let rows: Vec<(i64, String, String, Option<Vec<u8>>)> = sqlx::query_as(
+        "SELECT id, direction, file_name, xml_body FROM hddt_invoice_xml ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Đọc danh sách XML lỗi: {e}"))?;
+
+    let mut out = Vec::new();
+    let mut lost = 0usize;
+    for (id, direction, name, body) in rows {
+        let body = match body.filter(|b| !b.is_empty()) {
+            Some(b) => Some(b),
+            None => body_from_disk(pool, dir, id, &name).await?,
+        };
+        let Some(body) = body else {
+            lost += 1;
+            continue;
+        };
+        let folder = if direction == "sold" {
+            "hoa-don/xml/ban-ra"
+        } else {
+            "hoa-don/xml/mua-vao"
+        };
+        out.push((format!("{folder}/{name}"), body));
+    }
+    Ok((out, lost))
+}
+
 // ─── Nộp / gửi ZIP ───
 
 /// Gộp các hóa đơn đã lưu thành **1 file ZIP** để nộp/gửi cho kế toán hoặc
@@ -956,5 +998,71 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
         let err = export_zip(&pool, &dir, &[]).await.expect_err("chưa có gì");
         assert!(err.contains("Chưa có hóa đơn"), "lỗi = {err}");
+    }
+
+    // ─── Gói XML vào báo cáo kỳ thuế ───
+
+    #[tokio::test]
+    async fn xml_report_entries_groups_by_direction_and_backfills_blob() {
+        // Báo cáo kỳ thuế cần XML gom sẵn theo THƯ MỤC (mua vào / bán ra) chứ
+        // không phải ZIP riêng như nút "Tải XML".
+        let pool = test_pool().await;
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+        save_from_zip(&pool, &dir, &key(), &sample_zip(true), "pid-1", "auto")
+            .await
+            .unwrap();
+        let sold = XmlInvoiceKey {
+            direction: InvoiceDirection::Sold,
+            shdon: "00002398".into(),
+            ..key()
+        };
+        save_from_zip(&pool, &dir, &sold, &sample_zip(true), "pid-2", "auto")
+            .await
+            .unwrap();
+        // Dòng lưu trước khi thêm cột `xml_body` → nạp lại từ file.
+        sqlx::query("UPDATE hddt_invoice_xml SET xml_body = NULL WHERE direction = 'sold'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let (entries, lost) = xml_report_entries(&pool, &dir).await.expect("gói XML");
+        assert_eq!(lost, 0, "file còn thì không mất gì");
+        assert_eq!(entries.len(), 2, "đủ cả hai chiều");
+        assert!(
+            entries
+                .iter()
+                .any(|(p, _)| p.starts_with("hoa-don/xml/mua-vao/")),
+            "XML mua vào vào thư mục riêng: {entries:?}"
+        );
+        let (path, body) = entries
+            .iter()
+            .find(|(p, _)| p.starts_with("hoa-don/xml/ban-ra/"))
+            .expect("có XML bán ra");
+        assert!(path.ends_with(".xml"), "giữ nguyên tên file: {path}");
+        assert!(
+            String::from_utf8_lossy(body).contains("<HDon>"),
+            "nội dung lây từ file được"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn xml_report_entries_counts_rows_that_lost_blob_and_file() {
+        let pool = test_pool().await;
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+        save_from_zip(&pool, &dir, &key(), &sample_zip(true), "pid-1", "auto")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE hddt_invoice_xml SET xml_body = NULL, file_name = 'khong-con.xml'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let (entries, lost) = xml_report_entries(&pool, &dir).await.expect("gói XML");
+        assert!(entries.is_empty(), "không có gì để gộp");
+        assert_eq!(lost, 1, "báo đúng số file mất để ghi vào CHU-THICH.txt");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

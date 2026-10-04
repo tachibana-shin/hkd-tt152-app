@@ -230,6 +230,26 @@ pub(crate) async fn get_tax_declaration(
     Ok(serde_json::to_string(&out).unwrap_or_default())
 }
 
+/// Doanh thu thuần từng nhóm ngành nghề trong khoảng ngày — trả **cả nhóm chưa
+/// phát sinh**.
+///
+/// Khác [`get_tax_declaration`]: lệnh đó lọc bỏ nhóm không có doanh thu vì chỉ
+/// liệt kê nhóm phát sinh thuế. Màn *kê khai doanh thu theo mẫu* thì có **6 dòng
+/// cố định như trên cổng thuế**, nhóm chưa có doanh thu vẫn phải hiện ra với ô
+/// trống cho người dùng tự nhập. Ở đây không tính số thuế — frontend gộp nhóm
+/// của hồ sơ vào 6 dòng mẫu rồi để người dùng sửa tay trước khi in/xuất.
+#[tauri::command]
+pub(crate) async fn get_revenue_by_industry(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+    unit_code: String,
+) -> Result<String, String> {
+    let pool = state.pool.read().await;
+    let rows = load_tax_agg_in_range(&pool, &from_date, &to_date, &unit_code).await?;
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
 /// Doanh thu ghi trên phiếu xuất trong khoảng ngày, gộp theo nhóm ngành nghề.
 async fn load_tax_agg_in_range(
     pool: &SqlitePool,

@@ -675,6 +675,20 @@ export interface AttendanceWorkDay {
 
 // ─── Tờ khai thuế theo kỳ (To Khai Thue) ───
 
+/** Doanh thu của **một nhóm ngành nghề** trong kỳ — nguồn của màn kê khai theo mẫu.
+ *  Khác `TaxDeclarationRow`: không kèm số thuế, và trả cả nhóm chưa phát sinh
+ *  (mẫu có 6 dòng cố định nên nhóm chưa có doanh thu vẫn phải lên bảng). */
+export interface IndustryRevenue {
+  industry_code: string;
+  industry_name: string;
+  vat_rate: number;
+  pit_rate: number;
+  /** Doanh thu tăng trong kỳ. */
+  revenue_up: number;
+  /** Doanh thu giảm trong kỳ (điều chỉnh). */
+  revenue_down: number;
+}
+
 export interface TaxDeclarationRow {
   industry_code: string;
   industry_name: string;

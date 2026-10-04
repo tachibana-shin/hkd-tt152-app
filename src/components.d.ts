@@ -84,6 +84,7 @@ declare module 'vue' {
     Tag: typeof import('primevue/tag')['default']
     TaxBookTable: typeof import('./components/TaxBookTable.vue')['default']
     TaxConfigDialog: typeof import('./components/TaxConfigDialog.vue')['default']
+    TaxEntryForm: typeof import('./components/TaxEntryForm.vue')['default']
     Toast: typeof import('primevue/toast')['default']
     ToggleSwitch: typeof import('primevue/toggleswitch')['default']
     Toolbar: typeof import('primevue/toolbar')['default']

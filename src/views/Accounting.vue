@@ -2,7 +2,11 @@
 import { storeToRefs } from "pinia";
 import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
-import { exportXlsx, type XlsxColumn } from "@/utils/excel";
+import { exportXlsx, buildTaxBookXlsx, type XlsxColumn } from "@/utils/excel";
+import TaxEntryForm from "@/components/TaxEntryForm.vue";
+import { TT152_BOOKS } from "@/composables/useTaxBooks";
+import { buildTaxEntryXlsx } from "@/utils/taxEntry";
+import { blobToBase64, downloadZip } from "@/utils/download";
 import type {
   RevenueExpenseRow,
   CogsBackfillPending,
@@ -158,6 +162,17 @@ function groupSourceText(o: TaxOverview): string {
 const declYear = computed(
   () => Number(toIsoDate(fromDate.value).slice(0, 4)) || new Date().getFullYear(),
 );
+/**
+ * Khoảng ngày kê khai ISO — một nguồn duy nhất cho CẢ HAI mục "Tờ khai thuế" và
+ * "Tờ khai siêu chuẩn", để báo cáo số thuế và bản kê khai không bao giờ lệch kỳ.
+ * Thiếu khoảng ngày thì về trọn năm của năm tờ khai (giống khi chưa chọn gì).
+ */
+const declRange = computed(() => ({
+  from: toIsoDate(fromDate.value) || `${declYear.value}-01-01`,
+  to: toIsoDate(toDate.value) || `${declYear.value}-12-31`,
+}));
+/** Tờ khai siêu chuẩn — "Xuất báo cáo kỳ thuế" lấy số đã sửa tay của nó. */
+const taxEntry = ref<InstanceType<typeof TaxEntryForm> | null>(null);
 // (Bộ chọn của SỔ — "Năm" / "Loại kỳ sổ" / "Kỳ" — nằm trọn ở tab Sổ kế toán,
 // không phụ thuộc màn này.)
 
@@ -244,8 +259,8 @@ async function loadDeclaration() {
   declLoading.value = true;
   try {
     // Cùng khoảng ngày với các bảng khác trên màn → tờ khai luôn khớp số liệu.
-    const f = toIsoDate(fromDate.value) || `${declYear.value}-01-01`;
-    const t = toIsoDate(toDate.value) || `${declYear.value}-12-31`;
+    const f = declRange.value.from;
+    const t = declRange.value.to;
     const [rows, ov] = await Promise.all([
       api.getTaxDeclaration(f, t, unitCode.value),
       api.getTaxOverview(f, t, unitCode.value),
@@ -301,6 +316,78 @@ async function exportDeclarationExcel() {
     );
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi xuất file Excel", detail: String(e) });
+  }
+}
+
+// ─── Xuất báo cáo kỳ thuế — 1 file ZIP gộp cả hồ sơ ───
+
+const reportExporting = ref(false);
+
+/**
+ * Đóng gói **hồ sơ của kỳ thuế** rồi tải về một file ZIP duy nhất:
+ *
+ * ```
+ * CHU-THICH.txt       hướng dẫn mở + số liệu từng nhóm file
+ * to-khai/            tờ khai siêu chuẩn (số ĐANG hiển thị, gồm ô sửa tay)
+ * so-ke-toan/         CẢ 7 sổ kế toán theo năm — kỳ chưa tròn năm vẫn lấy đủ
+ *                     dữ liệu hiện có (sổ ghi liên tục cả năm theo Luật Kế toán)
+ * hoa-don/pdf/…       PDF hóa đơn mua vào & bán ra phát sinh trong kỳ
+ * hoa-don/xml/…       TOÀN BỘ XML đã lưu — bản gốc từ cổng, không lọc kỳ
+ * sao-luu/hkd.db      bản sao lưu cơ sở dữ liệu
+ * ```
+ *
+ * Frontend chỉ dựng phần **Excel** (đã có `exceljs`, lại đang giữ đúng số liệu
+ * người dùng sửa trên màn); phần PDF/XML/saoluu frontend không với tới được nên
+ * gửi kèm rồi để backend gộp (`commands/tax_report.rs`).
+ */
+async function exportTaxReport() {
+  if (reportExporting.value) return;
+  reportExporting.value = true;
+  const problems: string[] = [];
+  try {
+    const { from, to } = declRange.value;
+    const files: { path: string; data: string }[] = [];
+
+    // 1. Tờ khai siêu chuẩn — lấy ĐÚNG bản đang hiện trên màn, không nạp lại,
+    //    để các ô sửa tay đi theo vào hồ sơ.
+    const payload = taxEntry.value?.exportPayload();
+    if (payload?.rows.length) {
+      files.push({
+        path: `to-khai/${payload.fileName}`,
+        data: await blobToBase64(await buildTaxEntryXlsx(payload)),
+      });
+    }
+
+    // 2. Cả 7 sổ kế toán của năm — mẫu nào lỗi vẫn đóng gói nốt các sổ còn lại.
+    const year = Number(from.slice(0, 4)) || new Date().getFullYear();
+    for (const b of TT152_BOOKS) {
+      try {
+        const book = await api.getTaxBooks(year, "year", 0, b.value);
+        files.push({
+          path: `so-ke-toan/${b.value}-${year}.xlsx`,
+          data: await blobToBase64(await buildTaxBookXlsx(book)),
+        });
+      } catch (e) {
+        problems.push(`${b.value}: ${e}`);
+      }
+    }
+
+    // 3. Backend thêm PDF/XML hóa đơn + sao lưu CSDL rồi nén 1 ZIP.
+    const zip = await api.exportTaxReport({ fromDate: from, toDate: to, extraFiles: files });
+    const name = `bao-cao-ky-thue-${from}_${to}.zip`;
+    downloadZip(name, zip);
+    toast.add({
+      severity: problems.length ? "warn" : "success",
+      summary: "Đã tải báo cáo kỳ thuế",
+      detail: problems.length
+        ? `${name} — ${files.length} file Excel; ${problems.length} sổ lỗi, xem CHU-THICH.txt trong ZIP`
+        : `${name} — ${files.length} file Excel + hóa đơn PDF/XML + sao lưu CSDL`,
+      life: 6000,
+    });
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Lỗi xuất báo cáo kỳ thuế", detail: String(e) });
+  } finally {
+    reportExporting.value = false;
   }
 }
 
@@ -723,6 +810,16 @@ useKeepAliveRefresh(reload);
       </AppDataTable>
     </SectionCard>
 
+    <!-- Tờ khai siêu chuẩn — bản KÊ KHAI 6 dòng theo mẫu cổng (khác mục trên:
+         mục trên là báo cáo số thuế phải nộp, mục này là bản để nộp). -->
+    <TaxEntryForm
+      ref="taxEntry"
+      :period-from="declRange.from"
+      :period-to="declRange.to"
+      :unit-code="unitCode"
+      data-testid="tax-entry-form"
+    />
+
     <!-- Bảng cân đối số phát sinh — dư đầu kỳ (DMTK) + phát sinh trong kỳ -->
     <SectionCard title="Bảng cân đối số phát sinh">
       <template #icon><i-mdi-scale-balance class="text-amber-600" /></template>
@@ -864,6 +961,18 @@ useKeepAliveRefresh(reload);
             class="justify-start"
             :disabled="!declRows.length"
             @click="exportDeclarationExcel"
+          />
+          <Button
+            label="Xuất báo cáo kỳ thuế (ZIP)"
+            icon="pi pi-download"
+            outlined
+            class="justify-start"
+            :loading="reportExporting"
+            data-testid="export-tax-report"
+            v-tooltip.top="
+              'Tờ khai + 7 sổ kế toán theo năm + PDF/XML hóa đơn + sao lưu CSDL, gói 1 file ZIP'
+            "
+            @click="exportTaxReport"
           />
           <Button
             v-if="auth.isAdmin"

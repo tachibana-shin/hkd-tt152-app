@@ -709,6 +709,14 @@ pub async fn api_invoke(
             to_date: String,
             unit_code: String
         ),
+        // Doanh thu theo NHÓM NGÀNH (cả nhóm chưa phát sinh) — màn kê khai 6 dòng mẫu.
+        "get_revenue_by_industry" => mx!(
+            commands::accounting::get_revenue_by_industry,
+            body,
+            from_date: String,
+            to_date: String,
+            unit_code: String
+        ),
         "get_tax_overview" => mx!(
             commands::accounting::get_tax_overview,
             body,
@@ -759,6 +767,14 @@ pub async fn api_invoke(
         "restore_backup" => {
             mx_state_app!(commands::admin::restore_backup, body, filename: String)
         }
+        // Báo cáo kỳ thuế: tờ khai + sổ kế toán + PDF/XML hóa đơn + sao lưu CSDL.
+        "export_tax_report" => mx_state_app!(
+            commands::tax_report::export_tax_report,
+            body,
+            from_date: String,
+            to_date: String,
+            extra_files: Vec<commands::tax_report::ExtraFile>
+        ),
 
         _ => {
             let msg = format!("Lệnh '{}' không hỗ trợ trên web", cmd);

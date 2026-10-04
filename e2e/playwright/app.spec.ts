@@ -3054,6 +3054,136 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
   await expect(page.getByText("Đã lưu cấu hình thuế").first()).toBeVisible();
 });
 
+// ─── Tờ khai siêu chuẩn ───
+
+/**
+ * Tờ khai siêu chuẩn dựng lại màn "Chọn địa điểm kinh doanh cần kê khai doanh
+ * thu" của cổng thuế. Ba điểm khác của bản này với mục "Tờ khai thuế" phía trên:
+ * 6 dòng nhóm ngành là **cố định** (nhóm chưa phát sinh vẫn lên bảng), ô doanh
+ * thu **sửa tay được** nhưng không mất khi tải lại trang, và có **công tắc** tắt/
+ * bật địa điểm như bản gốc.
+ */
+test("Tờ khai siêu chuẩn: đủ 6 dòng cố định, ô sửa tay giữ qua tải lại, công tắc địa điểm", async ({
+  page,
+}) => {
+  await ensureLoggedIn(page);
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+
+  const table = page.getByTestId("tax-entry-table");
+  await expect(table).toBeVisible({ timeout: 30_000 });
+
+  // Đúng 6 dòng mẫu — kể cả nhóm CHƯA phát sinh doanh thu.
+  await expect(table.locator("tbody tr")).toHaveCount(6);
+  for (const name of [
+    "Phân phối, cung cấp hàng hóa",
+    "Dịch vụ, xây dựng không bao thầu nguyên vật liệu",
+    "Hoạt động cho thuê tài sản trừ bất động sản",
+    "Sản xuất, vận tải, dịch vụ có gắn với hàng hóa, xây dựng có bao thầu nguyên vật liệu",
+    "Hoạt động cung cấp sản phẩm nội dung thông tin số",
+    "Hoạt động kinh doanh khác",
+  ]) {
+    await expect(table, `thiếu dòng "${name}"`).toContainText(name);
+  }
+  // Tỷ lệ ghi đúng kiểu cổng: dấu chấm thập phân ("0.5%"), không phải "0,5%".
+  await expect(table).toContainText("TNCN: 0.5%");
+  await expect(table).toContainText("TNCN: 1.5%");
+
+  const summary = page.getByTestId("tax-entry-summary");
+  await expect(summary).toContainText("Tổng doanh thu GTGT:");
+
+  // Sửa tay dòng 1 → tổng doanh thu trên thanh tóm tắt đổi theo.
+  // Lấy ô theo CẤU TRÚC bảng (cột GTGT = ô số 1 của dòng đầu) thay vì theo
+  // nhãn: aria-label của PrimeVue InputNumber có thể rơi vào phần tử bọc ngoài.
+  const vat1 = table.locator("tbody tr").first().locator("input").first();
+  // Chỉ số không dấu để khỏi phụ thuộc cách PrimeVue format theo locale.
+  const digits = async (loc: typeof vat1) => (await loc.inputValue()).replace(/\D/g, "");
+  const summaryBefore = (await summary.textContent()) ?? "";
+  // Gõ như người thật (không `fill`): PrimeVue InputNumber tự format theo
+  // locale trong lúc gõ và chỉ chốt model khi Enter/blur.
+  await vat1.click();
+  await vat1.press("ControlOrMeta+a");
+  await vat1.pressSequentially("1234567");
+  await vat1.press("Enter");
+  await vat1.blur();
+  // Ô dòng 1 mang đúng số vừa gõ, và tổng trên thanh tóm tắt đổi theo
+  // (không soi chuỗi tổng: bên trong còn số liệu seed của các dòng khác).
+  await expect.poll(() => digits(vat1), { message: "dòng 1 phải giữ 1234567" }).toBe("1234567");
+  expect((await summary.textContent()) ?? "").not.toBe(summaryBefore);
+
+  // Bản sửa phải sống sót qua TẢI LẠI TRANG (đã lưu vào app_setting).
+  await page.waitForTimeout(900); // debounce lưu 600ms
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD", { timeout: 30_000 });
+  await expect(page.getByTestId("tax-entry-table")).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(() => digits(vat1), { message: "bản sửa phải sống qua reload" })
+    .toBe("1234567");
+
+  // "Lấy lại số từ sổ" bỏ bản sửa → về đúng số app tự lấp.
+  await page.getByRole("button", { name: "Lấy lại số từ sổ" }).click();
+  await expect.poll(() => digits(vat1), { message: "bản sửa phải bị xoá" }).not.toBe("1234567");
+
+  // Công tắc tắt → không còn bảng số, nói rõ địa điểm không tham gia kê khai;
+  // bật lại để trả trạng thái (màn sau dùng tới tờ khai).
+  // Testid là chính; `.p-toggleswitch` là dự phòng nếu PrimeVue nuốt attrs.
+  const toggle = page.getByTestId("tax-entry-enabled").or(page.locator(".p-toggleswitch")).first();
+  await toggle.click();
+  await expect(page.getByTestId("tax-entry-disabled")).toBeVisible();
+  await expect(page.getByTestId("tax-entry-table")).toHaveCount(0);
+  await toggle.click();
+  await expect(page.getByTestId("tax-entry-table")).toBeVisible();
+});
+
+/**
+ * "Xuất báo cáo kỳ thuế" phải gộp **một** ZIP đủ hồ sơ kỳ: tờ khai siêu chuẩn,
+ * cả 7 sổ kế toán theo năm (kỳ chưa tròn năm vẫn lấy đủ dữ liệu hiện có), hóa
+ * đơn PDF/XML mua vào – bán ra và bản sao lưu CSDL. Thiếu mục nào là hồ sơ không
+ * nộp được, nên soi thẳng tên file trong ZIP chứ không chỉ xem có tải về không.
+ */
+test(
+  "Xuất báo cáo kỳ thuế: ZIP gộp tờ khai, đủ 7 sổ, hóa đơn và sao lưu CSDL",
+  { timeout: 120_000 },
+  async ({ page }) => {
+    await ensureLoggedIn(page);
+    await openTab(page, "Kế toán HKD", "/accounting");
+    // Chờ tờ khai nạp xong — nó là 1 trong những file phải có trong ZIP.
+    await expect(page.getByTestId("tax-entry-table")).toBeVisible({ timeout: 30_000 });
+
+    const btn = page.getByTestId("export-tax-report");
+    await expect(btn).toBeVisible();
+    const [download] = await Promise.all([page.waitForEvent("download"), btn.click()]);
+    expect(download.suggestedFilename()).toMatch(
+      /^bao-cao-ky-thue-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.zip$/,
+    );
+    await expect(page.getByText("Đã tải báo cáo kỳ thuế")).toBeVisible({ timeout: 60_000 });
+
+    const zipPath = await download.path();
+    expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();
+    const bytes = readFileSync(zipPath as string);
+    expect([bytes[0], bytes[1]], "phải là ZIP thật").toEqual([0x50, 0x4b]);
+
+    // Tên file nằm nguyên trong header của ZIP (nén chỉ áp cho nội dung) → soi
+    // được danh mục mà không cần thư viện giải ZIP.
+    const raw = bytes.toString("latin1");
+    for (const path of [
+      "CHU-THICH.txt",
+      "to-khai/",
+      "so-ke-toan/",
+      "hoa-don/pdf/",
+      "hoa-don/xml/",
+      "sao-luu/hkd.db",
+    ]) {
+      expect(raw, `ZIP phải chứa ${path}`).toContain(path);
+    }
+    // Đủ 7 mẫu sổ TT 152 — thiếu một mẫu là hồ sơ thiếu sổ.
+    for (const book of ["S1a", "S2a", "S2b", "S2c", "S2d", "S2e", "S3a"]) {
+      expect(raw, `ZIP phải chứa sổ ${book}`).toContain(`so-ke-toan/${book}-`);
+    }
+    expect(bytes.length, "không được ZIP rỗng").toBeGreaterThan(5_000);
+  },
+);
+
 /**
  * Nhóm hộ để khác với doanh thu thực tế thì phải cảnh báo ở cả hai nơi người
  * dùng nhìn thấy: hồ sơ HKD (nơi sửa) và thẻ tổng hợp thuế (nơi đọc số liệu).

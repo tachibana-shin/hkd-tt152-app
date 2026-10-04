@@ -613,8 +613,10 @@ pub(crate) struct AttendanceWorkDayRow {
 
 // ─── TỜ KHAI THUẾ THEO KỲ (sheet To Khai Thue) ───
 
-/// Dữ liệu gộp thô được query từ DB (trước khi tính số thuế phải nộp)
-#[derive(sqlx::FromRow)]
+/// Dữ liệu gộp thô được query từ DB (trước khi tính số thuế phải nộp).
+/// Kèm `Serialize` vì màn kê khai theo mẫu (`get_revenue_by_industry`) trả
+/// thẳng các dòng này cho frontend — ở đó chỉ cần doanh thu, không cần số thuế.
+#[derive(sqlx::FromRow, serde::Serialize)]
 pub(crate) struct TaxAgg {
     pub(crate) industry_code: String,
     pub(crate) industry_name: String,

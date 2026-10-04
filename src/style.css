@@ -133,3 +133,23 @@ body {
 .p-datatable-table-container {
   overflow-x: auto;
 }
+
+/* ─── In tờ khai siêu chuẩn (TaxEntryForm) ───
+   Bản in nằm trong <Teleport to="body"> nên là con trực tiếp của <body>: khi bấm
+   "In" component thêm class `print-tax-entry` cho <body>, ta ẩn mọi phần còn lại
+   và chỉ giữ `.tax-entry-print` — in ra đúng tờ khai chứ không in cả giao diện.
+   Rule này phải đặt ở file global (không phải scoped) vì `#app` không mang
+   data-v-* của component nên CSS scoped sẽ không bao giờ khớp vào nó. */
+.tax-entry-print {
+  display: none;
+}
+
+@media print {
+  body.print-tax-entry > *:not(.tax-entry-print) {
+    display: none !important;
+  }
+
+  body.print-tax-entry .tax-entry-print {
+    display: block !important;
+  }
+}
