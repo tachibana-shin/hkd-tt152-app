@@ -171,6 +171,21 @@ impl InvoiceKind {
         }
     }
 
+    /// Suy loại hóa đơn **từ ký hiệu** — dùng cho hóa đơn BÁN RA của app vì
+    /// hóa đơn nội bộ không lưu loại (khác hóa đơn mua: `portal_kind` lấy
+    /// thẳng từ cổng).
+    ///
+    /// Ký hiệu HĐ máy tính tiền bắt buộc chứa chữ `CG` (vd `01CGKPTT`,
+    /// `01/2025/CGKPTT`) — đúng cách trang tra cứu của cổng chia 2 tab; HĐ điện
+    /// tử dùng mẫu `1C26T7DH`, `A26GTGK`… nên không có `CG`.
+    pub(crate) fn from_symbol(khhdon: &str) -> Self {
+        if khhdon.to_ascii_uppercase().contains("CG") {
+            Self::CashRegister
+        } else {
+            Self::Regular
+        }
+    }
+
     /// Đọc lại từ mã máy; giá trị lạ → `Err`.
     pub(crate) fn parse(s: &str) -> Result<Self, String> {
         match s.trim() {
@@ -906,6 +921,28 @@ mod tests {
             r.headers.contains_key("request-id"),
             "thiếu anti-bot request-id"
         );
+    }
+
+    #[test]
+    fn kind_from_symbol_reads_the_cg_marker() {
+        // Ký hiệu HĐ máy tính tiền bắt buộc chứa chữ CG (đúng cách cổng chia 2
+        // tab tra cứu) — hóa đơn điện tử dùng mẫu 1C26T7DH, A26GTGK… nên không.
+        assert_eq!(
+            InvoiceKind::from_symbol("01CGKPTT"),
+            InvoiceKind::CashRegister
+        );
+        assert_eq!(
+            InvoiceKind::from_symbol("01/2025/CGKP01A"),
+            InvoiceKind::CashRegister
+        );
+        assert_eq!(
+            InvoiceKind::from_symbol("1c26t7dh"),
+            InvoiceKind::Regular,
+            "chữ thường vẫn nhận ra"
+        );
+        assert_eq!(InvoiceKind::from_symbol("1C26T7DH"), InvoiceKind::Regular);
+        // Ký hiệu trống/lạ không được panic — mặc định là HĐ điện tử.
+        assert_eq!(InvoiceKind::from_symbol(""), InvoiceKind::Regular);
     }
 
     #[tokio::test]

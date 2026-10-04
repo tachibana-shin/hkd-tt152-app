@@ -887,8 +887,11 @@ export const api = {
 
   // ─── LƯU FILE XML HÓA ĐƠN ĐIỆN TỬ ───
   /** Tải XML 1 hóa đơn từ cổng rồi ghi vào `…/profiles/<key>/hddt_xml/`.
-   *  `direction` = "sold" | "purchase", `kind` = "regular" | "cash-register"
-   *  (mặc định "sold"/"regular" nếu bỏ trống). Đã lưu rồi → `already: true`. */
+   *  `direction` = "sold" | "purchase", `kind` = "regular" | "cash-register".
+   *  Truyền `kind` rỗng → backend suy từ ký hiệu (chứ `CG` = máy tính tiền) —
+   *  nút "Tải XML" ở chi tiết hóa đơn không biết hộ dùng loại nào. Web mode
+   *  bắt buộc mọi khoá có mặt trong JSON nên không được bỏ trống khoá này.
+   *  Đã lưu rồi → `already: true`. */
   hddtSaveXml: async (args: {
     direction?: "sold" | "purchase";
     kind?: "regular" | "cash-register";
@@ -901,7 +904,7 @@ export const api = {
     parse<HddtSaveXmlResult>(
       await call<string>("hddt_save_xml", {
         direction: args.direction ?? "sold",
-        kind: args.kind ?? "regular",
+        kind: args.kind ?? "",
         nbmst: args.nbmst,
         khmshdon: args.khmshdon,
         khhdon: args.khhdon,

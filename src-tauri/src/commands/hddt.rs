@@ -919,9 +919,16 @@ pub(crate) async fn hddt_save_xml(
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let (client, token) = portal_client(&state).await?;
+    // Không truyền `kind` (nút "Tải XML" ở chi tiết hóa đơn không biết hộ dùng
+    // HĐ điện tử hay máy tính tiền) → suy từ ký hiệu: máy tính tiền bắt buộc
+    // chứa chữ `CG`. Truyền sai thì cổng trả 404 chứ không tự đoán lại.
+    let kind = match kind.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => crate::hddt::InvoiceKind::parse(s)?,
+        None => crate::hddt::InvoiceKind::from_symbol(&khhdon),
+    };
     let key = crate::hddt::XmlInvoiceKey {
         direction: crate::hddt::InvoiceDirection::parse(direction.as_deref().unwrap_or(""))?,
-        kind: crate::hddt::InvoiceKind::parse(kind.as_deref().unwrap_or(""))?,
+        kind,
         nbmst: nbmst.trim().to_string(),
         khmshdon: khmshdon.unwrap_or(0),
         khhdon: khhdon.trim().to_string(),

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BASE_URL, MOCK_PORTAL_URL } from "./constants";
 import { ADMIN, seedApp } from "./helpers";
@@ -3133,6 +3133,113 @@ test("Tờ khai 01/CNKD: đủ 6 dòng cố định, ô sửa tay giữ qua tả
   await expect(page.getByTestId("tax-entry-table")).toHaveCount(0);
   await toggle.click();
   await expect(page.getByTestId("tax-entry-table")).toBeVisible();
+});
+
+/**
+ * Quy định lưu XML HĐĐT: app **không** tự tải ngay lúc gán số HĐĐT (sau khi ký,
+ * cổng còn cache nên trang tra cứu chưa trả hồ sơ gốc) → nút "Tải XML" ở chi
+ * tiết hóa đơn là nơi bấm tải. Phải hiện rõ "chưa tải / đã lưu" để biết hồ sơ
+ * đã đủ file XML chưa, và file phải nằm thật trong CSDL + thư mục hồ sơ.
+ */
+test("Chi tiết hóa đơn: nút Tải XML lưu file XML hóa đơn bán ra", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Phiên cổng (mock) — thiếu thì nút chỉ báo chưa đăng nhập nên không tải được.
+  // Dùng helper chung: tự cấu hình base_url về mock portal rồi đăng nhập (cấu
+  // hình chưa có khi chạy riêng test này).
+  await loginPortal(request);
+
+  // Tồn cho SP001 — chạy riêng test này thì không có tồn của test trước.
+  const stock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-16",
+      voucher_no: "PN-XML01",
+      description: "Nhập tồn cho test Tải XML",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 5, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stock.ok(), `save_inbound: ${await stock.text()}`).toBe(true);
+
+  // Hóa đơn đã gán số HĐĐT — đúng trường hợp nút hiện ra.
+  const number = "HD9510";
+  const shdon = "00001234";
+  const made = await request.post("/api/save_invoice", {
+    data: {
+      number,
+      date: "2026-09-18",
+      customer: "Khách Tải XML",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(made.ok(), `save_invoice: ${await made.text()}`).toBe(true);
+  const list = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    id: number;
+    number: string;
+  }>;
+  const id = list.find((i) => i.number === number)?.id;
+  expect(id, `vừa lập ${number}`).toBeTruthy();
+  const linked = await request.post("/api/link_hddt", {
+    data: {
+      invoiceId: id,
+      hddtNo: shdon,
+      hddtSymbol: "1C26TT152",
+      hddtDate: "2026-09-18",
+    },
+  });
+  expect(linked.ok(), `link_hddt: ${await linked.text()}`).toBe(true);
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByPlaceholder("Tìm kiếm…").first().fill(number);
+  const row = page.locator("tr", { has: page.getByText(number, { exact: true }) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.getByRole("button", { name: number }).click();
+
+  const xmlRow = page.getByTestId("invoice-xml-row");
+  await expect(xmlRow).toBeVisible();
+  await expect(xmlRow.getByText(/chưa tải/)).toBeVisible();
+  await page.getByTestId("download-invoice-xml").click();
+  await expect(xmlRow.getByText(/đã lưu \(/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Đã tải file XML")).toBeVisible();
+
+  // Soi thẳng CSDL + thư mục hồ sơ — giao diện "đã lưu" mà không có file là hồ
+  // sơ vẫn thiếu, không chấp nhận được.
+  const xmlRows = (await (await request.post("/api/hddt_list_xml", { data: {} })).json()) as Array<{
+    direction: string;
+    khhdon: string;
+    shdon: string;
+    file_name: string;
+  }>;
+  const saved = xmlRows.find((r) => r.direction === "sold" && r.shdon === shdon);
+  expect(saved, "file XML phải nằm trong CSDL hồ sơ").toBeTruthy();
+  expect(saved!.khhdon, "ghi đúng ký hiệu HĐ").toBe("1C26TT152");
+  const dataDir = readFileSync("/tmp/hkd-e2e-dir", "utf8").trim();
+  expect(
+    existsSync(`${dataDir}/profiles/default/hddt_xml/${saved!.file_name}`),
+    "file XML phải nằm trong thư mục hồ sơ",
+  ).toBe(true);
 });
 
 /**

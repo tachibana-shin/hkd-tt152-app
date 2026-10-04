@@ -1,17 +1,27 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
+import { useBusinessStore } from "@/stores/business";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
-import type { Invoice, InvoiceDuplicateNumber, InvoiceItem, InvoiceReplaceResult } from "@/types";
+import type {
+  HddtSavedXml,
+  Invoice,
+  InvoiceDuplicateNumber,
+  InvoiceItem,
+  InvoiceReplaceResult,
+} from "@/types";
 import { api } from "@/db";
 import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
+import { usePortalSession } from "@/composables/usePortalSession";
 
 const auth = useAuthStore();
+const business = useBusinessStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
+const portal = usePortalSession();
 const { industryGroups } = storeToRefs(catalog);
 const { detail } = storeToRefs(invoiceStore);
 const toast = useToast();
@@ -178,6 +188,102 @@ async function afterStatusChange() {
 async function showDetail(inv: Invoice) {
   await invoiceStore.loadDetail(inv.id);
   detailDialog.value = true;
+  await loadDetailXml(inv);
+}
+
+// ─── File XML của hóa đơn này ───
+// Quy định bắt buộc lưu file XML HĐĐT. app không tự tải lúc gán số HĐĐT (sau
+// khi ký, cổng còn cache nên chưa có hồ sơ gốc) → để người dùng bấm tải ở đây
+// và lúc xuất báo cáo kỳ thuế tự tìm bù.
+const xmlSaving = ref(false);
+/** File XML đã lưu của hóa đơn đang xem (null = chưa tải). */
+const xmlFile = ref<HddtSavedXml | null>(null);
+
+/** Số hóa đơn + ký hiệu đã gán HĐĐT — thiếu thì không tra XML được. */
+const xmlNo = computed(() => ({
+  khhdon: (detail.value?.invoice?.e_invoice_symbol ?? "").trim(),
+  shdon: (detail.value?.invoice?.e_invoice_no ?? "").trim(),
+}));
+const canSaveXml = computed(() => !!xmlNo.value.khhdon && !!xmlNo.value.shdon);
+
+async function loadDetailXml(inv: Invoice) {
+  xmlFile.value = null;
+  const khhdon = (inv.e_invoice_symbol ?? "").trim();
+  const shdon = (inv.e_invoice_no ?? "").trim();
+  if (!khhdon || !shdon) return;
+  try {
+    const rows = await api.hddtListXml();
+    xmlFile.value =
+      rows.find((r) => r.direction === "sold" && r.khhdon === khhdon && r.shdon === shdon) ?? null;
+  } catch {
+    // Không đọc được danh sách thì coi như chưa có — nút vẫn hiện, tải lại vẫn được.
+    xmlFile.value = null;
+  }
+}
+
+async function downloadXml() {
+  const { khhdon, shdon } = xmlNo.value;
+  if (!khhdon || !shdon || xmlSaving.value) return;
+  const nbmst = (business.config?.tax_code ?? "").trim();
+  if (!nbmst) {
+    toast.add({
+      severity: "warn",
+      summary: "Chưa khai mã số thuế",
+      detail: "Mở hồ sơ hộ kinh doanh để nhập mã số thuế — thiếu thì cổng không tra XML được.",
+      life: 6000,
+    });
+    return;
+  }
+  xmlSaving.value = true;
+  try {
+    const result = await portal.ensureSession();
+    if (result === "need_manual") {
+      await portal.openManual();
+      toast.add({
+        severity: "warn",
+        summary: "Cần đăng nhập cổng HĐĐT",
+        detail: "Nhập mã captcha trong hộp thoại vừa mở rồi bấm Tải XML lần nữa.",
+        life: 6000,
+      });
+      return;
+    }
+    if (result !== "logged_in") {
+      toast.add({
+        severity: "warn",
+        summary: "Chưa đăng nhập cổng HĐĐT",
+        detail:
+          result === "not_configured"
+            ? "Chưa khai tài khoản cổng — vào mục Đồng bộ HĐĐT để cấu hình."
+            : "Đăng nhập cổng thất bại — thử lại sau.",
+        life: 6000,
+      });
+      return;
+    }
+    // Không truyền `kind` — backend suy từ ký hiệu (chứ `CG` = máy tính tiền).
+    const saved = await api.hddtSaveXml({
+      direction: "sold",
+      nbmst,
+      khmshdon: 0,
+      khhdon,
+      shdon,
+    });
+    if (detail.value?.invoice) await loadDetailXml(detail.value.invoice);
+    toast.add({
+      severity: "success",
+      summary: saved.already ? "File XML đã có từ trước" : "Đã tải file XML",
+      detail: `${khhdon} — ${shdon} → ${saved.file_name}`,
+      life: 4000,
+    });
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không tải được file XML",
+      detail: String(e),
+      life: 8000,
+    });
+  } finally {
+    xmlSaving.value = false;
+  }
 }
 
 // Số hóa đơn trùng: app chỉ BÁO, không tự sửa dữ liệu — người dùng tự xoá bản
@@ -461,6 +567,29 @@ useKeepAliveRefresh(reload);
       :show-action="false"
     >
       <template v-if="detail">
+        <!-- File XML của chính hóa đơn này — app không tự tải lúc gán số nên
+             để đây cho người dùng bấm khi cần (hoặc tự tìm khi xuất báo cáo). -->
+        <div
+          v-if="canSaveXml"
+          data-testid="invoice-xml-row"
+          class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800 px-3 py-2"
+        >
+          <span class="text-xs text-surface-600 dark:text-surface-300">
+            File XML HĐĐT:
+            <b :class="xmlFile ? 'text-emerald-600' : 'text-amber-600'">
+              {{ xmlFile ? `đã lưu (${xmlFile.file_name})` : "chưa tải" }}
+            </b>
+          </span>
+          <Button
+            :label="xmlFile ? 'Tải lại XML' : 'Tải XML'"
+            icon="pi pi-download"
+            size="small"
+            outlined
+            :loading="xmlSaving"
+            data-testid="download-invoice-xml"
+            @click="downloadXml"
+          />
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-4">
           <div>
             <span class="text-gray-500">Số HĐ:</span>

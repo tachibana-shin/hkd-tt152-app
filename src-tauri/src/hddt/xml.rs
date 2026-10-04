@@ -368,7 +368,14 @@ struct PendingXml {
 
 fn to_key(row: &PendingXml) -> Option<XmlInvoiceKey> {
     let direction = InvoiceDirection::parse(&row.direction).ok()?;
-    let kind = InvoiceKind::parse(&row.kind).ok()?;
+    // Không lưu loại hóa đơn → suy từ ký hiệu (chỉ hóa đơn bán ra mới rỗng;
+    // hóa đơn mua lấy `portal_kind` từ cổng). Nhầm loại là cổng trả 404 nên
+    // thà đoán đúng theo chữ `CG` còn hơn mặc định cả về `regular`.
+    let kind = if row.kind.trim().is_empty() {
+        InvoiceKind::from_symbol(&row.khhdon)
+    } else {
+        InvoiceKind::parse(&row.kind).ok()?
+    };
     let khmshdon = row.khmshdon.unwrap_or(0);
     // Thiếu mã mẫu số thì endpoint export-xml vẫn nhận được (khác endpoint chi
     // tiết bắt buộc số) — giữ 0, cổng tự khớp theo 3 tham số còn lại.
