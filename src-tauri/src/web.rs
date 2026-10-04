@@ -602,7 +602,7 @@ pub async fn api_invoke(
             portal_id: String,
             detail: serde_json::Value
         ),
-        "hddt_sync_scan" => mx!(
+        "hddt_sync_scan" => mx_state_app!(
             commands::hddt::hddt_sync_scan,
             body,
             from: Option<String>,
@@ -636,7 +636,7 @@ pub async fn api_invoke(
         "render_invoice_pdf" => {
             mx!(commands::pdf::render_invoice_pdf, body, detail_json: String)
         }
-        "hddt_sync_import" => mx!(
+        "hddt_sync_import" => mx_state_app!(
             commands::hddt::hddt_sync_import,
             body,
             ids: Option<Vec<i64>>,
@@ -645,6 +645,19 @@ pub async fn api_invoke(
             debit_account: Option<String>,
             credit_account: Option<String>
         ),
+        // Tải file XML hóa đơn (nút tay) + danh sách file đã lưu.
+        "hddt_save_xml" => mx_state_app!(
+            commands::hddt::hddt_save_xml,
+            body,
+            direction: Option<String>,
+            kind: Option<String>,
+            nbmst: String,
+            khmshdon: Option<i64>,
+            khhdon: String,
+            shdon: String,
+            portal_id: Option<String>
+        ),
+        "hddt_list_xml" => mx!(commands::hddt::hddt_list_xml, body),
         "hddt_send_simulated" => mx!(
             commands::hddt::hddt_send_simulated,
             body,

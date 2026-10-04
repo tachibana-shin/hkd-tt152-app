@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_invoice_xml\n               (portal_id, direction, kind, nbmst, khmshdon, khhdon, shdon,\n                file_name, byte_size, source, saved_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n           ON CONFLICT (direction, kind, nbmst, khmshdon, khhdon, shdon)\n           DO UPDATE SET portal_id = excluded.portal_id,\n                         file_name = excluded.file_name,\n                         byte_size = excluded.byte_size,\n                         source = excluded.source,\n                         saved_at = excluded.saved_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "94a6b4e3adfb3fd6cf754891718460900af01e9ccb33f1134081c20d8036cb4e"
+}

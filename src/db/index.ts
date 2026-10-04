@@ -94,6 +94,8 @@ import type {
   HddtSyncPreview,
   HddtSyncImport,
   HddtSyncClearCache,
+  HddtSaveXmlResult,
+  HddtSavedXml,
   InvoiceEvent,
   InvoiceExportPack,
   InvoiceQueueItem,
@@ -877,6 +879,35 @@ export const api = {
 
   /** Sinh PDF hóa đơn từ `detail_json` (backend dựng HTML + render) — base64. */
   renderInvoicePdf: (detailJson: string) => call<string>("render_invoice_pdf", { detailJson }),
+
+  // ─── LƯU FILE XML HÓA ĐƠN ĐIỆN TỬ ───
+  /** Tải XML 1 hóa đơn từ cổng rồi ghi vào `…/profiles/<key>/hddt_xml/`.
+   *  `direction` = "sold" | "purchase", `kind` = "regular" | "cash-register"
+   *  (mặc định "sold"/"regular" nếu bỏ trống). Đã lưu rồi → `already: true`. */
+  hddtSaveXml: async (args: {
+    direction?: "sold" | "purchase";
+    kind?: "regular" | "cash-register";
+    nbmst: string;
+    khmshdon: number;
+    khhdon: string;
+    shdon: string;
+    portalId?: string;
+  }): Promise<HddtSaveXmlResult> =>
+    parse<HddtSaveXmlResult>(
+      await call<string>("hddt_save_xml", {
+        direction: args.direction ?? "sold",
+        kind: args.kind ?? "regular",
+        nbmst: args.nbmst,
+        khmshdon: args.khmshdon,
+        khhdon: args.khhdon,
+        shdon: args.shdon,
+        portal_id: args.portalId ?? null,
+      }),
+    ),
+
+  /** Toàn bộ file XML đã lưu — tra "hóa đơn nào đã có file" cho bảng UI. */
+  hddtListXml: async (): Promise<HddtSavedXml[]> =>
+    parse<HddtSavedXml[]>(await call<string>("hddt_list_xml", {})),
 
   /** `detail_json` dựng từ hóa đơn nội bộ — để xem trước PDF ở Chờ xuất HĐĐT. */
   invoiceDraftDetail: (id: number) => call<string>("invoice_draft_detail", { id }),

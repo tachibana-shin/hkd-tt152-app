@@ -321,11 +321,74 @@ async function openInvoicePdf(row: HddtInvoiceRow) {
   }
 }
 
+// ─── Lưu file XML hóa đơn điện tử ───
+// Quy định người bán/người mua phải lưu file XML. Màn này là nơi duy nhất thấy
+// hóa đơn BÁN RA (chưa nằm trong DB) nên nút "Tải XML" ở đây phục vụ cả 2 chiều.
+const xmlSaved = ref<Record<string, string>>({});
+/** Các dòng đang tải — bấm nhiều dòng cùng lúc không bị bỏ qua âm thầm. */
+const xmlSaving = ref<Set<string>>(new Set());
+
+function rowXmlKey(row: HddtInvoiceRow) {
+  return [
+    searchDirection.value,
+    searchKind.value,
+    String(row.nbmst ?? ""),
+    String(row.khhdon ?? ""),
+    String(row.shdon ?? ""),
+  ].join("|");
+}
+
+async function loadXmlIndex() {
+  try {
+    const rows = await api.hddtListXml();
+    const map: Record<string, string> = {};
+    for (const r of rows) {
+      map[[r.direction, r.kind, r.nbmst, r.khhdon, r.shdon].join("|")] = r.file_name;
+    }
+    xmlSaved.value = map;
+  } catch {
+    // Không có danh sách thì nút hiện "Tải XML" — không chặn màn tra cứu.
+    xmlSaved.value = {};
+  }
+}
+
+async function saveRowXml(row: HddtInvoiceRow) {
+  const key = rowXmlKey(row);
+  if (xmlSaving.value.has(key)) return;
+  xmlSaving.value.add(key);
+  xmlSaving.value = new Set(xmlSaving.value);
+  try {
+    const saved = await api.hddtSaveXml({
+      direction: searchDirection.value,
+      kind: searchKind.value,
+      nbmst: String(row.nbmst ?? ""),
+      khmshdon: Number(row.khmshdon ?? 0),
+      khhdon: String(row.khhdon ?? ""),
+      shdon: String(row.shdon ?? ""),
+      portalId: row.id === undefined || row.id === null ? undefined : String(row.id),
+    });
+    xmlSaved.value = { ...xmlSaved.value, [key]: saved.file_name };
+    await loadXmlIndex();
+    toast.add({
+      severity: "success",
+      summary: saved.already ? "File XML đã có từ trước" : "Đã lưu file XML",
+      detail: `${row.khhdon ?? ""} ${row.shdon ?? ""} → ${saved.file_name}`.trim(),
+      life: 3500,
+    });
+  } catch (e) {
+    toastError("Không tải được file XML", e);
+  } finally {
+    xmlSaving.value.delete(key);
+    xmlSaving.value = new Set(xmlSaving.value);
+  }
+}
+
 // Bộ lọc khởi tạo ở trên (ô mặc định "bán ra × máy tính tiền"); chỉ cần đọc
 // trạng thái phiên cổng — không có thao tác ref/DOM nên gọi thẳng ở root.
 // App đã đảm bảo phiên lúc khởi động; gọi thêm ở đây để màn này tự đăng nhập
 // nếu phiên đã mất (đăng xuất, token hết hạn) và mở popup nhập captcha tay.
 void (async () => {
+  await loadXmlIndex();
   const result = await portal.ensureSession();
   if (result === "need_manual") await portal.openManual();
   else if (result === "logged_in") portal.startHeartbeat();
@@ -551,18 +614,37 @@ void (async () => {
             <Tag v-else :value="ttxlyLabel(data)" severity="secondary" />
           </template>
         </Column>
-        <Column header="" :style="{ width: '4rem' }">
+        <Column header="" :style="{ width: '7rem' }">
           <template #body="{ data }">
-            <Button
-              icon="pi pi-file-pdf"
-              text
-              size="small"
-              class="!p-1 text-gray-500"
-              :aria-label="`Xem PDF hóa đơn ${data.khhdon ?? ''} ${data.shdon ?? ''}`"
-              v-tooltip="'Xem PDF hóa đơn'"
-              :loading="pdfLoadingId === String(data.id ?? '')"
-              @click="openInvoicePdf(data)"
-            />
+            <span class="inline-flex items-center gap-1">
+              <Button
+                icon="pi pi-file-pdf"
+                text
+                size="small"
+                class="!p-1 text-gray-500"
+                :aria-label="`Xem PDF hóa đơn ${data.khhdon ?? ''} ${data.shdon ?? ''}`"
+                v-tooltip="'Xem PDF hóa đơn'"
+                :loading="pdfLoadingId === String(data.id ?? '')"
+                @click="openInvoicePdf(data)"
+              />
+              <!-- Lưu file XML: hiện dấu tick khi đã có trong thư mục hồ sơ. -->
+              <Button
+                v-if="!xmlSaved[rowXmlKey(data)]"
+                icon="pi pi-download"
+                text
+                size="small"
+                class="!p-1 text-gray-500"
+                :aria-label="`Tải file XML hóa đơn ${data.khhdon ?? ''} ${data.shdon ?? ''}`"
+                v-tooltip="'Tải file XML'"
+                :loading="xmlSaving.has(rowXmlKey(data))"
+                @click="saveRowXml(data)"
+              />
+              <i
+                v-else
+                class="pi pi-check-circle cursor-default text-emerald-600"
+                v-tooltip="`Đã lưu: ${xmlSaved[rowXmlKey(data)]}`"
+              />
+            </span>
           </template>
         </Column>
       </AppDataTable>

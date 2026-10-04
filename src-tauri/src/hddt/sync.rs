@@ -975,6 +975,8 @@ pub(crate) struct PreviewRow {
     pub(crate) nbten: String,
     pub(crate) khhdon: String,
     pub(crate) shdon: String,
+    /// Mã mẫu số — cần cho nút "Tải XML" từng dòng (endpoint export-xml).
+    pub(crate) khmshdon: i64,
     pub(crate) portal_kind: String,
     pub(crate) status: String,
     pub(crate) skip_reason: String,
@@ -1014,15 +1016,16 @@ pub(crate) async fn preview(
     // `id = 0` (không có hành động) để không lẫn id với dòng cache.
     let rows: Vec<PreviewRow> = sqlx::query_as!(
         PreviewRow,
-        "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon, portal_kind,
+        "SELECT id, portal_id, posting_date, nbmst, nbten, khhdon, shdon,
+                COALESCE(khmshdon, 0) AS khmshdon, portal_kind,
                 status, skip_reason, line_count, new_product_count,
                 tgtcthue, tgtthue, ttcktmai, tgtttbso, voucher_no, detail_error
            FROM hddt_purchase_invoice
           WHERE (? = '' OR posting_date >= ?) AND (? = '' OR posting_date <= ?)
          UNION ALL
          SELECT 0, hi.portal_id, hi.posting_date, hi.nbmst, hi.nbten, hi.khhdon, hi.shdon,
-                hi.portal_kind, 'imported', '', hi.line_count, hi.new_product_count,
-                hi.tgtcthue, hi.tgtthue, hi.ttcktmai, hi.tgtttbso,
+                COALESCE(hi.khmshdon, 0), hi.portal_kind, 'imported', '', hi.line_count,
+                hi.new_product_count, hi.tgtcthue, hi.tgtthue, hi.ttcktmai, hi.tgtttbso,
                 COALESCE(iv.voucher_no, ''), ''
            FROM hddt_imported_invoice hi
            LEFT JOIN inbound_voucher iv ON iv.id = hi.inbound_voucher_id

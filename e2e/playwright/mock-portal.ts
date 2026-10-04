@@ -24,6 +24,12 @@ const CAPTCHA_SVG = readFileSync(
   "utf8",
 );
 
+/** ZIP `invoice.xml` + `invoice.html` — đúng cấu trúc endpoint `export-xml`
+ *  của cổng thật (đối chiếu 04/10/2026) để test lưu file XML offline. */
+const XML_ZIP = readFileSync(
+  fileURLToPath(new URL("../fixtures/invoice-xml.zip", import.meta.url)),
+);
+
 /** Dòng hóa đơn trong danh sách (khớp tên field của cổng). */
 const LIST_ROW = {
   id: "99999999-8888-7777-6666-555555555555",
@@ -135,6 +141,14 @@ const server = createServer((req, res) => {
       });
     }
     return json(res, 200, DETAIL);
+  }
+  if (path.endsWith("/invoices/export-xml")) {
+    // Trả ZIP binary (không phải JSON) — đúng hành vi cổng thật.
+    res.writeHead(200, {
+      "Content-Type": "application/zip",
+      "Content-Length": XML_ZIP.length,
+    });
+    return res.end(XML_ZIP);
   }
   if (path.endsWith("/invoices/sold") || path.endsWith("/invoices/purchase")) {
     return json(res, 200, { datas: [LIST_ROW], state: "", total: 1, time: 12 });

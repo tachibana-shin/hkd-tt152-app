@@ -1076,6 +1076,8 @@ export interface HddtSyncScanSummary {
   details_retried: number;
   /** Đã quét hôm nay (luôn quét lại, không cache). */
   days_today: number;
+  /** File XML hóa đơn tự động lưu cùng lượt quét (best effort). */
+  xml?: HddtXmlFill;
 }
 
 /** 1 dòng hóa đơn mua trong bảng xem trước (đọc từ cache, không gọi cổng). */
@@ -1087,6 +1089,8 @@ export interface HddtSyncRow {
   nbten: string;
   khhdon: string;
   shdon: string;
+  /** Mã mẫu số — cần cho nút "Tải XML" (endpoint export-xml). */
+  khmshdon: number;
   /** regular = hóa đơn điện tử, cash-register = máy tính tiền. */
   portal_kind: string;
   /** pending = chờ nhập kho · imported = đã có phiếu · manual = cần xử lý. */
@@ -1129,6 +1133,48 @@ export interface HddtSyncImport {
   imported: number;
   failed: number;
   results: HddtSyncImportResult[];
+  /** File XML hóa đơn tự động lưu trước lúc nhập (best effort). */
+  xml?: HddtXmlFill;
+}
+
+// ─── Lưu file XML hóa đơn điện tử (quy định lưu trữ HĐĐT) ───
+
+/** Số liệu tự động lưu XML chạy cùng lúc quét/nhập (best effort — lỗi từng
+ *  hóa đơn không làm hỏng luồng chính, chỉ báo ra UI). */
+export interface HddtXmlFill {
+  /** Đã có file từ trước — lượt này không đụng tới. */
+  skipped: number;
+  /** Tải + lưu mới trong lượt này. */
+  saved: number;
+  /** Lỗi (cổng chưa có hồ sơ gốc, hết phiên, mạng…). */
+  failed: number;
+  /** Lỗi đầu tiên — dùng cho tin nhắn cảnh báo. */
+  first_error: string;
+}
+
+/** Kết quả lệnh "Tải XML" 1 hóa đơn. */
+export interface HddtSaveXmlResult {
+  /** Tên file trong `…/profiles/<key>/hddt_xml/`. */
+  file_name: string;
+  byte_size: number;
+  /** true = đã lưu từ trước → lượt này không tải lại. */
+  already: boolean;
+}
+
+/** 1 file XML đã lưu (dòng trả từ `hddt_list_xml`). */
+export interface HddtSavedXml {
+  portal_id: string;
+  direction: "sold" | "purchase";
+  kind: "regular" | "cash-register";
+  nbmst: string;
+  khmshdon: number;
+  khhdon: string;
+  shdon: string;
+  file_name: string;
+  byte_size: number;
+  /** auto = tải lúc quét/nhập · manual = người dùng bấm nút. */
+  source: string;
+  saved_at: string;
 }
 
 /** Kết quả xoá cache đồng bộ. */

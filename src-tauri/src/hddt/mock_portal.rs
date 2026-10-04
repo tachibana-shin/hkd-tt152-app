@@ -199,6 +199,14 @@ async fn handle(
         .await;
     }
 
+    // `GET …/invoices/export-xml` trả ZIP binary (không phải JSON) — mock trả
+    // đúng form để test lưu file XML hóa đơn offline. Entry `invoice.xml` đúng
+    // tên cổng thật đặt (đối chiếu 04/10/2026 với 3 file tải live).
+    if path.ends_with("/invoices/export-xml") {
+        let zip = mock_xml_zip();
+        return write_response_bytes(&mut socket, 200, "application/zip", &zip).await;
+    }
+
     let body = match path.as_str() {
         "/api/captcha" => serde_json::json!({
             "key": "mock-captcha-key",
@@ -266,6 +274,17 @@ async fn write_response(
     content_type: &str,
     body: &str,
 ) -> std::io::Result<()> {
+    write_response_bytes(socket, status, content_type, body.as_bytes()).await
+}
+
+/// Response với thân là **byte thô** (ZIP của endpoint `export-xml` — portal
+/// không trả JSON nên đọc body như text sẽ hỏng cờ PK).
+async fn write_response_bytes(
+    socket: &mut tokio::net::TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
     use tokio::io::AsyncWriteExt;
     let reason = if status == 429 {
         "Too Many Requests"
@@ -277,8 +296,25 @@ async fn write_response(
         body.len()
     );
     socket.write_all(head.as_bytes()).await?;
-    socket.write_all(body.as_bytes()).await?;
+    socket.write_all(body).await?;
     socket.flush().await
+}
+
+/// ZIP mẫu cho endpoint `export-xml`: đúng cấu trúc cổng thật (đã đối chiếu
+/// 3 file live 04/10/2026 — `invoice.xml` + `invoice.html` + ảnh).
+fn mock_xml_zip() -> Vec<u8> {
+    use std::io::Write;
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let _ = w.start_file("invoice.xml", opts);
+    let _ = w.write_all(
+        b"<HDon><DLHDon><TTChung><NBan>MST:0100000000</NBan><SHDon>0001</SHDon>\
+          <KHMaHDon>C26MOCK</KHMaHDon></TTChung></DLHDen></HDon>",
+    );
+    let _ = w.start_file("invoice.html", opts);
+    let _ = w.write_all(b"<html><body>Invoice mock</body></html>");
+    w.finish().map(|c| c.into_inner()).unwrap_or_default()
 }
 
 /// Một dòng hóa đơn danh sách, đúng tên field của cổng (chỉ giữ field app dùng).

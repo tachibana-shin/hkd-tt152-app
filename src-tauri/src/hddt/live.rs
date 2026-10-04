@@ -252,6 +252,118 @@ mod live_tests {
         }
     }
 
+    /// Tải XML 1 hóa đơn thật từ cổng — xác nhận `…/invoices/export-xml` trả
+    /// về ZIP và bên trong có file XML.
+    /// Run with: cd src-tauri && cargo test live_export_xml -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "cần ../info.txt + portal live"]
+    async fn live_export_xml() {
+        use crate::hddt::{InvoiceDirection, InvoiceKind, InvoiceQuery};
+        use std::fs;
+
+        if !fs::metadata("../info.txt").is_ok() {
+            eprintln!("⚠️ skipped — ../info.txt không có");
+            return;
+        }
+        let txt = fs::read_to_string("../info.txt").expect("không đọc được info.txt");
+        let pick = |k: &str| {
+            txt.lines()
+                .filter_map(|l| l.split_once('='))
+                .find(|(a, _)| a.trim() == k)
+                .map(|(_, v)| v.trim().to_string())
+        };
+        let client = HddtClient::new(
+            &pick("USERNAME").expect("thiếu USERNAME"),
+            &pick("PASSWORD").expect("thiếu PASSWORD"),
+            None,
+        )
+        .expect("tạo client thất bại");
+        let login = client
+            .login_with_solver(&GlyphTemplateSolver, 3)
+            .await
+            .expect("login thất bại");
+        eprintln!("✅ login OK");
+
+        let to = chrono::Local::now();
+        let from = to - chrono::Duration::days(30);
+        let fmt = |d: chrono::DateTime<chrono::Local>| d.format("%d/%m/%Y").to_string();
+        let (from_s, to_s) = (fmt(from), fmt(to));
+
+        for (dir, kind) in [
+            (InvoiceDirection::Sold, InvoiceKind::Regular),
+            (InvoiceDirection::Sold, InvoiceKind::CashRegister),
+            (InvoiceDirection::Purchase, InvoiceKind::Regular),
+            (InvoiceDirection::Purchase, InvoiceKind::CashRegister),
+        ] {
+            let list = client
+                .query_invoices(
+                    &login.token,
+                    &InvoiceQuery {
+                        direction: dir,
+                        kind,
+                        size: 3,
+                        from: Some(from_s.clone()),
+                        to: Some(to_s.clone()),
+                        ttxly: Some("-1".into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap_or_else(|e| panic!("{dir:?}/{kind:?} thất bại: {e}"));
+            let Some(row) = list.datas.first() else {
+                eprintln!("── {dir:?}×{kind:?}: không có hóa đơn");
+                continue;
+            };
+            let g = |k: &str| {
+                row.get(k)
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => s.trim().to_string(),
+                        serde_json::Value::Number(n) => n.to_string(),
+                        serde_json::Value::Null => String::new(),
+                        other => other.to_string(),
+                    })
+                    .unwrap_or_default()
+            };
+            eprintln!(
+                "── {dir:?}×{kind:?}: {} {} / {} (hsgoc={:?})",
+                g("nbmst"),
+                g("khhdon"),
+                g("shdon"),
+                g("hsgoc")
+            );
+            let key = crate::hddt::xml::XmlInvoiceKey {
+                direction: dir,
+                kind,
+                nbmst: g("nbmst"),
+                khmshdon: g("khmshdon").parse().unwrap_or(0),
+                khhdon: g("khhdon"),
+                shdon: g("shdon"),
+            };
+            match client.export_invoice_xml(&login.token, &key).await {
+                Ok(bytes) => {
+                    let path = format!(
+                        "/tmp/opencode/xml_{}_{}.zip",
+                        match dir {
+                            InvoiceDirection::Sold => "sold",
+                            InvoiceDirection::Purchase => "purchase",
+                        },
+                        match kind {
+                            InvoiceKind::Regular => "regular",
+                            InvoiceKind::CashRegister => "sco",
+                        }
+                    );
+                    fs::write(&path, &bytes).expect("ghi file lỗi");
+                    eprintln!(
+                        "   ✅ {} bytes → {path} (head={:?})",
+                        bytes.len(),
+                        &bytes[..bytes.len().min(16)]
+                    );
+                }
+                Err(e) => eprintln!("   ❌ {e}"),
+            }
+        }
+    }
+
     /// Fetch một captcha tươi và solve — dùng để điền vào form đăng nhập của
     /// Chrome (browser-side login để bắt request thật). In ra `KEY<TAB>ANSWER`.
     /// Run with: cd src-tauri && cargo test captcha_for_browser -- --ignored --nocapture

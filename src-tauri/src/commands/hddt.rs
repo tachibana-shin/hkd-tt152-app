@@ -571,6 +571,17 @@ async fn portal_client(state: &State<'_, AppState>) -> Result<(HddtClient, Strin
     Ok((client, session.token))
 }
 
+/// Thư mục `hddt_xml/` của hồ sơ đang mở (file XML sống cùng DB nên đi theo
+/// hồ sơ khi đổi/backup).
+fn xml_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let db = crate::commands::profile::active_db_path(app)?;
+    let profile = db
+        .parent()
+        .ok_or_else(|| "Đường dẫn hồ sơ không hợp lệ".to_string())?
+        .to_path_buf();
+    Ok(crate::hddt::xml_dir_under(&profile))
+}
+
 fn parse_kinds(kinds: Option<String>) -> Vec<InvoiceKind> {
     let raw = kinds.unwrap_or_default();
     let list: Vec<InvoiceKind> = raw
@@ -595,6 +606,7 @@ fn parse_kinds(kinds: Option<String>) -> Vec<InvoiceKind> {
 #[tauri::command]
 pub(crate) async fn hddt_sync_scan(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     from: Option<String>,
     to: Option<String>,
     kinds: Option<String>,
@@ -611,9 +623,14 @@ pub(crate) async fn hddt_sync_scan(
         &parse_kinds(kinds),
     )
     .await?;
+    // Tự động lưu file XML cho hóa đơn mới (quy định lưu trữ HĐĐT). Lỗi từng
+    // hóa đơn không làm hỏng lượt quét — cộng vào `xml` để UI báo.
+    let xml = crate::hddt::fill_missing_after_scan(&pool, &xml_dir(&app)?, &client, &token).await;
     drop(pool);
     audit(&state, "hddt_sync_scan", "hddt", "sync scan").await;
-    Ok(serde_json::to_string(&summary).unwrap_or_default())
+    let mut v = serde_json::to_value(&summary).unwrap_or_default();
+    v["xml"] = serde_json::to_value(&xml).unwrap_or_default();
+    Ok(v.to_string())
 }
 
 /// Xem trước kết quả trong cache (không gọi cổng) + cho phép thử lại các
@@ -645,6 +662,7 @@ pub(crate) async fn hddt_sync_preview(
 #[tauri::command]
 pub(crate) async fn hddt_sync_import(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     ids: Option<Vec<i64>>,
     warehouse_code: Option<String>,
     unit_code: Option<String>,
@@ -652,6 +670,7 @@ pub(crate) async fn hddt_sync_import(
     credit_account: Option<String>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
+    let import_ids: Vec<i64> = ids.clone().unwrap_or_default();
     let pool = state.pool.read().await;
     let targets: Vec<CachedInvoice> = if let Some(list) = ids.filter(|l| !l.is_empty()) {
         let mut out = Vec::new();
@@ -713,12 +732,30 @@ pub(crate) async fn hddt_sync_import(
         }
     }
     let ok_count = results.iter().filter(|r| r["ok"] == true).count();
-    let v = serde_json::json!({
+    let mut v = serde_json::json!({
         "imported": ok_count,
         "failed": results.len() - ok_count,
         "results": results,
     });
     drop(pool);
+
+    // Tự động lưu file XML **sau khi phiếu đã tạo** — tạo phiếu là việc chính,
+    // còn XML là việc lưu trữ nên không được chặn hay làm hỏng kết quả nhập.
+    // Chạy được cả với hóa đơn quét từ trước khi app có tính năng này (backfill);
+    // thiếu phiên cổng thì bỏ qua — nhập kho vẫn chạy offline được từ cache.
+    if let Ok((client, token)) = portal_client(&state).await {
+        let post = state.pool.read().await;
+        let out = crate::hddt::fill_missing_before_import(
+            &post,
+            &xml_dir(&app)?,
+            &client,
+            &token,
+            &import_ids,
+        )
+        .await;
+        drop(post);
+        v["xml"] = serde_json::to_value(&out).unwrap_or_default();
+    }
     audit(
         &state,
         "hddt_sync_import",
@@ -854,4 +891,70 @@ pub(crate) async fn hddt_invoice_detail(
     )
     .await;
     Ok(detail.to_string())
+}
+
+// ─── Lưu file XML hóa đơn điện tử (quy định lưu trữ HĐĐT) ───
+
+/// Tải XML 1 hóa đơn từ cổng rồi ghi vào `…/profiles/<key>/hddt_xml/`.
+///
+/// Dùng cho nút "Tải XML" từng dòng ở màn Tra cứu HĐĐT (bán ra lẫn mua vào)
+/// và màn Đồng bộ. Nếu file đã có từ trước thì trả `already: true` (không tải
+/// lại) — người dùng bấm hai lần vẫn chỉ có 1 file.
+///
+/// Danh sách tham số phẳng theo đúng tên field của lệnh (web mode nhận JSON
+/// từng khoá) — gom vào struct sẽ phá hợp đồng API với frontend.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub(crate) async fn hddt_save_xml(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    direction: Option<String>,
+    kind: Option<String>,
+    nbmst: String,
+    khmshdon: Option<i64>,
+    khhdon: String,
+    shdon: String,
+    portal_id: Option<String>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let (client, token) = portal_client(&state).await?;
+    let key = crate::hddt::XmlInvoiceKey {
+        direction: crate::hddt::InvoiceDirection::parse(direction.as_deref().unwrap_or(""))?,
+        kind: crate::hddt::InvoiceKind::parse(kind.as_deref().unwrap_or(""))?,
+        nbmst: nbmst.trim().to_string(),
+        khmshdon: khmshdon.unwrap_or(0),
+        khhdon: khhdon.trim().to_string(),
+        shdon: shdon.trim().to_string(),
+    };
+    if key.nbmst.is_empty() || key.khhdon.is_empty() {
+        return Err("Thiếu MST bán ra hoặc ký hiệu — không gọi được cổng xuất XML.".to_string());
+    }
+    let pool = state.pool.read().await;
+    let saved = crate::hddt::save_manual(
+        &pool,
+        &xml_dir(&app)?,
+        &client,
+        &token,
+        &key,
+        portal_id.as_deref().unwrap_or(""),
+    )
+    .await?;
+    drop(pool);
+    audit(
+        &state,
+        "hddt_save_xml",
+        "hddt",
+        &format!("{} {} {}", key.khhdon, key.shdon, saved.file_name),
+    )
+    .await;
+    Ok(serde_json::to_string(&saved).unwrap_or_default())
+}
+
+/// Danh sách file XML đã lưu — màn Tra cứu/Đồng bộ tra "dòng nào đã có file".
+#[tauri::command]
+pub(crate) async fn hddt_list_xml(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let rows = crate::hddt::list_saved(&pool).await?;
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
 }

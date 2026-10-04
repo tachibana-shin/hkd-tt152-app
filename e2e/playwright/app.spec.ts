@@ -2097,6 +2097,134 @@ test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả
   }
 });
 
+test("Tra cứu HĐĐT: tải file XML hóa đơn rồi báo đã lưu", async ({ page, request }) => {
+  test.skip(LIVE_PORTAL, "Test UI luôn trỏ mock portal — bỏ qua khi chạy cổng thật");
+  await ensureLoggedIn(page);
+  const login = await loginPortal(request);
+  test.skip(
+    login === null,
+    "Không lấy được phiên cổng HĐĐT (thiếu info.txt hoặc cổng bắt captcha) — bỏ qua",
+  );
+
+  await sidebarButton(page, "Tra cứu HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Tra cứu HĐĐT");
+  await page.getByRole("button", { name: "Tìm kiếm", exact: true }).click();
+  const table = page.locator(".p-datatable");
+  const firstRow = table.locator("tbody tr").first();
+  await expect(firstRow).toBeVisible({ timeout: 30_000 });
+
+  // Chưa có file → nút "Tải XML" hiện trên dòng.
+  const xmlBtn = firstRow.getByRole("button", { name: /Tải file XML hóa đơn/ });
+  await expect(xmlBtn).toBeVisible();
+  await xmlBtn.click();
+  await expect(page.getByText("Đã lưu file XML")).toBeVisible({ timeout: 20_000 });
+
+  // Sau khi lưu: cột hiện dấu tick + backend có bản ghi file trong hồ sơ.
+  await expect(firstRow.locator("i.pi-check-circle")).toBeVisible();
+  const list = await request.post("/api/hddt_list_xml", { data: {} });
+  expect(list.ok(), `hddt_list_xml failed ${list.status()}`).toBe(true);
+  const rows = (await list.json()) as Array<{
+    file_name: string;
+    byte_size: number;
+    direction: string;
+    kind: string;
+    nbmst: string;
+    khmshdon: number;
+    khhdon: string;
+    shdon: string;
+  }>;
+  expect(rows.length).toBeGreaterThan(0, "phải có ít nhất 1 file XML đã lưu");
+  expect(rows[0].byte_size).toBeGreaterThan(0);
+  expect(rows[0].direction === "sold" || rows[0].direction === "purchase").toBe(true);
+
+  // Gọi lại đúng hóa đơn đó → `already: true` (không tải lại) và không thêm bản ghi.
+  const again = await request.post("/api/hddt_save_xml", {
+    data: {
+      direction: rows[0].direction,
+      kind: rows[0].kind,
+      nbmst: rows[0].nbmst,
+      khmshdon: rows[0].khmshdon,
+      khhdon: rows[0].khhdon,
+      shdon: rows[0].shdon,
+      portal_id: null,
+    },
+  });
+  expect(again.ok(), `hddt_save_xml failed ${again.status()}: ${await again.text()}`).toBe(true);
+  expect((await again.json()).already).toBe(true, "lần 2 phải báo đã có sẵn");
+  const after = await request.post("/api/hddt_list_xml", { data: {} });
+  expect(((await after.json()) as unknown[]).length).toBe(
+    rows.length,
+    "bấm lại không được tạo thêm bản ghi",
+  );
+});
+
+test("Đồng bộ HĐ mua: cột File XML tải được file XML của hóa đơn trong cache", async ({
+  page,
+  request,
+}) => {
+  test.skip(LIVE_PORTAL, "Test UI luôn trỏ mock portal — bỏ qua khi chạy cổng thật");
+  await ensureLoggedIn(page);
+  const login = await loginPortal(request);
+  test.skip(
+    login === null,
+    "Không lấy được phiên cổng HĐĐT (thiếu info.txt hoặc cổng bắt captcha) — bỏ qua",
+  );
+
+  // Vào màn trước rồi mới seed + reload (reload sẽ quay về route hiện tại).
+  await sidebarButton(page, "Đồng bộ HĐĐT").click();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+
+  const seed = await request.post("/api/hddt_sync_test_seed", {
+    data: {
+      portal_id: "e2e-uuid-xml",
+      detail: {
+        hdhhdvu: [
+          {
+            stt: 1,
+            tchat: 1,
+            ten: "Hàng XML E2E",
+            dvtinh: "Cái",
+            mhhdvu: "xmlitem",
+            sluong: 1,
+            dgia: 100000,
+            thtien: 100000,
+            stckhau: 0,
+            ltsuat: "8%",
+            tsuat: 0.08,
+          },
+        ],
+      },
+    },
+  });
+  expect(seed.ok(), `seed hddt_sync_test_seed failed ${seed.status()}`).toBe(true);
+
+  await page.reload();
+  await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+
+  // Bảng có nhiều hóa đơn seed chung ký hiệu C26E2E → lấy dòng đầu tiên.
+  const row = page.locator("tr", { has: page.getByText("C26E2E") }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+
+  // Chưa có file → bấm "Tải XML"; lượt trước đã lưu (test khác chạy trước) thì
+  // bỏ qua bước bấm, phần assert dưới vẫn kiểm tra trạng thái.
+  const xmlBtn = row.getByRole("button", { name: /Tải file XML/ });
+  if (await xmlBtn.count()) await xmlBtn.click();
+  await expect(row.getByText("Đã lưu", { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  // Backend phải có bản ghi file XML chiều mua (không phụ thuộc thao tác bấm).
+  const list = await request.post("/api/hddt_list_xml", { data: {} });
+  expect(list.ok(), `hddt_list_xml failed ${list.status()}`).toBe(true);
+  const rows = (await list.json()) as Array<{
+    direction: string;
+    kind: string;
+    byte_size: number;
+  }>;
+  expect(
+    rows.some((r) => r.direction === "purchase" && r.kind === "regular" && r.byte_size > 0),
+    "phải có file XML hóa đơn mua đã lưu",
+  ).toBe(true);
+});
+
 test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đổi menu (KeepAlive)", async ({
   page,
 }) => {

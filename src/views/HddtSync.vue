@@ -48,6 +48,75 @@ const syncSummary = ref<HddtSyncPreview["summary"] | null>(null);
 const syncScanning = ref(false);
 const syncImporting = ref(false);
 const syncScanMsg = ref("");
+/** Tên file XML đã lưu theo khóa hóa đơn — để bảng hiện "Đã lưu/Tải lại". */
+const xmlSaved = ref<Record<string, string>>({});
+const savingXml = ref<Set<string>>(new Set());
+
+/** Khóa tra trạng thái XML — 4 tham số định danh hóa đơn (bỏ mã mẫu số vì
+ *  người dùng nhìn tên file theo ký hiệu + số). */
+function xmlKey(direction: string, kind: string, nbmst: string, khhdon: string, shdon: string) {
+  return [direction, kind, nbmst, khhdon, shdon].join("|");
+}
+
+/** Khóa XML của 1 dòng bảng Đồng bộ (chiều mua). */
+function rowXmlKey(row: HddtSyncRow) {
+  return xmlKey("purchase", row.portal_kind, row.nbmst, row.khhdon, row.shdon);
+}
+
+/** Tên file XML đã lưu (rỗng = chưa có). */
+function rowXmlSaved(row: HddtSyncRow) {
+  return xmlSaved.value[rowXmlKey(row)] ?? "";
+}
+
+/** Đang tải file XML của dòng này (tránh bấm 2 lần). */
+function rowXmlBusy(row: HddtSyncRow) {
+  return savingXml.value.has(rowXmlKey(row));
+}
+
+async function loadXmlIndex() {
+  try {
+    const rows = await api.hddtListXml();
+    const map: Record<string, string> = {};
+    for (const r of rows) {
+      map[xmlKey(r.direction, r.kind, r.nbmst, r.khhdon, r.shdon)] = r.file_name;
+    }
+    xmlSaved.value = map;
+  } catch {
+    // Không có danh sách thì bảng hiện "Tải XML" hết — không chặn luồng chính.
+    xmlSaved.value = {};
+  }
+}
+
+/** Nút "Tải XML" từng dòng — tải từ cổng rồi ghi vào thư mục hồ sơ. */
+async function saveRowXml(row: HddtSyncRow) {
+  const key = rowXmlKey(row);
+  if (savingXml.value.has(key)) return;
+  savingXml.value.add(key);
+  savingXml.value = new Set(savingXml.value);
+  try {
+    const saved = await api.hddtSaveXml({
+      direction: "purchase",
+      kind: row.portal_kind as "regular" | "cash-register",
+      nbmst: row.nbmst,
+      khmshdon: row.khmshdon,
+      khhdon: row.khhdon,
+      shdon: row.shdon,
+      portalId: row.portal_id,
+    });
+    xmlSaved.value = { ...xmlSaved.value, [key]: saved.file_name };
+    toast.add({
+      severity: "success",
+      summary: saved.already ? "File XML đã có từ trước" : "Đã lưu file XML",
+      detail: `${row.khhdon} ${row.shdon} → ${saved.file_name}`,
+      life: 3500,
+    });
+  } catch (e) {
+    toastError("Không tải được file XML", e);
+  } finally {
+    savingXml.value.delete(key);
+    savingXml.value = new Set(savingXml.value);
+  }
+}
 
 function syncIsoDate(d: Date | null) {
   if (!d) return undefined;
@@ -84,11 +153,21 @@ async function loadSyncPreview(retryFailed = false) {
     });
     syncRows.value = res.rows;
     syncSummary.value = res.summary;
+    await loadXmlIndex();
   } catch (e) {
     toastError("Lỗi tải danh sách hóa đơn", e);
   } finally {
     syncScanning.value = false;
   }
+}
+
+/** Mô tả số liệu tự động lưu XML kèm thông báo quét/nhập (nếu có). */
+function xmlFillText(f?: { saved: number; failed: number; first_error: string }) {
+  if (!f) return "";
+  if (f.saved === 0 && f.failed === 0) return " · XML đã lưu đủ";
+  let s = ` · lưu XML ${f.saved}`;
+  if (f.failed > 0) s += `, lỗi ${f.failed} (${f.first_error})`;
+  return s;
 }
 
 async function onSyncScan() {
@@ -111,7 +190,8 @@ async function onSyncScan() {
       (s.details_retried > 0 ? ` · thử lại ${s.details_retried} HĐ lỗi` : "") +
       (s.days_today > 0 ? " · hôm nay (không cache)" : "") +
       ` · hóa đơn mới ${s.invoices_new} · có dòng hàng ${s.details_ok} · lỗi ${s.details_failed}` +
-      ` · cần xử lý ${s.need_manual}`;
+      ` · cần xử lý ${s.need_manual}` +
+      xmlFillText(s.xml);
     // Không bật `retryFailed` ở đây: scan đã tự thử lại các HĐ lỗi chi tiết. Bật
     // ở đây sẽ xoá lỗi và biến HĐ chưa có dòng hàng thành "chờ nhập kho" → bấm
     // nhập kho sẽ báo "Hóa đơn không có dòng hàng".
@@ -128,18 +208,24 @@ async function onSyncImport(ids?: number[]) {
   try {
     const res = await api.hddtSyncImport({ ids: ids ?? [] });
     const bad = res.results.filter((r) => !r.ok);
+    const xmlNote = xmlFillText(res.xml);
     if (res.imported > 0) {
       toast.add({
         severity: "success",
         summary: `Đã tạo ${res.imported} phiếu nhập`,
-        detail: bad.length
-          ? `${res.failed} hóa đơn lỗi: ${bad[0].message}`
-          : "Tất cả hóa đơn đã được liên kết với phiếu nhập.",
+        detail:
+          (bad.length
+            ? `${res.failed} hóa đơn lỗi: ${bad[0].message}`
+            : "Tất cả hóa đơn đã được liên kết với phiếu nhập.") + xmlNote,
       });
     } else if (res.failed > 0) {
       toastError("Không tạo được phiếu nhập", bad[0]?.message ?? "Không rõ nguyên nhân");
     } else {
-      toast.add({ severity: "info", summary: "Không có hóa đơn nào chờ nhập kho" });
+      toast.add({
+        severity: "info",
+        summary: "Không có hóa đơn nào chờ nhập kho",
+        detail: xmlNote || undefined,
+      });
     }
     await loadSyncPreview();
   } catch (e) {
@@ -383,6 +469,30 @@ void (async () => {
         </Column>
         <Column header="Dòng / HH mới" :style="{ width: '8rem' }">
           <template #body="{ data }">{{ data.line_count }} / {{ data.new_product_count }}</template>
+        </Column>
+        <!-- File XML hóa đơn: quy định phải lưu trữ → hiện rõ hóa đơn nào đã có
+             file trong thư mục hồ sơ, thiếu thì bấm tải ngay tại đây. -->
+        <Column header="File XML" :style="{ width: '8.5rem' }">
+          <template #body="{ data }">
+            <span
+              v-if="rowXmlSaved(data)"
+              class="inline-flex items-center gap-1 text-xs text-emerald-700"
+              :title="rowXmlSaved(data)"
+            >
+              <i class="pi pi-check-circle" />
+              Đã lưu
+            </span>
+            <Button
+              v-else
+              :label="rowXmlBusy(data) ? 'Đang tải' : 'Tải XML'"
+              icon="pi pi-download"
+              size="small"
+              severity="secondary"
+              :loading="rowXmlBusy(data)"
+              :aria-label="`Tải file XML hóa đơn ${data.khhdon} ${data.shdon}`"
+              @click="saveRowXml(data)"
+            />
+          </template>
         </Column>
         <!-- Ba cột phải cùng `frozen align-frozen="right"`: PrimeVue tính
              `inset-inline-end` theo cột frozen KẾ TIẾP nên pin cùng lúc mới không

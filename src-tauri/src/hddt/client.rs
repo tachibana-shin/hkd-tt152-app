@@ -110,9 +110,24 @@ pub(crate) enum InvoiceDirection {
 
 impl InvoiceDirection {
     fn segment(self) -> &'static str {
+        self.as_str()
+    }
+
+    /// Mã máy của chiều hóa đơn — đúng giá trị lưu trong cột `direction` của
+    /// bảng `hddt_invoice_xml` và dạng frontend truyền vào lệnh xuất XML.
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Sold => "sold",
             Self::Purchase => "purchase",
+        }
+    }
+
+    /// Đọc lại từ mã máy (`sold`/`purchase`); giá trị lạ → `Err`.
+    pub(crate) fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "sold" | "" => Ok(Self::Sold),
+            "purchase" => Ok(Self::Purchase),
+            other => Err(format!("Chiều hóa đơn không hợp lệ: {other}")),
         }
     }
 
@@ -144,6 +159,39 @@ impl InvoiceKind {
         match self {
             Self::Regular => "query",
             Self::CashRegister => "sco-query",
+        }
+    }
+
+    /// Mã máy của loại hóa đơn — đúng giá trị lưu trong cột `kind` của bảng
+    /// `hddt_invoice_xml` và dạng frontend truyền vào lệnh xuất XML.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Regular => "regular",
+            Self::CashRegister => "cash-register",
+        }
+    }
+
+    /// Đọc lại từ mã máy; giá trị lạ → `Err`.
+    pub(crate) fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "regular" | "" => Ok(Self::Regular),
+            "cash-register" => Ok(Self::CashRegister),
+            other => Err(format!("Loại hóa đơn không hợp lệ: {other}")),
+        }
+    }
+
+    /// Nhãn tiếng Việt cho header `Action` khi **xuất XML** (portal lưu vào
+    /// `localStorage.action` rồi đọc lại thành header — bắt từ bundle 10/2026).
+    fn export_action(self, direction: InvoiceDirection) -> String {
+        let base = match direction {
+            InvoiceDirection::Sold => "hóa đơn bán ra",
+            InvoiceDirection::Purchase => "hóa đơn mua vào",
+        };
+        match self {
+            InvoiceKind::Regular => format!("Xuất xml ({base})"),
+            InvoiceKind::CashRegister => {
+                format!("Xuất xml (hóa đơn máy tính tiền {base})")
+            }
         }
     }
 }
@@ -561,6 +609,56 @@ impl HddtClient {
         serde_json::from_value(v).map_err(|e| format!("Dữ liệu danh sách HĐĐT sai định dạng: {e}"))
     }
 
+    /// Tải hồ sơ XML của **1** hóa đơn dưới dạng file ZIP.
+    ///
+    /// `GET {base}/api/{query|sco-query}/invoices/export-xml?nbmst&khhdon&shdon&khmshdon`
+    ///
+    /// Bắt từ bundle portal 10/2026 (nút "Xuất xml" ở trang `/tra-cuu/tra-cuu-hoa-don`):
+    /// frontend gọi `sendGetBlob(url, {nbmst,khhdon,shdon,khmshdon}, jwt)` rồi
+    /// `exportFile("invoice", blob, "zip")` — tức response là **ZIP binary**
+    /// (không phải JSON), nên client đọc byte thô chứ không qua `read_json_body`.
+    /// Header `Action` = nhãn xuất XML của đúng tab (xem [`InvoiceKind::export_action`]).
+    ///
+    /// Sides: tab "hóa đơn bán ra" kiểm `hsgoc` (hồ sơ gốc) trước khi gọi — nếu
+    /// thiếu thì cổng không có gì để tải; tab "mua vào" gọi thẳng.
+    pub(crate) async fn export_invoice_xml(
+        &self,
+        token: &str,
+        key: &crate::hddt::xml::XmlInvoiceKey,
+    ) -> Result<Vec<u8>, String> {
+        let path = format!("/api/{}/invoices/export-xml", key.kind.prefix());
+        let params: Vec<(&str, String)> = vec![
+            ("nbmst", key.nbmst.clone()),
+            ("khhdon", key.khhdon.clone()),
+            ("shdon", key.shdon.clone()),
+            ("khmshdon", key.khmshdon.to_string()),
+        ];
+        let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
+            .map_err(|e| format!("URL xuất XML HĐĐT không hợp lệ: {e}"))?;
+        let action = encode_uri_component(&key.kind.export_action(key.direction));
+        let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
+        let resp = self.get_throttled_with(url, token, &page, action).await?;
+        let status = resp.status();
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("Đọc file XML HĐĐT lỗi: {e}"))?;
+        if !status.is_success() {
+            // Lỗi của cổng vẫn là JSON (`{"message": …}`) — đọc để lấy message.
+            let v = decode_body(&bytes).unwrap_or(serde_json::Value::Null);
+            let msg = portal_message(&v, "không rõ nguyên nhân");
+            return Err(format!("Lỗi tải XML hóa đơn (HTTP {status}): {msg}"));
+        }
+        // Phải là ZIP thật (magic `PK\x03\x04`); HTTP 200 mà trả JSON là cổng
+        // báo lỗi trong thân — đọc message cho người dùng thay vì lưu nhầm.
+        if bytes.len() < 4 || &bytes[..4] != b"PK\x03\x04" {
+            let v = decode_body(&bytes).unwrap_or(serde_json::Value::Null);
+            let msg = portal_message(&v, "không phải file ZIP");
+            return Err(format!("Cổng không trả file XML hợp lệ: {msg}"));
+        }
+        Ok(bytes.to_vec())
+    }
+
     /// Change the portal password (`POST /api/system-taxpayers/users/change-password`,
     /// no captcha — verified from the portal bundle 09/2026). The portal then
     /// invalidates the current session, so the next login must use `new_password`.
@@ -712,6 +810,26 @@ fn build_search_string(q: &InvoiceQuery) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hddt::xml::XmlInvoiceKey;
+
+    /// Dựng khóa định danh hóa đơn để test endpoint `export-xml`.
+    fn xml_key(
+        direction: InvoiceDirection,
+        kind: InvoiceKind,
+        nbmst: &str,
+        khhdon: &str,
+        shdon: &str,
+        khmshdon: i64,
+    ) -> XmlInvoiceKey {
+        XmlInvoiceKey {
+            direction,
+            kind,
+            nbmst: nbmst.to_string(),
+            khmshdon,
+            khhdon: khhdon.to_string(),
+            shdon: shdon.to_string(),
+        }
+    }
 
     #[test]
     fn anti_bot_headers_has_uuid_request_id() {
@@ -854,6 +972,77 @@ mod tests {
             portal.count("/invoices/purchase"),
             3,
             "2 lần 429 + 1 lần thành công"
+        );
+    }
+
+    #[tokio::test]
+    async fn export_xml_calls_export_endpoint_with_identity_params() {
+        // Endpoint + 4 tham số phải khớp bundle portal 10/2026 — sai một tham số
+        // là cổng trả lỗi JSON, ZIP không có nên file XML không lưu được.
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+
+        let zip = c
+            .export_invoice_xml(
+                "mock-token",
+                &xml_key(
+                    InvoiceDirection::Purchase,
+                    InvoiceKind::Regular,
+                    "0100000000",
+                    "C26MOCK",
+                    "0001",
+                    1,
+                ),
+            )
+            .await
+            .expect("phải tải được ZIP");
+
+        assert_eq!(&zip[..4], b"PK\x03\x04", "phải là ZIP binary thật");
+
+        let req = portal
+            .requests()
+            .into_iter()
+            .find(|r| r.path.ends_with("/invoices/export-xml"))
+            .expect("phải gọi /invoices/export-xml");
+        assert!(
+            req.path.contains("/api/query/"),
+            "tiền tố HĐĐT: {}",
+            req.path
+        );
+        assert_eq!(req.param("nbmst").as_deref(), Some("0100000000"));
+        assert_eq!(req.param("khhdon").as_deref(), Some("C26MOCK"));
+        assert_eq!(req.param("shdon").as_deref(), Some("0001"));
+        assert_eq!(req.param("khmshdon").as_deref(), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn export_xml_uses_sco_query_for_cash_register() {
+        // Máy tính tiền phải đi tiền tố `sco-query` — nhầm là cổng 404, không
+        // có file XML cho HĐ máy tính tiền.
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+        c.export_invoice_xml(
+            "mock-token",
+            &xml_key(
+                InvoiceDirection::Purchase,
+                InvoiceKind::CashRegister,
+                "0100000000",
+                "C26MOCK",
+                "0001",
+                1,
+            ),
+        )
+        .await
+        .expect("phải tải được ZIP");
+        let req = portal
+            .requests()
+            .into_iter()
+            .find(|r| r.path.ends_with("/invoices/export-xml"))
+            .expect("phải gọi export-xml");
+        assert!(
+            req.path.contains("/api/sco-query/"),
+            "phải là sco-query: {}",
+            req.path
         );
     }
 
