@@ -103,6 +103,7 @@ import type {
   InvoiceLinkResult,
   InvoiceReplaceResult,
   InvoiceDuplicateNumber,
+  JobProgress,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -1039,15 +1040,24 @@ export const api = {
    * kỳ, XML đã lưu và bản sao lưu CSDL — xem `commands/tax_report.rs`.
    */
   exportTaxReport: (args: {
+    /** UUID sinh riêng cho lần xuất này — để hỏi đúng tiến độ của mình. */
+    jobId: string;
     fromDate: string;
     toDate: string;
     extraFiles: { path: string; data: string }[];
   }): Promise<string> =>
     call<string>("export_tax_report", {
+      jobId: args.jobId,
       fromDate: args.fromDate,
       toDate: args.toDate,
       extraFiles: args.extraFiles,
     }),
+  /**
+   * Ảnh chụp tiến độ + nhật ký của việc đang chạy. Trả `null` khi việc này đã
+   * bị việc khác thay — frontend ngừng hỏi khi thấy `finished`.
+   */
+  getJobProgress: async (jobId: string): Promise<JobProgress | null> =>
+    parse<JobProgress | null>(await call<string>("get_job_progress", { jobId })),
   /** Nhóm hộ hiện hành + doanh thu cả năm dùng xếp nhóm (hộp cấu hình HKD tự điền). */
   getTaxGroup: async (year: number) =>
     parse<TaxGroupInfo>(await call<string>("get_tax_group", { year })),

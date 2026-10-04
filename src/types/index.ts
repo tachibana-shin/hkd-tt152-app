@@ -1227,3 +1227,27 @@ export interface VoucherRow {
   industry_code: string;
   note: string;
 }
+
+// ─── Tiến độ của việc chạy lâu (xuất báo cáo kỳ thuế) ───
+
+/**
+ * Ảnh chụp tiến độ backend giữ trong RAM — frontend hỏi lại bằng
+ * `getJobProgress` mỗi vài trăm mili giây cho tới khi `finished`.
+ *
+ * Hỏi (poll) chứ không bắn sự kiện: app chạy cả ở cửa sổ Tauri lẫn web server
+ * mở bằng trình duyệt, mà sự kiện Tauri không tới được trình duyệt.
+ */
+export interface JobProgress {
+  /** UUID frontend sinh — lệch là backend trả `null` (không đọc nhầm việc khác). */
+  id: string;
+  label: string;
+  /** Việc đang làm ngay lúc này (1 dòng). */
+  step: string;
+  /** Đã xong / tổng số việc đã biết. `total = 0` = chưa đếm được → progressbar chạy vòng. */
+  done: number;
+  total: number;
+  finished: boolean;
+  error: string | null;
+  /** Nhật ký, cũ nhất trước — khung log tự cuộn xuống cuối. */
+  log: string[];
+}

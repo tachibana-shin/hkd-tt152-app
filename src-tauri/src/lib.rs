@@ -96,6 +96,7 @@ pub fn run() {
             commands::admin::list_backups,
             commands::admin::restore_backup,
             commands::tax_report::export_tax_report,
+            commands::progress::get_job_progress,
             commands::attendance::get_attendance,
             commands::attendance::save_attendance,
             commands::attendance::get_attendance_work_days,

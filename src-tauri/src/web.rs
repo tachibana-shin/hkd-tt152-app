@@ -771,10 +771,14 @@ pub async fn api_invoke(
         "export_tax_report" => mx_state_app!(
             commands::tax_report::export_tax_report,
             body,
+            job_id: String,
             from_date: String,
             to_date: String,
             extra_files: Vec<commands::tax_report::ExtraFile>
         ),
+        // Tiến độ + nhật ký của việc chạy lâu (frontend hỏi định kỳ cho tới khi
+        // `finished`) — xem `commands/progress.rs`.
+        "get_job_progress" => mx!(commands::progress::get_job_progress, body, job_id: String),
 
         _ => {
             let msg = format!("Lệnh '{}' không hỗ trợ trên web", cmd);

@@ -16,6 +16,7 @@ pub(crate) mod page;
 pub(crate) mod payroll;
 pub(crate) mod pdf;
 pub(crate) mod profile;
+pub(crate) mod progress;
 pub(crate) mod settings;
 pub(crate) mod stock;
 pub(crate) mod tax_lookup;

@@ -38,6 +38,8 @@ struct ReportStats {
     books: usize,
     xml_purchase: usize,
     xml_sold: usize,
+    /// File XML **mới tải trong lúc xuất** (tự tìm phần còn thiếu của kỳ).
+    xml_fetched: usize,
     pdf_purchase: usize,
     pdf_sold: usize,
     db: bool,
@@ -177,12 +179,31 @@ async fn sold_pdf_jobs(
 /// Gộp báo cáo kỳ thuế thành **1 file ZIP** rồi trả về base64.
 ///
 /// * `extra_files` — tờ khai / sổ kế toán do frontend dựng (base64);
+/// * XML hóa đơn **trong kỳ** — app tự tải phần còn thiếu trước khi gom
+///   ([`fill_missing_for_report`]), rồi lấy **toàn bộ** file đã lưu (không lọc
+///   kỳ — file được lưu lúc bấm "Tải XML", ghi rõ trong `CHU-THICH.txt`);
 /// * PDF hóa đơn **trong kỳ** (`from_date` → `to_date`);
-/// * XML hóa đơn **đã lưu trọn vẹn** (không lọc kỳ — file được lưu lúc bấm
-///   "Tải XML", ghi rõ trong `CHU-THICH.txt`);
 /// * bản sao lưu CSDL (chép sau khi checkpoint WAL để không mất dữ liệu mới).
 #[tauri::command]
 pub(crate) async fn export_tax_report(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    job_id: String,
+    from_date: String,
+    to_date: String,
+    extra_files: Vec<ExtraFile>,
+) -> Result<String, String> {
+    // Tiến độ nằm ở ô chung (frontend hỏi lại bằng `get_job_progress`): BẮT ở
+    // ngay đây và KẾT ở mọi đường ra — kể cả khi lệnh lỗi giữa chừng — nếu không
+    // hộp thoại tiến độ sẽ hỏi vĩnh viễn sau một lệnh đã thất bại.
+    crate::commands::progress::begin(&job_id, "Xuất báo cáo kỳ thuế");
+    let out = build_tax_report(state, app, from_date, to_date, extra_files).await;
+    crate::commands::progress::finish(out.as_ref().err().cloned());
+    out
+}
+
+/// Phần việc thật — tách ra để hàm bọc trên chỉ lo begin/finish tiến độ.
+async fn build_tax_report(
     state: State<'_, AppState>,
     app: AppHandle,
     from_date: String,
@@ -190,13 +211,39 @@ pub(crate) async fn export_tax_report(
     extra_files: Vec<ExtraFile>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
-    let pool = state.pool.read().await;
     let xml_dir = crate::commands::hddt::xml_dir(&app)?;
+    crate::commands::progress::log(format!("Kỳ {from_date} → {to_date}"));
+
+    // ── 0. Tự tìm XML còn thiếu cho kỳ ──
+    // Chạy TRƯỚC khi giữ lock CSDL (lệnh này tự đọc CSDL nội bộ). Không tải ngay
+    // lúc gán số HĐĐT: sau khi ký, cổng còn cache nên trang tra cứu chưa trả
+    // hồ sơ gốc — bấm xuất hồ sơ mới là lúc chắc chắn nhất. Chưa đăng nhập hoặc
+    // hết phiên thì bỏ qua, ghi vào nhật ký ở bước audit cuối.
+    crate::commands::progress::step("Tự tìm XML còn thiếu cho kỳ…");
+    let xml_fetch =
+        crate::commands::hddt::fill_missing_for_report(&state, &xml_dir, &from_date, &to_date)
+            .await;
+    // Kết quả bước 0 vào nhật ký NGAY (không đợi tới dòng audit cuối): không có
+    // phiên cổng hay cổng không trả hồ sơ gốc thì người dùng thấy ngay vì sao
+    // ZIP thiếu file XML thay vì âm thầm nhận một ZIP thiếu mục.
+    crate::commands::progress::log(match &xml_fetch {
+        Ok(o) if o.first_error.is_empty() => {
+            format!(
+                "Tải XML cho kỳ xong — {} file mới, {} bỏ qua",
+                o.saved, o.skipped
+            )
+        }
+        Ok(o) => format!("Tải XML cho kỳ: {} ({} lỗi)", o.first_error, o.failed),
+        Err(e) => format!("Tải XML cho kỳ không chạy được — {e}"),
+    });
+
+    let pool = state.pool.read().await;
     let mut stats = ReportStats::default();
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     let mut used: HashSet<String> = HashSet::new();
 
     // ── 1. Tờ khai + sổ kế toán dựng sẵn từ frontend ──
+    crate::commands::progress::plan(extra_files.len());
     for f in extra_files {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(f.data.trim())
@@ -209,9 +256,37 @@ pub(crate) async fn export_tax_report(
         }
         entries.push((unique_path(&mut used, path), bytes));
     }
+    // Nhanh (chỉ giải mã base60) → gộp một dòng nhật ký thay vì spam từng file.
+    crate::commands::progress::advance_by(stats.tax_entry + stats.books);
+    crate::commands::progress::log(format!(
+        "Gộp {} file Excel — tờ khai {} + sổ kế toán {}",
+        stats.tax_entry + stats.books,
+        stats.tax_entry,
+        stats.books
+    ));
 
     // ── 2. XML đã lưu — gom theo chiều hóa đơn ──
+    // Lượt tự tìm XML (bước 0) đã xong: ghi vào chú thích nếu có file tải được
+    // trong lúc xuất, hoặc file nào đó thiếu vì cổng không trả hồ sơ gốc.
+    let xml_note = match &xml_fetch {
+        Ok(o) => {
+            stats.xml_fetched = o.saved;
+            if o.failed > 0 {
+                stats.problems.push(format!(
+                    "Không tải được {}/{} file XML còn thiếu ({})",
+                    o.failed,
+                    o.failed + o.saved + o.skipped,
+                    o.first_error
+                ));
+            }
+            format!("tải mới {}, lỗi {}", o.saved, o.failed)
+        }
+        // Chưa đăng nhập / hết phiên → bỏ qua im lặng, ghi vào nhật ký (bước cuối).
+        Err(e) => format!("không tải thêm ({e})"),
+    };
+    crate::commands::progress::step("Đọc file XML đã lưu trong hồ sơ…");
     let (xml_entries, xml_lost) = crate::hddt::xml_report_entries(&pool, &xml_dir).await?;
+    crate::commands::progress::plan(xml_entries.len());
     for (path, bytes) in xml_entries {
         if path.starts_with("hoa-don/xml/ban-ra/") {
             stats.xml_sold += 1;
@@ -220,6 +295,14 @@ pub(crate) async fn export_tax_report(
         }
         entries.push((unique_path(&mut used, path), bytes));
     }
+    // Đọc file có sẵn trong hồ sơ — nhanh, gộp một dòng như phần Excel.
+    crate::commands::progress::advance_by(stats.xml_sold + stats.xml_purchase);
+    crate::commands::progress::log(format!(
+        "Gộp {} file XML (bán ra {}, mua vào {})",
+        stats.xml_sold + stats.xml_purchase,
+        stats.xml_sold,
+        stats.xml_purchase
+    ));
     if xml_lost > 0 {
         stats.problems.push(format!(
             "{xml_lost} file XML không đọc được (cả blob lẫn file đều mất)"
@@ -227,18 +310,34 @@ pub(crate) async fn export_tax_report(
     }
 
     // ── 3. PDF hóa đơn trong kỳ ──
+    crate::commands::progress::step("Dò danh sách hóa đơn trong kỳ…");
     let purchase = purchase_pdf_jobs(&pool, &from_date, &to_date).await?;
     let sold = sold_pdf_jobs(&pool, &from_date, &to_date, &mut stats.problems).await?;
-    for job in purchase.into_iter().chain(sold) {
+    let pdf_total = purchase.len() + sold.len();
+    crate::commands::progress::plan(pdf_total);
+    crate::commands::progress::log(format!("Render PDF {pdf_total} hóa đơn trong kỳ"));
+    for (i, job) in purchase.into_iter().chain(sold).enumerate() {
         let path = unique_path(&mut used, job.path);
-        // Render là CPU-bound (~200ms/hóa đơn) → tách worker, chạy tuần tự để
-        // không chiếm sạch lõi CPU trên máy người dùng.
+        let side = if path.starts_with("hoa-don/pdf/ban-ra/") {
+            "bán ra"
+        } else {
+            "mua vào"
+        };
+        // Chặng chậm nhất (~200ms/hóa đơn) → ghi rõ từng hóa đơn đang render để
+        // người dùng biết máy không treo.
+        crate::commands::progress::step(format!(
+            "Render PDF {}/{pdf_total} — {side}: {path}",
+            i + 1
+        ));
+        // Render là CPU-bound → tách worker, chạy tuần tự để không chiếm sạch
+        // lõi CPU trên máy người dùng.
         let detail = job.detail_json;
         let outcome =
             tauri::async_runtime::spawn_blocking(move || invoice_pdf::render_pdf(&detail)).await;
         match outcome {
             Ok(Ok(bytes)) => {
                 let is_sold = path.starts_with("hoa-don/pdf/ban-ra/");
+                crate::commands::progress::tick(format!("PDF {side}: {path} — xong"));
                 entries.push((path, bytes));
                 if is_sold {
                     stats.pdf_sold += 1;
@@ -246,13 +345,21 @@ pub(crate) async fn export_tax_report(
                     stats.pdf_purchase += 1;
                 }
             }
-            Ok(Err(e)) => stats.problems.push(format!("{path}: {e}")),
-            Err(e) => stats.problems.push(format!("{path}: {e}")),
+            Ok(Err(e)) => {
+                stats.problems.push(format!("{path}: {e}"));
+                crate::commands::progress::tick(format!("PDF {side}: {path} — lỗi: {e}"));
+            }
+            Err(e) => {
+                stats.problems.push(format!("{path}: {e}"));
+                crate::commands::progress::tick(format!("PDF {side}: {path} — lỗi: {e}"));
+            }
         }
     }
 
     // ── 4. Sao lưu CSDL — checkpoint WAL trước khi chép, nếu không bản sao có
     //        thể thiếu dữ liệu mới nhất vẫn nằm trong file `-wal`. ──
+    crate::commands::progress::plan(1);
+    crate::commands::progress::step("Chốt WAL rồi sao lưu CSDL…");
     // PRAGMA không khai báo cột nên giữ runtime query (câu lệnh bảo trì DB).
     sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .execute(&*pool)
@@ -261,12 +368,16 @@ pub(crate) async fn export_tax_report(
     let db_path = crate::commands::profile::active_db_path(&app)?;
     match std::fs::read(&db_path) {
         Ok(bytes) => {
+            crate::commands::progress::tick("Đã chép sao lưu CSDL");
             entries.push((unique_path(&mut used, "sao-luu/hkd.db".to_string()), bytes));
             stats.db = true;
         }
-        Err(e) => stats
-            .problems
-            .push(format!("Không chép được CSDL {}: {e}", db_path.display())),
+        Err(e) => {
+            stats
+                .problems
+                .push(format!("Không chép được CSDL {}: {e}", db_path.display()));
+            crate::commands::progress::tick(format!("Không chép được CSDL: {e}"));
+        }
     }
 
     // ── 5. Chú thích đặt đầu ZIP ──
@@ -283,13 +394,23 @@ pub(crate) async fn export_tax_report(
         );
     }
 
+    crate::commands::progress::plan(1);
+    crate::commands::progress::step("Nén ZIP…");
     let zip = pack_zip(&entries)?;
+    crate::commands::progress::tick(format!(
+        "Nén xong — {} mục, {} KB",
+        entries.len(),
+        zip.len() / 1024
+    ));
     drop(pool);
     audit(
         &state,
         "export_tax_report",
         "report",
-        &format!("kỳ {from_date}–{to_date}, {n} mục", n = entries.len()),
+        &format!(
+            "kỳ {from_date}–{to_date}, {n} mục; XML: {xml_note}",
+            n = entries.len()
+        ),
     )
     .await;
     Ok(base64::engine::general_purpose::STANDARD.encode(zip))
@@ -360,13 +481,17 @@ fn manifest(from: &str, to: &str, year: &str, s: &ReportStats) -> String {
     ));
     out.push_str("\nGhi chú\n");
     out.push_str("-------\n");
-    out.push_str(
+    out.push_str(&format!(
         "- PDF lấy hóa đơn phát sinh TRONG kỳ kê khai.\n\
          - XML lấy TOÀN BỘ file đã lưu (lưu lúc bấm \"Tải XML\"), không lọc theo kỳ:\n\
           \x20 file là bản gốc từ cổng thuế nên giữ nguyên.\n\
+         - Trước khi đóng ZIP, app tự tải phần XML còn thiếu CỦA KỲ — tải mới {f} file.\n\
+          \x20 Không tải lúc gán số HĐĐT vì cổng còn cache hóa đơn vừa ký, bấm xuất\n\
+          \x20 hồ sơ này mới chắc chắn có gì đó để tải.\n\
          - Sổ kế toán lấy theo NĂM của kỳ (dù kỳ chưa tròn năm vẫn xuất đủ dữ liệu\n\
           \x20 hiện có — Luật Kế toán bắt sổ ghi liên tục cả năm).\n",
-    );
+        f = s.xml_fetched,
+    ));
     if s.problems.is_empty() {
         out.push_str("- Không có lỗi nào khi dựng báo cáo.\n");
     } else {
@@ -437,6 +562,7 @@ mod tests {
             books: 7,
             xml_purchase: 3,
             xml_sold: 2,
+            xml_fetched: 6,
             pdf_purchase: 4,
             pdf_sold: 5,
             db: true,
@@ -471,6 +597,10 @@ mod tests {
             "PDF lọc kỳ: {m}"
         );
         assert!(m.contains("XML lấy TOÀN BỘ"), "XML không lọc kỳ: {m}");
+        assert!(
+            m.contains("tự tải phần XML còn thiếu CỦA KỲ — tải mới 6 file"),
+            "nêu số XML tự tải lúc xuất: {m}"
+        );
         assert!(m.contains("kỳ chưa tròn năm"), "sổ lấy theo năm: {m}");
 
         // Lỗi từng mục phải liệt kê, không nuốt.

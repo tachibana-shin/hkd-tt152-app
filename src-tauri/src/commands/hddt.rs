@@ -557,7 +557,9 @@ pub(crate) async fn hddt_sync_test_seed(
 }
 
 /// Lấy token phiên cổng (đã bắt buộc đăng nhập) + config, dùng cho các lệnh sync.
-async fn portal_client(state: &State<'_, AppState>) -> Result<(HddtClient, String), String> {
+pub(crate) async fn portal_client(
+    state: &State<'_, AppState>,
+) -> Result<(HddtClient, String), String> {
     let session = state
         .portal
         .lock()
@@ -570,6 +572,29 @@ async fn portal_client(state: &State<'_, AppState>) -> Result<(HddtClient, Strin
     let cfg = read_config(state).await?;
     let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
     Ok((client, session.token))
+}
+
+/// Tự tìm XML còn thiếu cho **báo cáo kỳ thuế** — chạy trước khi giữ lock
+/// CSDL (hàm này tự đọc config + danh sách hóa đơn qua `pool.read()`).
+///
+/// Đúng lúc này chứ không phải lúc gán số HĐĐT: sau khi ký, cổng còn cache nên
+/// trang tra cứu đôi khi chưa trả hồ sơ gốc (`hsgoc`) — bấm xuất hồ sơ mới là
+/// lúc chắc chắn có gì đó để tải.
+///
+/// Không có/đã hết phiên → trả `Err` lý do để người gọi ghi **nhật ký** rồi bỏ
+/// qua; không tự `audit` ở đây vì người gọi đang giữ `pool.read()` (audit cũng
+/// đọc CSDL — lồng read-lock là nguy cơ chờ deadlock khi có writer xếp hàng).
+pub(crate) async fn fill_missing_for_report(
+    state: &State<'_, AppState>,
+    dir: &std::path::Path,
+    from: &str,
+    to: &str,
+) -> Result<crate::hddt::FillOutcome, String> {
+    let (client, token) = portal_client(state).await?;
+    let pool = state.pool.read().await;
+    let out = crate::hddt::fill_missing_in_period(&pool, dir, &client, &token, from, to).await;
+    drop(pool);
+    Ok(out)
 }
 
 /// Thư mục `hddt_xml/` của hồ sơ đang mở (file XML sống cùng DB nên đi theo

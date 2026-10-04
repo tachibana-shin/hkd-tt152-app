@@ -36,6 +36,7 @@ const PRIMEVUE_COMPONENTS = [
   "InputIcon",
   "InputNumber",
   "InputText",
+  "ProgressBar",
   "ProgressSpinner",
   "Select",
   "Tab",

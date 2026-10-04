@@ -3247,9 +3247,13 @@ test("Chi tiết hóa đơn: nút Tải XML lưu file XML hóa đơn bán ra", a
  * cả 7 sổ kế toán theo năm (kỳ chưa tròn năm vẫn lấy đủ dữ liệu hiện có), hóa
  * đơn PDF/XML mua vào – bán ra và bản sao lưu CSDL. Thiếu mục nào là hồ sơ không
  * nộp được, nên soi thẳng tên file trong ZIP chứ không chỉ xem có tải về không.
+ *
+ * Việc này mất hàng chục giây (tải XML từng hóa đơn, render PDF) nên kèm luôn
+ * hộp thoại **tiến độ + nhật ký**: bấm nút là hiện ngay, log do backend ghi qua
+ * lệnh hỏi `get_job_progress`, và vẫn đóng được khi chưa xong ("Chạy nền").
  */
 test(
-  "Xuất báo cáo kỳ thuế: ZIP gộp tờ khai, đủ 7 sổ, hóa đơn và sao lưu CSDL",
+  "Xuất báo cáo kỳ thuế: có tiến độ + nhật ký, ZIP gộp tờ khai, đủ 7 sổ, hóa đơn và sao lưu CSDL",
   { timeout: 120_000 },
   async ({ page }) => {
     await ensureLoggedIn(page);
@@ -3259,11 +3263,44 @@ test(
 
     const btn = page.getByTestId("export-tax-report");
     await expect(btn).toBeVisible();
-    const [download] = await Promise.all([page.waitForEvent("download"), btn.click()]);
+
+    // Phải đăng ký TRƯỚC khi bấm — chờ file xong rồi mới nghe là đã lỡ event.
+    const downloadPromise = page.waitForEvent("download");
+    await btn.click();
+
+    // ── Tiến độ phải hiện NGAY khi bấm, không để im hàng chục giây ──
+    const progress = page.getByTestId("export-progress");
+    await expect(progress).toBeVisible();
+    await expect(page.getByTestId("export-progress-bar")).toBeVisible();
+    // Chưa xong thì chỉ được đóng bằng "Chạy nền" — không có nút Đóng, sợ người
+    // dùng lỡ tay mất log khi chưa có gì để đọc.
+    await expect(page.getByTestId("export-progress-background")).toBeVisible();
+
+    // Đóng đi vẫn mở lại được — nhật ký giữ cho tới khi người dùng chủ động đóng,
+    // nên không phụ thuộc việc backend đã chạy xong hay chưa.
+    await page.getByTestId("export-progress-background").click();
+    await expect(progress).toBeHidden();
+    await page.getByTestId("export-progress-open").click();
+    await expect(progress).toBeVisible();
+
+    const log = page.getByTestId("export-progress-log");
+    // Dòng đầu do frontend ghi (dựng Excel chạy ở máy này, backend chưa nhận việc).
+    await expect(log).toContainText("Bắt đầu xuất báo cáo kỳ thuế");
+
+    const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(
       /^bao-cao-ky-thue-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.zip$/,
     );
     await expect(page.getByText("Đã tải báo cáo kỳ thuế")).toBeVisible({ timeout: 60_000 });
+
+    // XONG — hộp thoại phải còn mở để đọc nhật ký. Dòng sau phải do BACKEND trả
+    // về qua `get_job_progress` (chứng tỏ việc hỏi tiến độ nối thật tới server,
+    // không chỉ có spinner tự xoay), và dòng cuối phải là kết thúc có suy ra
+    // từ việc đã làm, chứ không phải mẩu chữ chung chung.
+    await expect(log).toContainText(/Kỳ \d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}/);
+    await expect(log).toContainText("✓ Hoàn tất");
+    await page.getByTestId("export-progress-close").click();
+    await expect(progress).toBeHidden();
 
     const zipPath = await download.path();
     expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();

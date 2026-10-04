@@ -4,6 +4,7 @@ import { useBusinessStore } from "@/stores/business";
 import { api } from "@/db";
 import { exportXlsx, buildTaxBookXlsx, type XlsxColumn } from "@/utils/excel";
 import TaxEntryForm from "@/components/TaxEntryForm.vue";
+import JobProgressDialog from "@/components/JobProgressDialog.vue";
 import { TT152_BOOKS } from "@/composables/useTaxBooks";
 import { buildTaxEntryXlsx } from "@/utils/taxEntry";
 import { blobToBase64, downloadZip } from "@/utils/download";
@@ -14,6 +15,7 @@ import type {
   TaxDeclarationRow,
   TaxOverview,
   TaxSettlement,
+  JobProgress,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
@@ -323,6 +325,81 @@ async function exportDeclarationExcel() {
 
 const reportExporting = ref(false);
 
+// ─── Tiến độ + nhật ký của lần xuất ───
+// Việc này mất hàng chục giây (tải XML từng hóa đơn qua cổng, render PDF ~200ms/
+// hóa đơn) nên backend ghi nhật ký vào ô chung, mình hỏi lại mỗi 300ms rồi vẽ
+// vào hộp thoại. Hỏi chứ không nghe sự kiện: chạy được cả trên bản Tauri lẫn
+// bản web mở bằng trình duyệt.
+const reportProgress = ref<JobProgress | null>(null);
+const reportProgressOpen = ref(false);
+/**
+ * Người dùng đã đọc xong nhật ký lần xuất trước chưa. Chừng nào còn false thì
+ * nút "Tiến độ" còn đó — kể cả khi việc đã chạy xong — để bấm "Chạy nền" lúc
+ * giữa chừng vẫn mở lại được nhật ký sau này.
+ */
+const reportProgressDismissed = ref(false);
+/** Dòng tự ghi TRƯỚC khi backend nhận việc — dựng Excel chạy ở máy này. */
+const reportPreLog = ref<string[]>([]);
+let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Hỏi backend một lần (dùng khi bấm nút và khi sắp đóng). Lỗi → bỏ qua. */
+async function pollReportProgress(jobId: string) {
+  try {
+    const p = await api.getJobProgress(jobId);
+    if (p) reportProgress.value = p;
+  } catch {
+    // Không thấy tiến độ thì vẫn cứ chờ lệnh xuất trả lời — không được làm
+    // hỏng việc chính chỉ vì không đọc được phần báo cáo tiến độ.
+  }
+}
+
+function startReportProgress(jobId: string) {
+  stopReportProgress();
+  // Khởi tạo ảnh chụp ngay từ đầu: dựng Excel chạy ở máy này nên backend chưa có
+  // gì — nhưng hộp thoại và nút "Tiến độ" phải hiện được ngay, không chờ server.
+  reportProgress.value = {
+    id: jobId,
+    label: "Xuất báo cáo kỳ thuế",
+    step: "Đang gửi yêu cầu…",
+    done: 0,
+    total: 0,
+    finished: false,
+    error: null,
+    log: [],
+  };
+  reportProgressDismissed.value = false;
+  reportPreLog.value = [
+    "Bắt đầu xuất báo cáo kỳ thuế…",
+    "Dựng tờ khai 01/CNKD + 7 sổ kế toán ở máy này…",
+  ];
+  reportProgressOpen.value = true;
+  void pollReportProgress(jobId);
+  progressTimer = setInterval(() => void pollReportProgress(jobId), 300);
+}
+
+/**
+ * Đóng hộp thoại. Đang chạy → "Chạy nền": giữ nhật ký, nút "Tiến độ" mở lại
+ * được. Đã xong/lỗi → "Đóng": coi như đọc xong, thôi hiện nút kia.
+ */
+function closeReportProgress() {
+  reportProgressOpen.value = false;
+  if (!reportExporting.value) reportProgressDismissed.value = true;
+}
+
+function stopReportProgress() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
+/**
+ * Mã việc riêng cho lần xuất này. Không xài `crypto.randomUUID` vì bản desktop
+ * chạy ở scheme `tauri://` không phải context bảo mật nên bị chặn ở một số WebView.
+ */
+const newJobId = () =>
+  `export-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 /**
  * Đóng gói **hồ sơ của kỳ thuế** rồi tải về một file ZIP duy nhất:
  *
@@ -343,6 +420,8 @@ const reportExporting = ref(false);
 async function exportTaxReport() {
   if (reportExporting.value) return;
   reportExporting.value = true;
+  const jobId = newJobId();
+  startReportProgress(jobId);
   const problems: string[] = [];
   try {
     const { from, to } = declRange.value;
@@ -373,7 +452,7 @@ async function exportTaxReport() {
     }
 
     // 3. Backend thêm PDF/XML hóa đơn + sao lưu CSDL rồi nén 1 ZIP.
-    const zip = await api.exportTaxReport({ fromDate: from, toDate: to, extraFiles: files });
+    const zip = await api.exportTaxReport({ jobId, fromDate: from, toDate: to, extraFiles: files });
     const name = `bao-cao-ky-thue-${from}_${to}.zip`;
     downloadZip(name, zip);
     toast.add({
@@ -384,10 +463,21 @@ async function exportTaxReport() {
         : `${name} — ${files.length} file Excel + hóa đơn PDF/XML + sao lưu CSDL`,
       life: 6000,
     });
+    // Hộp thoại GIỮ NGUYÊN khi xong — nhật ký cuối có "✓ Hoàn tất" và cả những
+    // cảnh báo XML/PDF backend gặp phải; tự đóng là mất đúng phần người ta cần
+    // đọc. Người dùng bấm "Đóng" là xong (hoặc "Chạy nền" từ lúc còn chạy).
   } catch (e) {
+    // Lỗi cũng giữ hộp thoại mở: nhật ký backend có dòng "✗ …" giải thích tại
+    // sao thất bại, đóng đi là mất thông tin hữu ích duy nhất.
+    reportProgressOpen.value = true;
     toast.add({ severity: "error", summary: "Lỗi xuất báo cáo kỳ thuế", detail: String(e) });
   } finally {
+    stopReportProgress();
     reportExporting.value = false;
+    // Hỏi lần CUỐI: backend chỉ ghi "✓ Hoàn tất"/"✗ …" SAU khi đã trả lời xong,
+    // nên lần hỏi cuối này mới là bản nhật ký đủ để người ta đọc. Không hỏi thêm
+    // thì log dừng ở gần cuối — mất đúng dòng kết luận.
+    await pollReportProgress(jobId);
   }
 }
 
@@ -974,6 +1064,17 @@ useKeepAliveRefresh(reload);
             "
             @click="exportTaxReport"
           />
+          <!-- Hiện ra khi người dùng bấm "Chạy nền" — mở lại hộp thoại nhật ký,
+               kể cả khi việc đã chạy xong (chưa ai bấm "Đóng"). -->
+          <Button
+            v-if="reportProgress && !reportProgressDismissed && !reportProgressOpen"
+            label="Tiến độ"
+            icon="pi pi-hourglass"
+            outlined
+            class="justify-start"
+            data-testid="export-progress-open"
+            @click="reportProgressOpen = true"
+          />
           <Button
             v-if="auth.isAdmin"
             label="Sao lưu dữ liệu"
@@ -989,6 +1090,16 @@ useKeepAliveRefresh(reload);
     <!-- Dialog cấu hình -->
     <!-- @saved: reload — nhóm hộ vừa đổi nên tổng hợp thuế phải tính lại. -->
     <BusinessConfigDialog v-model:visible="configDialog" :config="config" @saved="reload" />
+
+    <!-- Tiến độ + nhật ký lần xuất báo cáo kỳ thuế (mở ngay khi bấm nút Xuất). -->
+    <JobProgressDialog
+      :visible="reportProgressOpen"
+      header="Xuất báo cáo kỳ thuế"
+      :job="reportProgress"
+      :pre-log="reportPreLog"
+      :running="reportExporting"
+      @update:visible="closeReportProgress"
+    />
 
     <!-- Dialog cấu hình kê khai thuế -->
     <!-- Tạm nộp & quyết toán thu nhập cá nhân theo năm (Điều 10 khoản 2 NĐ 68/2026) -->

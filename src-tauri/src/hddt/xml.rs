@@ -488,6 +488,8 @@ async fn fill_missing(
     out
 }
 
+/// Tải XML cho **một** dòng, cập nhật tổng kết vào `out` và trả mô tả ngắn
+/// (người dùng đọc trong nhật ký tiến độ) — đúng/lỗi/bỏ qua vì lý do gì.
 async fn run_one(
     pool: &SqlitePool,
     dir: &Path,
@@ -495,18 +497,156 @@ async fn run_one(
     token: &str,
     row: &PendingXml,
     out: &mut FillOutcome,
-) {
+) -> String {
     let Some(key) = to_key(row) else {
         // Thiếu MST/ký hiệu → không gọi được cổng, bỏ qua âm thầm (dòng này
         // không đủ dữ kiện xuất XML bất kỳ cách nào).
         out.skipped += 1;
-        return;
+        return "bỏ qua — thiếu MST/ký hiệu".to_string();
     };
     match download_one(pool, dir, client, token, &key, &row.portal_id, "auto").await {
-        Ok(r) if r.already => out.skipped += 1,
-        Ok(_) => out.saved += 1,
-        Err(e) => out.fail(e),
+        Ok(r) if r.already => {
+            out.skipped += 1;
+            "bỏ qua — đã có file".to_string()
+        }
+        Ok(_) => {
+            out.saved += 1;
+            "đã tải".to_string()
+        }
+        Err(e) => {
+            let note = format!("lỗi — {e}");
+            out.fail(e);
+            note
+        }
     }
+}
+
+// ─── Tự động khi đóng BÁO CÁO KỲ THUẾ ───
+
+/// Hóa đơn **trong kỳ** còn thiếu XML — cả hai chiều.
+///
+/// Khác [`pending_rows`] (chỉ hóa đơn mua, chạy lúc quét/nhập): báo cáo kỳ thuế
+/// phải có XML của **cả hóa đơn bán ra**, nên đọc thêm bảng `invoice`. Hai điểm
+/// khác biệt:
+///
+/// * Bán ra không có `portal_id` trên cổng → để chuỗi rỗng, `kind` để rỗng cho
+///   [`to_key`] suy từ ký hiệu;
+/// * `nbmst` (MST bán ra) lấy từ hồ sơ HKD — hóa đơn nội bộ không lưu MST.
+///
+/// Lọc theo `posting_date`/`date` nằm trong kỳ: XML đã lưu ở các kỳ khác vẫn
+/// được [`xml_report_entries`] gom vào ZIP như cũ.
+async fn pending_rows_in_period(
+    pool: &SqlitePool,
+    from: &str,
+    to: &str,
+) -> Result<Vec<PendingXml>, String> {
+    let biz: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT tax_code FROM business WHERE id = 1")
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("Đọc mã số thuế HKD lỗi: {e}"))?;
+    let nbmst = biz.and_then(|r| r.0).unwrap_or_default();
+
+    let rows: Vec<PendingXml> = sqlx::query_as(
+        r#"SELECT '' AS portal_id, 'sold' AS direction, '' AS kind,
+                  ? AS nbmst, 0 AS khmshdon,
+                  e_invoice_symbol AS khhdon, e_invoice_no AS shdon
+             FROM invoice
+            WHERE date >= ? AND date <= ?
+              AND COALESCE(e_invoice_symbol, '') <> ''
+              AND COALESCE(e_invoice_no, '') <> ''
+              AND status <> 'cancelled'
+              AND NOT EXISTS (
+                    SELECT 1 FROM hddt_invoice_xml x
+                     WHERE x.direction = 'sold'
+                       AND x.khhdon = invoice.e_invoice_symbol
+                       AND x.shdon = invoice.e_invoice_no)
+           UNION ALL
+           SELECT c.portal_id, 'purchase', c.portal_kind, c.nbmst, c.khmshdon,
+                  c.khhdon, c.shdon
+             FROM hddt_purchase_invoice c
+            WHERE c.posting_date >= ? AND c.posting_date <= ?
+              AND NOT EXISTS (
+                    SELECT 1 FROM hddt_invoice_xml x
+                     WHERE x.direction = 'purchase' AND x.kind = c.portal_kind
+                       AND x.nbmst = c.nbmst
+                       AND x.khmshdon = COALESCE(c.khmshdon, 0)
+                       AND x.khhdon = c.khhdon AND x.shdon = c.shdon)
+           UNION ALL
+           SELECT h.portal_id, 'purchase', h.portal_kind, h.nbmst, h.khmshdon,
+                  h.khhdon, h.shdon
+             FROM hddt_imported_invoice h
+            WHERE h.posting_date >= ? AND h.posting_date <= ?
+              AND NOT EXISTS (
+                    SELECT 1 FROM hddt_invoice_xml x
+                     WHERE x.direction = 'purchase' AND x.kind = h.portal_kind
+                       AND x.nbmst = h.nbmst
+                       AND x.khmshdon = COALESCE(h.khmshdon, 0)
+                       AND x.khhdon = h.khhdon AND x.shdon = h.shdon)"#,
+    )
+    .bind(&nbmst)
+    .bind(from)
+    .bind(to)
+    .bind(from)
+    .bind(to)
+    .bind(from)
+    .bind(to)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Danh sách hóa đơn trong kỳ thiếu XML lỗi: {e}"))?;
+    // Thiếu MST bán ra thì [`to_key`] tự bỏ các dòng bán ra (cũng như hóa đơn
+    // mua thiếu dữ kiện) — không lọc thêm ở đây để đếm `skipped` đúng.
+    Ok(rows)
+}
+
+/// Tự tải XML cho hóa đơn **trong kỳ** — chạy lúc bấm "Xuất báo cáo kỳ thuế".
+///
+/// Đúng chỗ này chứ không phải lúc gán số HĐĐT: sau khi ký, cổng còn cache nên
+/// trang tra cứu đôi khi chưa trả hồ sơ gốc (`hsgoc`) — đóng hồ sơ kỳ mới là
+/// lúc chắc chắn đã có gì đó để tải. Lỗi từng hóa đơn không làm hỏng báo cáo.
+pub(crate) async fn fill_missing_in_period(
+    pool: &SqlitePool,
+    dir: &Path,
+    client: &HddtClient,
+    token: &str,
+    from: &str,
+    to: &str,
+) -> FillOutcome {
+    let mut out = FillOutcome::default();
+    crate::commands::progress::step("Dò hóa đơn trong kỳ còn thiếu XML…");
+    let rows = match pending_rows_in_period(pool, from, to).await {
+        Ok(r) => r,
+        Err(e) => {
+            crate::commands::progress::log(format!("Không lấy được danh sách XML cần tải: {e}"));
+            out.fail(e);
+            return out;
+        }
+    };
+    let n = rows.len();
+    crate::commands::progress::plan(n);
+    if n == 0 {
+        crate::commands::progress::log("Không có hóa đơn nào trong kỳ còn thiếu XML");
+    }
+    for (i, row) in rows.iter().enumerate() {
+        // Dòng "đang làm" không vào nhật ký — chỉ để biết hóa đơn nào đang chờ
+        // cổng trả lời; kết quả (đã tải / lỗi / bỏ qua) mới ghi vào nhật ký.
+        crate::commands::progress::step(format!(
+            "Tải XML {}/{} — {} {}",
+            i + 1,
+            n,
+            row.khhdon,
+            row.shdon
+        ));
+        let result = run_one(pool, dir, client, token, row, &mut out).await;
+        crate::commands::progress::tick(format!(
+            "XML {}/{} {} {}: {result}",
+            i + 1,
+            n,
+            row.khhdon,
+            row.shdon
+        ));
+    }
+    out
 }
 
 // ─── Tra cứu trạng thái ───
@@ -914,6 +1054,112 @@ mod tests {
         assert_eq!(out.saved, 1, "dòng đủ dữ kiện vẫn tải được: {out:?}");
         assert_eq!(out.skipped, 1, "dòng thiếu MST/ký hiệu bị bỏ qua: {out:?}");
         assert_eq!(out.failed, 0, "không tính là lỗi: {out:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Lượt tự tìm XML lúc xuất **báo cáo kỳ thuế**: kéo được cả hóa đơn BÁN RA
+    /// (app không tự lưu lúc gán số HĐĐT) lẫn mua vào trong kỳ, và không đụng
+    /// tới hóa đơn ở kỳ khác — thiếu thế là hồ sơ nộp bị lẫn kỳ.
+    #[tokio::test]
+    async fn fill_missing_in_period_covers_both_directions_and_only_the_period() {
+        let pool = test_pool().await;
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let client = crate::hddt::HddtClient::for_test(&portal.base);
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+
+        // MST bán ra — thiếu thì hóa đơn bán ra không tra được (đúng luồng app).
+        // Hồ sơ test đã có dòng `business` id=1 (migration seed) → cập nhật MST.
+        sqlx::query("UPDATE business SET tax_code = '010000000000' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .expect("seed MST bán ra");
+
+        // Bán ra đã gán số HĐĐT: 1 trong kỳ, 1 ở kỳ khác.
+        for (number, date, shdon) in [
+            ("HD-IN", "2026-10-05", "0001"),
+            ("HD-OUT", "2025-12-31", "0002"),
+        ] {
+            sqlx::query(
+                "INSERT INTO invoice (number, date, customer, customer_tax_code, total,
+                                      vat_amount, status)
+                 VALUES (?, ?, 'Khách A', '', 100000, 0, 'official')",
+            )
+            .bind(number)
+            .bind(date)
+            .execute(&pool)
+            .await
+            .expect("seed hóa đơn bán ra");
+            sqlx::query(
+                "UPDATE invoice SET e_invoice_symbol = '1C26T7DH', e_invoice_no = ?
+                  WHERE number = ?",
+            )
+            .bind(shdon)
+            .bind(number)
+            .execute(&pool)
+            .await
+            .expect("gán số HĐĐT");
+        }
+
+        // Mua vào trong kỳ (seed_cache ghi `posting_date` = 2026-10-02) + 1 bản
+        // ở kỳ khác để chắc chắn không bị tải nhầm vào hồ sơ này.
+        seed_cache(&pool, "pid-in", "0001").await;
+        sqlx::query(
+            "INSERT INTO hddt_purchase_invoice
+                (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
+                 khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue,
+                 tgtttbso, status, skip_reason, line_count, raw_json, detail_json)
+             VALUES ('pid-out', 'regular', '2025-11-01T17:00:00Z', '2025-11-02', '0100000000',
+                     'CÔNG TY MOCK', '001170019085', 1, 'C26MOCK', '0009', 1, 1,
+                     100000, 8000, 108000, 'pending', '', 1, '{}', '{}')",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed cache ngoài kỳ");
+
+        let out = fill_missing_in_period(
+            &pool,
+            &dir,
+            &client,
+            "mock-token",
+            "2026-10-01",
+            "2026-10-31",
+        )
+        .await;
+        assert_eq!(out.saved, 2, "1 bán ra + 1 mua vào trong kỳ: {out:?}");
+        assert_eq!(out.failed, 0, "không được lỗi: {out:?}");
+        assert_eq!(
+            portal.count("/invoices/export-xml"),
+            2,
+            "kỳ khác không được gọi cổng"
+        );
+
+        // Chạy lại → cả 2 đã có file nên không còn gì cần tải.
+        let again = fill_missing_in_period(
+            &pool,
+            &dir,
+            &client,
+            "mock-token",
+            "2026-10-01",
+            "2026-10-31",
+        )
+        .await;
+        assert_eq!(again.saved, 0, "không tải lại: {again:?}");
+        assert_eq!(again.failed, 0, "{again:?}");
+        assert_eq!(portal.count("/invoices/export-xml"), 2, "đúng 2 request");
+
+        let rows = list_saved(&pool).await.unwrap();
+        let sold: Vec<_> = rows.iter().filter(|r| r.direction == "sold").collect();
+        assert_eq!(sold.len(), 1, "chỉ hóa đơn bán ra trong kỳ: {rows:?}");
+        assert_eq!(
+            sold[0].kind, "regular",
+            "ký hiệu 1C26T7DH không có chữ CG → HĐ điện tử"
+        );
+        assert_eq!(
+            rows.iter().filter(|r| r.direction == "purchase").count(),
+            1,
+            "chỉ hóa đơn mua trong kỳ: {rows:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
