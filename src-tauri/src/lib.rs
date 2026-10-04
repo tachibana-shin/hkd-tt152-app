@@ -22,13 +22,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Test/E2E: trỏ app vào thư mục dữ liệu riêng (cô lập, không đụng dữ liệu thật).
-            let app_dir = std::env::var("HKD_DATA_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| {
-                    app.path()
-                        .app_data_dir()
-                        .expect("failed to get app data dir")
-                });
+            // `commands::profile::app_data_dir` là NGUỒN DUY NHẤT đọc biến này — mọi lệnh
+            // (sao lưu, hồ sơ, thư mục XML…) phải đi cùng chỗ nếu không sẽ trỏ nhầm nơi.
+            let app_dir = commands::profile::app_data_dir(app).expect("failed to get app data dir");
             std::fs::create_dir_all(&app_dir).ok();
             let profiles_dir = app_dir.join("profiles");
             std::fs::create_dir_all(&profiles_dir).ok();

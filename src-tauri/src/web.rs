@@ -179,7 +179,7 @@ fn log_request(cmd: &str, status: u16, detail: &str) {
     );
     println!("{line}");
     if let Some(app) = APP.get() {
-        if let Ok(dir) = app.path().app_data_dir() {
+        if let Ok(dir) = crate::commands::profile::app_data_dir(app) {
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)

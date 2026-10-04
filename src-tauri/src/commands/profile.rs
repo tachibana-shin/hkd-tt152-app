@@ -35,10 +35,27 @@ struct ProfileMeta {
 }
 
 fn profiles_dir(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
+    app_data_dir(app)
         .map(|d| d.join("profiles"))
         .unwrap_or_else(|_| PathBuf::from("profiles"))
+}
+
+/// Thư mục dữ liệu của app — **một nguồn duy nhất** cho mọi lệnh.
+///
+/// Tôn trọng `HKD_DATA_DIR`: `lib.rs` mở DB theo biến này lúc khởi động (test/
+/// E2E trỏ vào thư mục riêng, không đụng dữ liệu thật). Nếu chỗ khác lại dùng
+/// thẳng `app_data_dir()` của Tauri thì mọi thao tác sẽ trỏ sang THƯ MỤC SAI —
+/// sao lưu/đổi hồ sơ ghi vào nơi không có DB thật, còn file XML lại rơi ra
+/// ngoài thư mục hồ sơ (bấm "Xuất báo cáo" là hồ sơ thiếu XML mà không hiểu vì sao).
+pub(crate) fn app_data_dir<R: tauri::Runtime>(
+    app: &impl tauri::Manager<R>,
+) -> Result<PathBuf, String> {
+    if let Ok(dir) = std::env::var("HKD_DATA_DIR") {
+        if !dir.trim().is_empty() {
+            return Ok(PathBuf::from(dir));
+        }
+    }
+    app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
 fn profile_dir(app: &AppHandle, key: &str) -> PathBuf {
@@ -100,7 +117,7 @@ pub(crate) fn set_active(app_dir: &Path, key: &str, name: &str) {
 
 /// Đường dẫn file DB của hồ sơ đang mở (dùng cho backup/restore — DB giờ nằm trong `profiles/<key>/`).
 pub(crate) fn active_db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = app_data_dir(app)?;
     let key = read_active_key(&app_dir)
         .filter(|k| app_dir.join("profiles").join(k).join("hkd.db").is_file())
         .unwrap_or_else(|| "default".to_string());
@@ -154,8 +171,7 @@ pub(crate) async fn get_profiles(app: AppHandle) -> Result<String, String> {
     if !dir.is_dir() {
         return Ok(json!([]).to_string());
     }
-    let active =
-        read_active_key(&app.path().app_data_dir().map_err(|e| e.to_string())?).unwrap_or_default();
+    let active = read_active_key(&app_data_dir(&app)?).unwrap_or_default();
     let mut out: Vec<ProfileRow> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
@@ -228,7 +244,7 @@ pub(crate) async fn rename_profile(
     }
     write_profile_meta(&dir, &name);
     // Nếu đang mở → cập nhật luôn file active để tên hiển thị ở màn hình đăng nhập
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = app_data_dir(&app)?;
     if read_active_key(&app_dir).as_deref() == Some(key.as_str()) {
         set_active(&app_dir, &key, &name);
     }
@@ -245,7 +261,7 @@ pub(crate) async fn delete_profile(
 ) -> Result<String, String> {
     require_role(&state, &["admin"]).await?;
     validate_key(&key)?;
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = app_data_dir(&app)?;
     if read_active_key(&app_dir).as_deref() == Some(key.as_str()) {
         return Err("Không thể xóa hồ sơ đang mở. Hãy chuyển sang hồ sơ khác trước.".into());
     }
@@ -284,7 +300,7 @@ pub(crate) async fn switch_profile(
     *state.portal.lock().await = None; // mỗi hồ sơ có tài khoản HĐĐT riêng
 
     // Ghi hồ sơ đang mở, rồi swap pool
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = app_data_dir(&app)?;
     set_active(&app_dir, &key, &name);
     *state.pool.write().await = new_pool;
 
@@ -312,8 +328,7 @@ pub(crate) struct ProfilePrefs {
 }
 
 fn prefs_file(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
+    app_data_dir(app)
         .map(|d| d.join("profile_prefs.json"))
         .unwrap_or_else(|_| PathBuf::from("profile_prefs.json"))
 }
@@ -377,7 +392,7 @@ pub(crate) async fn select_profile(
     *state.portal.lock().await = None;
 
     // Ghi hồ sơ đang mở, rồi swap pool
-    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_dir = app_data_dir(&app)?;
     set_active(&app_dir, &key, &name);
     *state.pool.write().await = new_pool;
 
