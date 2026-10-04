@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_invoice_xml SET xml_body = ?, byte_size = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "f089aca7e206cbfc7fa0c8a6c71bd38f493c1c3425146242deac48006dcea168"
+}

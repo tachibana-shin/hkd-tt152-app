@@ -2124,6 +2124,7 @@ test("Tra cứu HĐĐT: tải file XML hóa đơn rồi báo đã lưu", async (
   const list = await request.post("/api/hddt_list_xml", { data: {} });
   expect(list.ok(), `hddt_list_xml failed ${list.status()}`).toBe(true);
   const rows = (await list.json()) as Array<{
+    id: number;
     file_name: string;
     byte_size: number;
     direction: string;
@@ -2156,6 +2157,20 @@ test("Tra cứu HĐĐT: tải file XML hóa đơn rồi báo đã lưu", async (
     rows.length,
     "bấm lại không được tạo thêm bản ghi",
   );
+  expect(rows[0].id, "dòng phải có id để gộp ZIP").toBeGreaterThan(0);
+
+  // Nút "Tải ZIP XML" gộp file đã lưu → tải về 1 file `.zip` thật (nộp/gửi).
+  const zipBtn = page.getByRole("button", { name: /Tải ZIP gộp file XML/ });
+  await expect(zipBtn).toBeVisible();
+  const [download] = await Promise.all([page.waitForEvent("download"), zipBtn.click()]);
+  expect(download.suggestedFilename()).toMatch(/\.zip$/);
+  await expect(page.getByText(/Đã tải ZIP \d+ file XML/)).toBeVisible();
+  const zipPath = await download.path();
+  expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();
+  const zipBytes = readFileSync(zipPath as string);
+  // Magic byte "PK" (0x50 0x4B) — đúng định dạng ZIP chứ không phải chuỗi lỗi JSON.
+  expect([zipBytes[0], zipBytes[1]], "phải là ZIP thật").toEqual([0x50, 0x4b]);
+  expect(zipBytes.length).toBeGreaterThan(100);
 });
 
 test("Đồng bộ HĐ mua: cột File XML tải được file XML của hóa đơn trong cache", async ({
@@ -2223,6 +2238,17 @@ test("Đồng bộ HĐ mua: cột File XML tải được file XML của hóa đ
     rows.some((r) => r.direction === "purchase" && r.kind === "regular" && r.byte_size > 0),
     "phải có file XML hóa đơn mua đã lưu",
   ).toBe(true);
+
+  // Nút "Tải ZIP XML" ở thanh công cụ gộp đúng file XML của dòng đang xem.
+  const zipBtn = page.getByRole("button", { name: /Tải ZIP gộp file XML/ });
+  await expect(zipBtn).toBeVisible();
+  const [download] = await Promise.all([page.waitForEvent("download"), zipBtn.click()]);
+  expect(download.suggestedFilename()).toMatch(/^hddt_xml_mua_\d{8}\.zip$/);
+  await expect(page.getByText(/Đã tải ZIP \d+ file XML/)).toBeVisible();
+  const zipPath = await download.path();
+  expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();
+  const zipBytes = readFileSync(zipPath as string);
+  expect([zipBytes[0], zipBytes[1]], "phải là ZIP thật").toEqual([0x50, 0x4b]);
 });
 
 test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đổi menu (KeepAlive)", async ({

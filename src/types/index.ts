@@ -1163,6 +1163,8 @@ export interface HddtSaveXmlResult {
 
 /** 1 file XML đã lưu (dòng trả từ `hddt_list_xml`). */
 export interface HddtSavedXml {
+  /** Id trong `hddt_invoice_xml` — gửi lại cho `hddt_export_xml_zip` để gộp ZIP. */
+  id: number;
   portal_id: string;
   direction: "sold" | "purchase";
   kind: "regular" | "cash-register";

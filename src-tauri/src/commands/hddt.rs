@@ -19,6 +19,7 @@ use crate::hddt::{
 };
 use crate::helpers::{audit, require_role};
 use crate::models::AppState;
+use base64::Engine;
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -957,4 +958,34 @@ pub(crate) async fn hddt_list_xml(state: State<'_, AppState>) -> Result<String, 
     let pool = state.pool.read().await;
     let rows = crate::hddt::list_saved(&pool).await?;
     Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
+/// Gộp nhiều file XML đã lưu thành **1 file ZIP** để nộp/gửi — trả base64
+/// (frontend giải mã rồi tải về, cùng cách với PDF hóa đơn).
+///
+/// `ids` = danh sách `hddt_invoice_xml.id` mà frontend lấy từ `hddt_list_xml`
+/// (tức đúng các dòng người dùng đang thấy); bỏ trống/rỗng = gộp **tất cả**.
+#[tauri::command]
+pub(crate) async fn hddt_export_xml_zip(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    ids: Option<Vec<i64>>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let ids = ids.unwrap_or_default();
+    let pool = state.pool.read().await;
+    let zip = crate::hddt::export_zip(&pool, &xml_dir(&app)?, &ids).await?;
+    drop(pool);
+    audit(
+        &state,
+        "hddt_export_xml_zip",
+        "hddt",
+        &if ids.is_empty() {
+            "tất cả hóa đơn đã lưu XML".to_string()
+        } else {
+            format!("{} hóa đơn", ids.len())
+        },
+    )
+    .await;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&zip))
 }

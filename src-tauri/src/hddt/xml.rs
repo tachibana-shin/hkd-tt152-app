@@ -8,16 +8,20 @@
 //!
 //! App chỉ giữ `invoice.xml` (đúng phần bắt buộc lưu trữ — xem hỏi người dùng
 //! 04/10/2026), bỏ phần render HTML/ ảnh vì app tự render PDF được từ
-//! `detail_json`. File nằm trong thư mục hồ sơ HKD (`…/profiles/<key>/hddt_xml/`)
-//! nên đi theo DB khi đổi/backup hồ sơ; bảng `hddt_invoice_xml` ghi lại hóa
-//! đơn nào đã có file để không tải lại.
+//! `detail_json`.
 //!
-//! Ba đường vào:
+//! **Nơi lưu**: nội dung nằm trong cột `hddt_invoice_xml.xml_body` (nguồn sự
+//! thật — đọc/nộp/gửi không phụ thuộc file còn trên đĩa, và backup đi theo
+//! DB). Song song đó vẫn ghi bản sao `.xml` vào `…/profiles/<key>/hddt_xml/`
+//! để mở/tải ra tay; file mất thì ghi lại từ blob chứ không tải lại cổng.
+//!
+//! Bốn đường vào:
 //!   * [`fill_missing_after_scan`] — chạy sau "Quét cổng" (màn Đồng bộ);
 //!   * [`fill_missing_before_import`] — chạy **sau** khi "Nhập kho" đã tạo
 //!     phiếu xong (backfill hóa đơn quét từ trước khi có tính năng này) để
 //!     việc lưu trữ không được làm chậm hay làm hỏng việc tạo phiếu;
-//!   * [`save_manual`] — nút "Tải XML" từng dòng (màn Tra cứu / Đồng bộ).
+//!   * [`save_manual`] — nút "Tải XML" từng dòng (màn Tra cứu / Đồng bộ);
+//!   * [`export_zip`] — nút "Tải ZIP XML" gộp nhiều hóa đơn để nộp/gửi.
 
 use std::path::{Path, PathBuf};
 
@@ -47,9 +51,13 @@ pub(crate) struct SavedXml {
     pub(crate) already: bool,
 }
 
-/// Một dòng đã lưu (để frontend tra "hóa đơn này có file XML chưa").
+/// Một dòng đã lưu (để frontend tra "hóa đơn này có file XML chưa" + chọn ra
+/// ZIP nộp/gửi).
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
 pub(crate) struct SavedXmlRow {
+    /// Id trong `hddt_invoice_xml` — frontend gửi lại danh sách này cho
+    /// [`export_zip`] khi người dùng chọn hóa đơn để nộp/gửi.
+    pub(crate) id: i64,
     pub(crate) portal_id: String,
     pub(crate) direction: String,
     pub(crate) kind: String,
@@ -172,7 +180,8 @@ pub(crate) fn extract_invoice_xml(zip_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 // ─── Ghi file + bảng ───
 
-/// Ghi file XML vào thư mục hồ sơ + ghi bản ghi trong `hddt_invoice_xml`.
+/// Ghi nội dung XML vào CSDL (`xml_body` — nguồn sự thật) + bản sao file vào
+/// thư mục hồ sơ.
 ///
 /// Idempotent: trùng khóa thì thay file và bản ghi cũ (nội dung hóa đơn không
 /// đổi giữa hai lần tải, nhưng tránh tích tụ file rác nếu đổi tên file sau này).
@@ -200,17 +209,19 @@ pub(crate) async fn save_from_zip(
     let shdon = key.shdon.clone();
     let khmshdon = key.khmshdon;
     let file_name2 = file_name.clone();
+    let body: &[u8] = xml.as_slice();
     sqlx::query!(
         r#"INSERT INTO hddt_invoice_xml
                (portal_id, direction, kind, nbmst, khmshdon, khhdon, shdon,
-                file_name, byte_size, source, saved_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                file_name, byte_size, source, saved_at, xml_body)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (direction, kind, nbmst, khmshdon, khhdon, shdon)
            DO UPDATE SET portal_id = excluded.portal_id,
                          file_name = excluded.file_name,
                          byte_size = excluded.byte_size,
                          source = excluded.source,
-                         saved_at = excluded.saved_at"#,
+                         saved_at = excluded.saved_at,
+                         xml_body = excluded.xml_body"#,
         portal_id,
         direction,
         kind,
@@ -222,6 +233,7 @@ pub(crate) async fn save_from_zip(
         byte_size,
         source,
         saved_at,
+        body,
     )
     .execute(pool)
     .await
@@ -234,17 +246,21 @@ pub(crate) async fn save_from_zip(
     })
 }
 
-/// Đã lưu chưa (và file còn trên đĩa) — bỏ qua nếu bản ghi còn mà file bị xoá
-/// để lượt tải tới ghi lại thay vì báo "đã lưu" giả.
+/// Đã lưu chưa — `xml_body` trong CSDL là nguồn sự thật, không phụ thuộc file
+/// còn trên đĩa.
+///
+/// Trả `(tên file, cỡ byte)` hoặc `None` khi chưa có. Dòng lưu trước khi thêm
+/// cột `xml_body` sẽ được nạp blob lại từ bản sao `.xml` còn trên đĩa (không
+/// mất một request cổng nào); cả file cũng mất thì mới coi là chưa lưu.
 async fn existing(
     pool: &SqlitePool,
     dir: &Path,
     key: &XmlInvoiceKey,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, i64)>, String> {
     let direction = key.direction.as_str();
     let kind = key.kind.as_str();
-    let row: Option<(String, i64)> = sqlx::query_as(
-        r#"SELECT file_name, byte_size FROM hddt_invoice_xml
+    let row: Option<(i64, String, i64, Option<Vec<u8>>)> = sqlx::query_as(
+        r#"SELECT id, file_name, byte_size, xml_body FROM hddt_invoice_xml
             WHERE direction = ? AND kind = ? AND nbmst = ?
               AND khmshdon = ? AND khhdon = ? AND shdon = ?"#,
     )
@@ -257,13 +273,51 @@ async fn existing(
     .fetch_optional(pool)
     .await
     .map_err(|e| format!("Đọc bản ghi XML lỗi: {e}"))?;
-    match row {
-        Some((name, size)) if size > 0 && dir.join(&name).is_file() => Ok(Some(name)),
-        _ => Ok(None),
+
+    let Some((id, name, size, body)) = row else {
+        return Ok(None);
+    };
+    if body.as_deref().is_some_and(|b| !b.is_empty()) {
+        return Ok(Some((name, size)));
+    }
+
+    // Chưa có blob: đọc bản sao file rồi ghi vào CSDL để lần sau khỏi đụng đĩa.
+    match body_from_disk(pool, dir, id, &name).await? {
+        Some(bytes) => Ok(Some((name, bytes.len() as i64))),
+        None => Ok(None),
     }
 }
 
-/// Tải XML 1 hóa đơn từ cổng rồi lưu (trừ khi đã có file).
+/// Dòng chưa có `xml_body` → đọc bản sao file `.xml` rồi ghi vào CSDL.
+///
+/// Trả `None` khi file cũng mất (lúc đó mới thật sự phải tải lại cổng). Dùng
+/// chung cho lúc kiểm "đã lưu chưa" và lúc gộp ZIP nộp/gửi.
+async fn body_from_disk(
+    pool: &SqlitePool,
+    dir: &Path,
+    id: i64,
+    file_name: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let bytes = std::fs::read(dir.join(file_name)).unwrap_or_default();
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    // Biểu thức tạm bind trước: macro giữ tham số cho tới hết `.await`.
+    let body: &[u8] = bytes.as_slice();
+    let size = bytes.len() as i64;
+    sqlx::query!(
+        "UPDATE hddt_invoice_xml SET xml_body = ?, byte_size = ? WHERE id = ?",
+        body,
+        size,
+        id,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("Bổ sung nội dung XML vào CSDL lỗi: {e}"))?;
+    Ok(Some(bytes))
+}
+
+/// Tải XML 1 hóa đơn từ cổng rồi lưu (trừ khi đã có trong CSDL).
 ///
 /// `source` = `auto` (quét/nhập) hoặc `manual` (nút tay).
 pub(crate) async fn download_one(
@@ -275,10 +329,7 @@ pub(crate) async fn download_one(
     portal_id: &str,
     source: &str,
 ) -> Result<SavedXml, String> {
-    if let Some(name) = existing(pool, dir, key).await? {
-        let size: i64 = std::fs::metadata(dir.join(&name))
-            .map(|m| m.len() as i64)
-            .unwrap_or(0);
+    if let Some((name, size)) = existing(pool, dir, key).await? {
         return Ok(SavedXml {
             file_name: name,
             byte_size: size,
@@ -456,13 +507,97 @@ async fn run_one(
 /// Toàn bộ file đã lưu — frontend tra "hóa đơn nào đã có XML".
 pub(crate) async fn list_saved(pool: &SqlitePool) -> Result<Vec<SavedXmlRow>, String> {
     sqlx::query_as::<_, SavedXmlRow>(
-        r#"SELECT portal_id, direction, kind, nbmst, khmshdon, khhdon, shdon,
+        r#"SELECT id, portal_id, direction, kind, nbmst, khmshdon, khhdon, shdon,
                   file_name, byte_size, source, saved_at
              FROM hddt_invoice_xml ORDER BY saved_at DESC, id DESC"#,
     )
     .fetch_all(pool)
     .await
     .map_err(|e| format!("Danh sách file XML lỗi: {e}"))
+}
+
+// ─── Nộp / gửi ZIP ───
+
+/// Gộp các hóa đơn đã lưu thành **1 file ZIP** để nộp/gửi cho kế toán hoặc
+/// lưu trữ theo quy định.
+///
+/// * `ids` là danh sách `hddt_invoice_xml.id` frontend lấy từ [`list_saved`];
+///   rỗng = lấy **tất cả**.
+/// * Mỗi entry dùng đúng `file_name` đã đặt (đã chứa chiều/loại/ký hiệu/số →
+///   không hóa đơn nào trùng tên trong ZIP).
+/// * Nội dung đọc từ `xml_body`; dòng cũ chưa có blob được nạp lại từ bản sao
+///   file nên không phải tải lại từ cổng.
+pub(crate) async fn export_zip(
+    pool: &SqlitePool,
+    dir: &Path,
+    ids: &[i64],
+) -> Result<Vec<u8>, String> {
+    let targets: Vec<(i64, String)> = if ids.is_empty() {
+        sqlx::query_as("SELECT id, file_name FROM hddt_invoice_xml ORDER BY saved_at DESC, id DESC")
+            .fetch_all(pool)
+            .await
+            .map_err(|e| format!("Đọc danh sách XML lỗi: {e}"))?
+    } else {
+        let mut out: Vec<(i64, String)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for id in ids {
+            // Id lặp lại → 2 entry cùng tên trong ZIP là lỗi, bỏ qua bản sao.
+            if !seen.insert(*id) {
+                continue;
+            }
+            let row: Option<(i64, String)> =
+                sqlx::query_as("SELECT id, file_name FROM hddt_invoice_xml WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| format!("Đọc bản ghi XML lỗi: {e}"))?;
+            if let Some(r) = row {
+                out.push(r);
+            }
+        }
+        out
+    };
+
+    if targets.is_empty() {
+        return Err("Chưa có hóa đơn nào được lưu XML nên chưa gộp được ZIP.".to_string());
+    }
+
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut packed = 0usize;
+    let mut lost = 0usize;
+    for (id, name) in &targets {
+        let row: Option<(String, Option<Vec<u8>>)> =
+            sqlx::query_as("SELECT file_name, xml_body FROM hddt_invoice_xml WHERE id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| format!("Đọc nội dung XML lỗi: {e}"))?;
+        let Some((_, body)) = row else { continue };
+        // Blob thiếu (dòng lưu trước khi có cột) → lây từ bản sao file.
+        let body = match body.filter(|b| !b.is_empty()) {
+            Some(b) => Some(b),
+            None => body_from_disk(pool, dir, *id, name).await?,
+        };
+        let Some(body) = body else {
+            lost += 1;
+            continue;
+        };
+        w.start_file(name.as_str(), opts)
+            .map_err(|e| format!("Tạo mục {name} trong ZIP lỗi: {e}"))?;
+        std::io::Write::write_all(&mut w, &body)
+            .map_err(|e| format!("Ghi {name} vào ZIP lỗi: {e}"))?;
+        packed += 1;
+    }
+    if packed == 0 {
+        return Err(format!(
+            "Không đọc được nội dung XML nào để gộp ZIP ({lost} hóa đơn mất cả blob lẫn file)."
+        ));
+    }
+    w.finish()
+        .map_err(|e| format!("Hoàn tất ZIP lỗi: {e}"))
+        .map(|c| c.into_inner())
 }
 
 #[cfg(test)]
@@ -541,12 +676,26 @@ mod tests {
             .expect("lưu lần 2");
         let rows = list_saved(&pool).await.expect("liệt kê");
         assert_eq!(rows.len(), 1, "không được trùng bản ghi");
+        assert!(rows[0].id > 0, "phải trả id để frontend chọn ra ZIP");
+
+        // Nội dung nằm trong CSDL chứ không chỉ trong file.
+        let stored: Option<Vec<u8>> = sqlx::query_scalar("SELECT xml_body FROM hddt_invoice_xml")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            stored.as_deref(),
+            Some(extract_invoice_xml(&sample_zip(true)).unwrap().as_slice()),
+            "xml_body phải đúng nội dung file"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
-    async fn existing_hides_row_when_file_deleted_on_disk() {
+    async fn existing_keeps_row_when_file_deleted_because_blob_is_authoritative() {
+        // File `.xml` chỉ là bản sao để mở tay — mất file không được coi là
+        // "chưa lưu" (nếu không, mỗi lần quét lại tốn 1 request cổng vô ích).
         let pool = test_pool().await;
         let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
         let k = key();
@@ -555,10 +704,47 @@ mod tests {
             .expect("lưu");
         std::fs::remove_file(dir.join(&saved.file_name)).unwrap();
 
-        // Bản ghi còn nhưng file mất → coi như chưa lưu để tải lại.
+        let found = existing(&pool, &dir, &k)
+            .await
+            .unwrap()
+            .expect("blob còn thì vẫn tính là đã lưu");
+        assert_eq!(found.0, saved.file_name);
+        assert_eq!(found.1, saved.byte_size, "cỡ lấy từ CSDL, không từ file");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn row_saved_before_blob_column_is_backfilled_from_its_file() {
+        // Dòng cũ có file nhưng `xml_body` NULL (lưu trước migration thêm cột):
+        // đọc lúc sau phải tự nạp blob từ file, không gọi cổng.
+        let pool = test_pool().await;
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+        let k = key();
+        let saved = save_from_zip(&pool, &dir, &k, &sample_zip(true), "pid-1", "auto")
+            .await
+            .expect("lưu");
+        sqlx::query("UPDATE hddt_invoice_xml SET xml_body = NULL")
+            .execute(&pool)
+            .await
+            .unwrap();
         assert!(
-            existing(&pool, &dir, &k).await.unwrap().is_none(),
-            "file bị xoá thì phải tải lại"
+            existing(&pool, &dir, &k).await.unwrap().is_some(),
+            "file còn thì vẫn là đã lưu"
+        );
+        let stored: Option<Vec<u8>> = sqlx::query_scalar("SELECT xml_body FROM hddt_invoice_xml")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(
+            stored.as_deref().is_some_and(|b| !b.is_empty()),
+            "blob đã được nạp lại từ file"
+        );
+
+        // Giờ file có mất đi nữa cũng không cần tải lại cổng.
+        std::fs::remove_file(dir.join(&saved.file_name)).unwrap();
+        assert!(
+            existing(&pool, &dir, &k).await.unwrap().is_some(),
+            "blob đã có trong CSDL"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -681,5 +867,94 @@ mod tests {
         assert_eq!(out.failed, 0, "không tính là lỗi: {out:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ─── Gộp ZIP nộp/gửi ───
+
+    /// Đọc ZIP thành danh sách `(tên entry, nội dung)`.
+    fn zip_entries(bytes: &[u8]) -> Vec<(String, String)> {
+        let mut a = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
+        (0..a.len())
+            .map(|i| {
+                let mut e = a.by_index(i).unwrap();
+                let name = e.name().to_string();
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut e, &mut s).unwrap();
+                (name, s)
+            })
+            .collect()
+    }
+
+    /// Hóa đơn thứ 2 — cùng mẫu số/ký hiệu nhưng khác số.
+    fn key2() -> XmlInvoiceKey {
+        XmlInvoiceKey {
+            shdon: "00002398".into(),
+            ..key()
+        }
+    }
+
+    #[tokio::test]
+    async fn export_zip_packs_only_the_selected_invoices() {
+        let pool = test_pool().await;
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+        let (k1, k2) = (key(), key2());
+        save_from_zip(&pool, &dir, &k1, &sample_zip(true), "pid-1", "auto")
+            .await
+            .unwrap();
+        save_from_zip(&pool, &dir, &k2, &sample_zip(true), "pid-2", "auto")
+            .await
+            .unwrap();
+
+        let rows = list_saved(&pool).await.unwrap();
+        assert_eq!(rows.len(), 2);
+
+        // Chọn 1 hóa đơn → ZIP có đúng 1 file, tên file đúng như đã đặt.
+        let one = export_zip(&pool, &dir, &[rows[0].id]).await.expect("gộp 1");
+        let entries = zip_entries(&one);
+        assert_eq!(entries.len(), 1, "chỉ gộp hóa đơn được chọn");
+        assert_eq!(entries[0].0, rows[0].file_name);
+        assert!(entries[0].1.contains("<HDon>"), "nội dung là XML thật");
+
+        // Không chọn gì → gộp tất cả (dùng khi nộp theo kỳ).
+        let all = export_zip(&pool, &dir, &[]).await.expect("gộp tất cả");
+        assert_eq!(zip_entries(&all).len(), 2, "2 hóa đơn = 2 file XML");
+
+        // Id lặp lại không được sinh 2 entry cùng tên (ZIP sẽ lỗi).
+        let dup = export_zip(&pool, &dir, &[rows[0].id, rows[0].id])
+            .await
+            .expect("gộp id trùng");
+        assert_eq!(zip_entries(&dup).len(), 1, "bỏ bản sao id");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn export_zip_reads_a_legacy_row_whose_blob_is_still_empty() {
+        // Dòng lưu trước khi có cột `xml_body`: file vẫn còn → ZIP vẫn gộp được
+        // và blob được nạp lại từ file trong lúc gộp.
+        let pool = test_pool().await;
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+        save_from_zip(&pool, &dir, &key(), &sample_zip(true), "pid-1", "auto")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE hddt_invoice_xml SET xml_body = NULL")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let rows = list_saved(&pool).await.unwrap();
+        let zip = export_zip(&pool, &dir, &[rows[0].id]).await.expect("gộp");
+        assert_eq!(zip_entries(&zip).len(), 1, "lây từ file được");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn export_zip_explains_when_there_is_nothing_to_pack() {
+        // Không có gì đã lưu → báo lỗi rõ ràng thay vì trả ZIP rỗng.
+        let pool = test_pool().await;
+        let dir = std::env::temp_dir().join(format!("hkd-xml-{}", uuid::Uuid::new_v4()));
+        let err = export_zip(&pool, &dir, &[]).await.expect_err("chưa có gì");
+        assert!(err.contains("Chưa có hóa đơn"), "lỗi = {err}");
     }
 }

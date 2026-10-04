@@ -28,8 +28,8 @@ pub(crate) use password::generate_password;
 pub(crate) use session::{days_left_until, now_unix, rfc3339_to_unix, PortalSession};
 pub(crate) use sync::CachedInvoice;
 pub(crate) use xml::{
-    fill_missing_after_scan, fill_missing_before_import, list_saved, save_from_zip, save_manual,
-    xml_dir_under, FillOutcome, SavedXml, SavedXmlRow, XmlInvoiceKey,
+    export_zip, fill_missing_after_scan, fill_missing_before_import, list_saved, save_from_zip,
+    save_manual, xml_dir_under, FillOutcome, SavedXml, SavedXmlRow, XmlInvoiceKey,
 };
 
 #[cfg(test)]

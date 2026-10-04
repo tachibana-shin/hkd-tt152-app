@@ -9,7 +9,8 @@
 import { api } from "@/db";
 import { useBusinessStore } from "@/stores/business";
 import { usePortalSession } from "@/composables/usePortalSession";
-import type { HddtSyncPreview, HddtSyncRow } from "@/types";
+import type { HddtSavedXml, HddtSyncPreview, HddtSyncRow } from "@/types";
+import { downloadZip } from "@/utils/download";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const toast = useToast();
@@ -48,9 +49,10 @@ const syncSummary = ref<HddtSyncPreview["summary"] | null>(null);
 const syncScanning = ref(false);
 const syncImporting = ref(false);
 const syncScanMsg = ref("");
-/** Tên file XML đã lưu theo khóa hóa đơn — để bảng hiện "Đã lưu/Tải lại". */
-const xmlSaved = ref<Record<string, string>>({});
+/** File XML đã lưu theo khóa hóa đơn — để bảng hiện "Đã lưu" + chọn ra ZIP. */
+const xmlSaved = ref<Record<string, HddtSavedXml>>({});
 const savingXml = ref<Set<string>>(new Set());
+const exportingXml = ref(false);
 
 /** Khóa tra trạng thái XML — 4 tham số định danh hóa đơn (bỏ mã mẫu số vì
  *  người dùng nhìn tên file theo ký hiệu + số). */
@@ -63,9 +65,9 @@ function rowXmlKey(row: HddtSyncRow) {
   return xmlKey("purchase", row.portal_kind, row.nbmst, row.khhdon, row.shdon);
 }
 
-/** Tên file XML đã lưu (rỗng = chưa có). */
-function rowXmlSaved(row: HddtSyncRow) {
-  return xmlSaved.value[rowXmlKey(row)] ?? "";
+/** Bản ghi XML đã lưu của dòng này (`undefined` = chưa có file). */
+function rowXmlSaved(row: HddtSyncRow): HddtSavedXml | undefined {
+  return xmlSaved.value[rowXmlKey(row)];
 }
 
 /** Đang tải file XML của dòng này (tránh bấm 2 lần). */
@@ -76,9 +78,9 @@ function rowXmlBusy(row: HddtSyncRow) {
 async function loadXmlIndex() {
   try {
     const rows = await api.hddtListXml();
-    const map: Record<string, string> = {};
+    const map: Record<string, HddtSavedXml> = {};
     for (const r of rows) {
-      map[xmlKey(r.direction, r.kind, r.nbmst, r.khhdon, r.shdon)] = r.file_name;
+      map[xmlKey(r.direction, r.kind, r.nbmst, r.khhdon, r.shdon)] = r;
     }
     xmlSaved.value = map;
   } catch {
@@ -87,7 +89,53 @@ async function loadXmlIndex() {
   }
 }
 
-/** Nút "Tải XML" từng dòng — tải từ cổng rồi ghi vào thư mục hồ sơ. */
+/** Id các file XML của **dòng đang xem** — đúng phạm vi người dùng muốn nộp. */
+function displayedXmlIds(): number[] {
+  return syncRows.value
+    .map((row) => xmlSaved.value[rowXmlKey(row)]?.id)
+    .filter((id): id is number => typeof id === "number");
+}
+
+/** Số file sẽ vào ZIP — hiện ngay trên nhãn nút để biết sắp tải bao nhiêu. */
+const exportableXmlCount = computed(() => displayedXmlIds().length);
+
+/** Tên ZIP theo ngày — cùng mẫu đặt tên file với các mục xuất khác của app. */
+function zipFileName() {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  return `hddt_xml_mua_${stamp}.zip`;
+}
+
+/** Nút "Tải ZIP XML" — gộp file XML của các dòng đang xem để nộp/gửi. */
+async function exportXmlZip() {
+  const ids = displayedXmlIds();
+  if (exportingXml.value) return;
+  if (ids.length === 0) {
+    toast.add({
+      severity: "info",
+      summary: "Chưa có file XML nào trong danh sách này",
+      detail: 'Bấm "Tải XML" từng dòng hoặc "Quét cổng" để lưu tự động trước.',
+      life: 4500,
+    });
+    return;
+  }
+  exportingXml.value = true;
+  try {
+    downloadZip(zipFileName(), await api.hddtExportXmlZip(ids));
+    toast.add({
+      severity: "success",
+      summary: `Đã tải ZIP ${ids.length} file XML`,
+      detail: `Tệp ${zipFileName()} — gửi hoặc lưu trữ theo quy định.`,
+      life: 4000,
+    });
+  } catch (e) {
+    toastError("Không gộp được ZIP file XML", e);
+  } finally {
+    exportingXml.value = false;
+  }
+}
+
+/** Nút "Tải XML" từng dòng — tải từ cổng rồi ghi vào CSDL + thư mục hồ sơ. */
 async function saveRowXml(row: HddtSyncRow) {
   const key = rowXmlKey(row);
   if (savingXml.value.has(key)) return;
@@ -103,7 +151,8 @@ async function saveRowXml(row: HddtSyncRow) {
       shdon: row.shdon,
       portalId: row.portal_id,
     });
-    xmlSaved.value = { ...xmlSaved.value, [key]: saved.file_name };
+    // Tải lại toàn bộ chỉ mục để lấy `id` (cần cho "Tải ZIP XML").
+    await loadXmlIndex();
     toast.add({
       severity: "success",
       summary: saved.already ? "File XML đã có từ trước" : "Đã lưu file XML",
@@ -396,6 +445,17 @@ void (async () => {
           :disabled="syncScanning || !syncSummary || syncSummary.total === 0"
           @click="onSyncClearCache"
         />
+        <!-- Gộp file XML của đúng các dòng đang xem thành 1 ZIP để nộp/gửi. -->
+        <Button
+          :label="exportableXmlCount > 0 ? `Tải ZIP XML (${exportableXmlCount})` : 'Tải ZIP XML'"
+          icon="pi pi-download"
+          severity="secondary"
+          :loading="exportingXml"
+          :disabled="syncScanning"
+          :aria-label="`Tải ZIP gộp file XML hóa đơn mua (${exportableXmlCount} file)`"
+          v-tooltip="'Gộp file XML của các hóa đơn trong danh sách thành 1 file ZIP'"
+          @click="exportXmlZip"
+        />
         <Button
           v-if="syncSummary && syncSummary.pending > 0"
           :label="`Nhập tất cả (${syncSummary.pending})`"
@@ -477,7 +537,7 @@ void (async () => {
             <span
               v-if="rowXmlSaved(data)"
               class="inline-flex items-center gap-1 text-xs text-emerald-700"
-              :title="rowXmlSaved(data)"
+              :title="rowXmlSaved(data)?.file_name"
             >
               <i class="pi pi-check-circle" />
               Đã lưu

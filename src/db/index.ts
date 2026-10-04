@@ -909,6 +909,11 @@ export const api = {
   hddtListXml: async (): Promise<HddtSavedXml[]> =>
     parse<HddtSavedXml[]>(await call<string>("hddt_list_xml", {})),
 
+  /** Gộp các file XML đã lưu thành 1 ZIP để nộp/gửi — trả **base64**.
+   *  `ids` rỗng = gộp tất cả (dùng `downloadZip` để tải về máy). */
+  hddtExportXmlZip: async (ids: number[]): Promise<string> =>
+    call<string>("hddt_export_xml_zip", { ids }),
+
   /** `detail_json` dựng từ hóa đơn nội bộ — để xem trước PDF ở Chờ xuất HĐĐT. */
   invoiceDraftDetail: (id: number) => call<string>("invoice_draft_detail", { id }),
 

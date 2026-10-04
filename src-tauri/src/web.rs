@@ -658,6 +658,12 @@ pub async fn api_invoke(
             portal_id: Option<String>
         ),
         "hddt_list_xml" => mx!(commands::hddt::hddt_list_xml, body),
+        // Gộp nhiều XML đã lưu thành 1 ZIP để nộp/gửi (rỗng = tất cả).
+        "hddt_export_xml_zip" => mx_state_app!(
+            commands::hddt::hddt_export_xml_zip,
+            body,
+            ids: Option<Vec<i64>>
+        ),
         "hddt_send_simulated" => mx!(
             commands::hddt::hddt_send_simulated,
             body,

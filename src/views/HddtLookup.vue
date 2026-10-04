@@ -9,8 +9,9 @@
  */
 import { api } from "@/db";
 import { usePortalSession } from "@/composables/usePortalSession";
-import type { HddtInvoiceDirection, HddtInvoiceKind, HddtInvoiceRow } from "@/types";
+import type { HddtInvoiceDirection, HddtInvoiceKind, HddtInvoiceRow, HddtSavedXml } from "@/types";
 import { HDDT_KHMSHDON, HDDT_TTHAI, HDDT_TTXLY, HDDT_TTXLY_ALL } from "@/types";
+import { downloadZip } from "@/utils/download";
 
 const toast = useToast();
 const portal = usePortalSession();
@@ -324,9 +325,10 @@ async function openInvoicePdf(row: HddtInvoiceRow) {
 // ─── Lưu file XML hóa đơn điện tử ───
 // Quy định người bán/người mua phải lưu file XML. Màn này là nơi duy nhất thấy
 // hóa đơn BÁN RA (chưa nằm trong DB) nên nút "Tải XML" ở đây phục vụ cả 2 chiều.
-const xmlSaved = ref<Record<string, string>>({});
+const xmlSaved = ref<Record<string, HddtSavedXml>>({});
 /** Các dòng đang tải — bấm nhiều dòng cùng lúc không bị bỏ qua âm thầm. */
 const xmlSaving = ref<Set<string>>(new Set());
+const exportingXml = ref(false);
 
 function rowXmlKey(row: HddtInvoiceRow) {
   return [
@@ -341,14 +343,55 @@ function rowXmlKey(row: HddtInvoiceRow) {
 async function loadXmlIndex() {
   try {
     const rows = await api.hddtListXml();
-    const map: Record<string, string> = {};
+    const map: Record<string, HddtSavedXml> = {};
     for (const r of rows) {
-      map[[r.direction, r.kind, r.nbmst, r.khhdon, r.shdon].join("|")] = r.file_name;
+      map[[r.direction, r.kind, r.nbmst, r.khhdon, r.shdon].join("|")] = r;
     }
     xmlSaved.value = map;
   } catch {
     // Không có danh sách thì nút hiện "Tải XML" — không chặn màn tra cứu.
     xmlSaved.value = {};
+  }
+}
+
+/** Id file XML của **các dòng kết quả đang xem** — phạm vi gộp ZIP. */
+function displayedXmlIds(): number[] {
+  return searchRows.value
+    .map((row) => xmlSaved.value[rowXmlKey(row)]?.id)
+    .filter((id): id is number => typeof id === "number");
+}
+
+const exportableXmlCount = computed(() => displayedXmlIds().length);
+
+/** Nút "Tải ZIP XML" — gộp file XML của kết quả tra cứu hiện tại để nộp/gửi. */
+async function exportXmlZip() {
+  const ids = displayedXmlIds();
+  if (exportingXml.value) return;
+  if (ids.length === 0) {
+    toast.add({
+      severity: "info",
+      summary: "Chưa có file XML nào trong kết quả này",
+      detail: 'Bấm "Tải XML" từng dòng trước khi gộp ZIP.',
+      life: 4500,
+    });
+    return;
+  }
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const name = `hddt_xml_${stamp}.zip`;
+  exportingXml.value = true;
+  try {
+    downloadZip(name, await api.hddtExportXmlZip(ids));
+    toast.add({
+      severity: "success",
+      summary: `Đã tải ZIP ${ids.length} file XML`,
+      detail: `Tệp ${name} — gửi hoặc lưu trữ theo quy định.`,
+      life: 4000,
+    });
+  } catch (e) {
+    toastError("Không gộp được ZIP file XML", e);
+  } finally {
+    exportingXml.value = false;
   }
 }
 
@@ -367,7 +410,7 @@ async function saveRowXml(row: HddtInvoiceRow) {
       shdon: String(row.shdon ?? ""),
       portalId: row.id === undefined || row.id === null ? undefined : String(row.id),
     });
-    xmlSaved.value = { ...xmlSaved.value, [key]: saved.file_name };
+    // Nạp lại chỉ mục để lấy `id` (dùng cho "Tải ZIP XML").
     await loadXmlIndex();
     toast.add({
       severity: "success",
@@ -516,6 +559,16 @@ void (async () => {
           text
           @click="onResetSearch"
         />
+        <!-- Gộp file XML của kết quả đang xem (mua vào lẫn bán ra) thành 1 ZIP. -->
+        <Button
+          :label="exportableXmlCount > 0 ? `Tải ZIP XML (${exportableXmlCount})` : 'Tải ZIP XML'"
+          icon="pi pi-download"
+          severity="secondary"
+          :loading="exportingXml"
+          :aria-label="`Tải ZIP gộp file XML hóa đơn (${exportableXmlCount} file)`"
+          v-tooltip="'Gộp file XML của các hóa đơn trong kết quả thành 1 file ZIP'"
+          @click="exportXmlZip"
+        />
       </div>
 
       <div class="mb-2 flex flex-wrap items-center gap-3 text-sm">
@@ -642,7 +695,7 @@ void (async () => {
               <i
                 v-else
                 class="pi pi-check-circle cursor-default text-emerald-600"
-                v-tooltip="`Đã lưu: ${xmlSaved[rowXmlKey(data)]}`"
+                v-tooltip="`Đã lưu: ${xmlSaved[rowXmlKey(data)]?.file_name}`"
               />
             </span>
           </template>

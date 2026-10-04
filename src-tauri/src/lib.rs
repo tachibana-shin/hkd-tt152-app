@@ -174,6 +174,7 @@ pub fn run() {
             commands::hddt::hddt_sync_clear_cache,
             commands::hddt::hddt_save_xml,
             commands::hddt::hddt_list_xml,
+            commands::hddt::hddt_export_xml_zip,
             commands::hddt::hddt_invoice_detail,
             commands::hddt::hddt_sync_invoice_detail,
             commands::hddt::hddt_voucher_invoice_detail,
