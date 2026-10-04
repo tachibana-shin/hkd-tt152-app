@@ -39,26 +39,26 @@
 
 ## 🧩 Tính năng theo màn hình
 
-| Màn hình               | Route               | Nghiệp vụ chính                                                                  |
-| ---------------------- | ------------------- | -------------------------------------------------------------------------------- |
-| 📊 Tổng quan           | `/`                 | Bảng điều khiển nhanh                                                            |
-| 🛒 Danh mục sản phẩm   | `/products`         | Hàng hóa/dịch vụ, giá bán–giá vốn, VAT, tồn tối thiểu                            |
-| 📒 Danh mục tài khoản  | `/accounts`         | Hệ thống tài khoản + số dư đầu kỳ                                                |
-| 🏷️ Đối tác & kho       | `/catalogs`         | Kho, khách hàng, nhà cung cấp, nhóm ngành                                        |
-| 💵 Phiếu thu / chi     | `/cash`             | Phiếu thu (`PT`) / chi (`PC`), hạch toán Nợ/Có                                   |
-| 📥 Nhập kho            | `/inbound`          | Phiếu nhập kho (`PN`), tạo lô FIFO                                               |
-| 📤 Xuất kho / Bán hàng | `/outbound`         | Phiếu xuất kho (`PX`), trừ lô FIFO, kiểm tra tồn                                 |
-| 📦 Tồn kho             | `/inventory`        | NXT theo lô, phiếu kiểm kê điều chỉnh                                            |
-| 🧾 Hóa đơn             | `/invoices`         | Lập hóa đơn nháp, chi tiết, liên kết HĐĐT                                        |
-| 🖨️ In phiếu            | `/print/:voucherNo` | In PNK `01-VT` / PXK `02-VT`, số tiền bằng chữ                                   |
-| 🧮 Kế toán HKD         | `/accounting`       | Tờ khai theo nhóm ngành, tờ khai siêu chuẩn, sổ sách, xuất báo cáo kỳ thuế (ZIP) |
-| 📚 Sổ nhật ký chung    | `/ledger`           | Sổ NKC theo bộ lọc                                                               |
-| 💼 Bảng lương          | `/payroll`          | Nhân viên, lập bảng lương, BHXH/TNCN, chi lương                                  |
-| 🕒 Chấm công           | `/attendance`       | Lưới công theo ngày, tổng công theo kỳ                                           |
-| 📄 Nhập liệu Excel     | `/import`           | Nhập khối dữ liệu sheet `NHAP LIEU`                                              |
-| 📝 Nhật ký hoạt động   | `/audit`            | Audit log (ai, khi nào, thao tác gì)                                             |
-| 👥 Người dùng          | `/users`            | Tài khoản & phân quyền                                                           |
-| 🏠 Hồ sơ HKD           | `/profiles`         | Tạo/đổi tên/xóa/chuyển hồ sơ kinh doanh                                          |
+| Màn hình               | Route               | Nghiệp vụ chính                                                               |
+| ---------------------- | ------------------- | ----------------------------------------------------------------------------- |
+| 📊 Tổng quan           | `/`                 | Bảng điều khiển nhanh                                                         |
+| 🛒 Danh mục sản phẩm   | `/products`         | Hàng hóa/dịch vụ, giá bán–giá vốn, VAT, tồn tối thiểu                         |
+| 📒 Danh mục tài khoản  | `/accounts`         | Hệ thống tài khoản + số dư đầu kỳ                                             |
+| 🏷️ Đối tác & kho       | `/catalogs`         | Kho, khách hàng, nhà cung cấp, nhóm ngành                                     |
+| 💵 Phiếu thu / chi     | `/cash`             | Phiếu thu (`PT`) / chi (`PC`), hạch toán Nợ/Có                                |
+| 📥 Nhập kho            | `/inbound`          | Phiếu nhập kho (`PN`), tạo lô FIFO                                            |
+| 📤 Xuất kho / Bán hàng | `/outbound`         | Phiếu xuất kho (`PX`), trừ lô FIFO, kiểm tra tồn                              |
+| 📦 Tồn kho             | `/inventory`        | NXT theo lô, phiếu kiểm kê điều chỉnh                                         |
+| 🧾 Hóa đơn             | `/invoices`         | Lập hóa đơn nháp, chi tiết, liên kết HĐĐT                                     |
+| 🖨️ In phiếu            | `/print/:voucherNo` | In PNK `01-VT` / PXK `02-VT`, số tiền bằng chữ                                |
+| 🧮 Kế toán HKD         | `/accounting`       | Tờ khai theo nhóm ngành, tờ khai 01/CNKD, sổ sách, xuất báo cáo kỳ thuế (ZIP) |
+| 📚 Sổ nhật ký chung    | `/ledger`           | Sổ NKC theo bộ lọc                                                            |
+| 💼 Bảng lương          | `/payroll`          | Nhân viên, lập bảng lương, BHXH/TNCN, chi lương                               |
+| 🕒 Chấm công           | `/attendance`       | Lưới công theo ngày, tổng công theo kỳ                                        |
+| 📄 Nhập liệu Excel     | `/import`           | Nhập khối dữ liệu sheet `NHAP LIEU`                                           |
+| 📝 Nhật ký hoạt động   | `/audit`            | Audit log (ai, khi nào, thao tác gì)                                          |
+| 👥 Người dùng          | `/users`            | Tài khoản & phân quyền                                                        |
+| 🏠 Hồ sơ HKD           | `/profiles`         | Tạo/đổi tên/xóa/chuyển hồ sơ kinh doanh                                       |
 
 ---
 
@@ -129,14 +129,14 @@ Màn **Kế toán HKD** tính thuế theo đúng các văn bản đang có hiệ
 Mẫu sổ nào dùng cho hộ còn tùy phương pháp tính thuế: hộ nhóm 1 dùng **S1a**; hộ nộp thuế theo tỷ lệ
 % doanh thu dùng **S2a**; hộ nộp TNCN theo thu nhập tính thuế dùng **S2b–S2e**.
 
-Bên cạnh mục _Tờ khai thuế_ có sẵn, màn Kế toán còn **_Tờ khai siêu chuẩn_** dựng lại màn
+Bên cạnh mục _Tờ khai thuế_ có sẵn, màn Kế toán còn **_Tờ khai 01/CNKD (hộ kinh doanh)_** dựng lại màn
 "Chọn địa điểm kinh doanh cần kê khai doanh thu" của cổng thuế: 6 dòng nhóm ngành luôn hiển thị
 dù chưa phát sinh doanh thu, ô số **sửa tay được** (lưu riêng từng địa điểm, không mất khi mở lại
 app), và **công tắc** bật/tắt từng địa điểm — tắt nghĩa là địa điểm đó không tham gia kê khai nên
 bảng số, bản in và file Excel đều ghi _KHÔNG KÊ KHAI_.
 
-Khi kỳ đã đủ chứng từ, bấm **_Xuất báo cáo kỳ thuế (ZIP)_** để lấy trọn một hồ sơ gồm: tờ khai
-siêu chuẩn, **cả 7 sổ** kế toán theo mẫu TT 152/2025, bản PDF hóa đơn mua vào/bán ra **trong kỳ**,
+Khi kỳ đã đủ chứng từ, bấm **_Xuất báo cáo kỳ thuế (ZIP)_** để lấy trọn một hồ sơ gồm: tờ khai 01/CNKD,
+**cả 7 sổ** kế toán theo mẫu TT 152/2025, bản PDF hóa đơn mua vào/bán ra **trong kỳ**,
 **toàn bộ** XML hóa đơn đã lưu, bản sao lưu SQLite và file `CHU-THICH.txt` liệt kê từng mục (kèm
 lý do nếu mục nào không dựng được).
 

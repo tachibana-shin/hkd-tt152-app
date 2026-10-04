@@ -3054,16 +3054,16 @@ test("Tờ khai thuế: nhóm 1 miễn thuế, giá vốn FIFO, loại chi thi�
   await expect(page.getByText("Đã lưu cấu hình thuế").first()).toBeVisible();
 });
 
-// ─── Tờ khai siêu chuẩn ───
+// ─── Tờ khai 01/CNKD ───
 
 /**
- * Tờ khai siêu chuẩn dựng lại màn "Chọn địa điểm kinh doanh cần kê khai doanh
+ * Tờ khai 01/CNKD dựng lại màn "Chọn địa điểm kinh doanh cần kê khai doanh
  * thu" của cổng thuế. Ba điểm khác của bản này với mục "Tờ khai thuế" phía trên:
  * 6 dòng nhóm ngành là **cố định** (nhóm chưa phát sinh vẫn lên bảng), ô doanh
  * thu **sửa tay được** nhưng không mất khi tải lại trang, và có **công tắc** tắt/
  * bật địa điểm như bản gốc.
  */
-test("Tờ khai siêu chuẩn: đủ 6 dòng cố định, ô sửa tay giữ qua tải lại, công tắc địa điểm", async ({
+test("Tờ khai 01/CNKD: đủ 6 dòng cố định, ô sửa tay giữ qua tải lại, công tắc địa điểm", async ({
   page,
 }) => {
   await ensureLoggedIn(page);
@@ -3136,7 +3136,7 @@ test("Tờ khai siêu chuẩn: đủ 6 dòng cố định, ô sửa tay giữ qu
 });
 
 /**
- * "Xuất báo cáo kỳ thuế" phải gộp **một** ZIP đủ hồ sơ kỳ: tờ khai siêu chuẩn,
+ * "Xuất báo cáo kỳ thuế" phải gộp **một** ZIP đủ hồ sơ kỳ: tờ khai 01/CNKD,
  * cả 7 sổ kế toán theo năm (kỳ chưa tròn năm vẫn lấy đủ dữ liệu hiện có), hóa
  * đơn PDF/XML mua vào – bán ra và bản sao lưu CSDL. Thiếu mục nào là hồ sơ không
  * nộp được, nên soi thẳng tên file trong ZIP chứ không chỉ xem có tải về không.

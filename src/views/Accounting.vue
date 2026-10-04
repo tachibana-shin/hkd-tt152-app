@@ -164,14 +164,14 @@ const declYear = computed(
 );
 /**
  * Khoảng ngày kê khai ISO — một nguồn duy nhất cho CẢ HAI mục "Tờ khai thuế" và
- * "Tờ khai siêu chuẩn", để báo cáo số thuế và bản kê khai không bao giờ lệch kỳ.
+ * "Tờ khai 01/CNKD", để báo cáo số thuế và bản kê khai không bao giờ lệch kỳ.
  * Thiếu khoảng ngày thì về trọn năm của năm tờ khai (giống khi chưa chọn gì).
  */
 const declRange = computed(() => ({
   from: toIsoDate(fromDate.value) || `${declYear.value}-01-01`,
   to: toIsoDate(toDate.value) || `${declYear.value}-12-31`,
 }));
-/** Tờ khai siêu chuẩn — "Xuất báo cáo kỳ thuế" lấy số đã sửa tay của nó. */
+/** Tờ khai 01/CNKD — "Xuất báo cáo kỳ thuế" lấy số đã sửa tay của nó. */
 const taxEntry = ref<InstanceType<typeof TaxEntryForm> | null>(null);
 // (Bộ chọn của SỔ — "Năm" / "Loại kỳ sổ" / "Kỳ" — nằm trọn ở tab Sổ kế toán,
 // không phụ thuộc màn này.)
@@ -328,7 +328,7 @@ const reportExporting = ref(false);
  *
  * ```
  * CHU-THICH.txt       hướng dẫn mở + số liệu từng nhóm file
- * to-khai/            tờ khai siêu chuẩn (số ĐANG hiển thị, gồm ô sửa tay)
+ * to-khai/            tờ khai 01/CNKD (số ĐANG hiển thị, gồm ô sửa tay)
  * so-ke-toan/         CẢ 7 sổ kế toán theo năm — kỳ chưa tròn năm vẫn lấy đủ
  *                     dữ liệu hiện có (sổ ghi liên tục cả năm theo Luật Kế toán)
  * hoa-don/pdf/…       PDF hóa đơn mua vào & bán ra phát sinh trong kỳ
@@ -348,7 +348,7 @@ async function exportTaxReport() {
     const { from, to } = declRange.value;
     const files: { path: string; data: string }[] = [];
 
-    // 1. Tờ khai siêu chuẩn — lấy ĐÚNG bản đang hiện trên màn, không nạp lại,
+    // 1. Tờ khai 01/CNKD — lấy ĐÚNG bản đang hiện trên màn, không nạp lại,
     //    để các ô sửa tay đi theo vào hồ sơ.
     const payload = taxEntry.value?.exportPayload();
     if (payload?.rows.length) {
@@ -810,7 +810,7 @@ useKeepAliveRefresh(reload);
       </AppDataTable>
     </SectionCard>
 
-    <!-- Tờ khai siêu chuẩn — bản KÊ KHAI 6 dòng theo mẫu cổng (khác mục trên:
+    <!-- Tờ khai 01/CNKD — bản KÊ KHAI 6 dòng theo mẫu cổng (khác mục trên:
          mục trên là báo cáo số thuế phải nộp, mục này là bản để nộp). -->
     <TaxEntryForm
       ref="taxEntry"

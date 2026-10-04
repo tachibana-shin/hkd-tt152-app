@@ -134,7 +134,7 @@ body {
   overflow-x: auto;
 }
 
-/* ─── In tờ khai siêu chuẩn (TaxEntryForm) ───
+/* ─── In tờ khai 01/CNKD (TaxEntryForm) ───
    Bản in nằm trong <Teleport to="body"> nên là con trực tiếp của <body>: khi bấm
    "In" component thêm class `print-tax-entry` cho <body>, ta ẩn mọi phần còn lại
    và chỉ giữ `.tax-entry-print` — in ra đúng tờ khai chứ không in cả giao diện.

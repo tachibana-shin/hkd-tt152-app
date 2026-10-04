@@ -14,7 +14,7 @@ import {
 } from "@/utils/taxEntry";
 
 /**
- * **Tờ khai siêu chuẩn** — màn "Chọn địa điểm kinh doanh cần kê khai doanh thu"
+ * **Tờ khai 01/CNKD (hộ kinh doanh)** — màn "Chọn địa điểm kinh doanh cần kê khai doanh thu"
  * của cổng thuế, dựng lại trong tab Kế toán HKD.
  *
  * Khác mục "Tờ khai thuế" phía trên (báo cáo số thuế phải nộp): mục này là
@@ -244,9 +244,9 @@ void (async () => {
   <SectionCard>
     <template #icon><i-mdi-clipboard-text-outline class="text-fuchsia-500" /></template>
     <template #title>
-      <span>Tờ khai siêu chuẩn</span>
+      <span>Tờ khai 01/CNKD (hộ kinh doanh)</span>
       <span class="text-xs font-normal text-gray-400"
-        >Kê khai doanh thu theo mẫu 6 nhóm ngành nghề</span
+        >Hộ kinh doanh, cá nhân kinh doanh — kê khai doanh thu theo từng địa điểm</span
       >
     </template>
     <template #actions>
@@ -379,6 +379,9 @@ void (async () => {
   <Teleport to="body">
     <div class="tax-entry-print">
       <h1>Chọn địa điểm kinh doanh cần kê khai doanh thu</h1>
+      <p class="tax-entry-print-form">
+        Mẫu số 01/CNKD — Tờ khai thuế đối với hộ kinh doanh, cá nhân kinh doanh
+      </p>
       <p>Kỳ kê khai: {{ periodLabel }}</p>
       <p v-if="taxpayer">Người nộp thuế: {{ taxpayer }}</p>
       <p class="tax-entry-print-sec">
@@ -439,6 +442,13 @@ void (async () => {
 
 .tax-entry-print p {
   margin: 5px 0;
+}
+
+/* Dòng nêu mã mẫu ngay dưới tiêu đề — người cầm bản in biết đây là mẫu nào. */
+.tax-entry-print-form {
+  margin: 0 0 10px;
+  font-size: 11pt;
+  text-align: center;
 }
 
 .tax-entry-print-sec {

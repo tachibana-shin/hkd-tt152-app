@@ -4,7 +4,7 @@
 // trữ: tờ khai, các sổ kế toán theo năm, PDF + XML hóa đơn mua vào và bán ra,
 // cùng bản sao lưu cơ sở dữ liệu.
 //
-// Chia đôi trách nhiệm: frontend dựng phần **Excel** (tờ khai siêu chuẩn, sổ
+// Chia đôi trách nhiệm: frontend dựng phần **Excel** (tờ khai 01/CNKD, sổ
 // kế toán) vì đã có sẵn `exceljs` và giữ đúng số liệu người dùng đang sửa trên
 // màn; backend dựng phần **PDF** (render qua gói `invoice-pdf`), lấy XML đã lưu
 // trong CSDL và chép CSDL — tất cả phần này frontend không với tới được.
