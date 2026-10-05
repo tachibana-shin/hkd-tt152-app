@@ -63,6 +63,25 @@ function openEdit(inv: Invoice) {
   draftDialog.value = true;
 }
 
+// ─── Xem trước PDF ngay trên tab Hóa đơn (nháp lẫn đã phát hành) ───
+const pdfVisible = ref(false);
+const pdfDetail = ref("");
+const pdfTitle = ref("");
+
+/**
+ * Backend dựng `detail_json` từ hóa đơn nội bộ rồi render PDF ngay trong Rust
+ * — bản nháp in nhãn "HÓA ĐƠN NHÁP", bản đã phát hành giữ khung in như cũ.
+ */
+async function openPdf(inv: Invoice) {
+  try {
+    pdfDetail.value = await api.invoiceDraftDetail(inv.id);
+    pdfTitle.value = `Hóa đơn ${inv.number}`;
+    pdfVisible.value = true;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không mở được PDF", detail: String(e), life: 4000 });
+  }
+}
+
 const linkDialog = ref(false);
 const linkTarget = ref<Invoice | null>(null);
 
@@ -379,7 +398,7 @@ useKeepAliveRefresh(reload);
           :global-filter-fields="['number', 'customer', 'voucher_no', 'e_invoice_no']"
           stripedRows
           actions-header="Hành động"
-          actions-width="190"
+          actions-width="220"
           @page="page.onPage"
           @sort="page.onSort"
           @search="page.onSearch"
@@ -454,6 +473,16 @@ useKeepAliveRefresh(reload);
           </Column>
           <template #actions="{ data }">
             <div v-if="auth.canAccounting" class="flex items-center justify-center gap-1">
+              <!-- Xem PDF có mặt ở mọi trạng thái (kể cả đã hủy / đã thay thế). -->
+              <Button
+                icon="pi pi-file-pdf"
+                text
+                rounded
+                size="small"
+                aria-label="Xem PDF hóa đơn"
+                v-tooltip="'Xem PDF hóa đơn'"
+                @click="openPdf(data)"
+              />
               <!-- Đã bị thay thế thì không chép/liên kết được nữa -->
               <template v-if="data.status !== 'cancelled' && data.status !== 'replaced'">
                 <Button
@@ -678,5 +707,8 @@ useKeepAliveRefresh(reload);
       @done="afterStatusChange"
       @replaced="onReplaced"
     />
+
+    <!-- Xem trước / in / tải PDF của chính hóa đơn ở dòng -->
+    <InvoicePdfDialog v-model:visible="pdfVisible" :detail-json="pdfDetail" :title="pdfTitle" />
   </div>
 </template>

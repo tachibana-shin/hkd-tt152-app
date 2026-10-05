@@ -71,7 +71,7 @@ function openLink(inv: Invoice) {
   linkTarget.value = inv;
   linkVisible.value = true;
 }
-function openDraft(inv: Invoice) {
+function openDraft(inv: Invoice | null) {
   draftTarget.value = inv;
   draftVisible.value = true;
 }
@@ -184,6 +184,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </template>
       <template #end>
         <div class="flex flex-wrap items-center gap-2">
+          <!-- Lập nháp ngay tại màn này: không phải qua tab Hóa đơn rồi quay lại. -->
+          <Button
+            v-if="auth.canAccounting"
+            label="Lập hóa đơn nháp"
+            icon="pi pi-plus"
+            @click="openDraft(null)"
+          />
           <span class="text-xs text-gray-500">
             {{ readyCount }} hóa đơn sẵn sàng chép · {{ copiedCount }} đã chép ·
             {{ blockedCount }} cần sửa

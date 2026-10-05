@@ -226,7 +226,37 @@ pub(crate) async fn invoice_draft_detail_json(
     .to_string())
 }
 
-/// Xem trước PDF hóa đơn nội bộ (nháp hoặc đã chép) ở màn Chờ xuất HĐĐT.
+/// QR in trên bản xem trước — hộ chưa có trang xác minh riêng nên tạm trỏ về
+/// trang dự án; cứ có URL là PDF mới vẽ ô QR (để trống thì bỏ ô, xem `qr.rs`).
+const PREVIEW_QR_URL: &str = "https://github.com/tachibana-shin";
+
+/// Dựng `detail_json` cho màn **xem trước** PDF (Chờ xuất HĐĐT, tab Hóa đơn).
+///
+/// Khác [`invoice_draft_detail_json`] — bản đó dùng chung cho ZIP báo cáo kỳ
+/// thuế nên giữ nguyên — bản xem trước phân rõ 2 nhánh:
+/// * nháp / đã chép (chưa có số hiệu của cổng): in **HÓA ĐƠN NHÁP**, mẫu số và
+///   ký hiệu tạm ghi `000000` để không ai tưởng đây là hóa đơn thật;
+/// * đã phát hành: giữ nguyên khung in (ký hiệu lấy từ hồ sơ hộ), chỉ thêm QR.
+async fn invoice_preview_json(pool: &SqlitePool, id: i64) -> Result<String, String> {
+    let mut data: serde_json::Value =
+        serde_json::from_str(&invoice_draft_detail_json(pool, id).await?)
+            .map_err(|e| e.to_string())?;
+
+    let status: String = sqlx::query_scalar!("SELECT status FROM invoice WHERE id = ?", id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    if matches!(status.as_str(), "draft" | "exported") {
+        data["tlhdon"] = json!("HÓA ĐƠN NHÁP");
+        data["khmshdon"] = json!("000000");
+        data["khhdon"] = json!("000000");
+    }
+    data["qrcode"] = json!(PREVIEW_QR_URL);
+    Ok(data.to_string())
+}
+
+/// Xem trước PDF hóa đơn nội bộ (nháp hoặc đã phát hành) ở màn Chờ xuất HĐĐT
+/// và tab Hóa đơn.
 #[tauri::command]
 pub(crate) async fn invoice_draft_detail(
     state: State<'_, AppState>,
@@ -234,7 +264,7 @@ pub(crate) async fn invoice_draft_detail(
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     let pool = state.pool.read().await;
-    invoice_draft_detail_json(&pool, id).await
+    invoice_preview_json(&pool, id).await
 }
 
 /// 1 dòng hóa đơn đã qua kiểm tra (có sẵn mã sản phẩm, nhóm ngành, tỷ lệ thuế).
@@ -1418,6 +1448,69 @@ mod tests {
         assert_eq!(rows[0]["thtien"], 1000.0);
         assert_eq!(rows[0]["ltsuat"], "1%", "tỷ lệ thuế từ sản phẩm");
         assert_eq!(rows[0]["sluong"], 1.0);
+    }
+
+    /// Bản xem trước phân 2 nhánh: nháp / đã chép in rõ "HÓA ĐƠN NHÁP" với mẫu
+    /// số + ký hiệu `000000`, đã phát hành giữ nguyên khung in (ký hiệu lấy từ
+    /// hồ sơ hộ) — cả hai đều có QR. ZIP báo cáo kỳ thuế không đổi vì nó đọc
+    /// [`invoice_draft_detail_json`].
+    #[tokio::test]
+    async fn xem_truoc_pdf_phan_biet_ban_nhap_va_ban_da_phat_hanh() {
+        let pool = test_pool().await;
+        sqlx::query!(
+            "INSERT INTO business (id, name, tax_code, address, phone, hddt_symbol)
+             VALUES (1, 'Hộ KD Test', '0123456789', 'Số 1 Đường A', '0241112223', 'C26TST')
+             ON CONFLICT(id) DO UPDATE SET
+                 name = excluded.name, tax_code = excluded.tax_code,
+                 address = excluded.address, phone = excluded.phone,
+                 hddt_symbol = excluded.hddt_symbol"
+        )
+        .execute(&pool)
+        .await
+        .expect("hồ sơ hộ kinh doanh");
+
+        let id = seed_draft(&pool, "HDPRE").await;
+
+        // ── 1) Nháp: chưa có số hiệu của cổng → nhãn nháp +000000 + QR ──
+        let raw = invoice_preview_json(&pool, id)
+            .await
+            .expect("xem trước được");
+        let draft: serde_json::Value = serde_json::from_str(&raw).expect("JSON hợp lệ");
+        assert_eq!(draft["tlhdon"], "HÓA ĐƠN NHÁP");
+        assert_eq!(draft["khmshdon"], "000000", "mẫu số tạm của bản nháp");
+        assert_eq!(draft["khhdon"], "000000", "ký hiệu tạm của bản nháp");
+        assert_eq!(draft["qrcode"], "https://github.com/tachibana-shin");
+
+        // ── 2) Đã chép sang cổng → vẫn chưa phát hành nên vẫn là bản nháp;
+        //       phát hành xong thì giữ nguyên khung in, chỉ còn thiếu QR ──
+        for status in ["exported", "official"] {
+            sqlx::query("UPDATE invoice SET status = ? WHERE id = ?")
+                .bind(status)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap_or_else(|e| panic!("đổi trạng thái {status}: {e}"));
+            let raw = invoice_preview_json(&pool, id)
+                .await
+                .expect("xem trước được");
+            let data: serde_json::Value = serde_json::from_str(&raw).expect("JSON hợp lệ");
+            if status == "official" {
+                assert_eq!(data["khhdon"], "C26TST", "ký hiệu lấy từ hồ sơ hộ");
+                assert_eq!(data["khmshdon"], "", "mẫu số giữ nguyên từ hồ sơ");
+                assert!(
+                    data.get("tlhdon").is_none(),
+                    "không được ghi đè tiêu đề của bản đã phát hành"
+                );
+            } else {
+                assert_eq!(data["tlhdon"], "HÓA ĐƠN NHÁP");
+                assert_eq!(data["khmshdon"], "000000");
+                assert_eq!(data["khhdon"], "000000");
+            }
+            assert_eq!(
+                data["qrcode"], "https://github.com/tachibana-shin",
+                "QR phải có ở cả 2 nhánh ({status})"
+            );
+        }
     }
 
     /// Không thấy hóa đơn → báo lỗi rõ ràng, không im lặng trả JSON rỗng.

@@ -1556,6 +1556,13 @@ test("Chờ xuất HĐĐT: xem PDF hóa đơn nháp ngay trên hàng chờ", asy
   await expectValidPdf(page);
   await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
   await expect(invoiceFrame(page)).toBeHidden();
+
+  // Lập nháp ngay tại màn này — mở hộp thoại LẬP MỚI (không phải sửa hóa đơn dở).
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const draftDlg = page.getByRole("dialog").filter({ hasText: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(draftDlg).toBeVisible();
+  await draftDlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(draftDlg).toBeHidden();
 });
 
 test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa đơn", async ({ page, request }) => {
@@ -3687,6 +3694,68 @@ async function expectValidPdf(page: Page) {
   expect(head.size, "PDF quá nhỏ").toBeGreaterThan(5000);
   expect(head.pages, "phải có ít nhất 1 trang").toBeGreaterThan(0);
 }
+
+test("Xem PDF hóa đơn: mở từ tab Hóa đơn", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Tồn kho + hóa đơn nháp riêng cho test này (không phụ thuộc test khác đã chạy).
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-19",
+      voucher_no: "PN9380",
+      description: "Nhập tồn cho test xem PDF trên tab Hóa đơn",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 20, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed: ${await stockIn.text()}`).toBe(true);
+  const mkInvoice = await request.post("/api/save_invoice", {
+    data: {
+      number: "HD9380",
+      date: "2026-09-19",
+      customer: "Khách xem PDF trên tab Hóa đơn",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 2,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(mkInvoice.ok(), `save_invoice failed: ${await mkInvoice.text()}`).toBe(true);
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  // Bảng phân trang server-side + sắp theo ngày giảm dần → tìm cho chắc (số mới
+  // tạo không hẳn nằm ở trang đầu).
+  await page.getByPlaceholder("Tìm kiếm…").fill("HD9380");
+  const row = page.locator("tr", { has: page.getByText("HD9380", { exact: true }) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+
+  // Nút PDF dựng `detail_json` ở backend rồi render ngay trong Rust; bản nháp
+  // in nhãn "HÓA ĐƠN NHÁP" (2 nhánh nháp/đã phát hành test ở Rust).
+  await row.getByRole("button", { name: "Xem PDF hóa đơn" }).click();
+  await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
+  await expectValidPdf(page);
+  await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await expect(invoiceFrame(page)).toBeHidden();
+});
 
 test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập", async ({ page, request }) => {
   await ensureLoggedIn(page);
