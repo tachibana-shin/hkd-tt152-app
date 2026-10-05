@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.0...v0.19.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **invoice:** load catalog when the draft dialog opens ([2e983cc](https://github.com/tachibana-shin/hkd-tt152-app/commit/2e983cc6239c25415e49aff25b093a1127335885))
+
 # [0.19.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.18.0...v0.19.0) (2026-10-05)
 
 
