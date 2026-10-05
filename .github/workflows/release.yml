@@ -353,3 +353,37 @@ jobs:
           gh release edit "v$VERSION" --draft=false \
             --title "HKD Kế Toán v$VERSION" --notes-file release-notes.md
           echo "Đã công khai release v$VERSION"
+
+      # tauri-action ghi latest.json cho updater nhưng để `notes` rỗng (nó chỉ điền
+      # tag / url / signature), còn updater đọc đúng ô `notes` rồi gán cho
+      # Update.body → popup "Có bản cập nhật" trống trơn dù release body đủ mục
+      # Thay đổi. Ghép danh sách thay đổi của bản này vào rồi upload lại
+      # (--clobber) để app hiển thị được Markdown.
+      - name: Ghi ghi chú phát hành vào latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -f latest.json
+          if ! gh release download "v$VERSION" --pattern latest.json; then
+            echo "::notice::Release v$VERSION chưa có latest.json — bỏ qua."
+            exit 0
+          fi
+          # Nguồn chính: CHANGELOG.md (đã lấy từ origin/main ở trên).
+          notes=$(node scripts/release-notes.mjs "$VERSION" 2>/dev/null || true)
+          if [ -z "$notes" ]; then
+            # CHANGELOG chưa có mục này (chạy tay) → lấy phần Thay đổi trong body
+            # vừa ghi (nó nằm cuối file, sau mục "Tải bản cài").
+            notes=$(awk '/^### Thay đổi/{f=1} f' release-notes.md 2>/dev/null || true)
+          fi
+          if [ -z "$notes" ]; then
+            echo "::notice::Không lấy được danh sách thay đổi — giữ nguyên notes rỗng."
+            exit 0
+          fi
+          printf '%s\n' "$notes" > notes.md
+          jq --rawfile n notes.md '.notes = ($n | sub("\n+$"; ""))' latest.json > latest.new.json
+          mv latest.new.json latest.json
+          gh release upload "v$VERSION" latest.json --clobber
+          echo "Đã ghi ghi chú phát hành vào latest.json của v$VERSION"
