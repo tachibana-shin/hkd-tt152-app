@@ -19,23 +19,37 @@ export const useCatalogStore = defineStore("catalog", () => {
   // Nạp lazy qua loadOnhand chỉ khi popup cần (bảng dòng có cột Kho/Tồn).
   const onhand = ref(new Map<string, number>());
 
-  /** Nạp tất cả lô tồn → cộng dồn theo (sản phẩm × kho) cho cảnh báo thiếu tồn. */
-  async function loadOnhand() {
-    if (onhand.value.size || loadingOnhand.value) return;
+  /** Request nạp tồn đang chạy (nếu có) — để loadOnhand gộp yêu cầu trùng. */
+  let onhandTask: Promise<void> | null = null;
+
+  /**
+   * Nạp tất cả lô tồn → cộng dồn theo (sản phẩm × kho) cho cảnh báo thiếu tồn.
+   *
+   * `force` = tải lại dù đã có (dùng khi tồn đổi ngay trong lúc đang mở popup:
+   * tạo lô sản xuất, nhập kho…). Luôn trả về promise để người gọi chờ xong mới
+   * soi thiếu tồn — có yêu cầu đang chạy thì ghép vào đó, không bắn song song.
+   */
+  function loadOnhand(force = false): Promise<void> {
+    if (onhandTask) return onhandTask;
+    if (onhand.value.size && !force) return Promise.resolve();
     loadingOnhand.value = true;
-    try {
-      const lots = await api.getStockLots();
-      const m = new Map<string, number>();
-      for (const lot of lots) {
-        const keyAll = lot.product_code + "|";
-        m.set(keyAll, (m.get(keyAll) ?? 0) + lot.quantity);
-        const keyWh = lot.product_code + "|" + lot.warehouse_code;
-        m.set(keyWh, (m.get(keyWh) ?? 0) + lot.quantity);
+    onhandTask = (async () => {
+      try {
+        const lots = await api.getStockLots();
+        const m = new Map<string, number>();
+        for (const lot of lots) {
+          const keyAll = lot.product_code + "|";
+          m.set(keyAll, (m.get(keyAll) ?? 0) + lot.quantity);
+          const keyWh = lot.product_code + "|" + lot.warehouse_code;
+          m.set(keyWh, (m.get(keyWh) ?? 0) + lot.quantity);
+        }
+        onhand.value = m;
+      } finally {
+        loadingOnhand.value = false;
+        onhandTask = null;
       }
-      onhand.value = m;
-    } finally {
-      loadingOnhand.value = false;
-    }
+    })();
+    return onhandTask;
   }
 
   /** Tồn còn lại của sản phẩm tại kho (rỗng → tổng mọi kho); 0 nếu chưa nạp. */

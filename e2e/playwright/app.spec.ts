@@ -4106,6 +4106,235 @@ test("Popup hóa đơn: gõ tên mới là tạo nhanh mặt hàng, thêm tên k
   expect(after.find((p) => p.name === "Bột năng Tân An")?.aliases).toContain("Tapioca Tân An");
 });
 
+// ─── POPUP HÓA ĐƠN: 2 NÚT Ở HEADER BẢNG MẶT HÀNG (TẠO LÔ + TÊN KHÁC) ───
+test("Popup hóa đơn: tạo nhanh lô sản xuất và thêm tên khác ở header", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Thành phẩm + vật tư + định mức + tồn — riêng cho test này.
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-LSXPP",
+      name: "Bàn nhựa LSX PP",
+      unit: "Cái",
+      salePrice: 500_000,
+      costPrice: 400_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-LSXPP: ${await fg.text()}`).toBe(true);
+  const mat = await request.post("/api/save_product", {
+    data: {
+      code: "NVL-LSXPP",
+      name: "Nhựa LSX PP",
+      unit: "Kg",
+      salePrice: 0,
+      costPrice: 100_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(mat.ok(), `save_product NVL-LSXPP: ${await mat.text()}`).toBe(true);
+  const bom = await request.post("/api/save_product_bom", {
+    data: { productCode: "SP-LSXPP", items: [{ material_code: "NVL-LSXPP", quantity: 2 }] },
+  });
+  expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
+  const stock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-07",
+      voucher_no: "PN9491",
+      description: "Nhập vật tư cho test popup hóa đơn",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "NVL-LSXPP", quantity: 40, unit_price: 100_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stock.ok(), `save_inbound: ${await stock.text()}`).toBe(true);
+
+  // Màn Hóa đơn nạp lại danh mục khi mở — vào SAU khi tạo hàng qua API.
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog", { name: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByRole("textbox").first()).toHaveValue(/^HD\d+$/);
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Lô Nhanh");
+  await custInput.press("Enter");
+
+  // ── 1) Nút "Tạo lô sản xuất" NGAY trong popup → lô tạo xong gắn vào dòng ──
+  await dlg.getByTestId("header-create-lot").click();
+  const lotDlg = page.getByRole("dialog", { name: "Tạo lô sản xuất" });
+  await expect(lotDlg).toBeVisible();
+  await lotDlg.getByTestId("lot-fg").locator(".p-select").click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await expect(box).toBeVisible();
+  await box.fill("Bàn nhựa LSX PP");
+  await page
+    .getByRole("option", { name: /Bàn nhựa LSX PP/ })
+    .first()
+    .click();
+  await lotDlg.getByRole("spinbutton").first().fill("5");
+  await lotDlg.getByRole("spinbutton").first().press("Enter");
+  await expect(
+    page.getByTestId("lot-preview-table").getByText(/Nhựa LSX PP \(NVL-LSXPP\)/),
+  ).toBeVisible();
+  await lotDlg.getByRole("button", { name: "Tạo lô" }).click();
+  await expect(lotDlg).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText(/Đã tạo lô PN\d+/);
+
+  // Thành phẩm vừa tạo tự vào dòng trống của bảng Mặt hàng.
+  const line = dlg.locator("tbody tr").first();
+  await expect(line).toContainText("Bàn nhựa LSX PP");
+
+  // ── 2) Nút "Thêm tên khác" ở header → gán tên cho hàng bất kỳ ──
+  await dlg.getByTestId("header-add-alias").click();
+  const aDlg = page.getByRole("dialog", { name: "Thêm tên khác" });
+  await expect(aDlg).toBeVisible();
+  await aDlg.getByRole("combobox").first().click();
+  const aliasBox = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await aliasBox.fill("Bàn nhựa LSX PP");
+  await page
+    .getByRole("option", { name: /Bàn nhựa LSX PP/ })
+    .first()
+    .click();
+  await aDlg.getByTestId("alias-input").fill("Bàn nhựa LSX PP xuất");
+  await aDlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(aDlg).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã thêm tên khác");
+
+  // Tên vào danh mục…
+  const prods = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
+    code: string;
+    aliases: string;
+  }>;
+  expect(prods.find((p) => p.code === "SP-LSXPP")?.aliases).toContain("Bàn nhựa LSX PP xuất");
+  // …và dòng hóa đơn giữ ngay tên vừa thêm (in ra đúng tên người dùng chọn).
+  await expect(line).toContainText("Bàn nhựa LSX PP xuất");
+
+  // ── 3) Tồn vừa tạo đủ (5 ≥ 1) → lưu không bị hỏi thiếu kho ──
+  await dlg.getByRole("button", { name: "Lập hóa đơn" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.getByRole("alertdialog", { name: "Tồn kho đang thiếu" })).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText(/Đã lập hóa đơn HD/);
+
+  const inv = (await (
+    await request.post("/api/get_inventory_summary", { data: {} })
+  ).json()) as Array<{ product_code: string; balance: number }>;
+  expect(inv.find((r) => r.product_code === "SP-LSXPP")?.balance, "tồn thành phẩm").toBeCloseTo(
+    5,
+    5,
+  );
+});
+
+// ─── POPUP HÓA ĐƠN: THIẾU TỒN → HỎI TRƯỚC, NHÁP VẪN LƯU / GHI SỐ THÌ BỊ CHẶN ───
+test("Popup hóa đơn: thiếu tồn kho thì hỏi trước khi lưu nháp", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Hàng CHƯA có tồn kho nào — riêng cho test này (kèm nhóm ngành để lưu được nháp).
+  const made = await request.post("/api/save_product", {
+    data: {
+      code: "SP-THIEU1",
+      name: "Hàng thiếu kho E2E",
+      unit: "Cái",
+      salePrice: 10_000,
+      costPrice: 5_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(made.ok(), `save_product SP-THIEU1: ${await made.text()}`).toBe(true);
+
+  // Màn Hóa đơn nạp lại danh mục khi mở — vào SAU khi tạo hàng qua API.
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog", { name: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+  const numberInput = dlg.getByRole("textbox").first();
+  await expect(numberInput).toHaveValue(/^HD\d+$/);
+  const number = await numberInput.inputValue();
+
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Thiếu Kho");
+  await custInput.press("Enter");
+
+  // Hàng vừa tạo chưa nhập kho lần nào → soi tồn là 0.
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await box.fill("Hàng thiếu kho E2E");
+  await page
+    .getByRole("option", { name: /Hàng thiếu kho E2E/ })
+    .first()
+    .click();
+  await line.getByRole("spinbutton").first().fill("3");
+  await line.getByRole("spinbutton").first().press("Enter");
+  await expect(line).toContainText("Thiếu");
+
+  await dlg.getByRole("button", { name: "Lập hóa đơn" }).click();
+  const cDlg = page.getByRole("alertdialog", { name: "Tồn kho đang thiếu" });
+  await expect(cDlg).toBeVisible();
+  await expect(cDlg).toContainText("Hàng thiếu kho E2E");
+
+  // Từ chối → quay lại form, chưa lưu gì.
+  await cDlg.getByRole("button", { name: "Quay lại" }).click();
+  await expect(cDlg).toBeHidden();
+  await expect(dlg).toBeVisible();
+
+  // Chấp nhận → nháp vẫn lưu được (HĐĐT đã xuất cần thời gian mới lên cổng).
+  await dlg.getByRole("button", { name: "Lập hóa đơn" }).click();
+  await page
+    .getByRole("alertdialog", { name: "Tồn kho đang thiếu" })
+    .getByRole("button", { name: "Vẫn lưu nháp" })
+    .click();
+  await expect(dlg).toBeHidden();
+  // Toast gộp: tóm tắt + dòng "Thiếu tồn kho" backend trả về.
+  const saved = page.locator(".p-toast-message").last();
+  await expect(saved).toContainText(`Đã lập hóa đơn ${number}`);
+  await expect(saved).toContainText("Thiếu tồn kho");
+
+  // Nhưng ghi số HĐĐT (chốt thành hóa đơn thật) thì backend chặn.
+  const list = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
+    id: number;
+    number: string;
+  }>;
+  const id = list.find((i) => i.number === number)?.id;
+  expect(id, `vừa lập ${number}`).toBeTruthy();
+  const linked = await request.post("/api/link_hddt", {
+    data: {
+      invoiceId: id,
+      hddtNo: "00000777",
+      hddtSymbol: "1C26TT152",
+      hddtDate: "2026-09-30",
+    },
+  });
+  expect(linked.ok(), "ghi số HĐĐT phải bị chặn khi thiếu tồn").toBe(false);
+  expect(await linked.text()).toContain("Không đủ tồn kho");
+});
+
 // ─── F4 — ĐỊNH MỨC: KHAI NHIỀU THÀNH PHẨM TRONG 1 MÀN (MỖI SP 1 BẢNG) ───
 test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và xóa tất cả 1 lần", async ({
   page,

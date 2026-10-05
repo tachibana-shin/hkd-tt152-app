@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ii.product_id, p.code, p.is_service as \"is_service!: bool\",\n                  ii.quantity, ii.warehouse_code\n             FROM invoice_item ii\n             JOIN product p ON p.id = ii.product_id\n            WHERE ii.invoice_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "product_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_service!: bool",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "warehouse_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "591cd88cd7a98d4b79ac838ed14bd0a5722686faaa6f92df37d0ed2af1408570"
+}

@@ -287,10 +287,14 @@ struct PreparedInvoice {
     total: f64,
     tax_payable: f64,
     lines: Vec<PreparedLine>,
+    /// Dòng thiếu tồn (rỗng = đủ) theo ĐÚNG kho xuất trên dòng. Nháp KHÔNG bị
+    /// chặn: HĐĐT đã xuất vẫn cần thời gian mới lên cổng thông tin điện tử, nên
+    /// app hỏi người dùng rồi vẫn lưu — nhưng phải trả danh sách này về để báo.
+    shortage: Vec<String>,
 }
 
-/// Kiểm tra + dựng dòng hóa đơn từ input người dùng: nhóm ngành phải hợp lệ, tồn
-/// kho phải đủ theo ĐÚNG kho xuất trên từng dòng (rỗng → tổng mọi kho), và tính
+/// Kiểm tra + dựng dòng hóa đơn từ input người dùng: nhóm ngành phải hợp lệ,
+/// soi tồn kho theo ĐÚNG kho xuất trên từng dòng (rỗng → tổng mọi kho) và tính
 /// tổng tiền. Dùng chung cho lập mới và sửa hóa đơn nháp.
 async fn prepare_invoice(
     tx: &mut SqliteTransaction<'_>,
@@ -366,9 +370,6 @@ async fn prepare_invoice(
             ));
         }
     }
-    if !shortage.is_empty() {
-        return Err(format!("Không đủ tồn kho: {}", shortage.join("; ")));
-    }
 
     // Hóa đơn bán hàng của HKD không tách thuế GTGT (không ghi thuế trên hóa đơn).
     // Số thuế phải nộp tính theo tỷ lệ nhóm ngành × doanh thu (tax_payable) để
@@ -396,10 +397,14 @@ async fn prepare_invoice(
         });
     }
 
+    // Thiếu tồn không chặn ở đây (xem `PreparedInvoice.shortage`): nháp được lưu
+    // dù thiếu — cánh cửa chặn là bước ghi số HĐĐT (`link_hddt_core`) và lúc lập
+    // phiếu xuất, khi hóa đơn đã thành thật.
     Ok(PreparedInvoice {
         total,
         tax_payable,
         lines,
+        shortage,
     })
 }
 
@@ -500,6 +505,8 @@ async fn save_invoice_core(
         "total": round2(prepared.total),
         "vat_amount": 0.0,
         "tax_payable": round2(prepared.tax_payable),
+        // Nháp vẫn ghi được khi thiếu tồn — app báo danh sách này cho người dùng.
+        "shortage": prepared.shortage,
     }))
 }
 
@@ -566,6 +573,7 @@ async fn update_invoice_core(
         "total": round2(prepared.total),
         "vat_amount": 0.0,
         "tax_payable": round2(prepared.tax_payable),
+        "shortage": prepared.shortage,
     }))
 }
 
@@ -594,7 +602,8 @@ pub(crate) async fn update_invoice(
     Ok(res.to_string())
 }
 
-/// Tạo hóa đơn nháp — kiểm tra tồn kho trước khi lưu
+/// Tạo hóa đơn nháp — thiếu tồn vẫn ghi được (trả danh sách `shortage` để app
+/// hỏi người dùng); cánh cửa chặn là ghi số HĐĐT và lập phiếu xuất.
 #[tauri::command]
 pub(crate) async fn save_invoice(
     state: State<'_, AppState>,
@@ -713,6 +722,66 @@ fn same_period(a: &str, b: &str) -> bool {
     a.len() >= 7 && b.len() >= 7 && a[..7] == b[..7] // cùng tháng: yyyy-mm
 }
 
+/// Soi tồn kho của TỪNG dòng hóa đơn lúc sắp ghi số HĐĐT — thiếu ở ĐÚNG kho xuất
+/// trên dòng (rỗng → tổng mọi kho) thì trả về danh sách lỗi. Hàng dịch vụ không
+/// theo dõi tồn kho nên bỏ qua.
+async fn invoice_stock_shortage(
+    tx: &mut SqliteTransaction<'_>,
+    invoice_id: i64,
+) -> Result<Vec<String>, String> {
+    let rows = sqlx::query!(
+        r#"SELECT ii.product_id, p.code, p.is_service as "is_service!: bool",
+                  ii.quantity, ii.warehouse_code
+             FROM invoice_item ii
+             JOIN product p ON p.id = ii.product_id
+            WHERE ii.invoice_id = ?"#,
+        invoice_id
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut shortage = Vec::new();
+    for row in rows {
+        if row.is_service {
+            continue;
+        }
+        let where_str = if row.warehouse_code.trim().is_empty() {
+            "tổng các kho"
+        } else {
+            "kho đã chọn"
+        };
+        let available: f64 = if row.warehouse_code.trim().is_empty() {
+            sqlx::query_scalar!(
+                r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+                   WHERE product_id = ? AND depleted = 0"#,
+                row.product_id
+            )
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?
+        } else {
+            let wh_id = resolve_warehouse(tx, &row.warehouse_code, &row.code).await?;
+            sqlx::query_scalar!(
+                r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+                   WHERE product_id = ? AND warehouse_id = ? AND depleted = 0"#,
+                row.product_id,
+                wh_id
+            )
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?
+        };
+        if row.quantity - available > 1e-9 {
+            shortage.push(format!(
+                "{}: cần {:.2}, tồn {} {:.2}",
+                row.code, row.quantity, where_str, available
+            ));
+        }
+    }
+    Ok(shortage)
+}
+
 /// Ghi nhận số HĐĐT cho hóa đơn nháp → trạng thái 'official'.
 ///
 /// Ký hiệu gõ ở đây cũng được lưu vào hồ sơ HKD (`business.hddt_symbol`) làm
@@ -746,6 +815,17 @@ async fn link_hddt_core(
     };
 
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    // Ghi số HĐĐT = hóa đơn đã THẬT → bắt buộc đủ tồn kho NGAY LÚC NÀY (nháp thì
+    // được thiếu, app đã hỏi người dùng trước khi lưu). Hóa đơn đã gắn phiếu xuất
+    // thì kho đã trừ lúc lập phiếu → bỏ qua, không kiểm nữa.
+    if old.voucher_no.trim().is_empty() {
+        let shortage = invoice_stock_shortage(&mut tx, invoice_id).await?;
+        if !shortage.is_empty() {
+            return Err(format!("Không đủ tồn kho: {}", shortage.join("; ")));
+        }
+    }
+
     sqlx::query!(
         "UPDATE invoice SET status = 'official', e_invoice_no = ?, e_invoice_symbol = ?,
                            e_invoice_date = ?, date = ?
@@ -1317,8 +1397,9 @@ mod tests {
         // W1 có 5, W2 không có gì
         add_stock_lot(&pool, p, w1, 5.0, 1000.0, "2026-01-01").await;
 
-        // Khoai trừ W1 nhưng khai kho W2 → thiếu dù tổng kho đủ
-        let err = save_invoice_core(
+        // Tồn nằm ở W1 nhưng khai kho W2 → thiếu dù tổng kho đủ. Nháp VẪN lưu được
+        // (HĐĐT lên cổng có độ trễ) nhưng phải báo đúng dòng thiếu cho app hỏi.
+        let res = save_invoice_core(
             &pool,
             "HD0002",
             "2026-03-10",
@@ -1327,11 +1408,26 @@ mod tests {
             &[line("HD-B", 4.0, 2000.0, 0.0, "W2")],
         )
         .await
-        .unwrap_err();
+        .expect("nháp được lưu dù thiếu tồn");
+        let shortage = res["shortage"].as_array().cloned().unwrap_or_default();
+        assert_eq!(shortage.len(), 1, "phải báo đúng 1 dòng thiếu: {res}");
+        let detail = shortage[0].as_str().unwrap_or_default().to_string();
+        assert!(detail.contains("HD-B"), "{detail}");
+        assert!(detail.contains("kho đã chọn"), "{detail}");
+
+        // Ghi số HĐĐT (chốt thành hóa đơn thật) khi vẫn thiếu kho → chặn.
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0002'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let err = link_hddt_core(&pool, id, "00000010", "1C26TT152", "2026-03-10")
+            .await
+            .unwrap_err();
         assert!(err.contains("Không đủ tồn kho"), "err: {err}");
 
-        // Đủ tồn ở đúng kho W1 → lưu được
-        save_invoice_core(
+        // Đủ tồn ở đúng kho W1 → không thiếu gì, ghi số HĐĐT được.
+        let res = save_invoice_core(
             &pool,
             "HD0003",
             "2026-03-10",
@@ -1341,6 +1437,21 @@ mod tests {
         )
         .await
         .expect("đủ tồn kho đúng kho");
+        assert!(
+            res["shortage"]
+                .as_array()
+                .map(|v| v.is_empty())
+                .unwrap_or(false),
+            "đúng kho thì không thiếu gì: {res}"
+        );
+        let id: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0003'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        link_hddt_core(&pool, id, "00000011", "1C26TT152", "2026-03-10")
+            .await
+            .expect("đủ tồn ở đúng kho thì ghi số được");
     }
 
     #[tokio::test]
@@ -1755,8 +1866,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sua_hoa_don_nhap_van_kiem_tra_ton_kho() {
-        // Sửa số lượng vượt tồn phải bị chặn như lúc lập mới.
+    async fn sua_hoa_don_nhap_van_bao_danh_sach_thieu_ton() {
+        // Sửa số lượng vượt tồn: nháp vẫn sửa được nhưng phải báo thiếu.
         let pool = test_pool().await;
         let p = seed_product(&pool, "HD-EDIT4", "Hàng ít tồn", 0.01).await;
         let w = seed_warehouse(&pool, "W1", "Kho 1").await;
@@ -1777,7 +1888,7 @@ mod tests {
                 .await
                 .unwrap();
 
-        let err = update_invoice_core(
+        let res = update_invoice_core(
             &pool,
             id,
             "HDE4",
@@ -1787,7 +1898,19 @@ mod tests {
             &[line("HD-EDIT4", 99.0, 1000.0, 0.0, "W1")],
         )
         .await
-        .unwrap_err();
+        .expect("sửa nháp được lưu dù thiếu tồn");
+        assert!(
+            !res["shortage"]
+                .as_array()
+                .map(|v| v.is_empty())
+                .unwrap_or(true),
+            "phải báo thiếu: {res}"
+        );
+
+        // Còn ghi số HĐĐT khi vẫn thiếu thì bị chặn.
+        let err = link_hddt_core(&pool, id, "00000020", "1C26TT152", "2026-03-10")
+            .await
+            .unwrap_err();
         assert!(err.contains("Không đủ tồn kho"), "{err}");
     }
 

@@ -9,6 +9,9 @@ import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
+import LineItemsEditor from "@/components/LineItemsEditor.vue";
+import ProductAliasDialog from "@/components/ProductAliasDialog.vue";
+import ProductionLotDialog from "@/components/ProductionLotDialog.vue";
 import type { Invoice } from "@/types";
 import { fmtInt as fmt, parseIsoDate, toIsoDate } from "@/utils/format";
 
@@ -19,6 +22,7 @@ const emit = defineEmits<{ done: [] }>();
 const auth = useAuthStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
+const confirm = useConfirm();
 const { products, customers, industryGroups, warehouses } = storeToRefs(catalog);
 const { invoices } = storeToRefs(invoiceStore);
 const toast = useToast();
@@ -83,11 +87,48 @@ function onCustomerSaved(code: string) {
   }
 }
 
+// ─── Nút ở header bảng "Mặt hàng": thêm tên khác + tạo nhanh lô sản xuất ───
+const aliasDialog = ref(false);
+const lotDialog = ref(false);
+const editor = ref<InstanceType<typeof LineItemsEditor> | null>(null);
+
+/**
+ * Thêm tên khác từ header (chưa đứng trên dòng nào) → gắn thẳng tên vừa thêm
+ * vào dòng đầu đang dùng đúng hàng đó và CHƯA đặt tên riêng: in ra đúng tên
+ * người vừa gõ. Không có dòng nào dùng hàng đó thì chỉ cần lưu vào danh mục.
+ */
+function onAliasSaved(code: string, alias: string) {
+  const row = form.items.find((it) => it.product_code === code && !it.line_name);
+  if (row) row.line_name = alias;
+}
+
+/**
+ * Tạo lô ngay trong popup: nạp lại danh mục + tồn (để soi thiếu tồn không dùng
+ * số cũ) rồi gắn thành phẩm vừa tạo vào dòng trống — không phải quay lại ô chọn.
+ */
+async function onLotDone(payload: { voucherNo: string; productCode: string }) {
+  try {
+    await Promise.all([catalog.loadAll(), catalog.loadOnhand(true)]);
+  } catch (e) {
+    // Nạp lại lỗi vẫn gắn hàng được — popup thiếu tồn sẽ báo khi lưu.
+    toast.add({ severity: "warn", summary: "Không làm mới được tồn kho", detail: String(e) });
+  }
+  let index = form.items.findIndex((it) => !it.product_code);
+  if (index < 0) {
+    addRow();
+    index = form.items.length - 1;
+  }
+  editor.value?.assignProduct(index, payload.productCode);
+}
+
 /** Mỗi lần mở dialog: lập mới (tự sinh số) hoặc nạp hóa đơn cần sửa. */
 watch(
   [visible, () => props.editInvoice?.id],
   async ([open, id], [wasOpen, wasId]) => {
     if (!open || (wasOpen && id === wasId)) return;
+    // Soi thiếu tồn phải theo số mới nhất — map chỉ nạp 1 lần ở nơi khác nên
+    // ép tải lại mỗi lần mở (nhanh, không chặn render form).
+    void catalog.loadOnhand(true);
     if (!id) {
       editingId.value = null;
       Object.assign(form, {
@@ -157,6 +198,39 @@ async function save() {
     });
     return;
   }
+
+  // Soi tồn NGAY LÚC CHỐT (có thể vừa tạo lô / nhập kho trong lúc mở popup).
+  await catalog.loadOnhand(true);
+  const missing = rows
+    .map((it) => {
+      const p = catalog.productByCode(it.product_code);
+      // Hàng dịch vụ / nhân công không theo dõi tồn kho.
+      if (!p || p.is_service || !(it.quantity > 0)) return "";
+      const avail = catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
+      const short = it.quantity - avail;
+      return short > 1e-9 ? `${p.name}: thiếu ${fmt(short)}` : "";
+    })
+    .filter(Boolean);
+
+  if (missing.length) {
+    // Nháp THÌ vẫn lưu được (HĐĐT đã xuất cũng cần thời gian mới lên cổng thông
+    // tin điện tử) — nhưng phải hỏi trước; ghi số HĐĐT sau này vẫn bị chặn.
+    confirm.require({
+      header: "Tồn kho đang thiếu",
+      message: `${missing.join("; ")}. Vẫn lưu nháp? Hóa đơn nháp lưu được, nhưng đến lúc ghi số HĐĐT sẽ bị chặn nếu vẫn thiếu kho.`,
+      icon: "pi pi-exclamation-triangle",
+      acceptLabel: "Vẫn lưu nháp",
+      rejectLabel: "Quay lại",
+      accept: async () => {
+        await persist(rows);
+      },
+    });
+    return;
+  }
+  await persist(rows);
+}
+
+async function persist(rows: typeof form.items) {
   saving.value = true;
   try {
     const payload = {
@@ -171,10 +245,15 @@ async function save() {
         ? await invoiceStore.updateInvoice({ id: editingId.value, ...payload })
         : await invoiceStore.saveDraft(payload),
     );
+    // Backend luôn báo các dòng thiếu tồn dù đã lưu — gộp vào toast duy nhất.
+    const shortage: string[] = res.shortage ?? [];
     toast.add({
-      severity: "success",
+      severity: shortage.length ? "warn" : "success",
       summary: editingId.value ? `Đã sửa hóa đơn ${form.number}` : `Đã lập hóa đơn ${form.number}`,
-      detail: `Tổng tiền: ${fmt(res.total)} đ • Thuế phải nộp (tỷ lệ nhóm ngành): ${fmt(res.tax_payable ?? 0)} đ`,
+      detail: [
+        `Tổng tiền: ${fmt(res.total)} đ • Thuế phải nộp (tỷ lệ nhóm ngành): ${fmt(res.tax_payable ?? 0)} đ`,
+        ...(shortage.length ? [`Thiếu tồn kho: ${shortage.join("; ")}`] : []),
+      ].join(" • "),
     });
     visible.value = false;
     emit("done");
@@ -241,6 +320,7 @@ async function save() {
     </div>
 
     <LineItemsEditor
+      ref="editor"
       :items="form.items"
       :products="products"
       :industry-groups="industryGroups"
@@ -259,7 +339,30 @@ async function save() {
       total-label="Tổng tiền:"
       @add="addRow"
       @remove="removeRow"
-    />
+    >
+      <template #actions>
+        <Button
+          label="Thêm tên khác"
+          icon="pi pi-tag"
+          size="small"
+          text
+          :disabled="!auth.canAccounting"
+          data-testid="header-add-alias"
+          v-tooltip="'Thêm tên khác cho một mặt hàng'"
+          @click="aliasDialog = true"
+        />
+        <Button
+          label="Tạo lô sản xuất"
+          icon="pi pi-factory"
+          size="small"
+          text
+          :disabled="!auth.canStock"
+          data-testid="header-create-lot"
+          v-tooltip="'Tạo nhanh lô sản xuất — thành phẩm được gắn vào dòng trống'"
+          @click="lotDialog = true"
+        />
+      </template>
+    </LineItemsEditor>
 
     <PartnerDialog
       v-model:visible="customerDialog"
@@ -267,5 +370,10 @@ async function save() {
       :show-action="auth.canAccounting"
       @saved="onCustomerSaved"
     />
+
+    <!-- Thêm tên khác từ header bảng — cùng dialog với icon trên từng dòng. -->
+    <ProductAliasDialog v-model:visible="aliasDialog" @saved="onAliasSaved" />
+    <!-- Tạo nhanh lô sản xuất trong lúc đang lập hóa đơn. -->
+    <ProductionLotDialog v-model:visible="lotDialog" @done="onLotDone" />
   </AppDialog>
 </template>
