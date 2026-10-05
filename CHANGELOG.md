@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.17.0...v0.17.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **ui:** paginate client-side tables (bare paginator attr was ignored) ([2e81e71](https://github.com/tachibana-shin/hkd-tt152-app/commit/2e81e716ee183c17a319cfc8d0fea55ff8c36d5d))
+
 # [0.17.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.16.0...v0.17.0) (2026-10-05)
 
 
