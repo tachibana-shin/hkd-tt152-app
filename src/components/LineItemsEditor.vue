@@ -4,6 +4,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import ProductDialog from "@/components/ProductDialog.vue";
 import ProductAliasDialog from "@/components/ProductAliasDialog.vue";
 import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { useClientPage } from "@/composables/useClientPage";
 import type { IndustryGroup, Product, Warehouse } from "@/types";
 
 interface LineItem {
@@ -84,6 +85,34 @@ const emit = defineEmits<{
 const catalog = useCatalogStore();
 const toast = useToast();
 
+// Phân trang phía client: đổ file Excel vào phiếu nhập có thể vài nghìn dòng —
+// bảng chỉ render 1 trang (50 dòng) thay vì hàng nghìn <tr> (mỗi dòng có ô chọn
+// hàng → sẽ treo trình duyệt). Dữ liệu ≤ 1 trang thì giữ nguyên như cũ, không
+// hiện thanh phân trang thừa. Gọi hàng loạt xong vẫn ở trang đầu để soát từ trên.
+//
+// Ô tìm kiếm "Tìm kiếm…" ở header (AppDataTable có sẵn cho mọi bảng) lọc ngay
+// trên máy theo tên/mã hàng — bảng dài mới tìm được dòng cần soát. PrimeVue
+// không tự lọc vì bảng đang ở chế độ lazy (tự slicing), nên ta lọc ở đây; dòng
+// trống (chưa chọn hàng) luôn giữ lại để còn nhập tiếp.
+const keyword = ref("");
+const {
+  first,
+  rows: pageRows,
+  totalRows,
+  paged,
+  showPager,
+  onPage,
+  gotoLast,
+} = useClientPage(() => {
+  const q = keyword.value.trim().toLowerCase();
+  if (!q) return props.items;
+  return props.items.filter((it) => {
+    if (!it.product_code) return true;
+    const name = it.line_name || catalog.productByCode(it.product_code)?.name || "";
+    return `${name} ${it.product_code}`.toLowerCase().includes(q);
+  });
+}, 50);
+
 // Cảnh báo thiếu tồn realtime (báo đỏ ngay trên dòng khi SL > tồn đúng kho):
 // chỉ bật khi bảng có cột Kho xuất (kho trên dòng quyết định tồn so sánh).
 // Không đồng bộ block; loadOnhand nạp 1 lần (có guard in catalog store).
@@ -100,16 +129,14 @@ function needsStock(it: LineItem): boolean {
  * Số lượng thiếu so với tồn theo đúng kho xuất trên dòng (kho rỗng → tổng mọi kho).
  * Trả về 0 khi: chưa chọn sản phẩm / là dịch vụ / chưa nạp tồn / đủ hàng.
  */
-function shortageAt(index: number): number {
-  const it = props.items[index];
+function shortageOf(it: LineItem): number {
   if (!it.quantity || !needsStock(it)) return 0;
   const avail = catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
   return Math.max(0, it.quantity - avail);
 }
 
 /** Tồn còn lại tại kho trên dòng (cho tooltip "còn X"); 0 nếu chưa nạp. */
-function onhandLineAt(index: number): number {
-  const it = props.items[index];
+function onhandOf(it: LineItem): number {
   if (!it.product_code || !needsStock(it)) return 0;
   return catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
 }
@@ -125,42 +152,44 @@ function onProductSaved(code: string) {
   if (row) {
     row.product_code = code;
     row.line_name = ""; // hàng mới → dùng tên chính
-    onProductPick(props.items.length - 1);
+    onProductPick(row);
   } else {
     // Đủ các trường cho cả dòng nhập (discount) lẫn dòng xuất (ngành + kho).
-    props.items.push({
+    const created: LineItem = {
       product_code: code,
       quantity: 1,
       unit_price: 0,
       discount: 0,
       industry_code: "",
       warehouse_code: "",
-    });
-    onProductPick(props.items.length - 1);
+    };
+    props.items.push(created);
+    onProductPick(created);
   }
 }
 
 // Tạo nhanh mặt hàng từ ô Sản phẩm (gõ tên CHƯA có trong danh mục → bấm dòng
-// "Tạo nhanh"): mở form rút gọn, lưu xong gắn vào ĐÚNG dòng đang đứng.
+// "Tạo nhanh"): mở form rút gọn, lưu xong gắn vào ĐÚNG dòng đang đứng. Giữ
+// THAM CHIẾU dòng (không giữ vị trí) — bảng đã phân trang nên index theo trang
+// không còn trỏ đúng dòng nữa.
 const quickDialog = ref(false);
 const quickName = ref("");
-const quickRow = ref<number | null>(null);
+const quickRow = ref<LineItem | null>(null);
 
-function onQuickCreate(index: number, name: string) {
-  quickRow.value = index;
+function onQuickCreate(row: LineItem, name: string) {
+  quickRow.value = row;
   quickName.value = name;
   quickDialog.value = true;
 }
 
 function onQuickSaved(code: string) {
-  const index = quickRow.value;
+  const row = quickRow.value;
   quickRow.value = null;
-  if (index != null && props.items[index]) {
-    const row = props.items[index];
+  if (row) {
     // Dòng đang đứng đã có hàng khác → đổi sang hàng vừa tạo.
     row.product_code = code;
     row.line_name = ""; // hàng mới → dùng tên chính
-    onProductPick(index);
+    onProductPick(row);
     return;
   }
   onProductSaved(code);
@@ -170,16 +199,13 @@ function onQuickSaved(code: string) {
 // Logic nằm trong ProductAliasDialog dùng chung; bảng chỉ giữ dòng nào đang mở
 // và gắn tên vừa lưu vào dòng đó.
 const aliasDialog = ref(false);
-const aliasRow = ref<number | null>(null);
+const aliasRow = ref<LineItem | null>(null);
 
 /** Mã hàng của dòng đang thêm tên khác (rỗng nếu không có dòng nào đứng). */
-const aliasProductCode = computed(() => {
-  const index = aliasRow.value;
-  return index == null ? "" : (props.items[index]?.product_code ?? "");
-});
+const aliasProductCode = computed(() => aliasRow.value?.product_code ?? "");
 
-function openAlias(index: number) {
-  aliasRow.value = index;
+function openAlias(row: LineItem) {
+  aliasRow.value = row;
   aliasDialog.value = true;
 }
 
@@ -188,9 +214,8 @@ function openAlias(index: number) {
  * chọn) và bảng tự báo kết quả — gộp 1 toast để khỏi nói một đằng khác một nẻo.
  */
 function onAliasSaved(code: string, added: string[]) {
-  const index = aliasRow.value;
+  const row = aliasRow.value;
   aliasRow.value = null;
-  const row = index == null ? null : props.items[index];
   const attached = !!row && row.product_code === code;
   if (row && attached && added[0]) row.line_name = added[0];
   const detail = `${added.join(", ")} → ${catalog.productByCode(code)?.name ?? code}`;
@@ -211,7 +236,7 @@ function assignProduct(index: number, code: string) {
   if (!row) return;
   row.product_code = code;
   row.line_name = "";
-  onProductPick(index);
+  onProductPick(row);
 }
 
 defineExpose({ assignProduct });
@@ -220,28 +245,27 @@ defineExpose({ assignProduct });
  * Đổi mã hàng trên dòng → bỏ tên hiển thị cũ (tên của hàng trước không còn
  * nghĩa). Chạy TRƯỚC event `picked` để tên alias vừa chọn được ghi đè sau.
  */
-function onProductChange(index: number, code: string) {
-  const it = props.items[index];
+function onProductChange(it: LineItem, code: string) {
   if (it.product_code === code) return;
   it.product_code = code;
   it.line_name = "";
 }
 
 /** Ghi tên người dùng chọn (tên chính → ""). */
-function onProductPicked(index: number, name: string) {
-  props.items[index].line_name = name;
+function onProductPicked(it: LineItem, name: string) {
+  it.line_name = name;
 }
 
-function onProductPick(index: number) {
-  const p = catalog.productByCode(props.items[index].product_code);
+function onProductPick(it: LineItem) {
+  const p = catalog.productByCode(it.product_code);
   if (!p) return;
-  props.items[index].unit_price = props.priceField === "sale_price" ? p.sale_price : p.cost_price;
+  it.unit_price = props.priceField === "sale_price" ? p.sale_price : p.cost_price;
   // Tự điền nhóm ngành theo sản phẩm (cơ sở tỷ lệ thuế bán ra) — vẫn sửa tay được.
-  if (p.industry_code) props.items[index].industry_code = p.industry_code;
+  if (p.industry_code) it.industry_code = p.industry_code;
   // Tự điền kho xuất theo kho mặc định của sản phẩm — nếu dòng chưa chọn kho.
-  if (!props.items[index].warehouse_code && p.default_warehouse_id) {
+  if (!it.warehouse_code && p.default_warehouse_id) {
     const w = props.warehouses.find((x) => x.id === p.default_warehouse_id);
-    if (w) props.items[index].warehouse_code = w.code;
+    if (w) it.warehouse_code = w.code;
   }
 }
 
@@ -252,9 +276,27 @@ function lineNet(it: LineItem): number {
 }
 
 /** Gõ thẳng Thành tiền cả dòng → quy về Đơn giá (SL × Đơn giá luôn khớp). */
-function onAmountChange(index: number, amount: number | null) {
-  const qty = props.items[index].quantity || 1;
-  props.items[index].unit_price = Math.round(((amount ?? 0) / qty) * 100) / 100;
+function onAmountChange(it: LineItem, amount: number | null) {
+  const qty = it.quantity || 1;
+  it.unit_price = Math.round(((amount ?? 0) / qty) * 100) / 100;
+}
+
+/**
+ * Xóa dòng: ô đứng đang theo TRANG (table chỉ render slice của trang) nên phải
+ * dịch ngược về VỊ TRÍ thật trong `items` rồi mới báo lên màn gọi.
+ */
+function removeLine(it: LineItem) {
+  const i = props.items.indexOf(it);
+  if (i >= 0) emit("remove", i);
+}
+
+/**
+ * Nút "Thêm dòng" khi bảng đã phân trang: thêm rồi nhảy trang cuối — dòng mới
+ * thêm luôn ở cuối mảng nên đứng nguyên trang đầu sẽ không thấy nó.
+ */
+function addRowAndPage() {
+  emit("add");
+  nextTick(() => gotoLast());
 }
 
 const total = computed(() => props.items.reduce((s, it) => s + lineNet(it), 0));
@@ -313,47 +355,54 @@ watch(
         @click="productDialog = true"
       />
       <Button
-        v-if="canEdit && !compact && !preInput"
+        v-if="canEdit && ((!compact && !preInput) || showPager)"
         label="Thêm dòng"
         icon="pi pi-plus"
         size="small"
         text
-        @click="emit('add')"
+        @click="addRowAndPage"
       />
     </div>
   </div>
 
   <AppDataTable
     ref="tableRef"
-    :value="items"
+    :value="paged"
+    :first="first"
+    :rows="pageRows"
+    :total-records="totalRows"
+    :paginator="showPager"
+    :rows-per-page-options="[20, 50, 100, 200]"
     class="mt-2"
     :resizable-columns="false"
     :sortable="false"
     :size="compact || preInput ? 'small' : 'large'"
     :style="compact || preInput ? 'overflow-x: hidden' : undefined"
     :table-style="compact || preInput ? 'table-layout: fixed; width: 100%' : undefined"
+    @page="onPage"
+    @search="keyword = $event"
   >
     <Column
       header="Sản phẩm"
       :style="compact ? 'min-width: 230px' : preInput ? 'min-width: 260px' : undefined"
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <div class="flex items-center gap-1">
           <ProductSelect
             class="min-w-0 flex-1"
-            :model-value="items[index].product_code"
-            :picked-name="items[index].line_name ?? ''"
-            :warehouse-code="items[index].warehouse_code ?? ''"
+            :model-value="data.product_code"
+            :picked-name="data.line_name ?? ''"
+            :warehouse-code="data.warehouse_code ?? ''"
             :size="compact || preInput ? 'small' : undefined"
             :allow-create="showAddProduct && canEdit"
-            @update:model-value="onProductChange(index, $event)"
-            @picked="onProductPicked(index, $event)"
-            @change="onProductPick(index)"
-            @create="onQuickCreate(index, $event)"
+            @update:model-value="onProductChange(data, $event)"
+            @picked="onProductPicked(data, $event)"
+            @change="onProductPick(data)"
+            @create="onQuickCreate(data, $event)"
           />
           <!-- Thêm "tên khác" ngay trên dòng: gán tên cho CHÍNH mã hàng này. -->
           <Button
-            v-if="canEdit && items[index].product_code"
+            v-if="canEdit && data.product_code"
             icon="pi pi-tag"
             severity="secondary"
             text
@@ -363,7 +412,7 @@ watch(
             data-testid="line-add-alias"
             aria-label="Thêm tên khác"
             v-tooltip="'Thêm tên khác cho mặt hàng này'"
-            @click="openAlias(index)"
+            @click="openAlias(data)"
           />
         </div>
       </template>
@@ -373,9 +422,9 @@ watch(
       header="ĐVT"
       :style="compact || preInput ? 'width: 88px' : 'width: 120px'"
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <span class="text-gray-600">{{
-          catalog.productByCode(items[index].product_code)?.unit || "—"
+          catalog.productByCode(data.product_code)?.unit || "—"
         }}</span>
       </template>
     </Column>
@@ -391,25 +440,23 @@ watch(
               : 'width: 110px'
       "
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <div class="flex w-full flex-col gap-0.5">
           <InputNumber
-            v-model="items[index].quantity"
+            v-model="data.quantity"
             :min="0"
             :size="compact || preInput ? 'small' : undefined"
             class="w-full"
-            :class="{ '!ring-2 !ring-red-500 !border-red-500': shortageAt(index) > 0 }"
+            :class="{ '!ring-2 !ring-red-500 !border-red-500': shortageOf(data) > 0 }"
             :tooltip="
-              showWarehouse && onhandLineAt(index) > 0
-                ? `Còn ${fmt(onhandLineAt(index))}`
-                : undefined
+              showWarehouse && onhandOf(data) > 0 ? `Còn ${fmt(onhandOf(data))}` : undefined
             "
           />
           <span
-            v-if="shortageAt(index) > 0"
+            v-if="shortageOf(data) > 0"
             class="text-[11px] font-semibold leading-none text-red-600"
           >
-            Thiếu {{ fmt(shortageAt(index)) }}
+            Thiếu {{ fmt(shortageOf(data)) }}
           </span>
         </div>
       </template>
@@ -426,9 +473,9 @@ watch(
               : 'width: 150px'
       "
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
-          v-model="items[index].unit_price"
+          v-model="data.unit_price"
           :min="0"
           mode="currency"
           currency="VND"
@@ -443,9 +490,9 @@ watch(
       header="Nhóm ngành"
       :style="preInput ? 'width: 160px' : compact ? 'width: 140px' : undefined"
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <Select
-          v-model="items[index].industry_code"
+          v-model="data.industry_code"
           :options="industryGroups"
           optionLabel="name"
           optionValue="code"
@@ -460,9 +507,9 @@ watch(
       header="Kho xuất"
       :style="preInput ? 'width: 160px' : compact ? 'width: 150px' : undefined"
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <Select
-          v-model="items[index].warehouse_code"
+          v-model="data.warehouse_code"
           :options="warehouses"
           optionLabel="name"
           optionValue="code"
@@ -475,9 +522,9 @@ watch(
       </template>
     </Column>
     <Column v-if="showDiscount" header="Tiền CK" align="right" style="width: 120px">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
-          v-model="items[index].discount"
+          v-model="data.discount"
           :min="0"
           mode="currency"
           currency="VND"
@@ -493,11 +540,11 @@ watch(
       align="right"
       :style="compact ? 'width: 130px' : undefined"
     >
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
           v-if="amountInput"
-          :model-value="items[index].quantity * items[index].unit_price"
-          @update:model-value="(v) => onAmountChange(index, v)"
+          :model-value="data.quantity * data.unit_price"
+          @update:model-value="(v) => onAmountChange(data, v)"
           :min="0"
           mode="currency"
           currency="VND"
@@ -505,13 +552,11 @@ watch(
           :size="compact || preInput ? 'small' : undefined"
           class="w-full"
         />
-        <span v-else class="font-medium">{{
-          fmtVnd(items[index].quantity * items[index].unit_price)
-        }}</span>
+        <span v-else class="font-medium">{{ fmtVnd(data.quantity * data.unit_price) }}</span>
       </template>
     </Column>
     <Column header="" :style="compact || preInput ? 'width: 48px' : undefined">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <Button
           v-if="canEdit"
           icon="pi pi-times"
@@ -519,7 +564,7 @@ watch(
           rounded
           size="small"
           severity="danger"
-          @click="emit('remove', index)"
+          @click="removeLine(data)"
         />
       </template>
     </Column>

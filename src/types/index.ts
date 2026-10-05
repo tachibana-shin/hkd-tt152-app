@@ -182,6 +182,17 @@ export interface StockVoucherRow {
   note: string;
 }
 
+/**
+ * Một dòng mặt hàng thêm vào phiếu nhập từ Excel (popup "Nhập hàng từ Excel"):
+ * đã gán mã hàng (tên có sẵn trong danh mục hoặc vừa tự tạo mới).
+ */
+export interface InboundExcelLine {
+  product_code: string;
+  quantity: number;
+  unit_price: number;
+  discount: number;
+}
+
 export interface JournalEntryRow {
   id: number;
   posting_date: string;

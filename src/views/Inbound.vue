@@ -5,9 +5,10 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useSettingsStore } from "@/stores/settings";
 import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
+import InboundExcelDialog from "@/components/InboundExcelDialog.vue";
 import { api } from "@/db";
 import { fmtDec, fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
-import type { Account, StockVoucherRow } from "@/types";
+import type { Account, InboundExcelLine, StockVoucherRow } from "@/types";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
 
@@ -138,6 +139,8 @@ async function adjustFromVoucher(row: { voucher_no: string }) {
 
 const dialog = ref(false);
 const saving = ref(false);
+/** Popup "Nhập hàng từ Excel" — mở từ nút trong popup tạo phiếu nhập. */
+const excelVisible = ref(false);
 
 const form = reactive({
   posting_date: new Date(),
@@ -200,7 +203,34 @@ function addRow() {
 }
 
 function removeRow(i: number) {
+  if (i < 0) return;
   form.items.splice(i, 1);
+}
+
+/**
+ * Nhận dòng từ popup "Nhập hàng từ Excel": bỏ hết dòng trống còn sót (dòng tự
+ * thêm cuối ở kiểu nhập liên tục) để hàng mới không chen vào giữa, rồi thêm hết
+ * và nạp lại danh mục (trong đó vừa có mặt hàng mới tạo từ file).
+ */
+async function onExcelRows(lines: InboundExcelLine[]) {
+  while (form.items.length && !form.items[form.items.length - 1].product_code) {
+    form.items.pop();
+  }
+  form.items.push(...lines);
+  toast.add({
+    severity: "success",
+    summary: "Đã thêm hàng từ Excel",
+    detail: `${lines.length} dòng · ${form.items.length} dòng trong phiếu`,
+  });
+  try {
+    await catalog.loadAll();
+  } catch (e) {
+    toast.add({
+      severity: "warn",
+      summary: "Không nạp lại được danh mục",
+      detail: String(e),
+    });
+  }
 }
 
 // ─── Thêm nhà cung cấp nhanh: dùng chung PartnerDialog (tự sinh mã + tra cứu MST) ───
@@ -578,8 +608,28 @@ useKeepAliveRefresh(reload);
         :total-label="form.inbound_type === 'purchase' ? 'Giá trị nhập kho:' : 'Tổng tiền:'"
         @add="addRow"
         @remove="removeRow"
-      />
+      >
+        <!-- Nhập hàng từ Excel: cột Tên · ĐVT · Số lượng · Tổng tiền, thiếu hàng tự tạo mới. -->
+        <template #actions>
+          <Button
+            v-if="auth.canStock"
+            label="Nhập Excel"
+            icon="pi pi-file-excel"
+            size="small"
+            text
+            data-testid="inbound-excel-open"
+            @click="excelVisible = true"
+          />
+        </template>
+      </LineItemsEditor>
     </AppDialog>
+
+    <!-- Xem trước file Excel rồi thêm hàng loạt vào phiếu (phân trang vì file có thể vài nghìn dòng) -->
+    <InboundExcelDialog
+      v-model:visible="excelVisible"
+      :products="products"
+      @confirm="onExcelRows"
+    />
 
     <!-- Xem phiếu (chỉ đọc) — dùng chung cho cả PN/PX -->
     <VoucherViewDialog v-model:visible="viewVoucherVisible" :voucher-no="viewVoucherNo" />

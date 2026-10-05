@@ -380,6 +380,18 @@ pub(crate) struct BomItemInput {
     pub(crate) quantity: f64,
 }
 
+/// Một mặt hàng từ file Excel nhập kho (popup "Nhập hàng từ Excel"): chỉ tạo
+/// những cái CHƯA có trong danh mục — tên đã có giữ nguyên mã cũ.
+#[derive(serde::Deserialize, Debug, Clone)]
+pub(crate) struct BulkProductInput {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) unit: String,
+    /// Giá vốn suy từ file (tổng tiền ÷ số lượng) — chỉ ghi cho hàng mới tạo.
+    #[serde(default)]
+    pub(crate) cost_price: f64,
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct OutboundItemInput {
     pub(crate) product_code: String,

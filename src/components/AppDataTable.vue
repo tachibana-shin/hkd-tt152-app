@@ -496,11 +496,14 @@ export default defineComponent({
           // Attribute trần (`paginator` không gán giá trị) được Vue biên dịch thành
           // chuỗi rỗng "" chứ không phải true — nếu dùng `!!` thì mọi bảng client-side
           // gắn `paginator` kiểu trần sẽ thành false và không phân trang bao giờ.
+          // Có @page (bảng server-side) mà không bind `paginator` thì cũng tự bật.
+          // Ngược lại, bind tường minh (`:paginator="false"`/`=showPager`) thì giữ
+          // đúng ý màn gọi — bảng dòng mặt hàng chỉ hiện thanh phân trang khi dữ
+          // liệu nhiều hơn 1 trang, không thêm giao diện thừa cho phiếu 3 dòng.
           paginator:
-            !!attrs.onPage ||
-            attrs.paginator === "" ||
-            attrs.paginator === true ||
-            attrs.paginator === "true",
+            attrs.paginator === undefined
+              ? !!attrs.onPage
+              : attrs.paginator === "" || attrs.paginator === true || attrs.paginator === "true",
           selectionMode: props.selection != null ? "multiple" : undefined,
           metaKeySelection: props.metaKeySelection,
           dataKey: props.dataKey,

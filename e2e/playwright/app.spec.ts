@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import * as XLSX from "xlsx";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -4850,4 +4851,67 @@ test("Tồn kho & Bảng lương: bảng client-side có thanh phân trang", asy
   // Bảng lương: danh sách nhân sự (10 dòng/trang) + bảng nhập liệu (50 dòng/trang).
   await openTab(page, "Bảng lương", "/payroll");
   await expect(paginator.first()).toBeVisible({ timeout: 15_000 });
+});
+
+// ─── NHẬP HÀNG TỪ EXCEL VÀO POPUP TẠO PHIẾU NHẬP KHO ───
+// Cột đọc theo THỨ TỰ (nhãn trong file có thể lệch tên): Tên mặt hàng · ĐVT ·
+// Số lượng · Tổng tiền. Tên chưa có trong danh mục thì tự tạo mới (1 lệnh
+// save_products_bulk cho cả file). File tới vài nghìn dòng được → preview lẫn
+// bảng dòng trong phiếu đều phải phân trang, không render hàng nghìn <tr>.
+test("Nhập kho: nhập Excel — preview phân trang, tự tạo mặt hàng mới", async ({
+  page,
+  request,
+}) => {
+  // 60 dòng đều là tên mới: preview 20 dòng/trang (3 trang); sau khi thêm,
+  // bảng dòng có 61 dòng (kèm dòng trống tự thêm cuối kiểu nhập liên tục) →
+  // vượt 50 → cũng phải có thanh phân trang.
+  const wb = XLSX.utils.book_new();
+  const aoa: unknown[][] = [["Tên mặt hàng", "Đơn vị tính", "Số lượng tồn", "Tổng tiền"]];
+  for (let i = 1; i <= 60; i++) aoa.push([`HH Excel ${i}`, "Cái", 2, 40_000]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "Nhap hang");
+  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+
+  await ensureLoggedIn(page);
+  await openTab(page, "Nhập kho", "/inbound");
+  await page.getByRole("button", { name: "Tạo phiếu nhập" }).click();
+
+  await page.getByTestId("inbound-excel-open").click();
+  const xlsx = page.getByRole("dialog", { name: "Nhập hàng từ Excel" });
+  await expect(xlsx).toBeVisible();
+  await page.getByTestId("inbound-excel-file").setInputFiles({
+    name: "nhap-hang.xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    buffer,
+  });
+
+  // Đọc đủ 60 dòng (hàng tiêu đề tự bỏ, không rơi dòng nào) — toàn bộ là mới.
+  const summary = xlsx.getByTestId("excel-preview-summary");
+  await expect(summary).toContainText("60 dòng", { timeout: 20_000 });
+  await expect(summary).toContainText("60 mặt hàng mới");
+  await expect(summary).toContainText("Tổng tiền: 2.400.000 đ");
+
+  // Preview phân trang: 20 dòng/trang → sang trang 2 là hàng 21…, hết hàng 1.
+  // Nút trang mang aria-label "Page N" (PrimeVue) chứ không phải chỉ con số.
+  const previewPager = xlsx.locator(".p-paginator:visible");
+  await expect(previewPager.first()).toBeVisible();
+  await previewPager.getByRole("button", { name: "Page 2" }).click();
+  await expect(xlsx.locator("tbody tr").first()).toContainText("HH Excel 21");
+  await expect(xlsx.getByText("HH Excel 1", { exact: true })).toHaveCount(0);
+
+  // Thêm vào phiếu → popup đóng, dòng vào bảng (bảng có thanh phân trang)…
+  await xlsx.getByRole("button", { name: /Thêm 60 dòng/ }).click();
+  await expect(xlsx).toBeHidden();
+  const dlg = page.getByRole("dialog", { name: "Tạo phiếu nhập kho" });
+  await expect(dlg.locator("tbody tr").first()).toContainText("HH Excel 1", { timeout: 20_000 });
+  await expect(dlg.locator(".p-paginator:visible").first()).toBeVisible();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã thêm hàng từ Excel");
+
+  // …và 60 mặt hàng mới đã vào danh mục (đơn vị lấy từ cột ĐVT của file).
+  const products = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
+    name: string;
+    unit: string;
+  }>;
+  const created = products.find((p) => p.name === "HH Excel 1");
+  expect(created, "mặt hàng mới phải có trong danh mục").toBeTruthy();
+  expect(created?.unit).toBe("Cái");
 });

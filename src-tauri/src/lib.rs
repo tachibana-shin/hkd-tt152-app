@@ -132,6 +132,7 @@ pub fn run() {
             commands::catalog::get_customers_page,
             commands::catalog::save_customer,
             commands::catalog::save_product,
+            commands::catalog::save_products_bulk,
             commands::catalog::save_product_aliases,
             commands::catalog::get_product_boms,
             commands::catalog::save_product_bom,

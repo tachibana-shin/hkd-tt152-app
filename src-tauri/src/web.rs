@@ -13,9 +13,9 @@ use crate::commands;
 use crate::helpers::require_role;
 use crate::models::AppState;
 use crate::models::{
-    AttendanceEntryInput, BomItemInput, CashEntryInput, CountItemInput, EmployeeInput,
-    ImportEntryInput, InboundItemInput, InvoiceItemInput, OutboundInvoiceInput, OutboundItemInput,
-    PayrollLineInput, UserInput,
+    AttendanceEntryInput, BomItemInput, BulkProductInput, CashEntryInput, CountItemInput,
+    EmployeeInput, ImportEntryInput, InboundItemInput, InvoiceItemInput, OutboundInvoiceInput,
+    OutboundItemInput, PayrollLineInput, UserInput,
 };
 use axum::extract::Path;
 use axum::http::{header, HeaderValue, StatusCode, Uri};
@@ -295,6 +295,12 @@ pub async fn api_invoke(
             industry_code: String
         ),
         "delete_product" => mx!(commands::catalog::delete_product, body, id: i64),
+        // Tạo hàng loạt mặt hàng từ Excel nhập kho (1 lần gọi cho cả file).
+        "save_products_bulk" => mx!(
+            commands::catalog::save_products_bulk,
+            body,
+            items: Vec<BulkProductInput>
+        ),
         "save_product_aliases" => mx!(
             commands::catalog::save_product_aliases,
             body,

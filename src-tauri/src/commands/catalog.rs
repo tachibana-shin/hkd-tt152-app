@@ -984,6 +984,144 @@ fn next_code_of(codes: Vec<String>, prefix: &str, digits: usize) -> String {
     format!("{}{:0>width$}", prefix, max_num + 1, width = digits)
 }
 
+/// Chuẩn hoá tên mặt hàng để so khớp: gộp khoảng trắng thừa + chữ thường —
+/// FE dò tên theo cùng cách này (file Excel thường ghi khác hoa/thường/cách).
+fn norm_product_name(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Sinh `count` mã sản phẩm liên tiếp theo cấu hình product_code_*: tính max 1
+/// lượt rồi cấp tuần tự — dùng khi import Excel tạo nhiều hàng trong 1 lần.
+async fn next_product_codes(pool: &sqlx::SqlitePool, count: usize) -> Result<Vec<String>, String> {
+    let prefix = get_setting(pool, "product_code_prefix").await?;
+    let start: i64 = get_setting(pool, "product_code_start")
+        .await?
+        .trim()
+        .parse()
+        .unwrap_or(1)
+        .max(1);
+    let digits: usize = get_setting(pool, "product_code_digits")
+        .await?
+        .trim()
+        .parse()
+        .unwrap_or(4)
+        .clamp(1, 12);
+
+    let pattern = format!("{}%", prefix);
+    let rows = sqlx::query!("SELECT code FROM product WHERE code LIKE ?", pattern)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut max_num: i64 = start - 1;
+    for r in &rows {
+        if let Some(num) = r.code.strip_prefix(&prefix) {
+            if let Ok(n) = num.trim_start_matches('0').trim().parse::<i64>() {
+                max_num = max_num.max(n);
+            }
+        }
+    }
+    Ok((0..count)
+        .map(|i| {
+            format!(
+                "{}{:0>width$}",
+                prefix,
+                max_num + 1 + i as i64,
+                width = digits
+            )
+        })
+        .collect())
+}
+
+/// Tạo hàng loạt mặt hàng từ file Excel nhập kho — 1 lần gọi cho cả file (vài
+/// nghìn dòng) thay vì gọi `save_product` từng cái (mỗi lần một round-trip +
+/// một dòng audit). Tên đã có trong danh mục giữ nguyên mã cũ, không tạo trùng.
+///
+/// Trả `{ "map": { "tên hàng": "mã hàng" }, "created": n }` để FE gán mã cho
+/// từng dòng phiếu nhập.
+#[tauri::command]
+pub(crate) async fn save_products_bulk(
+    state: State<'_, AppState>,
+    items: Vec<BulkProductInput>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+
+    // 1) Danh mục hiện có: tên chuẩn hoá → mã.
+    let pool = state.pool.read().await;
+    let existing: Vec<(String, String)> = sqlx::query_as("SELECT code, name FROM product")
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut code_of: std::collections::HashMap<String, String> = existing
+        .into_iter()
+        .map(|(code, name)| (norm_product_name(&name), code))
+        .collect();
+
+    // 2) Gom tên theo thứ tự gặp, bỏ trùng (kể cả khác hoa/thường/cách ghi);
+    //    tên đã có danh mục thì trả mã cũ ngay, không đưa vào bước tạo.
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // (tên đã gộp, khoá chuẩn hoá, đơn vị, giá vốn) cho từng tên CHƯA có.
+    let mut pending: Vec<(String, String, String, f64)> = Vec::new();
+    for it in &items {
+        let name = it.name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            continue;
+        }
+        let key = norm_product_name(&name);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        if let Some(code) = code_of.get(&key) {
+            map.insert(name, code.clone());
+            continue;
+        }
+        let unit = if it.unit.trim().is_empty() {
+            "Cái".to_string()
+        } else {
+            it.unit.trim().to_string()
+        };
+        pending.push((name, key, unit, it.cost_price.max(0.0)));
+    }
+
+    // 3) Sinh mã + chèn tất cả trong 1 transaction (3000 dòng vẫn ~vài chục ms).
+    let created = pending.len();
+    if created > 0 {
+        let codes = next_product_codes(&pool, created).await?;
+        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+        for ((name, key, unit, price), code) in pending.iter().zip(codes) {
+            sqlx::query(
+                "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, \
+                 vat_rate, import_tax_rate, is_service, industry_code) \
+                 VALUES (?, ?, ?, 0, ?, 0, 0.1, 0, 0, '') \
+                 ON CONFLICT(code) DO NOTHING",
+            )
+            .bind(&code)
+            .bind(name)
+            .bind(unit)
+            .bind(price)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            code_of.insert(key.clone(), code.clone());
+            map.insert(name.clone(), code);
+        }
+        tx.commit().await.map_err(|e| e.to_string())?;
+        audit(
+            &state,
+            "save",
+            "product",
+            &format!("bulk: {} sản phẩm mới từ Excel", created),
+        )
+        .await;
+    }
+
+    Ok(json!({ "map": map, "created": created }).to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn next_warehouse_code(state: State<'_, AppState>) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan", "kho"]).await?;

@@ -272,6 +272,15 @@ export const api = {
       isService: p.is_service ?? false,
       industryCode: p.industry_code ?? "",
     }),
+  /**
+   * Tạo hàng loạt mặt hàng CHƯA có trong danh mục (nhập Excel — vài nghìn dòng
+   * trong 1 lần gọi thay vì gọi save_product từng cái). Tên đã có giữ nguyên mã
+   * cũ. Trả về { map: { "tên hàng": "mã hàng" }, created }.
+   */
+  saveProductsBulk: async (items: { name: string; unit: string; cost_price: number }[]) =>
+    parse<{ map: Record<string, string>; created: number }>(
+      await call<string>("save_products_bulk", { items }),
+    ),
   /** Lưu danh sách "tên khác" (alias) của sản phẩm — thay toàn bộ danh sách cũ (F5). */
   saveProductAliases: (code: string, aliases: string[]) =>
     call<string>("save_product_aliases", { code, aliases }),

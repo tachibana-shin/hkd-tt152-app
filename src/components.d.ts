@@ -58,6 +58,7 @@ declare module 'vue' {
     IMdiUpload: typeof import('~icons/mdi/upload')['default']
     IMdiWarehouse: typeof import('~icons/mdi/warehouse')['default']
     ImportPreview: typeof import('./components/ImportPreview.vue')['default']
+    InboundExcelDialog: typeof import('./components/InboundExcelDialog.vue')['default']
     InputIcon: typeof import('primevue/inputicon')['default']
     InputNumber: typeof import('primevue/inputnumber')['default']
     InputText: typeof import('primevue/inputtext')['default']
