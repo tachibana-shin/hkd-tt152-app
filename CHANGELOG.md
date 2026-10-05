@@ -1,5 +1,57 @@
 # Changelog
 
+# [0.17.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.16.0...v0.17.0) (2026-10-05)
+
+
+### Bug Fixes
+
+* **accounting:** drop the dead hidden table breaking the revenue card ([f66859a](https://github.com/tachibana-shin/hkd-tt152-app/commit/f66859ad0eb92b63b4470966becd81851b563dfd))
+* **accounting:** drop zero-revenue rows from books and declarations ([44d9c1f](https://github.com/tachibana-shin/hkd-tt152-app/commit/44d9c1f590f1961cef3bc8d26297e2c774b5b2d4))
+* **accounting:** fill default accounts on import and drop payable refunds from expense ([02ced1f](https://github.com/tachibana-shin/hkd-tt152-app/commit/02ced1f7e5e12c7b9e0ea4bb74c923c0164622c5))
+* **accounting:** keep TT 152 book dates on one line in narrow windows ([cab2cd6](https://github.com/tachibana-shin/hkd-tt152-app/commit/cab2cd6de3336ef71f67153d0ab40952096245a1))
+* **accounting:** let the TT 152 book fill its frame ([e9962d7](https://github.com/tachibana-shin/hkd-tt152-app/commit/e9962d70d7fcb696db5871f6c822f86c966df75e))
+* **accounting:** make TT 152 book header and grid follow dark mode ([464c378](https://github.com/tachibana-shin/hkd-tt152-app/commit/464c378c2d4fccd9ce076d888996a3d3941c0800)), closes [#f4f4f5](https://github.com/tachibana-shin/hkd-tt152-app/issues/f4f4f5) [#f1f5f9](https://github.com/tachibana-shin/hkd-tt152-app/issues/f1f5f9) [#27272a](https://github.com/tachibana-shin/hkd-tt152-app/issues/27272a)
+* **accounting:** scale TT 152 book columns so narrow windows stop overflowing ([ea58d98](https://github.com/tachibana-shin/hkd-tt152-app/commit/ea58d98971537a12c3d1e5cf024e203646cf1e97))
+* **app:** show the real version in the sidebar footer ([23b4398](https://github.com/tachibana-shin/hkd-tt152-app/commit/23b4398b84cb348a7961ed8f7c9aed95bea4ec9c))
+* **hddt:** no fake save error, reveal the saved password in place ([34effe2](https://github.com/tachibana-shin/hkd-tt152-app/commit/34effe220e1e9b3dc481e66d3c0db6592de04e54))
+* **pdf:** align printed tables and tighten the invoice layout ([9623f2d](https://github.com/tachibana-shin/hkd-tt152-app/commit/9623f2debb41dd077093430a5ba41d79fc53833c))
+* **pdf:** stop wrapping the last word of invoice info values ([7ee6546](https://github.com/tachibana-shin/hkd-tt152-app/commit/7ee65462b9145d34bfe091c42268518bee598fef))
+* **profile:** read the data directory through one helper so nothing escapes HKD_DATA_DIR ([4ed816d](https://github.com/tachibana-shin/hkd-tt152-app/commit/4ed816d3f9f5fca8df43c80f72d816899c633a69))
+* **release:** read the version from the workspace Cargo.lock ([142f911](https://github.com/tachibana-shin/hkd-tt152-app/commit/142f911c884655a890678e07c53aaf22ca569693))
+* show trade discounts on vouchers and keep synced hddt columns frozen ([a434bc4](https://github.com/tachibana-shin/hkd-tt152-app/commit/a434bc4753daa151e775596a1a674139db391815))
+* **ui:** find a product by code and say where a new alias went ([ce3d581](https://github.com/tachibana-shin/hkd-tt152-app/commit/ce3d581a71a68874254b827f91489d6030cda54a))
+
+
+### Features
+
+* **accounting:** add standard tax return form and tax period report export ([b2ef492](https://github.com/tachibana-shin/hkd-tt152-app/commit/b2ef492da0a8dc4c046bb8aef388b0988a9a366f))
+* **accounting:** bump the exported Word book font to form size ([1bf336c](https://github.com/tachibana-shin/hkd-tt152-app/commit/1bf336cda06b973905c2afaf18382cf1d064b1f5))
+* **accounting:** decouple the book period from the tax declaration ([3f86366](https://github.com/tachibana-shin/hkd-tt152-app/commit/3f86366f4456bcef6ac23dacf19fb3142f821a48))
+* **accounting:** drop the redundant period labels on both book tabs ([ca2d94a](https://github.com/tachibana-shin/hkd-tt152-app/commit/ca2d94af52ca2c616db5341a541cbb4468e0ff58))
+* **accounting:** export the viewed TT 152 book as an A4 .docx ([bcc586a](https://github.com/tachibana-shin/hkd-tt152-app/commit/bcc586aaaad728cb91e9ef8b307174d23ba05dee))
+* **accounting:** export Word and Excel at a 14pt base font ([f6feefe](https://github.com/tachibana-shin/hkd-tt152-app/commit/f6feefe0e1362cbf09b039db37e8ecb4a49adac4))
+* **accounting:** open the TT 152 book on the whole accounting year ([878cd5a](https://github.com/tachibana-shin/hkd-tt152-app/commit/878cd5a3cacdeac10c2ed2085dd77723324a3e32))
+* **hddt:** accept any date as the e-invoice start date ([b2597b2](https://github.com/tachibana-shin/hkd-tt152-app/commit/b2597b2cb6151fba7987ff51bbc0076fd9313d23))
+* **hddt:** download an invoice's XML from the invoice detail dialog ([87e4458](https://github.com/tachibana-shin/hkd-tt152-app/commit/87e445897042d49f3715a82b727916332ddf4338))
+* **hddt:** keep e-invoice XML files downloaded from the tax portal ([122f990](https://github.com/tachibana-shin/hkd-tt152-app/commit/122f99062422dbe51c2207d9a56f00758f279136))
+* **hddt:** keep e-invoice XML in SQLite and pack it into a ZIP for filing ([b65e739](https://github.com/tachibana-shin/hkd-tt152-app/commit/b65e739607245aa1395cb6644ecc666eb6f4654e))
+* **invoice:** create a product quickly and add an alias on the line ([34d64b6](https://github.com/tachibana-shin/hkd-tt152-app/commit/34d64b6864efe5862219e0244409f308af1c67b8))
+* **invoice:** preview a draft invoice as PDF from the export queue ([10b3283](https://github.com/tachibana-shin/hkd-tt152-app/commit/10b3283c55696cc4d38cbf811cc31fc9f8c35a10))
+* **invoice:** quick lot creation and shortage confirmation in the draft dialog ([c60556d](https://github.com/tachibana-shin/hkd-tt152-app/commit/c60556d98efcc626c797b27ce234a83b8e0ee2e0))
+* **invoice:** start a draft from the export queue and preview any invoice as PDF ([ecde0f8](https://github.com/tachibana-shin/hkd-tt152-app/commit/ecde0f8beb951092fd2aaf0d56a1ca119af12195))
+* **pdf:** dash every inner grid line and fill the page with the watermark ([d35d6ce](https://github.com/tachibana-shin/hkd-tt152-app/commit/d35d6ce91cee02d39ae1bed48144653b9ff518e9))
+* **pdf:** redesign the invoice layout around the goods table ([46a54b3](https://github.com/tachibana-shin/hkd-tt152-app/commit/46a54b3d683b59131ceec47ed84702cb80105bab))
+* **pdf:** render every invoice type from its form code ([69b6f65](https://github.com/tachibana-shin/hkd-tt152-app/commit/69b6f65d530d460d96c4b9ba9242b1a8766714fe))
+* **pdf:** render invoice PDFs in Rust with the htmltopdf engine ([2302137](https://github.com/tachibana-shin/hkd-tt152-app/commit/2302137c296cc6f8a0758cb83358fe229d0c1f7b))
+* **product:** declare a bill of materials for many products on one screen ([5d7f5f6](https://github.com/tachibana-shin/hkd-tt152-app/commit/5d7f5f6b90ba8dd9e98a2733f1135436d970e717))
+* **report:** fetch the period's missing XML and show a progress log while exporting ([ec57ddd](https://github.com/tachibana-shin/hkd-tt152-app/commit/ec57dddcdbd51062e1d0c2684bf5d50681b4b349))
+* **settings:** check for updates and refresh e-invoices when the app opens ([39fd719](https://github.com/tachibana-shin/hkd-tt152-app/commit/39fd719fce7336b9d481e550bebf2c8b66428edc))
+* **stock,invoice:** BOM auto-issue of materials and per-line product aliases ([61063bb](https://github.com/tachibana-shin/hkd-tt152-app/commit/61063bb484eebdf80ab52c4cb16e0b5f2050f63b))
+* **stock:** create production lots from the bill of materials ([11ce567](https://github.com/tachibana-shin/hkd-tt152-app/commit/11ce567ae15e515f6f59e23d3d5bc9f2c624e787))
+* **update:** open a dialog with the release log and an install button ([20fe292](https://github.com/tachibana-shin/hkd-tt152-app/commit/20fe2922cfac7a9e40d42ff00c5e59a3cf266e0c))
+* **update:** show the release notes as markdown in the update dialog ([88f3a17](https://github.com/tachibana-shin/hkd-tt152-app/commit/88f3a178257b9e4d4e4866807f5617c234ffd762))
+* view electronic purchase invoices as PDF ([7156bac](https://github.com/tachibana-shin/hkd-tt152-app/commit/7156bacadf8003d697131d308744cd92d1d6f40b))
+
 # [0.16.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.15.1...v0.16.0) (2026-10-01)
 
 
