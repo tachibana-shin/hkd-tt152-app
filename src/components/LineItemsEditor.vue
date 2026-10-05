@@ -80,6 +80,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: "add"): void;
   (e: "remove", index: number): void;
+  /** Người dùng vừa CHỌN hàng trên dòng (sau khi đã tự điền giá/kho). */
+  (e: "picked", line: LineItem): void;
 }>();
 
 const catalog = useCatalogStore();
@@ -236,7 +238,8 @@ function assignProduct(index: number, code: string) {
   if (!row) return;
   row.product_code = code;
   row.line_name = "";
-  onProductPick(row);
+  // `false`: vừa tạo lô xong không cần soi thiếu tồn lần nữa (vòng lặp gợi ý).
+  onProductPick(row, false);
 }
 
 defineExpose({ assignProduct });
@@ -256,7 +259,13 @@ function onProductPicked(it: LineItem, name: string) {
   it.line_name = name;
 }
 
-function onProductPick(it: LineItem) {
+/**
+ * Tự điền giá / nhóm ngành / kho xuất cho dòng vừa chọn hàng.
+ *
+ * `notify = false` khi gán từ NGOÀI (popup khác ví dụ tạo lô xong) — màn cha
+ * chỉ muốn soi thiếu tồn khi NGƯỜI DÙNG tự chọn, không gợi ý lô lần nữa.
+ */
+function onProductPick(it: LineItem, notify = true) {
   const p = catalog.productByCode(it.product_code);
   if (!p) return;
   it.unit_price = props.priceField === "sale_price" ? p.sale_price : p.cost_price;
@@ -267,6 +276,7 @@ function onProductPick(it: LineItem) {
     const w = props.warehouses.find((x) => x.id === p.default_warehouse_id);
     if (w) it.warehouse_code = w.code;
   }
+  if (notify) emit("picked", it);
 }
 
 /** Giá trị thực tế 1 dòng (giá trị nhập kho): Thành tiền − Tiền CK. */

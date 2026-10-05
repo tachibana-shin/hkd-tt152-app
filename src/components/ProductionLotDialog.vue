@@ -24,6 +24,13 @@ import type { BomItem, StockLot } from "@/types";
 const props = defineProps<{
   /** Thành phẩm gợi ý sẵn khi mở (popup hóa đơn gắn hàng vừa tạo xong). */
   productCode?: string;
+  /**
+   * Sản lượng điền sẵn — popup hóa đơn gợi ý phần còn THIẾU khi chọn hàng
+   * chế tạo mà kho không đủ, người dùng vẫn sửa được trước khi tạo lô.
+   */
+  quantity?: number;
+  /** Kho nhập điền sẵn — lấy kho xuất trên dòng hóa đơn để nhập về đúng chỗ. */
+  warehouseCode?: string;
 }>();
 const emit = defineEmits<{
   done: [payload: { voucherNo: string; productCode: string }];
@@ -55,11 +62,16 @@ watch(
   visible,
   async (open) => {
     if (!open) return;
+    // Kho điền sẵn phải là kho có thật (dòng hóa đơn có thể để trống/rơi kho
+    // đã xoá) — sai thì rơi về kho đầu tiên như cũ.
+    const presetWh = warehouses.value.some((w) => w.code === props.warehouseCode)
+      ? props.warehouseCode!
+      : "";
     Object.assign(form, {
       product_code: props.productCode ?? "",
-      quantity: 1,
+      quantity: props.quantity && props.quantity > 0 ? props.quantity : 1,
       posting_date: new Date(),
-      warehouse_code: warehouses.value[0]?.code ?? "",
+      warehouse_code: presetWh || warehouses.value[0]?.code || "",
       voucher_no: "",
       description: "Nhập kho thành phẩm — lô sản xuất",
     });

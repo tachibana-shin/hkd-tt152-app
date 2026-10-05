@@ -92,6 +92,69 @@ const aliasDialog = ref(false);
 const lotDialog = ref(false);
 const editor = ref<InstanceType<typeof LineItemsEditor> | null>(null);
 
+// ─── Gợi ý thông minh: chọn hàng CHẾ TẠO mà kho thiếu → mở tạo lô ngay ───
+/** Số liệu dòng vừa báo thiếu (điền sẵn vào popup tạo lô); null = mở thủ công. */
+const lotSuggest = ref<{ code: string; quantity: number; warehouseCode: string } | null>(null);
+/** Đang có prompt gợi ý — đừng xếp hàng cảnh báo nếu chọn liên tiếp. */
+const prompting = ref(false);
+
+/** Mở tạo lô thủ công từ header (không kèm số liệu gợi ý từ dòng). */
+function openLot() {
+  lotSuggest.value = null;
+  lotDialog.value = true;
+}
+
+/**
+ * Người dùng vừa chọn hàng trên dòng: nếu là hàng CHẾ TẠO (có định mức) mà kho
+ * đang thiếu → mở prompt tạo lô sản xuất ngay với sản lượng = phần thiếu, không
+ * để tới lúc bấm Lưu mới vỡ lẽ. Từ chối thì thôi — dòng vẫn hiện cảnh báo đỏ
+ * và khâu lưu vẫn còn confirm chặn riêng.
+ */
+async function onLinePicked(it: {
+  product_code: string;
+  quantity: number;
+  warehouse_code?: string;
+}) {
+  // Tạo lô cần quyền kho; đang có prompt khác thì thôi (đừng xô nhau).
+  if (!it.product_code || prompting.value || !auth.canStock) return;
+  const p = catalog.productByCode(it.product_code);
+  if (!p || p.is_service) return; // dịch vụ không theo dõi tồn
+  try {
+    // Nạp định mức (1 lần trong phiên) + tồn (phòng khi mở popup vội, map
+    // chưa kịp nạp xong → soi nhầm "thiếu" là gợi ý sai, thà đợi tí còn hơn).
+    await Promise.all([catalog.loadBoms(), catalog.loadOnhand()]);
+  } catch {
+    return; // soi không được thì bỏ — gợi ý chỉ là bổ trợ, thiếu kho vẫn chặn lúc lưu
+  }
+  if (!catalog.hasBom(it.product_code)) return; // không phải hàng chế tạo
+  const avail = catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
+  const short = (it.quantity || 0) - avail;
+  if (!(short > 1e-9)) return;
+
+  prompting.value = true;
+  confirm.require({
+    header: "Thiếu tồn kho — hàng chế tạo",
+    message: `${p.name} (${p.code}): cần ${fmt(it.quantity)}, kho chỉ có ${fmt(
+      avail,
+    )} → thiếu ${fmt(short)}. Đây là hàng có định mức — tạo lô sản xuất ngay để đủ hàng bán?`,
+    icon: "pi pi-factory",
+    acceptLabel: "Tạo lô sản xuất",
+    rejectLabel: "Để sau",
+    accept: () => {
+      prompting.value = false;
+      lotSuggest.value = {
+        code: it.product_code,
+        quantity: short,
+        warehouseCode: it.warehouse_code ?? "",
+      };
+      lotDialog.value = true;
+    },
+    reject: () => {
+      prompting.value = false;
+    },
+  });
+}
+
 /**
  * Thêm tên khác từ header (chưa đứng trên dòng nào) → gắn thẳng tên vừa thêm
  * vào dòng đầu đang dùng đúng hàng đó và CHƯA đặt tên riêng: in ra đúng tên
@@ -122,6 +185,9 @@ async function onLotDone(payload: { voucherNo: string; productCode: string }) {
     // Nạp lại lỗi vẫn gắn hàng được — popup thiếu tồn sẽ báo khi lưu.
     toast.add({ severity: "warn", summary: "Không làm mới được tồn kho", detail: String(e) });
   }
+  // Lô tạo từ gợi ý (hàng ĐANG đứng trên hóa đơn) → nạp tồn xong là dòng tự
+  // hết cảnh báo; thêm dòng mới nữa sẽ trùng hàng trên cùng hóa đơn.
+  if (form.items.some((it) => it.product_code === payload.productCode)) return;
   let index = form.items.findIndex((it) => !it.product_code);
   if (index < 0) {
     addRow();
@@ -138,6 +204,9 @@ watch(
     // Soi thiếu tồn phải theo số mới nhất — map chỉ nạp 1 lần ở nơi khác nên
     // ép tải lại mỗi lần mở (nhanh, không chặn render form).
     void catalog.loadOnhand(true);
+    // Hết gợi ý/confirm của lần mở trước — đừng vướng lại số liệu dòng cũ.
+    prompting.value = false;
+    lotSuggest.value = null;
     if (!id) {
       editingId.value = null;
       Object.assign(form, {
@@ -348,6 +417,7 @@ async function persist(rows: typeof form.items) {
       total-label="Tổng tiền:"
       @add="addRow"
       @remove="removeRow"
+      @picked="onLinePicked"
     >
       <template #actions>
         <Button
@@ -368,7 +438,7 @@ async function persist(rows: typeof form.items) {
           :disabled="!auth.canStock"
           data-testid="header-create-lot"
           v-tooltip="'Tạo nhanh lô sản xuất — thành phẩm được gắn vào dòng trống'"
-          @click="lotDialog = true"
+          @click="openLot"
         />
       </template>
     </LineItemsEditor>
@@ -382,7 +452,13 @@ async function persist(rows: typeof form.items) {
 
     <!-- Thêm tên khác từ header bảng — cùng dialog với icon trên từng dòng. -->
     <ProductAliasDialog v-model:visible="aliasDialog" @saved="onAliasSaved" />
-    <!-- Tạo nhanh lô sản xuất trong lúc đang lập hóa đơn. -->
-    <ProductionLotDialog v-model:visible="lotDialog" @done="onLotDone" />
+    <!-- Tạo nhanh lô sản xuất trong lúc đang lập hóa đơn (kèm gợi ý từ dòng thiếu). -->
+    <ProductionLotDialog
+      v-model:visible="lotDialog"
+      :product-code="lotSuggest?.code"
+      :quantity="lotSuggest?.quantity"
+      :warehouse-code="lotSuggest?.warehouseCode"
+      @done="onLotDone"
+    />
   </AppDialog>
 </template>

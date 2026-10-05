@@ -1,5 +1,5 @@
 import { api } from "@/db";
-import type { Product, Warehouse, Supplier, Customer, IndustryGroup } from "@/types";
+import type { Product, Warehouse, Supplier, Customer, IndustryGroup, BomItem } from "@/types";
 
 export const useCatalogStore = defineStore("catalog", () => {
   const products = ref<Product[]>([]);
@@ -56,6 +56,33 @@ export const useCatalogStore = defineStore("catalog", () => {
   function onhandAt(productCode: string, warehouseCode = "") {
     return onhand.value.get(productCode + "|" + warehouseCode) ?? 0;
   }
+
+  // Định mức vật tư (mọi thành phẩm) — nạp lazy khi popup cần nhận ra "hàng
+  // chế tạo" (sản phẩm có định mức) để gợi ý tạo lô sản xuất lúc thiếu kho.
+  const boms = ref<BomItem[]>([]);
+
+  /** Request nạp định mức đang chạy (nếu có) — để loadBoms gộp yêu cầu trùng. */
+  let bomTask: Promise<void> | null = null;
+
+  /**
+   * Nạp định mức của mọi thành phẩm. `force` = tải lại dù đã có; luôn trả
+   * promise để người gọi chờ xong mới quyết định (soi thiếu tồn không đoán).
+   */
+  function loadBoms(force = false): Promise<void> {
+    if (bomTask) return bomTask;
+    if (boms.value.length && !force) return Promise.resolve();
+    bomTask = (async () => {
+      try {
+        boms.value = await api.getProductBoms();
+      } finally {
+        bomTask = null;
+      }
+    })();
+    return bomTask;
+  }
+
+  /** Thành phẩm có định mức (hàng chế tạo)? false nếu chưa nạp hoặc không có. */
+  const hasBom = (productCode: string) => boms.value.some((b) => b.product_code === productCode);
 
   async function loadAll() {
     loading.value = true;
@@ -189,6 +216,9 @@ export const useCatalogStore = defineStore("catalog", () => {
     loadingOnhand,
     loadOnhand,
     onhandAt,
+    boms,
+    loadBoms,
+    hasBom,
     loadAll,
     loadIndustryGroups,
     loadProductsPage,

@@ -4915,3 +4915,120 @@ test("Nhập kho: nhập Excel — preview phân trang, tự tạo mặt hàng m
   expect(created, "mặt hàng mới phải có trong danh mục").toBeTruthy();
   expect(created?.unit).toBe("Cái");
 });
+
+// ─── GỢI Ý THÔNG MINH: CHỌN HÀNG CHẾ TẠO MÀ KHO THIẾU → TẠO LÔ NGAY ───
+// Chọn hàng có ĐỊNH MỨC mà tồn không đủ trong popup lập hóa đơn → hiện prompt
+// báo đúng phần thiếu + mở popup tạo lô với thành phẩm/sản lượng điền sẵn.
+// Tạo lô xong KHÔNG được thêm dòng trùng (hàng đã đứng trên hóa đơn).
+test("Lập hóa đơn: chọn hàng chế tạo thiếu kho → prompt tạo lô sản xuất nhanh", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Thành phẩm có định mức (tồn 0) + vật tư + tồn vật tư — riêng cho test này.
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-GG-LSX",
+      name: "Ghế gỗ LSX",
+      unit: "Cái",
+      salePrice: 300_000,
+      costPrice: 250_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-GG-LSX: ${await fg.text()}`).toBe(true);
+  const mat = await request.post("/api/save_product", {
+    data: {
+      code: "NVL-GG-LSX",
+      name: "Gỗ LSX",
+      unit: "Khay",
+      salePrice: 0,
+      costPrice: 150_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(mat.ok(), `save_product NVL-GG-LSX: ${await mat.text()}`).toBe(true);
+  const bom = await request.post("/api/save_product_bom", {
+    data: { productCode: "SP-GG-LSX", items: [{ material_code: "NVL-GG-LSX", quantity: 3 }] },
+  });
+  expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
+  const stock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-12",
+      voucher_no: "PN9592",
+      description: "Nhập gỗ cho test gợi ý lô sản xuất",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "NVL-GG-LSX", quantity: 30, unit_price: 150_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stock.ok(), `save_inbound: ${await stock.text()}`).toBe(true);
+
+  // Màn Hóa đơn nạp danh mục khi mở — vào SAU khi tạo hàng qua API.
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog", { name: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+
+  // Nhập SL 3 TRƯỚC khi chọn hàng → prompt phải báo đúng phần thiếu.
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("spinbutton").first().fill("3");
+  await line.getByRole("spinbutton").first().press("Enter");
+
+  // Chọn hàng chế tạo (vừa có định mức, tồn 0) → hiện prompt gợi ý.
+  await line.getByRole("combobox").first().click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await box.fill("SP-GG-LSX");
+  await page
+    .getByRole("option", { name: /Ghế gỗ LSX/ })
+    .first()
+    .click();
+
+  const prompt = page.getByRole("alertdialog", { name: /Thiếu tồn kho — hàng chế tạo/ });
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toContainText("Ghế gỗ LSX (SP-GG-LSX)");
+  await expect(prompt).toContainText("thiếu 3");
+  await expect(prompt).toContainText("hàng có định mức");
+
+  // Chấp nhận → popup tạo lô mở với thành phẩm + sản lượng (phần thiếu) sẵn.
+  await prompt.getByRole("button", { name: "Tạo lô sản xuất" }).click();
+  const lotDlg = page.getByRole("dialog", { name: "Tạo lô sản xuất" });
+  await expect(lotDlg).toBeVisible();
+  await expect(lotDlg.getByTestId("lot-fg")).toContainText("Ghế gỗ LSX");
+  await expect(lotDlg.getByRole("spinbutton").first()).toHaveValue("3");
+  // Vật tư nhập đủ (3 × 3 = 9 ≤ 30) → bản xem trước định mức hiện ra.
+  await expect(
+    page.getByTestId("lot-preview-table").getByText(/Gỗ LSX \(NVL-GG-LSX\)/),
+  ).toBeVisible();
+
+  // Tạo lô luôn: popup đóng, toast báo số phiếu.
+  await lotDlg.getByRole("button", { name: "Tạo lô" }).click();
+  await expect(lotDlg).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText(/Đã tạo lô PN\d+/);
+
+  // KHÔNG THÊM DÔNG TRÙNG: lô tạo từ gợi ý, hàng đã đứng trên hóa đơn → 1 dòng…
+  await expect(dlg.locator("tbody tr", { hasText: "Ghế gỗ LSX" })).toHaveCount(1);
+  // …tồn đủ sau khi tạo lô → dòng hết cảnh báo "Thiếu", prompt không nổ lại.
+  await expect(dlg.locator("tbody tr").first()).not.toContainText("Thiếu");
+  await expect(page.getByRole("alertdialog", { name: /Thiếu tồn kho/ })).toBeHidden();
+});
