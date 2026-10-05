@@ -60,6 +60,7 @@ function addRow() {
 }
 
 function removeRow(i: number) {
+  if (i < 0) return;
   countForm.items.splice(i, 1);
 }
 
@@ -166,7 +167,14 @@ useKeepAliveRefresh(reload);
           <TabPanels>
             <!-- Tổng hợp -->
             <TabPanel value="summary">
-              <AppDataTable :value="summary" :loading="loading" stripedRows paginator :rows="15">
+              <AppDataTable
+                :value="summary"
+                :loading="loading"
+                stripedRows
+                paginator
+                :rows="15"
+                :rows-per-page-options="[15, 30, 50, 100]"
+              >
                 <Column field="product_code" header="Mã SP" />
                 <Column field="product_name" header="Tên sản phẩm" />
                 <Column field="inbound" header="Nhập" align="right">
@@ -207,7 +215,15 @@ useKeepAliveRefresh(reload);
                   @click="stock.loadLots(productFilter)"
                 />
               </div>
-              <AppDataTable :value="lots" :loading="loading" stripedRows>
+              <!-- Lô tích lũy theo từng lần nhập → có thể hàng nghìn dòng. -->
+              <AppDataTable
+                :value="lots"
+                :loading="loading"
+                stripedRows
+                paginator
+                :rows="15"
+                :rows-per-page-options="[15, 30, 50, 100]"
+              >
                 <Column field="product_code" header="Mã SP" />
                 <Column field="product_name" header="Tên sản phẩm" />
                 <Column field="warehouse_code" header="Kho" />
@@ -226,7 +242,14 @@ useKeepAliveRefresh(reload);
 
             <!-- Phiếu kiểm kê -->
             <TabPanel value="counts">
-              <AppDataTable :value="counts" :loading="cntLoading" stripedRows>
+              <AppDataTable
+                :value="counts"
+                :loading="cntLoading"
+                stripedRows
+                paginator
+                :rows="15"
+                :rows-per-page-options="[15, 30, 50, 100]"
+              >
                 <Column field="date" header="Ngày" />
                 <Column field="note" header="Ghi chú" />
                 <Column field="id" header="Số dòng" align="right">
@@ -283,26 +306,32 @@ useKeepAliveRefresh(reload);
         />
       </div>
 
+      <!-- Cả danh mục hàng hoá được đổ vào một bảng (có thể hàng nghìn dòng) →
+           phân trang; các ô gán theo `data` (chính đối tượng dòng) chứ không theo
+           `index`, vì trang nào index cũng bắt đầu từ 0. -->
       <AppDataTable
         :value="countForm.items"
         class="mt-2"
         :resizable-columns="false"
         :sortable="false"
+        paginator
+        :rows="15"
+        :rows-per-page-options="[15, 30, 50, 100]"
       >
         <Column header="Sản phẩm">
-          <template #body="{ index }">
+          <template #body="{ data }">
             <ProductSelect
-              v-model="countForm.items[index].product_code"
-              :warehouse-code="countForm.items[index].warehouse_code ?? ''"
+              v-model="data.product_code"
+              :warehouse-code="data.warehouse_code ?? ''"
               size="small"
               :show-clear="false"
             />
           </template>
         </Column>
         <Column header="Kho">
-          <template #body="{ index }">
+          <template #body="{ data }">
             <Select
-              v-model="countForm.items[index].warehouse_code"
+              v-model="data.warehouse_code"
               :options="warehouses"
               optionLabel="name"
               optionValue="code"
@@ -316,12 +345,12 @@ useKeepAliveRefresh(reload);
           </template>
         </Column>
         <Column header="Đếm thực tế">
-          <template #body="{ index }">
-            <InputNumber v-model="countForm.items[index].counted_qty" :min="0" class="w-full" />
+          <template #body="{ data }">
+            <InputNumber v-model="data.counted_qty" :min="0" class="w-full" />
           </template>
         </Column>
         <Column header="">
-          <template #body="{ index }">
+          <template #body="{ data }">
             <Button
               v-if="auth.canStock"
               icon="pi pi-times"
@@ -329,7 +358,7 @@ useKeepAliveRefresh(reload);
               rounded
               size="small"
               severity="danger"
-              @click="removeRow(index)"
+              @click="removeRow(countForm.items.indexOf(data))"
             />
           </template>
         </Column>
@@ -347,7 +376,13 @@ useKeepAliveRefresh(reload);
       cancel-label="Đóng"
       :show-action="false"
     >
-      <AppDataTable :value="countDetail" stripedRows>
+      <AppDataTable
+        :value="countDetail"
+        stripedRows
+        paginator
+        :rows="15"
+        :rows-per-page-options="[15, 30, 50, 100]"
+      >
         <Column field="product_code" header="Mã SP" />
         <Column field="product_name" header="Tên sản phẩm" />
         <Column field="book_qty" header="Tồn sổ cái" align="right">

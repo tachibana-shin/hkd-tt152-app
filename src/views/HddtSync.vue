@@ -479,6 +479,8 @@ void (async () => {
         </span>
       </div>
 
+      <!-- Nhật ký không giới hạn theo bản ghi (khoảng lọc theo ngày vẫn có thể
+           trả hàng nghìn dòng) → phân trang, vẫn giữ khung cuộn cố định. -->
       <AppDataTable
         :value="syncRows"
         :loading="syncScanning"
@@ -486,6 +488,9 @@ void (async () => {
         scrollable
         scrollHeight="420px"
         size="small"
+        paginator
+        :rows="50"
+        :rows-per-page-options="[20, 50, 100, 200]"
       >
         <Column header="Ngày lập" :style="{ width: '7rem' }">
           <template #body="{ data }">{{ data.posting_date || "—" }}</template>

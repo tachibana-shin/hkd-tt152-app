@@ -33,6 +33,8 @@ const totals = computed(() => {
 </script>
 
 <template>
+  <!-- Bảng lương có thể bằng số nhân sự (vài trăm dòng × nhiều cột nhập) →
+       phân trang; ô nhập gán theo `data` chứ không theo `index` (index theo trang). -->
   <AppDataTable
     :value="rows"
     :loading="loading"
@@ -43,13 +45,15 @@ const totals = computed(() => {
     class="mt-3"
     :resizable-columns="false"
     :sortable="false"
+    paginator
+    :rows="50"
   >
     <Column field="employee_code" header="Mã NV" />
     <Column field="employee_name" header="Họ tên" />
     <Column header="Số công">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
-          v-model="rows[index].work_days"
+          v-model="data.work_days"
           :min="0"
           :max="31"
           :step="0.5"
@@ -66,9 +70,9 @@ const totals = computed(() => {
       <template #body="{ data }">{{ fmtVnd(preview(data).allowance) }}</template>
     </Column>
     <Column header="Thưởng">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
-          v-model="rows[index].bonus"
+          v-model="data.bonus"
           :min="0"
           mode="currency"
           currency="VND"
@@ -88,9 +92,9 @@ const totals = computed(() => {
       <template #body="{ data }">{{ fmtVnd(preview(data).bhEmployee) }}</template>
     </Column>
     <Column header="TNCN">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
-          v-model="rows[index].pit_amount"
+          v-model="data.pit_amount"
           :min="0"
           mode="currency"
           currency="VND"
@@ -101,9 +105,9 @@ const totals = computed(() => {
       </template>
     </Column>
     <Column header="Tạm ứng">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputNumber
-          v-model="rows[index].advance"
+          v-model="data.advance"
           :min="0"
           mode="currency"
           currency="VND"
@@ -119,9 +123,9 @@ const totals = computed(() => {
       </template>
     </Column>
     <Column header="Ghi chú">
-      <template #body="{ index }">
+      <template #body="{ data }">
         <InputText
-          v-model="rows[index].note"
+          v-model="data.note"
           class="w-full"
           placeholder="Ghi chú..."
           :disabled="!canEdit"

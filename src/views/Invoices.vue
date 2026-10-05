@@ -634,7 +634,7 @@ useKeepAliveRefresh(reload);
             {{ detail.invoice.customer_tax_code || "—" }}
           </div>
         </div>
-        <AppDataTable :value="detail.items as InvoiceItem[]" stripedRows>
+        <AppDataTable :value="detail.items as InvoiceItem[]" stripedRows paginator :rows="10">
           <Column field="product_code" header="Mã SP" />
           <Column field="product_name" header="Tên sản phẩm" />
           <Column field="industry_code" header="Nhóm ngành">

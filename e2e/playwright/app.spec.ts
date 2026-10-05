@@ -4828,3 +4828,26 @@ test("Popup cập nhật: hiện ghi chú phát hành Markdown thay cho nhật k
   await page.getByTestId("update-later").click();
   await expect(dlg).toBeHidden();
 });
+
+// ─── PHÂN TRANG: CÁC BẢNG CLIENT-SIDE PHẢI CÓ THANH PHÂN TRANG ───
+// `paginator` là attribute trần, Vue biên dịch thành chuỗi rỗng "" chứ không phải
+// true — AppDataTable từng kiểm bằng `!!attrs.paginator` nên mọi bảng client-side
+// gắn `paginator` kiểu trần đều mất phân trang âm thầm (tab Tồn kho code có
+// `paginator :rows="15"` nhưng không hiện trang nào). Test này giữ chân bug đó
+// và các bảng mới thêm phân trang.
+test("Tồn kho & Bảng lương: bảng client-side có thanh phân trang", async ({ page }) => {
+  await ensureLoggedIn(page);
+  // Panel ẩn trong tab vẫn nằm trong DOM → chỉ so với paginator đang hiện.
+  const paginator = page.locator(".p-paginator:visible");
+
+  await openTab(page, "Tồn kho", "/inventory");
+  await expect(paginator.first()).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("tab", { name: /Chi tiết lô/ }).click();
+  await expect(paginator.first()).toBeVisible();
+  await page.getByRole("tab", { name: /Phiếu kiểm kê/ }).click();
+  await expect(paginator.first()).toBeVisible();
+
+  // Bảng lương: danh sách nhân sự (10 dòng/trang) + bảng nhập liệu (50 dòng/trang).
+  await openTab(page, "Bảng lương", "/payroll");
+  await expect(paginator.first()).toBeVisible({ timeout: 15_000 });
+});

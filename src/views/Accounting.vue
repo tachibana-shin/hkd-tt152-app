@@ -913,7 +913,7 @@ useKeepAliveRefresh(reload);
     <!-- Bảng cân đối số phát sinh — dư đầu kỳ (DMTK) + phát sinh trong kỳ -->
     <SectionCard title="Bảng cân đối số phát sinh">
       <template #icon><i-mdi-scale-balance class="text-amber-600" /></template>
-      <AppDataTable :value="tb" :loading="loading" stripedRows>
+      <AppDataTable :value="tb" :loading="loading" stripedRows paginator :rows="25">
         <Column field="code" header="Mã TK" style="width: 90px" />
         <Column field="name" header="Tên tài khoản" />
         <Column field="opening_debit" header="Dư Nợ đầu kỳ" align="right">

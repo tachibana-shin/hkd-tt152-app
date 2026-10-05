@@ -83,7 +83,14 @@ function restore(filename: string) {
       <div>
         <Button v-if="auth.isAdmin" label="Tạo sao lưu" icon="pi pi-database" @click="create" />
       </div>
-      <AppDataTable :value="backups" :loading="loading" stripedRows size="small">
+      <AppDataTable
+        :value="backups"
+        :loading="loading"
+        stripedRows
+        size="small"
+        paginator
+        :rows="10"
+      >
         <Column header="Tên file">
           <template #body="{ data }">{{ data }}</template>
         </Column>

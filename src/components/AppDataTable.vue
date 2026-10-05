@@ -493,7 +493,14 @@ export default defineComponent({
           scrollable: true,
           scrollHeight: "flex",
           lazy: !!attrs.onPage,
-          paginator: !!attrs.onPage || !!attrs.paginator,
+          // Attribute trần (`paginator` không gán giá trị) được Vue biên dịch thành
+          // chuỗi rỗng "" chứ không phải true — nếu dùng `!!` thì mọi bảng client-side
+          // gắn `paginator` kiểu trần sẽ thành false và không phân trang bao giờ.
+          paginator:
+            !!attrs.onPage ||
+            attrs.paginator === "" ||
+            attrs.paginator === true ||
+            attrs.paginator === "true",
           selectionMode: props.selection != null ? "multiple" : undefined,
           metaKeySelection: props.metaKeySelection,
           dataKey: props.dataKey,
