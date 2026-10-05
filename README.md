@@ -342,8 +342,8 @@ Cách tính phiên bản: `feat:` → minor, `fix:` → patch, `!` trong tiêu �
 
 1. tạo tag `v<phiên bản>` và commit `chore(release): <phiên bản> [skip ci]`;
 2. ghi phiên bản vào **cả 4 file manifest** — `package.json`,
-   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`
-   (script `scripts/set-version.mjs`) nên bundle luôn khớp tag;
+   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `Cargo.lock` (ở gốc
+   workspace, script `scripts/set-version.mjs`) nên bundle luôn khớp tag;
 3. cập nhật [`CHANGELOG.md`](CHANGELOG.md) bằng ghi chú tiếng Việt theo từng nhóm
    commit (Tính năng mới / Sửa lỗi / Hiệu năng / Tài liệu / …);
 4. tạo Release ở trạng thái **draft** kèm ghi chú trên.

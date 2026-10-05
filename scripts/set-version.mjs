@@ -14,7 +14,9 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CARGO = join(root, "src-tauri", "Cargo.toml");
-const LOCK = join(root, "src-tauri", "Cargo.lock");
+// Cargo.lock nằm ở WORKSPACE ROOT (root Cargo.toml giữ [workspace] + [profile]);
+// Cargo chỉ ghi lockfile ở đó, không bao giờ ở thư mục member.
+const LOCK = join(root, "Cargo.lock");
 
 /** Các file JSON chứa khoá "version" cùng nội dung phiên bản của crate Rust. */
 const JSON_FILES = ["package.json", "src-tauri/tauri.conf.json"];
@@ -63,7 +65,7 @@ function lockPackagePattern() {
 function lockVersion() {
   const text = readFileSync(LOCK, "utf8");
   const block = text.match(lockPackagePattern());
-  if (!block) throw new Error(`Không tìm thấy gói ${crateName()} trong src-tauri/Cargo.lock`);
+  if (!block) throw new Error(`Không tìm thấy gói ${crateName()} trong Cargo.lock`);
   return block[2];
 }
 
@@ -105,17 +107,17 @@ function setLockVersion(value) {
   const text = readFileSync(LOCK, "utf8");
   const pattern = lockPackagePattern();
   if (!pattern.test(text)) {
-    throw new Error(`Không tìm thấy gói ${crateName()} trong src-tauri/Cargo.lock`);
+    throw new Error(`Không tìm thấy gói ${crateName()} trong Cargo.lock`);
   }
   writeFileSync(LOCK, text.replace(pattern, `$1${value}$3`));
-  console.log(`src-tauri/Cargo.lock: ${crateName()} = ${value}`);
+  console.log(`Cargo.lock: ${crateName()} = ${value}`);
 }
 
 if (check) {
   const found = [
     ...JSON_FILES.map((f) => [f, jsonVersion(f)]),
     ["src-tauri/Cargo.toml", cargoVersion()],
-    ["src-tauri/Cargo.lock", lockVersion()],
+    ["Cargo.lock", lockVersion()],
   ];
   const versions = new Set(found.map(([, v]) => v));
   if (versions.size > 1) {
