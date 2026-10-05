@@ -269,8 +269,8 @@ bun run test:e2e:report           # mở báo cáo HTML (kể cả trace của t
 ### 🤖 E2E bằng Playwright (Chrome)
 
 Vì app đã chạy được trên Chrome (web server nhúng), E2E dùng Playwright điều khiển
-**Chrome hệ thống** (không tải Chromium riêng). **Không cần build trước** — mỗi lần
-chạy test, Playwright tự khởi động **một instance `bun run tauri dev` riêng** cô lập:
+**Chrome hệ thống** (không tải Chromium riêng). **Không cần build trước** —
+Playwright tự khởi động **một instance `bun run tauri dev` riêng** cô lập:
 
 - `HKD_WEB_PORT=45821` — web server nhúng của app ở cổng riêng, không đụng app người
   dùng (45731). `HKD_DATA_DIR=<thư mục tạm>` — DB hoàn toàn cô lập; seed sẵn thông tin
@@ -300,7 +300,7 @@ trực tiếp, hoặc mở trace trong `bun run test:e2e:report`.
 
 ### Kiểm tra tự động (`.github/workflows/ci.yml`)
 
-Mỗi lần push/PR chạy 4 việc song song:
+CI chạy 4 job song song:
 
 | Job        | Kiểm tra                                                                                |
 | ---------- | --------------------------------------------------------------------------------------- |
@@ -338,7 +338,7 @@ Cách tính phiên bản: `feat:` → minor, `fix:` → patch, `!` trong tiêu �
 > runner nào. Commit **không ghi kiểu** (kiểu `"Update README"`) vẫn ra patch theo
 > `releaseRules` trong [`.releaserc.json`](.releaserc.json).
 
-**Mỗi lần release, semantic-release tự động:**
+**semantic-release tự động:**
 
 1. tạo tag `v<phiên bản>` và commit `chore(release): <phiên bản> [skip ci]`;
 2. ghi phiên bản vào **cả 4 file manifest** — `package.json`,
