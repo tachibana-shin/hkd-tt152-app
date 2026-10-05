@@ -82,6 +82,7 @@ const emit = defineEmits<{
 }>();
 
 const catalog = useCatalogStore();
+const toast = useToast();
 
 // Cảnh báo thiếu tồn realtime (báo đỏ ngay trên dòng khi SL > tồn đúng kho):
 // chỉ bật khi bảng có cột Kho xuất (kho trên dòng quyết định tồn so sánh).
@@ -182,12 +183,22 @@ function openAlias(index: number) {
   aliasDialog.value = true;
 }
 
-/** Lưu xong: dòng giữ NGAY tên vừa thêm — hóa đơn in đúng tên người dùng chọn. */
-function onAliasSaved(code: string, alias: string) {
+/**
+ * Lưu xong từ dialog: dòng giữ NGAY tên vừa thêm (F5 in đúng tên người dùng
+ * chọn) và bảng tự báo kết quả — gộp 1 toast để khỏi nói một đằng khác một nẻo.
+ */
+function onAliasSaved(code: string, added: string[]) {
   const index = aliasRow.value;
   aliasRow.value = null;
   const row = index == null ? null : props.items[index];
-  if (row && row.product_code === code) row.line_name = alias;
+  const attached = !!row && row.product_code === code;
+  if (row && attached && added[0]) row.line_name = added[0];
+  const detail = `${added.join(", ")} → ${catalog.productByCode(code)?.name ?? code}`;
+  toast.add({
+    severity: "success",
+    summary: "Đã thêm tên khác",
+    detail: `${detail} · ${attached ? "gắn vào dòng hóa đơn" : "lưu vào danh mục"}`,
+  });
 }
 
 /**

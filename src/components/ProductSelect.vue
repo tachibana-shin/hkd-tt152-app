@@ -192,10 +192,13 @@ void catalog.loadOnhand();
 </script>
 
 <template>
+  <!-- Lọc theo TÊN và MÃ: người dùng quen gõ SP001 — mặc định PrimeVue chỉ lọc
+       theo optionLabel (tên) nên gõ mã ra dropdown trống. -->
   <Select
     :model-value="selected"
     :options="selectOptions"
     optionLabel="name"
+    :filter-fields="['name', 'code']"
     filter
     reset-filter-on-hide
     :showClear="showClear"

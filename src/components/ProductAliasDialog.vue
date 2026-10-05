@@ -4,8 +4,8 @@
  * đơn dùng lại: vừa mở từ icon tag trên từng dòng (truyền sẵn `product-code`),
  * vừa mở từ nút ở header bảng "Mặt hàng" (chưa biết hàng nào → có ô chọn).
  *
- * Lưu xong bắn `saved(mã hàng, tên vừa thêm)` để người gọi gán tên NGAY cho
- * dòng (hóa đơn in đúng tên người dùng chọn, F5).
+ * Lưu xong bắn `saved(mã hàng, danh sách tên mới)` — người gọi tự toast để nói
+ * rõ tên đó có gắn được vào dòng hóa đơn (F5 in đúng tên) hay chỉ lưu danh mục.
  */
 import { useCatalogStore } from "@/stores/catalog";
 
@@ -13,7 +13,7 @@ const props = defineProps<{
   /** Mã hàng đang thêm tên khác — bỏ trống thì dialog thêm ô chọn sản phẩm. */
   productCode?: string;
 }>();
-const emit = defineEmits<{ saved: [code: string, alias: string] }>();
+const emit = defineEmits<{ saved: [code: string, added: string[]] }>();
 const visible = defineModel<boolean>("visible", { default: false });
 
 const catalog = useCatalogStore();
@@ -55,17 +55,23 @@ async function save() {
   }
   saving.value = true;
   try {
+    // Bắt số/ tên TRƯỚC khi đóng — dialog header tự dọn ô chọn khi tắt.
+    const target = code.value;
+    const name = product.value?.name ?? target;
     // Thêm (giữ tên cũ), nạp lại danh mục — backend bỏ tên trùng tên chính/mã.
-    const added = await catalog.addProductAliases(code.value, wanted);
-    toast.add({
-      severity: added.length ? "success" : "warn",
-      summary: added.length ? "Đã thêm tên khác" : "Tên này không cần thêm",
-      detail: added.length
-        ? `${added.join(", ")} → ${product.value?.name ?? code.value}`
-        : `${wanted[0]} đã là tên chính hoặc tên khác của ${product.value?.name ?? code.value}`,
-    });
+    const added = await catalog.addProductAliases(target, wanted);
     visible.value = false;
-    if (added[0]) emit("saved", code.value, added[0]);
+    // Có tên mới → người gọi báo kết quả (kèm việc gắn vào dòng hay chỉ danh mục).
+    if (added[0]) {
+      emit("saved", target, added);
+      return;
+    }
+    // Không thêm được gì (đều đã là tên chính / tên khác) → dialog tự báo.
+    toast.add({
+      severity: "warn",
+      summary: "Tên này không cần thêm",
+      detail: `${wanted[0]} đã là tên chính hoặc tên khác của ${name}`,
+    });
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi", detail: String(e) });
   } finally {

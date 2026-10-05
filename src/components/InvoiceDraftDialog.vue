@@ -95,11 +95,20 @@ const editor = ref<InstanceType<typeof LineItemsEditor> | null>(null);
 /**
  * Thêm tên khác từ header (chưa đứng trên dòng nào) → gắn thẳng tên vừa thêm
  * vào dòng đầu đang dùng đúng hàng đó và CHƯA đặt tên riêng: in ra đúng tên
- * người vừa gõ. Không có dòng nào dùng hàng đó thì chỉ cần lưu vào danh mục.
+ * người vừa gõ. Hàng chưa có trên hóa đơn thì chỉ lưu danh mục — báo luôn cho
+ * người dùng khỏi tưởng bảng hỏng.
  */
-function onAliasSaved(code: string, alias: string) {
+function onAliasSaved(code: string, added: string[]) {
   const row = form.items.find((it) => it.product_code === code && !it.line_name);
-  if (row) row.line_name = alias;
+  if (row) row.line_name = added[0];
+  const detail = `${added.join(", ")} → ${catalog.productByCode(code)?.name ?? code}`;
+  toast.add({
+    severity: "success",
+    summary: "Đã thêm tên khác",
+    detail: row
+      ? `${detail} · gắn vào dòng hóa đơn`
+      : `${detail} · hàng chưa có trên hóa đơn nên chỉ lưu vào danh mục`,
+  });
 }
 
 /**

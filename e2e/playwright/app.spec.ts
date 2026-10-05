@@ -1169,7 +1169,7 @@ test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ li�
   await expect(page.locator("tr", { has: page.getByText(dupNo, { exact: true }) })).toHaveCount(1);
 });
 
-test("Hóa đơn: cảnh báo ⚠ chưa có phiếu xuất khi đã phát hành nhưng lập PX lỗi", async ({
+test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa có PX thì cảnh báo ⚠", async ({
   page,
   request,
 }) => {
@@ -1237,7 +1237,8 @@ test("Hóa đơn: cảnh báo ⚠ chưa có phiếu xuất khi đã phát hành 
   expect(created.ok(), `save_invoice failed ${created.status()}: ${await created.text()}`).toBe(
     true,
   );
-  // Tồn bị dùng hết ở nơi khác (bán ngoài app) → lúc phát hành sẽ không lập được PX.
+  // Tồn bị dùng hết ở nơi khác (bán ngoài app) → ghi số HĐĐT sẽ bị chặn vì thiếu
+  // kho; phải nhập lại tồn mới chốt được hóa đơn thật.
   const out = await request.post("/api/save_outbound", {
     data: {
       posting_date: "2026-09-20",
@@ -1272,17 +1273,53 @@ test("Hóa đơn: cảnh báo ⚠ chưa có phiếu xuất khi đã phát hành 
   await expect(row.getByText("—", { exact: true }).first()).toBeVisible();
   await expect(row.getByText("⚠ chưa có")).toHaveCount(0);
 
-  // Ghi số HĐĐT với tuỳ chọn lập phiếu xuất → lập PX lỗi vì hết tồn.
+  // ── Thiếu tồn → ghi số HĐĐT (chốt thành hóa đơn THẬT) bị chặn ──
   await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
   const dlg = page.getByRole("dialog");
   await dlg.getByLabel("Số HĐĐT").fill("00009600");
   await dlg.getByRole("button", { name: "Lưu" }).click();
+  await expect(dlg, "thiếu tồn thì không ghi số được").toBeVisible();
+  await expect(page.locator(".p-toast-message").last()).toContainText("Không đủ tồn kho");
+  await expect(row.getByText("⚠ chưa có")).toHaveCount(0);
+  await expect(row.getByText("—", { exact: true }).first()).toBeVisible();
+  await dlg.getByRole("button", { name: "Đóng" }).click();
   await expect(dlg).toBeHidden();
-  await expect(page.locator(".p-toast-summary").last()).toContainText("chưa lập được phiếu xuất", {
-    timeout: 15_000,
-  });
 
-  // Đã phát hành mà chưa có PX → dòng hóa đơn phải cảnh báo đỏ, không phải "—".
+  // ── Nhập thêm tồn → ghi số được; chọn "đã lập phiếu xuất ở nơi khác" thì
+  //    hóa đơn chưa gắn phiếu → dòng phải cảnh báo ⚠ kèm nút lập PX ngay tại chỗ. ──
+  const restock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-21",
+      voucher_no: "PN9601",
+      description: "Nhập lại tồn cho test cảnh báo chưa có PX",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SPPX1", quantity: 5, unit_price: 8000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(restock.ok(), `save_inbound PN9601: ${await restock.text()}`).toBe(true);
+
+  await row.getByRole("button", { name: "Nhập số HĐĐT đã phát hành" }).click();
+  const dlg2 = page.getByRole("dialog");
+  await dlg2.getByLabel("Số HĐĐT").fill("00009600");
+  // Bỏ ô "Lập phiếu xuất" → app không sinh phiếu mới, để người dùng tự báo số PX.
+  await dlg2.getByRole("checkbox", { name: /Lập phiếu xuất/ }).uncheck();
+  await dlg2.locator("#link-px-no").fill("PX9600");
+  await dlg2.getByRole("button", { name: "Lưu" }).click();
+  await expect(dlg2).toBeHidden();
+  await expect(page.locator(".p-toast-message").last()).toContainText("Đã liên kết HĐĐT");
+
+  // Đã phát hành mà chưa gắn phiếu xuất → dòng hóa đơn phải cảnh báo đỏ, không phải "—".
   await expect(row.getByText("⚠ chưa có")).toBeVisible();
   await expect(row.getByRole("button", { name: "Lập phiếu xuất từ hóa đơn" })).toBeVisible();
 });
@@ -4188,7 +4225,8 @@ test("Popup hóa đơn: tạo nhanh lô sản xuất và thêm tên khác ở he
   await lotDlg.getByTestId("lot-fg").locator(".p-select").click();
   const box = page.locator('.p-select-overlay [role="searchbox"]').last();
   await expect(box).toBeVisible();
-  await box.fill("Bàn nhựa LSX PP");
+  // Gõ MÃ hàng để tìm (bộ lọc có cả cột mã, không chỉ tên).
+  await box.fill("SP-LSXPP");
   await page
     .getByRole("option", { name: /Bàn nhựa LSX PP/ })
     .first()
@@ -4220,7 +4258,9 @@ test("Popup hóa đơn: tạo nhanh lô sản xuất và thêm tên khác ở he
   await aDlg.getByTestId("alias-input").fill("Bàn nhựa LSX PP xuất");
   await aDlg.getByRole("button", { name: "Lưu" }).click();
   await expect(aDlg).toBeHidden();
-  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã thêm tên khác");
+  // Toast phải nói rõ tên này được GÁN vào dòng (hàng đang đứng trên hóa đơn).
+  await expect(page.locator(".p-toast-message").last()).toContainText("Đã thêm tên khác");
+  await expect(page.locator(".p-toast-message").last()).toContainText("gắn vào dòng hóa đơn");
 
   // Tên vào danh mục…
   const prods = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
@@ -4230,6 +4270,23 @@ test("Popup hóa đơn: tạo nhanh lô sản xuất và thêm tên khác ở he
   expect(prods.find((p) => p.code === "SP-LSXPP")?.aliases).toContain("Bàn nhựa LSX PP xuất");
   // …và dòng hóa đơn giữ ngay tên vừa thêm (in ra đúng tên người dùng chọn).
   await expect(line).toContainText("Bàn nhựa LSX PP xuất");
+
+  // ── Thêm tên khác cho hàng CHƯA đứng trên dòng nào → toast phải nói rõ chỉ
+  //    lưu vào danh mục, đừng để người dùng tưởng bảng không nhận ──
+  await dlg.getByTestId("header-add-alias").click();
+  const aDlg2 = page.getByRole("dialog", { name: "Thêm tên khác" });
+  await expect(aDlg2).toBeVisible();
+  await aDlg2.getByRole("combobox").first().click();
+  const aliasBox2 = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await aliasBox2.fill("NVL-LSXPP");
+  await page
+    .getByRole("option", { name: /Nhựa LSX PP/ })
+    .first()
+    .click();
+  await aDlg2.getByTestId("alias-input").fill("Nhựa LSX PP nhập khẩu");
+  await aDlg2.getByRole("button", { name: "Lưu" }).click();
+  await expect(aDlg2).toBeHidden();
+  await expect(page.locator(".p-toast-message").last()).toContainText("chưa có trên hóa đơn");
 
   // ── 3) Tồn vừa tạo đủ (5 ≥ 1) → lưu không bị hỏi thiếu kho ──
   await dlg.getByRole("button", { name: "Lập hóa đơn" }).click();
@@ -4364,6 +4421,19 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
   await mk("SP-MFG2", "Thành phẩm MFG 2", "Cái");
   await mk("SP-MM1", "Vật tư MFG 1", "Kg");
   await mk("SP-MM2", "Vật tư MFG 2", "Cái");
+
+  // Các test trước cũng dùng chung 1 DB (vd tạo lô ở popup hóa đơn có khai định
+  // mức) → dọn hết để màn vào đúng trạng thái "chưa có định mức nào".
+  const existingBoms = (await (
+    await request.post("/api/get_product_boms", { data: {} })
+  ).json()) as Array<{ product_code: string }>;
+  const bomedCodes = new Set(existingBoms.map((b) => b.product_code));
+  for (const code of bomedCodes) {
+    const cleared = await request.post("/api/save_product_bom", {
+      data: { productCode: code, items: [] },
+    });
+    expect(cleared.ok(), `dọn định mức ${code}: ${await cleared.text()}`).toBe(true);
+  }
 
   /** Mở 1 bộ chọn (đã scope vào bảng / dòng) rồi gõ + bấm option đúng tên. */
   async function choose(scope: Locator, text: string) {
