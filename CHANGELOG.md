@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.18.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.17.1...v0.18.0) (2026-10-05)
+
+
+### Features
+
+* **inbound:** import stock lines from Excel with paged preview ([497d7c0](https://github.com/tachibana-shin/hkd-tt152-app/commit/497d7c0151fb44ba048c2f2afbb9dfa7a9bdef94))
+
 ## [0.17.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.17.0...v0.17.1) (2026-10-05)
 
 
