@@ -215,6 +215,12 @@ const menuItems: MenuItem[] = [
     to: "/inbound",
     roles: ["admin", "ketoan", "kho"],
   },
+  {
+    label: "Lô sản xuất",
+    icon: "pi pi-factory",
+    to: "/production-lots",
+    roles: ["admin", "ketoan", "kho"],
+  },
   { label: "Xuất kho", icon: "pi pi-arrow-up", to: "/outbound", roles: ["admin", "ketoan", "kho"] },
   {
     label: "Tồn kho",

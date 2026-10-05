@@ -147,6 +147,21 @@ export interface JournalEntry {
  * Màn kho trước đây in từng dòng hàng nên một phiếu 10 mặt hàng ra 10 dòng trùng
  * số phiếu; giờ gom lại 1 dòng 1 phiếu, bấm vào để xem chi tiết từng dòng.
  */
+/** 1 lô sản xuất (phiếu nhập loại `production`) trên danh sách Lô sản xuất. */
+export interface ProductionLotRow {
+  voucher_no: string;
+  posting_date: string;
+  description: string;
+  /** Thành phẩm của lô, gộp bằng ", " (thường 1 lô = 1 thành phẩm). */
+  products: string;
+  /** Số LOẠI thành phẩm của lô. */
+  item_count: number;
+  total_qty: number;
+  /** Giá trị nhập kho = giá thành ước tính (đ). */
+  amount: number;
+  warehouse_code: string;
+}
+
 export interface StockVoucherRow {
   voucher_no: string;
   posting_date: string;

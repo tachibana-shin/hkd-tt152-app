@@ -68,6 +68,7 @@ declare module 'vue' {
     InvoiceStatusDialog: typeof import('./components/InvoiceStatusDialog.vue')['default']
     JobProgressDialog: typeof import('./components/JobProgressDialog.vue')['default']
     LineItemsEditor: typeof import('./components/LineItemsEditor.vue')['default']
+    Message: typeof import('primevue/message')['default']
     PartnerDialog: typeof import('./components/PartnerDialog.vue')['default']
     PayrollTable: typeof import('./components/PayrollTable.vue')['default']
     ProductDialog: typeof import('./components/ProductDialog.vue')['default']

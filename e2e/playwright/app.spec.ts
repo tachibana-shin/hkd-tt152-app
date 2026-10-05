@@ -163,6 +163,7 @@ test("navigating all main tabs updates the header title correctly", async ({ pag
     ["Sổ nhật ký", "Sổ nhật ký chung", "/ledger"],
     ["Nhập liệu", "Nhập liệu Excel", "/import"],
     ["Nhập kho", "Nhập kho", "/inbound"],
+    ["Lô sản xuất", "Lô sản xuất", "/production-lots"],
     ["Xuất kho", "Xuất kho / Bán hàng", "/outbound"],
     ["Tồn kho", "Tồn kho", "/inventory"],
     ["Hóa đơn", "Hóa đơn", "/invoices"],
@@ -4382,6 +4383,123 @@ test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh 
     })
   ).json()) as Array<{ voucher_no: string; adjust_code: string }>;
   expect(entries.find((r) => r.voucher_no === pxNo)?.adjust_code).toBe("XuatNVL");
+});
+
+// ─── LÔ SẢN XUẤT: TẠO LÔ TỪ ĐỊNH MỨC, TỰ XUẤT NVL ───
+test("Lô sản xuất: xem NVL theo định mức rồi tạo lô tự xuất vật tư", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Thành phẩm + vật tư + định mức + tồn kho — riêng cho test này.
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-LSX1",
+      name: "Bàn nhôm LSX",
+      unit: "Cái",
+      salePrice: 500_000,
+      costPrice: 400_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-LSX1: ${await fg.text()}`).toBe(true);
+  const mat = await request.post("/api/save_product", {
+    data: {
+      code: "NVL-LSX1",
+      name: "Nhôm LSX",
+      unit: "Cây",
+      salePrice: 0,
+      costPrice: 100_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(mat.ok(), `save_product NVL-LSX1: ${await mat.text()}`).toBe(true);
+
+  // Định mức: 1 bàn = 3 cây nhôm.
+  const bom = await request.post("/api/save_product_bom", {
+    data: { productCode: "SP-LSX1", items: [{ material_code: "NVL-LSX1", quantity: 3 }] },
+  });
+  expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
+
+  // Tồn nhôm 40 cây × 100.000 đ để bản xem trước có tồn + giá vốn.
+  const matStock = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-06",
+      voucher_no: "PN9395",
+      description: "Nhập vật tư cho test lô sản xuất",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "NVL-LSX1", quantity: 40, unit_price: 100_000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(matStock.ok(), `save_inbound NVL: ${await matStock.text()}`).toBe(true);
+
+  await sidebarButton(page, "Lô sản xuất").click();
+  await expect(page.locator("header h2")).toHaveText("Lô sản xuất");
+  await expect(page.getByTestId("production-lots-table")).toBeVisible();
+
+  // ── 1) Tạo lô: chọn thành phẩm + sản lượng → bản xem trước NVL ──
+  await page.getByRole("button", { name: "Tạo lô sản xuất" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toBeVisible();
+
+  await dlg.getByTestId("lot-fg").locator(".p-select").click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await expect(box).toBeVisible();
+  await box.fill("Bàn nhôm LSX");
+  await page
+    .getByRole("option", { name: /Bàn nhôm LSX/ })
+    .first()
+    .click();
+
+  // `fill()` không bắn keydown nên InputNumber chưa gộp model — Enter để gắn
+  // sản lượng (PrimeVue chỉ chốt model khi Enter/blur).
+  await dlg.getByRole("spinbutton").first().fill("5");
+  await dlg.getByRole("spinbutton").first().press("Enter");
+
+  const preview = page.getByTestId("lot-preview-table");
+  await expect(preview.getByText(/Nhôm LSX \(NVL-LSX1\)/)).toBeVisible();
+  await expect(preview.getByText("15", { exact: true }), "SL cần = 3 × 5").toBeVisible();
+  await expect(preview.getByText("40", { exact: true }), "tồn nhôm trước khi xuất").toBeVisible();
+  // Giá thành = 15 cây × 100.000 đ.
+  await expect(dlg.getByText(/Giá thành ước tính/)).toContainText("1.500.000 đ");
+
+  // ── 2) Lưu lô: nhập thành phẩm + tự xuất NVL trong 1 transaction ──
+  await dlg.getByRole("button", { name: "Tạo lô" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.locator(".p-toast-summary").last()).toContainText(/Đã tạo lô PN\d+/);
+
+  // Lô vào danh sách…
+  await expect(page.getByTestId("production-lots-table").getByText(/Bàn nhôm LSX/)).toBeVisible();
+
+  // …và vật tư đã tự trừ: 40 − 15 = 25.
+  const inv = (await (
+    await request.post("/api/get_inventory_summary", { data: {} })
+  ).json()) as Array<{ product_code: string; balance: number }>;
+  expect(inv.find((r) => r.product_code === "NVL-LSX1")?.balance, "tồn nhôm sau xuất").toBeCloseTo(
+    25,
+    5,
+  );
+  expect(inv.find((r) => r.product_code === "SP-LSX1")?.balance, "tồn thành phẩm").toBeCloseTo(
+    5,
+    5,
+  );
 });
 
 // ─── POPUP CẬP NHẬT: THÂN HỘP THOẠI LÀ GHI CHÚ PHÁT HÀNH (MARKDOWN) ───

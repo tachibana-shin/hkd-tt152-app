@@ -75,6 +75,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: "Nhập kho" },
   },
   {
+    path: "/production-lots",
+    name: "production-lots",
+    component: () => import("@/views/ProductionLots.vue"),
+    meta: { title: "Lô sản xuất" },
+  },
+  {
     path: "/outbound",
     name: "outbound",
     component: () => import("@/views/Outbound.vue"),

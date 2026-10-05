@@ -488,6 +488,13 @@ pub async fn api_invoke(
         ),
         "get_voucher" => mx!(commands::stock::get_voucher, body, voucher_no: String),
         "get_stock_lots" => mx!(commands::stock::get_stock_lots, body, product_code: String),
+        "get_production_lots" => mx!(
+            commands::stock::get_production_lots,
+            body,
+            lazy_event: String,
+            from_date: String,
+            to_date: String
+        ),
 
         // ── Thu / chi ──
         "save_cash_entry" => mx!(commands::cash::save_cash_entry, body, input: CashEntryInput),

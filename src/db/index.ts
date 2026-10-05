@@ -60,6 +60,7 @@ import type {
   InventoryRow,
   StockLot,
   JournalEntryRow,
+  ProductionLotRow,
   StockVoucherRow,
   LedgerRow,
   Invoice,
@@ -1104,6 +1105,19 @@ export const api = {
 
   getVoucher: async (voucherNo: string) =>
     parse<VoucherRow[]>(await call<string>("get_voucher", { voucherNo })),
+
+  /**
+   * Danh sách lô sản xuất (phiếu nhập loại `production`) — 1 lô = 1 dòng kèm
+   * tên thành phẩm + giá trị nhập kho, phân trang server-side.
+   */
+  getProductionLots: async (lazyEvent: unknown, fromDate: string, toDate: string) =>
+    parse<PageResult<ProductionLotRow>>(
+      await call<string>("get_production_lots", {
+        lazyEvent: JSON.stringify(lazyEvent),
+        fromDate,
+        toDate,
+      }),
+    ),
 
   // ─── ĐĂNG NHẬP / PHÂN QUYỀN ───
   login: async (username: string, password: string): Promise<CurrentUser> =>

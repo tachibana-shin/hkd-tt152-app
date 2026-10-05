@@ -1772,6 +1772,162 @@ pub(crate) async fn stock_vouchers_core(
     Ok((rows, total))
 }
 
+/// Một lô sản xuất trên danh sách: đầu phiếu nhập loại `production` gộp với
+/// các dòng thành phẩm (PN) của chính lô đó.
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct ProductionLotRow {
+    pub voucher_no: String,
+    pub posting_date: String,
+    pub description: String,
+    /// Thành phẩm của lô, gộp bằng ", " (thường 1 lô = 1 thành phẩm).
+    pub products: String,
+    /// Số LOẠI thành phẩm của lô.
+    pub item_count: i64,
+    pub total_qty: f64,
+    /// Giá trị nhập kho = giá thành (Nợ 155 / Có 154), tính bằng đ.
+    pub amount: f64,
+    pub warehouse_code: String,
+}
+
+/// Điều kiện lọc danh sách lô (chỉ đụng cột đầu phiếu + EXISTS dòng hàng nên
+/// dùng lại y hệt cho câu đếm).
+fn production_lots_where(search: &str, from_date: &str, to_date: &str) -> (String, Vec<String>) {
+    let mut sql = String::from(" WHERE iv.inbound_type = 'production'");
+    let mut params: Vec<String> = Vec::new();
+    if !from_date.trim().is_empty() {
+        sql.push_str(" AND iv.posting_date >= ?");
+        params.push(from_date.trim().to_string());
+    }
+    if !to_date.trim().is_empty() {
+        sql.push_str(" AND iv.posting_date <= ?");
+        params.push(to_date.trim().to_string());
+    }
+    let kw = search.trim();
+    if !kw.is_empty() {
+        // Khóa ký tự đại diện để gõ `%` cũng chỉ tìm đúng chữ đó.
+        let like = format!(
+            "%{}%",
+            kw.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        sql.push_str(
+            " AND (iv.voucher_no LIKE ? ESCAPE '\\' OR iv.description LIKE ? ESCAPE '\\'
+               OR EXISTS (SELECT 1 FROM journal_entry je
+                            LEFT JOIN product p ON p.code = je.product_code
+                           WHERE je.inbound_voucher_id = iv.id AND je.entry_type = 'PN'
+                             AND (je.product_code LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')))",
+        );
+        params.extend([like.clone(), like.clone(), like.clone(), like.clone()]);
+    }
+    (sql, params)
+}
+
+/// Thân truy vấn danh sách lô sản xuất — tách riêng để unit test gọi trực tiếp.
+pub(crate) async fn production_lots_core(
+    pool: &SqlitePool,
+    search: &str,
+    from_date: &str,
+    to_date: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<ProductionLotRow>, i64), String> {
+    let (where_sql, params) = production_lots_where(search, from_date, to_date);
+
+    // 1) Đầu phiếu + tổng hợp dòng thành phẩm (mỗi lô 1 dòng).
+    let rows_sql = format!(
+        "SELECT iv.voucher_no, iv.posting_date, iv.description,
+                CAST(iv.total AS REAL) AS amount,
+                iv.warehouse_code,
+                '' AS products,
+                COUNT(DISTINCT CASE WHEN je.product_code <> '' THEN je.product_code END)
+                    AS item_count,
+                CAST(COALESCE(SUM(CASE WHEN je.product_code <> '' THEN je.quantity END), 0) AS REAL)
+                    AS total_qty
+           FROM inbound_voucher iv
+           LEFT JOIN journal_entry je
+             ON je.inbound_voucher_id = iv.id AND je.entry_type = 'PN'
+          {where_sql}
+          GROUP BY iv.voucher_no
+          ORDER BY iv.posting_date DESC, iv.voucher_no DESC
+          LIMIT ? OFFSET ?"
+    );
+    let mut q = sqlx::query_as::<_, ProductionLotRow>(&rows_sql);
+    for p in &params {
+        q = q.bind(p);
+    }
+    let mut rows: Vec<ProductionLotRow> = q
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 2) Tên thành phẩm của đúng các lô đang hiển thị (trang này thôi — không
+    //    gộp vào câu trên vì SQLite không gộp được DISTINCT bằng GROUP_CONCAT).
+    if !rows.is_empty() {
+        let nos: Vec<String> = rows.iter().map(|r| r.voucher_no.clone()).collect();
+        let marks = vec!["?"; nos.len()].join(", ");
+        let names_sql = format!(
+            "SELECT je.voucher_no, COALESCE(NULLIF(p.name, ''), je.product_code)
+               FROM journal_entry je
+               LEFT JOIN product p ON p.code = je.product_code
+              WHERE je.entry_type = 'PN' AND je.product_code <> ''
+                AND je.voucher_no IN ({marks})
+              ORDER BY je.voucher_no, je.id"
+        );
+        let mut nq = sqlx::query_as::<_, (String, String)>(&names_sql);
+        for no in &nos {
+            nq = nq.bind(no);
+        }
+        let names = nq.fetch_all(pool).await.map_err(|e| e.to_string())?;
+        for (no, name) in names {
+            if let Some(row) = rows.iter_mut().find(|r| r.voucher_no == no) {
+                if row.products.is_empty() {
+                    row.products = name;
+                } else if !row.products.contains(&name) {
+                    row.products.push_str(", ");
+                    row.products.push_str(&name);
+                }
+            }
+        }
+    }
+
+    // 3) Tổng số lô (cùng bộ lọc) để bảng đếm đúng số trang.
+    let count_sql = format!("SELECT COUNT(*) FROM inbound_voucher iv{where_sql}");
+    let mut cq = sqlx::query_scalar::<_, i64>(&count_sql);
+    for p in &params {
+        cq = cq.bind(p);
+    }
+    let total = cq.fetch_one(pool).await.unwrap_or(0);
+
+    Ok((rows, total))
+}
+
+/// Danh sách lô sản xuất (phiếu nhập loại `production`) — phân trang server-side.
+#[tauri::command]
+pub(crate) async fn get_production_lots(
+    state: State<'_, AppState>,
+    lazy_event: String,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let ev: crate::commands::page::PageEvent =
+        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+    let page = ev.page();
+    let pool = state.pool.read().await;
+    let (rows, total) = production_lots_core(
+        &pool,
+        &ev.global_keyword().unwrap_or_default(),
+        &from_date,
+        &to_date,
+        page.size,
+        page.offset,
+    )
+    .await?;
+    Ok(json!({ "rows": rows, "total": total }).to_string())
+}
+
 /// Chi tiết 1 chứng từ theo số phiếu — phục vụ in PNK (mẫu 01-VT) / PXK (mẫu 02-VT).
 /// Gộp tên sản phẩm, nhà cung cấp / khách hàng để trình bày phiếu in.
 #[tauri::command]
@@ -2407,6 +2563,91 @@ mod tests {
             .expect("tìm từ khoá không khớp");
         assert_eq!(none_total, 0);
         assert!(none.is_empty());
+    }
+
+    /// Danh sách lô sản xuất: chỉ lấy đầu phiếu loại `production`, mỗi lô 1 dòng
+    /// kèm tên thành phẩm — phiếu nhập mua ngoài cùng thời điểm không bị lẫn.
+    #[tokio::test]
+    async fn danh_sach_lo_san_xuat_chi_lay_phieu_loai_production() {
+        let pool = test_pool().await;
+        seed_product(&pool, "FG1", "Thành phẩm A", 0.01).await;
+        seed_product(&pool, "FG2", "Thành phẩm B", 0.01).await;
+        seed_warehouse(&pool, "W1", "Kho 1").await;
+
+        save_inbound_core(
+            &pool,
+            "2026-03-02",
+            "PN-LSX1",
+            "Lô sản xuất A",
+            "",
+            "W1",
+            "HKD",
+            &[inp("FG1", 10.0, 5_000.0)],
+            "",
+            "production",
+            "",
+            0.0,
+            "155",
+            "154",
+            false,
+            "",
+            false,
+        )
+        .await
+        .expect("lô sản xuất");
+        save_inbound_core(
+            &pool,
+            "2026-03-01",
+            "PN-MUA1",
+            "Nhập mua ngoài",
+            "",
+            "W1",
+            "HKD",
+            &[inp("FG2", 3.0, 1_000.0)],
+            "",
+            "purchase",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+        )
+        .await
+        .expect("nhập mua ngoài");
+
+        let (rows, total) = production_lots_core(&pool, "", "", "", 20, 0)
+            .await
+            .expect("danh sách lô");
+        assert_eq!(total, 1, "phiếu mua ngoài không phải lô sản xuất");
+        let lot = &rows[0];
+        assert_eq!(lot.voucher_no, "PN-LSX1");
+        assert_eq!(
+            lot.products, "Thành phẩm A",
+            "tên thành phẩm ghép từ dòng PN"
+        );
+        assert_eq!(lot.item_count, 1);
+        assert_eq!(lot.total_qty, 10.0);
+        assert_eq!(lot.amount, 50_000.0, "giá trị nhập = giá thành");
+        assert_eq!(lot.warehouse_code, "W1");
+
+        // Từ khoá tìm qua TÊN thành phẩm của lô.
+        let (found, found_total) = production_lots_core(&pool, "Thành phẩm A", "", "", 20, 0)
+            .await
+            .expect("tìm theo tên thành phẩm");
+        assert_eq!(found_total, 1);
+        assert_eq!(found[0].voucher_no, "PN-LSX1");
+        let (_, other_total) = production_lots_core(&pool, "Thành phẩm B", "", "", 20, 0)
+            .await
+            .expect("tìm theo tên của phiếu mua ngoài");
+        assert_eq!(other_total, 0, "không lẫn phiếu mua ngoài");
+
+        // Khoảng ngày.
+        let (_, future_total) = production_lots_core(&pool, "", "2026-03-10", "", 20, 0)
+            .await
+            .expect("lọc từ ngày");
+        assert_eq!(future_total, 0);
     }
 
     #[tokio::test]
