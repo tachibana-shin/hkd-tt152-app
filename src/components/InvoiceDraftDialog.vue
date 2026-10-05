@@ -201,6 +201,10 @@ watch(
   [visible, () => props.editInvoice?.id],
   async ([open, id], [wasOpen, wasId]) => {
     if (!open || (wasOpen && id === wasId)) return;
+    // Danh mục phải sẵn sàng cho ô chọn (mặt hàng, khách hàng, kho, nhóm
+    // ngành) — màn Chờ xuất HĐĐT không tự nạp như màn Hóa đơn nên popup tự
+    // bảo đảm khi mở, không phụ thuộc màn cha đứng sau.
+    void catalog.loadAll();
     // Soi thiếu tồn phải theo số mới nhất — map chỉ nạp 1 lần ở nơi khác nên
     // ép tải lại mỗi lần mở (nhanh, không chặn render form).
     void catalog.loadOnhand(true);

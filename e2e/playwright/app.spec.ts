@@ -5032,3 +5032,21 @@ test("Lập hóa đơn: chọn hàng chế tạo thiếu kho → prompt tạo l�
   await expect(dlg.locator("tbody tr").first()).not.toContainText("Thiếu");
   await expect(page.getByRole("alertdialog", { name: /Thiếu tồn kho/ })).toBeHidden();
 });
+
+// ─── CHỜ XUẤT HĐĐT: POPUP VẪN CHỌN ĐƯỢC MẶT HÀNG ───
+// Màn Chờ xuất HĐĐT không nạp danh mục như màn Hóa đơn → popup phải tự nạp
+// khi mở, nếu không ô chọn mặt hàng rỗng trơn (bug: vào thẳng tab này là trượt).
+test("Chờ xuất HĐĐT: popup lập hóa đơn nháp vẫn chọn được mặt hàng", async ({ page }) => {
+  await ensureLoggedIn(page);
+  await openTab(page, "Chờ xuất HĐĐT", "/invoice-queue");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog", { name: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+
+  // Vào thẳng tab này chưa ai nạp danh mục → popup tự nạp, ô chọn phải có hàng.
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await box.fill("SP001");
+  await expect(page.getByRole("option", { name: /Bottled water/ }).first()).toBeVisible();
+});
