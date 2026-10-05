@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { api, inTauri } from "@/db";
+import ReleaseNotes from "@/components/ReleaseNotes.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useAppUpdater } from "@/composables/useAppUpdater";
@@ -535,12 +536,7 @@ useKeepAliveRefresh(reload);
                 Đang tải bản cập nhật… xong sẽ tự khởi động lại app.
               </div>
             </div>
-            <p
-              v-if="updater.available.value?.notes"
-              class="text-sm text-gray-600 whitespace-pre-line"
-            >
-              {{ updater.available.value.notes }}
-            </p>
+            <ReleaseNotes v-if="updater.available.value" :notes="updater.available.value.notes" />
             <p v-if="updater.error.value" class="text-sm text-red-600">
               {{ updater.error.value }}
             </p>

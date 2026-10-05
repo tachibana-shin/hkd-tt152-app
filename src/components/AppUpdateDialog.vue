@@ -1,13 +1,14 @@
 <script setup lang="ts">
+import ReleaseNotes from "@/components/ReleaseNotes.vue";
 import { useAppUpdater } from "@/composables/useAppUpdater";
 
 /**
  * Popup "Có bản cập nhật" — việc chạy nền (`useAutoTasks`) thấy bản mới là tự
  * mở, không còn bắt người dùng tự nhớ đường vào màn Cài đặt nữa.
  *
- * Nội dung quan trọng nhất là **nhật ký từng bước**: hỏi server → tìm thấy bản
- * → tải bao nhiêu MB → cài → khởi động lại. Nên bấm "Tải và cài" biết chắc máy
- * đang làm gì, và nếu hỏng thì dòng ✗ cuối cùng nói rõ vì sao.
+ * Thân hộp thoại = **ghi chú phát hành** (release body, Markdown) render sẵn:
+ * người dùng đọc được ngay có gì mới rồi quyết định cài. Tiến độ chỉ hiện khi
+ * đang tải, dòng lỗi hiện khi có.
  *
  * Bản web (mở bằng trình duyệt) không có updater nên popup này không bao giờ
  * được mở — `checkUpdate()` trả về ngay khi không phải cửa sổ Tauri.
@@ -21,19 +22,6 @@ const mode = computed<"determinate" | "indeterminate">(() =>
 function setVisible(v: boolean) {
   updater.prompt.value = v;
 }
-
-const logEl = ref<HTMLElement | null>(null);
-// Giữ dòng mới nhất trong khung như hộp thoại tiến độ xuất báo cáo.
-watch(
-  () => updater.log.value.length,
-  () => {
-    void nextTick(() => {
-      const el = logEl.value;
-      if (el) el.scrollTop = el.scrollHeight;
-    });
-  },
-  { immediate: true },
-);
 </script>
 
 <template>
@@ -51,15 +39,6 @@ watch(
     @update:visible="setVisible"
   >
     <div data-testid="update-dialog" class="space-y-3">
-      <p class="text-sm text-gray-700">
-        Đang chạy bản
-        <b class="font-mono">{{ updater.current.value || "?" }}</b>
-        <template v-if="updater.available.value">
-          → bản mới <b class="font-mono">{{ updater.available.value.version }}</b>
-        </template>
-        . Tải về cài luôn hay để lần sau, việc chạy nền sẽ nhắc lại ở lần kiểm tra kế tiếp.
-      </p>
-
       <div v-if="updater.installing.value" data-testid="update-progress">
         <ProgressBar
           :mode="mode"
@@ -67,15 +46,13 @@ watch(
           :show-value="mode === 'determinate'"
           class="h-3"
         />
+        <p class="mt-1 text-xs text-gray-500">
+          Đang tải và cài bản mới… xong app tự khởi động lại.
+        </p>
       </div>
 
-      <!-- Ghi chú phát hành (nội dung do người phát hành để trong release). -->
-      <div
-        v-if="updater.available.value?.notes"
-        class="max-h-40 overflow-y-auto whitespace-pre-line rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
-      >
-        {{ updater.available.value.notes }}
-      </div>
+      <!-- Ghi chú phát hành (Markdown) do người phát hành để trong release. -->
+      <ReleaseNotes :notes="updater.available.value?.notes" />
 
       <p
         v-if="updater.error.value"
@@ -84,17 +61,6 @@ watch(
       >
         {{ updater.error.value }}
       </p>
-
-      <div
-        ref="logEl"
-        data-testid="update-log"
-        class="h-40 overflow-y-auto rounded-md border border-slate-700 bg-slate-900 p-3 font-mono text-[11px] leading-relaxed text-slate-100"
-      >
-        <p v-for="(line, i) in updater.log.value" :key="i" class="whitespace-pre-wrap break-words">
-          {{ line }}
-        </p>
-        <p v-if="!updater.log.value.length" class="text-slate-400">Chưa có dòng nào…</p>
-      </div>
     </div>
 
     <template #footer>

@@ -4194,3 +4194,31 @@ test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh 
   ).json()) as Array<{ voucher_no: string; adjust_code: string }>;
   expect(entries.find((r) => r.voucher_no === pxNo)?.adjust_code).toBe("XuatNVL");
 });
+
+// ─── POPUP CẬP NHẬT: THÂN HỘP THOẠI LÀ GHI CHÚ PHÁT HÀNH (MARKDOWN) ───
+test("Popup cập nhật: hiện ghi chú phát hành Markdown thay cho nhật ký", async ({ page }) => {
+  // Chạy bằng `vite dev` nên `?update-preview=…` (code dev-only) giả lập có bản
+  // mới kèm release body mẫu — bản cài build bằng `vite build` không có đoạn này.
+  await page.goto("/?update-preview=0.16.0", { waitUntil: "domcontentloaded" });
+  const dlg = page.getByRole("dialog", { name: "Có bản cập nhật 0.16.0" });
+  await expect(dlg).toBeVisible({ timeout: 30_000 });
+
+  // Markdown → HTML: tiêu đề, mục con, gạch đầu dòng, in đậm, link, trích dẫn.
+  const notes = dlg.getByTestId("release-notes");
+  await expect(notes).toBeVisible();
+  await expect(notes.getByRole("heading", { level: 2 })).toContainText("0.16.0");
+  await expect(notes.getByRole("heading", { level: 3, name: "Tính năng mới" })).toBeVisible();
+  await expect(notes.locator("li").first()).toContainText("tạo nhanh mặt hàng");
+  await expect(notes.locator("strong").first()).toBeVisible();
+  await expect(notes.getByRole("link", { name: "34d64b6" })).toBeVisible();
+  await expect(notes.locator("blockquote")).toContainText("mẫu");
+
+  // Không còn câu mở đầu "Đang chạy bản…" lẫn khung nhật ký từng bước.
+  await expect(dlg).not.toContainText("Đang chạy bản");
+  await expect(dlg.getByTestId("update-log")).toHaveCount(0);
+
+  // Nút cài vẫn ở chân hộp thoại; "Để sau" đóng được popup.
+  await expect(page.getByTestId("update-install")).toHaveText("Tải và cài bản 0.16.0");
+  await page.getByTestId("update-later").click();
+  await expect(dlg).toBeHidden();
+});

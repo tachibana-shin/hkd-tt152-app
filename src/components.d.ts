@@ -75,6 +75,7 @@ declare module 'vue' {
     ProfilePicker: typeof import('./components/ProfilePicker.vue')['default']
     ProgressBar: typeof import('primevue/progressbar')['default']
     ProgressSpinner: typeof import('primevue/progressspinner')['default']
+    ReleaseNotes: typeof import('./components/ReleaseNotes.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SectionCard: typeof import('./components/SectionCard.vue')['default']

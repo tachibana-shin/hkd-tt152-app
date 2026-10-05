@@ -14,7 +14,7 @@ import type { AppSettings } from "@/types";
  * bút toán khi app khởi động.
  *
  * Riêng CẬP NHẬT thì mở popup (không phải toast): gặp bản mới là hiện ngay
- * hộp thoại có nhật ký từng bước + nút "Tải và cài", người dùng bấm một cái là
+ * hộp thoại có ghi chú phát hành + nút "Tải và cài", người dùng bấm một cái là
  * xong — không phải tự nhớ đường vào màn Cài đặt.
  */
 
@@ -47,8 +47,8 @@ async function syncPortal(): Promise<void> {
 async function checkUpdate(): Promise<void> {
   const updater = useAppUpdater();
   if (!updater.inTauri) return; // bản web mở bằng trình duyệt không có updater
-  // Popup đang mở hoặc đang tải dở → đừng hỏi lại: hỏi sẽ xóa nhật ký người
-  // dùng đang đọc và hỏi trùng khi họ chưa kịp bấm "Tải và cài".
+  // Popup đang mở hoặc đang tải dở → đừng hỏi lại: hỏi lại sẽ reset popup
+  // người dùng đang đọc và hỏi trùng khi họ chưa kịp bấm "Tải và cài".
   if (updater.prompt.value || updater.busy.value) return;
   const update = await updater.checkUpdate();
   if (updater.error.value) {
@@ -58,8 +58,8 @@ async function checkUpdate(): Promise<void> {
     return;
   }
   if (update) {
-    // Thay toast "Mở Cài đặt → Cập nhật": mở popup ngay, ở đó có sẵn nhật ký
-    // các bước và nút "Tải và cài" làm luôn một lượt.
+    // Thay toast "Mở Cài đặt → Cập nhật": mở popup ngay, ở đó có sẵn ghi chú
+    // phát hành và nút "Tải và cài" làm luôn một lượt.
     updater.prompt.value = true;
   }
 }
