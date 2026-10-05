@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -4036,6 +4036,122 @@ test("Popup hóa đơn: gõ tên mới là tạo nhanh mặt hàng, thêm tên k
   expect(after.find((p) => p.name === "Bột năng Tân An")?.aliases).toContain("Tapioca Tân An");
 });
 
+// ─── F4 — ĐỊNH MỨC: KHAI NHIỀU THÀNH PHẨM TRONG 1 MÀN (MỖI SP 1 BẢNG) ───
+test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và xóa tất cả 1 lần", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  /** Tạo hàng hóa qua API — phần thêm sản phẩm bằng UI đã có test riêng. */
+  const mk = async (code: string, name: string, unit: string) => {
+    const r = await request.post("/api/save_product", {
+      data: {
+        code,
+        name,
+        unit,
+        salePrice: 10_000,
+        costPrice: 5_000,
+        minStock: 0,
+        vatRate: 1,
+        importTaxRate: 0,
+        isService: false,
+        industryCode: "PPHH",
+      },
+    });
+    expect(r.ok(), `save_product ${code}: ${await r.text()}`).toBe(true);
+  };
+  await mk("SP-MFG1", "Thành phẩm MFG 1", "Cái");
+  await mk("SP-MFG2", "Thành phẩm MFG 2", "Cái");
+  await mk("SP-MM1", "Vật tư MFG 1", "Kg");
+  await mk("SP-MM2", "Vật tư MFG 2", "Cái");
+
+  /** Mở 1 bộ chọn (đã scope vào bảng / dòng) rồi gõ + bấm option đúng tên. */
+  async function choose(scope: Locator, text: string) {
+    await scope.click();
+    const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+    await expect(box).toBeVisible();
+    await box.fill(text);
+    await page.getByRole("option", { name: text }).first().click();
+  }
+
+  await sidebarButton(page, "Sản phẩm").click();
+  await expect(page.locator("header h2")).toHaveText("Danh mục sản phẩm");
+  await page.getByRole("tab", { name: /Định mức vật tư/ }).click();
+  await expect(page.getByText("Chưa có định mức nào")).toBeVisible();
+
+  // 2 bảng = 2 thành phẩm khai song song, không phải chọn lại dropdown từng lần.
+  await page.getByTestId("bom-add").click();
+  await page.getByTestId("bom-add").click();
+  const blocks = page.locator('[data-testid="bom-block"]');
+  await expect(blocks).toHaveCount(2);
+  const b1 = blocks.first();
+  const b2 = blocks.nth(1);
+
+  await choose(b1.locator('[data-testid="bom-fg"] .p-select'), "Thành phẩm MFG 1");
+
+  // SP đã có định mức ở bảng khác → chặn, không cho ghi đè lên bảng đang giữ.
+  await choose(b2.locator('[data-testid="bom-fg"] .p-select'), "Thành phẩm MFG 1");
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Thành phẩm đã có định mức");
+  await choose(b2.locator('[data-testid="bom-fg"] .p-select'), "Thành phẩm MFG 2");
+  await expect(b1).toContainText("Thành phẩm MFG 1");
+  await expect(b2).toContainText("Thành phẩm MFG 2");
+
+  // Mỗi bảng 1 dòng vật tư với số lượng riêng — không có nút "Thêm dòng":
+  // chọn thành phẩm là bảng tự mở dòng trống.
+  const r1 = b1.locator('[data-testid="bom-table"] tbody tr').first();
+  await choose(r1.getByRole("combobox"), "Vật tư MFG 1");
+  await r1.getByRole("spinbutton").fill("1.5");
+
+  const r2 = b2.locator('[data-testid="bom-table"] tbody tr').first();
+  await choose(r2.getByRole("combobox"), "Vật tư MFG 2");
+  await r2.getByRole("spinbutton").fill("3");
+
+  await page.getByTestId("bom-save-all").click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã lưu định mức");
+
+  /** Đọc nguyên danh sách định mức từ server. */
+  async function fetchBoms() {
+    return (await (await request.post("/api/get_product_boms", { data: {} })).json()) as Array<{
+      product_code: string;
+      material_code: string;
+      quantity: number;
+    }>;
+  }
+
+  const saved = await fetchBoms();
+  const row1 = saved.find((r) => r.product_code === "SP-MFG1");
+  expect(row1, "SP-MFG1 phải có định mức").toBeTruthy();
+  expect(row1?.material_code).toBe("SP-MM1");
+  expect(row1?.quantity).toBe(1.5);
+  const row2 = saved.find((r) => r.product_code === "SP-MFG2");
+  expect(row2, "SP-MFG2 phải có định mức").toBeTruthy();
+  expect(row2?.material_code).toBe("SP-MM2");
+  expect(row2?.quantity).toBe(3);
+
+  // Rời tab rồi quay lại: 2 bảng vẫn được dựng lại từ DB đúng theo thành phẩm.
+  // Không neo `^…$`: nhãn tab kèm ký tự icon phía trước (font PrimeIcons).
+  await page.getByRole("tab", { name: /Danh mục sản phẩm/ }).click();
+  await page.getByRole("tab", { name: /Định mức vật tư/ }).click();
+  await expect(blocks).toHaveCount(2);
+
+  // Xóa hết dòng của cả 2 bảng rồi Lưu tất cả = xóa cả 2 định mức.
+  for (const b of [b1, b2]) {
+    await b
+      .locator('[data-testid="bom-table"] tbody tr')
+      .first()
+      .getByRole("button", { name: "Xóa dòng vật tư" })
+      .click();
+  }
+  await page.getByTestId("bom-save-all").click();
+  await expect(page.locator(".p-toast-detail").last()).toContainText("Đã xóa định mức");
+  await expect(blocks).toHaveCount(0);
+  await expect(page.getByText("Chưa có định mức nào")).toBeVisible();
+
+  const left = await fetchBoms();
+  expect(left.filter((r) => r.product_code.startsWith("SP-MFG"))).toHaveLength(0);
+});
+
 // ─── F4 — ĐỊNH MỨC VẬT TƯ: PNK sản xuất tự sinh phiếu xuất NVL (Nợ 154 / Có 152) ───
 test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh phiếu PX theo định mức", async ({
   page,
@@ -4102,7 +4218,11 @@ test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh 
   await expect(page.locator("header h2")).toHaveText("Danh mục sản phẩm");
   await page.getByRole("tab", { name: /Định mức vật tư/ }).click();
 
-  await page.locator('[data-testid="bom-fg"] .p-select').click();
+  // Màn giờ khai NHIỀU bảng — bảng nào cũng phải bấm "Thêm định mức" mới có.
+  // Dùng .last() vì bảng mới thêm luôn nằm cuối, kể cả khi đã có bảng từ trước.
+  await page.getByTestId("bom-add").click();
+  const bomBlock = page.locator('[data-testid="bom-block"]').last();
+  await bomBlock.locator('[data-testid="bom-fg"] .p-select').click();
   await expect(page.locator('.p-select-overlay [role="searchbox"]').last()).toBeVisible();
   await expect.poll(() => page.getByRole("option").count(), { timeout: 15_000 }).toBeGreaterThan(0);
   await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Thành phẩm E2E");
@@ -4111,8 +4231,8 @@ test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh 
     .first()
     .click();
 
-  await page.getByRole("button", { name: "Thêm dòng" }).click();
-  const bomRow = page.locator('[data-testid="bom-table"] tbody tr').first();
+  // Không có nút "Thêm dòng": chọn thành phẩm là bảng tự mở dòng trống.
+  const bomRow = bomBlock.locator('[data-testid="bom-table"] tbody tr').first();
   await bomRow.getByRole("combobox").click();
   await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Vật tư E2E");
   await page
@@ -4120,7 +4240,7 @@ test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh 
     .first()
     .click();
   await bomRow.getByRole("spinbutton").fill("2");
-  await page.getByRole("button", { name: "Lưu định mức" }).click();
+  await page.getByTestId("bom-save-all").click();
   await expect(page.locator(".p-toast-summary").last()).toContainText("Đã lưu định mức");
 
   // ── 2) PNK loại "Tự sản xuất / gia công" + ô "Tự xuất NVL theo định mức" ──
