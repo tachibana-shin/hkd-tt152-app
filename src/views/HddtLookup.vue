@@ -381,7 +381,9 @@ async function exportXmlZip() {
   const name = `hddt_xml_${stamp}.zip`;
   exportingXml.value = true;
   try {
-    downloadZip(name, await api.hddtExportXmlZip(ids));
+    const saved = await downloadZip(name, await api.hddtExportXmlZip(ids));
+    // Người dùng hủy hộp thoại "Lưu file" → chưa tải gì, khỏi toast "Đã tải".
+    if (!saved) return;
     toast.add({
       severity: "success",
       summary: `Đã tải ZIP ${ids.length} file XML`,

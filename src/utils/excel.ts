@@ -1,5 +1,6 @@
 import { Workbook } from "exceljs";
 import type { TaxBook } from "@/types";
+import { downloadBinary } from "@/utils/download";
 
 export interface XlsxColumn {
   header: string;
@@ -46,17 +47,10 @@ export async function exportXlsx(
   filename: string,
   columns: XlsxColumn[],
   rows: Record<string, unknown>[],
-): Promise<void> {
+): Promise<boolean> {
   const blob = await buildXlsxBlob(columns, rows);
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${filename}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Gỡ link trễ — revoke sớm là trình duyệt huỷ blob khi đang tải dở.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  // Một đường lui duy nhất cho desktop (hộp thoại Lưu file) lẫn web (tải về).
+  return downloadBinary(`${filename}.xlsx`, new Uint8Array(await blob.arrayBuffer()), XLSX_MIME);
 }
 
 /**

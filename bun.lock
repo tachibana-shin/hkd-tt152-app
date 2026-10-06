@@ -7,6 +7,7 @@
       "dependencies": {
         "@primeuix/themes": "^3.0.1",
         "@tauri-apps/api": "2.12",
+        "@tauri-apps/plugin-dialog": "^2",
         "@tauri-apps/plugin-opener": "^2",
         "@tauri-apps/plugin-process": "^2.4.0",
         "@tauri-apps/plugin-updater": "^2.13.0",
@@ -333,6 +334,8 @@
     "@tauri-apps/cli-win32-ia32-msvc": ["@tauri-apps/cli-win32-ia32-msvc@2.12.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-SsBjvq4f7YaBGqcWoE3cycoItPf0SrQeqFqWWgfxoeZWAIz01E31LDSeZ2p/etJiIY0R9oi045chkFfb0O7WGw=="],
 
     "@tauri-apps/cli-win32-x64-msvc": ["@tauri-apps/cli-win32-x64-msvc@2.12.0", "", { "os": "win32", "cpu": "x64" }, "sha512-9zzDKYUH4TKKBgRdDdVQX8fiRO5gJ8hD1nGsHU9DOHG5Jpm3arjbu9Xg1frR20EusG3Sl8X0dppoO/4EoUXUGg=="],
+
+    "@tauri-apps/plugin-dialog": ["@tauri-apps/plugin-dialog@2.8.1", "", { "dependencies": { "@tauri-apps/api": "^2.12.0" } }, "sha512-/DtE3B62JgpYuWFL5ATXM6KOXUq7pca7cJWOgSqULhZsgyjLk0PWKek1dbRDvhNBW6flNsOfWphsKnb+738Dmw=="],
 
     "@tauri-apps/plugin-opener": ["@tauri-apps/plugin-opener@2.5.5", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-xvzGai5aQds8j8R8RsUK/lW6pGG50YgOYIPLzvkqmkwAj7dfySOD7sGtejRzvVdMmv1EQfKVEFh1MvmDp8QR0g=="],
 

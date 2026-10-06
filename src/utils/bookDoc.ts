@@ -35,6 +35,7 @@ import {
 } from "docx";
 import type { BookColumn, BookHeader, TaxBook } from "@/types";
 import { bookLabelColumn, bookCellValue, renderBookCell } from "@/utils/bookCell";
+import { downloadBinary } from "@/utils/download";
 
 /** Lề 12mm — cùng khổ màn in của app, đổi sang twip (1/20 điểm) cho Word. */
 const MARGIN = convertMillimetersToTwip(12);
@@ -338,18 +339,10 @@ export function buildBookDoc(book: TaxBook): Document {
 }
 
 /**
- * Dựng file và tải về — cùng cơ chế với xuất Excel (Blob + `<a download>`), nên
- * chạy được cả trong app Tauri lẫn bản chạy bằng trình duyệt.
+ * Dựng file và lưu qua util chung `downloadBinary` — trong app desktop mở hộp
+ * thoại "Lưu file" của hệ điều hành, trong trình duyệt tải về như cũ.
  */
-export async function exportBookDocx(book: TaxBook, filename: string): Promise<void> {
+export async function exportBookDocx(book: TaxBook, filename: string): Promise<boolean> {
   const blob = await Packer.toBlob(buildBookDoc(book));
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${filename}.docx`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Gỡ link trễ — revoke sớm là trình duyệt huỷ blob khi đang tải dở.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return downloadBinary(`${filename}.docx`, new Uint8Array(await blob.arrayBuffer()), blob.type);
 }

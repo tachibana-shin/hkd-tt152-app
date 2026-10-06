@@ -17,6 +17,8 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Hộp thoại "Lưu file" cho các nút xuất file ở bản desktop.
+        .plugin(tauri_plugin_dialog::init())
         // Cập nhật OTA: bản mới ký bằng minisign, app tải + cài + khởi động lại.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -179,6 +181,7 @@ pub fn run() {
             commands::hddt::hddt_sync_invoice_detail,
             commands::hddt::hddt_voucher_invoice_detail,
             commands::pdf::render_invoice_pdf,
+            commands::files::save_file,
             commands::import::import_nhap_lieu,
             commands::inventory::get_inventory_counts,
             commands::inventory::get_inventory_count_detail,

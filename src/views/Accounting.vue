@@ -454,15 +454,19 @@ async function exportTaxReport() {
     // 3. Backend thêm PDF/XML hóa đơn + sao lưu CSDL rồi nén 1 ZIP.
     const zip = await api.exportTaxReport({ jobId, fromDate: from, toDate: to, extraFiles: files });
     const name = `bao-cao-ky-thue-${from}_${to}.zip`;
-    downloadZip(name, zip);
-    toast.add({
-      severity: problems.length ? "warn" : "success",
-      summary: "Đã tải báo cáo kỳ thuế",
-      detail: problems.length
-        ? `${name} — ${files.length} file Excel; ${problems.length} sổ lỗi, xem CHU-THICH.txt trong ZIP`
-        : `${name} — ${files.length} file Excel + hóa đơn PDF/XML + sao lưu CSDL`,
-      life: 6000,
-    });
+    const saved = await downloadZip(name, zip);
+    // Hủy hộp thoại "Lưu file" → không toast "Đã tải"; hộp thoại nhật ký vẫn
+    // giữ nguyên ở finally để đọc "✓ Hoàn tất" như bình thường.
+    if (saved) {
+      toast.add({
+        severity: problems.length ? "warn" : "success",
+        summary: "Đã tải báo cáo kỳ thuế",
+        detail: problems.length
+          ? `${name} — ${files.length} file Excel; ${problems.length} sổ lỗi, xem CHU-THICH.txt trong ZIP`
+          : `${name} — ${files.length} file Excel + hóa đơn PDF/XML + sao lưu CSDL`,
+        life: 6000,
+      });
+    }
     // Hộp thoại GIỮ NGUYÊN khi xong — nhật ký cuối có "✓ Hoàn tất" và cả những
     // cảnh báo XML/PDF backend gặp phải; tự đóng là mất đúng phần người ta cần
     // đọc. Người dùng bấm "Đóng" là xong (hoặc "Chạy nền" từ lúc còn chạy).

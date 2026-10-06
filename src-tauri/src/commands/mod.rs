@@ -7,6 +7,7 @@ pub(crate) mod auth;
 pub(crate) mod business;
 pub(crate) mod cash;
 pub(crate) mod catalog;
+pub(crate) mod files;
 pub(crate) mod hddt;
 pub(crate) mod import;
 pub(crate) mod inventory;
