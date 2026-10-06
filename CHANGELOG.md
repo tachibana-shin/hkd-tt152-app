@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.3](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.2...v0.19.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* **desktop:** open the native save dialog for every file export ([f19b742](https://github.com/tachibana-shin/hkd-tt152-app/commit/f19b742874d6c3ade50e4c680c0c2acc9d6bea7a))
+
 ## [0.19.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.1...v0.19.2) (2026-10-06)
 
 
