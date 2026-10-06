@@ -76,7 +76,7 @@ useKeepAliveRefresh(reload);
     </div>
 
     <!-- Quick links -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+    <div data-testid="quick-links" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
       <router-link
         to="/inbound"
         class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
@@ -104,6 +104,20 @@ useKeepAliveRefresh(reload);
       >
         <i class="pi pi-inbox text-2xl text-teal-500"></i>
         <p class="mt-2 text-sm font-medium">Tồn kho</p>
+      </router-link>
+      <router-link
+        to="/invoice-queue"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
+      >
+        <i class="pi pi-clock text-2xl text-amber-500"></i>
+        <p class="mt-2 text-sm font-medium">Chờ xuất HĐĐT</p>
+      </router-link>
+      <router-link
+        to="/hddt-sync"
+        class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition text-center"
+      >
+        <i class="pi pi-sync text-2xl text-indigo-500"></i>
+        <p class="mt-2 text-sm font-medium">Đồng bộ HĐĐT</p>
       </router-link>
     </div>
   </div>

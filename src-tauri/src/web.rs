@@ -467,6 +467,7 @@ pub async fn api_invoke(
             mx!(commands::invoice::replace_invoice, body, invoice_id: i64, reason: String)
         }
         "invoice_duplicate_numbers" => mx!(commands::invoice::invoice_duplicate_numbers, body),
+        "invoice_shortage_map" => mx!(commands::invoice::invoice_shortage_map, body, ids: Vec<i64>),
         "next_voucher_no" => mx!(commands::stock::next_voucher_no, body, entry_type: String),
         "get_journal_entries" => mx!(
             commands::stock::get_journal_entries,

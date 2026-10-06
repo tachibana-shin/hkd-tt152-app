@@ -26,7 +26,7 @@ const st = reactive({
   tax_group4: 50_000_000_000,
   // Việc chạy nền khi mở app (xem composable useAutoTasks).
   auto_check_update: true,
-  auto_sync_enabled: false,
+  auto_sync_enabled: true,
   auto_sync_interval_min: 15,
 });
 

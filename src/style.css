@@ -145,6 +145,20 @@ body {
   overflow-x: auto;
 }
 
+/* ─── Màu nền dòng hóa đơn (Invoices + Chờ xuất HĐĐT) ───
+   Vàng = nháp/còn chờ xuất, đỏ = thiếu tồn kho nên sẽ bị chặn lúc ghi số HĐĐT.
+   !important để thắng nền sọc (striped), hover và highlight chọn dòng của
+   PrimeVue — màu trạng thái phải luôn nhìn thấy được. */
+.p-datatable tr.hkd-row-draft,
+.p-datatable tr.hkd-row-draft > td {
+  background-color: #fef3c7 !important;
+}
+
+.p-datatable tr.hkd-row-short,
+.p-datatable tr.hkd-row-short > td {
+  background-color: #fee2e2 !important;
+}
+
 /* ─── In tờ khai 01/CNKD (TaxEntryForm) ───
    Bản in nằm trong <Teleport to="body"> nên là con trực tiếp của <body>: khi bấm
    "In" component thêm class `print-tax-entry` cho <body>, ta ẩn mọi phần còn lại

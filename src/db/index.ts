@@ -129,7 +129,7 @@ const SETTING_DEFAULTS: AppSettings = {
   tax_threshold_group3: 3_000_000_000, // Mốc Nhóm 3 (TNCN theo thu nhập 17%)
   tax_threshold_group4: 50_000_000_000, // Mốc Nhóm 4 (TNCN theo thu nhập 20%)
   auto_check_update: true, // Tự kiểm tra cập nhật khi mở app (bản web thì tự bỏ qua)
-  auto_sync_enabled: false, // Tự quét cổng HĐĐT — mặc định TẮT, để người dùng tự bật
+  auto_sync_enabled: true, // Tự quét cổng HĐĐT — mặc định BẬT (chưa đăng nhập thì lặng lẽ bỏ qua)
   auto_sync_interval_min: 15, // Khoảng thời gian tự gọi lại (phút)
 };
 
@@ -191,10 +191,11 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     tax_threshold_exempt: exempt,
     tax_threshold_group3: group3,
     tax_threshold_group4: group4,
-    // Việc chạy nền: thiếu key thì lấy mặc định (bật kiểm tra cập nhật, tắt quét
-    // cổng); số phút ép về 1–1440 để timer không nhận giá trị rác từ DB.
+    // Việc chạy nền: thiếu key thì lấy mặc định (bật cả kiểm tra cập nhật lẫn
+    // quét cổng); số phút ép về 1–1440 để timer không nhận giá trị rác từ DB.
     auto_check_update: raw.auto_check_update === "0" ? false : true,
-    auto_sync_enabled: raw.auto_sync_enabled === "1",
+    // Thiếu key = hồ sơ cũ chưa từng lưu → mặc định BẬT (chỉ "0" tường minh mới tắt).
+    auto_sync_enabled: raw.auto_sync_enabled === "0" ? false : true,
     auto_sync_interval_min: Math.min(
       1440,
       Math.max(1, num("auto_sync_interval_min", SETTING_DEFAULTS.auto_sync_interval_min)),
@@ -713,6 +714,9 @@ export const api = {
   /** Số hóa đơn bị trùng (sinh ra khi bấm Lập nhiều lần) — app không tự sửa. */
   invoiceDuplicateNumbers: async () =>
     parse<InvoiceDuplicateNumber[]>(await call<string>("invoice_duplicate_numbers", {})),
+  /** Soi tồn từng hóa đơn — map id → dòng thiếu (dòng bảng tô đỏ). */
+  invoiceShortageMap: async (ids: number[]) =>
+    parse<Record<string, string[]>>(await call<string>("invoice_shortage_map", { ids })),
   invoiceEvents: async (invoiceId: number) =>
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {

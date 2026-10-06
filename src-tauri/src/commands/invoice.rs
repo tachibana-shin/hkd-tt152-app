@@ -706,6 +706,42 @@ pub(crate) async fn invoice_duplicate_numbers(
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Soi tồn kho cho MỖI hóa đơn trong danh sách — màn Hóa đơn / Chờ xuất HĐĐT
+/// tô màu dòng: đỏ = thiếu hàng nên sẽ bị chặn lúc ghi số HĐĐT. Chỉ trả về
+/// hóa đơn THIẾU (đủ tồn thì im lặng), JSON `{ "<id>": ["SP001: cần 5, còn 2"] }`.
+/// Không gắn phiếu xuất thì mới kiểm — phiếu đã trừ kho rồi (cùng cửa kiểm với
+/// lúc ghi số). Lỗi riêng lẻ của 1 hóa đơn không làm hỏng cả bảng.
+#[tauri::command]
+pub(crate) async fn invoice_shortage_map(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<String, String> {
+    if ids.is_empty() {
+        return Ok("{}".into());
+    }
+    // Chốt chặn phòng hiểm: mỗi id vài truy vấn nhỏ — đừng kéo nguyên bảng vào.
+    if ids.len() > 500 {
+        return Err("Quá nhiều hóa đơn cần soi tồn trong một lần".into());
+    }
+    let pool = state.pool.read().await;
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let mut out = serde_json::Map::new();
+    for id in ids {
+        let list = match invoice_stock_shortage(&mut tx, id).await {
+            Ok(list) => list,
+            Err(_) => continue,
+        };
+        if !list.is_empty() {
+            out.insert(
+                id.to_string(),
+                serde_json::Value::Array(list.into_iter().map(serde_json::Value::String).collect()),
+            );
+        }
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(serde_json::to_string(&serde_json::Value::Object(out)).unwrap_or_default())
+}
+
 #[tauri::command]
 pub(crate) async fn delete_invoice(state: State<'_, AppState>, id: i64) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;

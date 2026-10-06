@@ -129,6 +129,8 @@ const page = useLazyPage(async (lazy) => {
     if (selectedId.value && !items.value.some((i) => i.invoice.id === selectedId.value)) {
       selectedId.value = null;
     }
+    // Soi tồn nền để tô màu dòng (lỗi thì mất màu, không toast giữa chừng).
+    void loadShortages();
   } catch (e) {
     items.value = [];
     toast.add({ severity: "error", summary: "Không tải được hàng chờ xuất", detail: String(e) });
@@ -148,6 +150,29 @@ function applyFilters() {
 /** Ô tìm kiếm riêng của màn → đưa từ khoá vào bộ lọc chung rồi nạp lại. */
 function searchNow() {
   void page.setKeyword(keyword.value);
+}
+
+// ─── Màu nền dòng: hàng chờ = còn chờ xuất (vàng), thiếu tồn = đỏ ───
+const shortages = ref<Record<string, string[]>>({});
+let shortageSeq = 0;
+async function loadShortages() {
+  const seq = ++shortageSeq;
+  try {
+    // Đã có phiếu xuất là kho đã trừ lúc lập phiếu → không kiểm nữa.
+    const ids = items.value
+      .filter((i) => !(i.invoice.voucher_no ?? "").trim())
+      .map((i) => i.invoice.id);
+    const map = ids.length ? await api.invoiceShortageMap(ids) : {};
+    if (seq === shortageSeq) shortages.value = map;
+  } catch {
+    if (seq === shortageSeq) shortages.value = {};
+  }
+}
+
+/** Hàng chờ toàn hóa đơn chưa phát hành → nền vàng; thiếu hàng thì đỏ (ưu tiên). */
+function queueRowClass(item: InvoiceQueueItem) {
+  if (shortages.value[item.invoice.id]?.length) return "hkd-row-short";
+  return "hkd-row-draft";
 }
 
 const load = () => page.reload();
@@ -273,7 +298,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           size="small"
           striped-rows
           highlight-on-select
-          :row-class="() => ''"
+          :row-class="queueRowClass"
           class="text-sm"
           @row-select="(e: any) => (selectedId = e.data.invoice.id)"
           @row-unselect="() => (selectedId = null)"

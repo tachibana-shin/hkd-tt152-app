@@ -124,6 +124,10 @@ test("login with valid credentials opens the Dashboard with the seeded business 
   await expect(page.getByText("Doanh thu ròng")).toBeVisible();
   // "Quản trị" is the seeded admin display name in the app's own seed data.
   await expect(page.getByText("Quản trị").first()).toBeVisible();
+  // Lối tắt trên Dashboard: vào thẳng hàng chờ xuất HĐĐT và màn đồng bộ HĐĐT.
+  const quick = page.getByTestId("quick-links");
+  await expect(quick.locator('a[href="/invoice-queue"]')).toBeVisible();
+  await expect(quick.locator('a[href="/hddt-sync"]')).toBeVisible();
 });
 
 /**
@@ -1498,6 +1502,9 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   const rowBad = page.locator("tr", { has: page.getByText("HD9301", { exact: true }) }).first();
   await expect(rowOk.getByText("Sẵn sàng chép")).toBeVisible();
   await expect(rowBad.getByText("1 lỗi")).toBeVisible();
+  // Nền dòng: hàng chờ = còn chờ xuất (vàng) hoặc thiếu hàng (đỏ) — không để trắng.
+  await expect(rowOk).toHaveClass(/hkd-row-(draft|short)/);
+  await expect(rowBad).toHaveClass(/hkd-row-(draft|short)/);
   await expect(rowBad.getByText(/MST người mua/)).toBeVisible();
   // Nút chép bị khoá khi còn lỗi.
   await expect(rowBad.getByRole("button", { name: "Chép sang dịch vụ HĐĐT khác" })).toBeDisabled();
@@ -1670,6 +1677,10 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
   const sameNo = all.filter((i) => i.number === number);
   expect(sameNo.length, `số ${number} bị lặp: ${sameNo.length} bản ghi`).toBe(1);
   await expect(page.locator("tr", { has: page.getByText(number, { exact: true }) })).toHaveCount(1);
+  // Dòng nháp phải có nền màu: vàng = nháp (đủ hàng), đỏ = thiếu hàng.
+  await expect(page.locator("tr", { has: page.getByText(number, { exact: true }) })).toHaveClass(
+    /hkd-row-(draft|short)/,
+  );
 });
 
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {
@@ -3564,12 +3575,12 @@ test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sa
   const checkToggle = page.getByLabel(/Tự kiểm tra cập nhật/);
   const syncToggle = page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/);
   const interval = page.getByLabel(/Khoảng thời gian tự gọi lại/);
-  // Mặc định: kiểm tra cập nhật BẬT (bản web thì tự bỏ qua), quét cổng TẮT vì
-  // đây là gọi cổng thật nên để người dùng tự bật.
+  // Mặc định: kiểm tra cập nhật BẬT (bản web thì tự bỏ qua) và quét cổng CŨNG
+  // BẬT — tự quét hóa đơn mua khi mở app; chưa đăng nhập cổng thì lặng lẽ bỏ qua.
   await expect(checkToggle).toBeChecked();
-  await expect(syncToggle).not.toBeChecked();
+  await expect(syncToggle).toBeChecked();
 
-  // Bật quét cổng + rút ngắn khoảng thời gian, rồi Lưu.
+  // Tắt quét cổng + rút ngắn khoảng thời gian, rồi Lưu — tắt cũng phải giữ sau tải lại.
   await syncToggle.click();
   await interval.fill("30");
   await page.keyboard.press("Tab");
@@ -3582,7 +3593,7 @@ test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sa
       string
     >;
   const saved = await readSettings();
-  expect(saved.auto_sync_enabled, "quét cổng phải được bật").toBe("1");
+  expect(saved.auto_sync_enabled, "quét cổng tắt được").toBe("0");
   expect(saved.auto_check_update, "kiểm tra cập nhật vẫn bật").toBe("1");
   expect(saved.auto_sync_interval_min, "khoảng thời gian lưu đúng").toBe("30");
 
@@ -3590,13 +3601,13 @@ test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sa
   await page.reload();
   await openTab(page, "Cài đặt", "/settings");
   await page.getByText("Tự động khi mở ứng dụng").scrollIntoViewIfNeeded();
-  await expect(page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/)).toBeChecked();
+  await expect(page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/)).not.toBeChecked();
 
-  // Trả lại mặc định để các test sau không bị quét cổng khi app mở.
+  // Bật lại = cấu hình xuất xưởng, vẫn giữ nguyên sau khi tải lại trang.
   await page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/).click();
   await page.getByRole("button", { name: "Lưu cài đặt" }).click();
   await expect(page.getByText("Đã lưu cài đặt")).toBeVisible({ timeout: 10_000 });
-  expect((await readSettings()).auto_sync_enabled).toBe("0");
+  expect((await readSettings()).auto_sync_enabled).toBe("1");
 });
 
 /**
@@ -4420,6 +4431,10 @@ test("Popup hóa đơn: thiếu tồn kho thì hỏi trước khi lưu nháp", a
   });
   expect(linked.ok(), "ghi số HĐĐT phải bị chặn khi thiếu tồn").toBe(false);
   expect(await linked.text()).toContain("Không đủ tồn kho");
+
+  // Danh sách Hóa đơn: nháp thiếu hàng phải hiện NỀN ĐỎ (soi tồn ngay khi nạp trang).
+  const shortRow = page.locator("tr", { has: page.getByText(number, { exact: true }) }).first();
+  await expect(shortRow).toHaveClass(/hkd-row-short/, { timeout: 10_000 });
 });
 
 // ─── F4 — ĐỊNH MỨC: KHAI NHIỀU THÀNH PHẨM TRONG 1 MÀN (MỖI SP 1 BẢNG) ───

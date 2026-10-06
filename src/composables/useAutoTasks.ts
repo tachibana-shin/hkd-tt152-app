@@ -33,13 +33,17 @@ async function loadSettings(): Promise<AppSettings | null> {
 /** Quét cổng HĐĐT từ ngày bắt đầu dùng HĐĐT tới hôm nay. Lỗi thì hẹn lần sau. */
 async function syncPortal(): Promise<void> {
   try {
+    // Chưa đăng nhập cổng thì đừng gửi lệnh quét — không làm gì cả thay vì gọi
+    // rồi nhận lỗi 400 (vừa vô ích, vừa đỏ console, vừa rình rập vô ích).
+    const st = await api.hddtStatus().catch(() => null);
+    if (!st?.logged_in) return;
     const cfg = await api.getBusinessConfig();
     await api.hddtSyncScan({
       from: cfg.hddt_start_date || undefined,
       to: toIsoDate(new Date()),
     });
   } catch {
-    /* chưa đăng nhập cổng / chưa khai mốc bắt đầu / lỗi mạng → bỏ qua */
+    /* chưa khai mốc bắt đầu / lỗi mạng → bỏ qua */
   }
 }
 

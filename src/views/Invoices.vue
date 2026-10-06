@@ -39,12 +39,41 @@ const page = useLazyPage(async (lazy) => {
     const res = await api.getInvoicesPage(lazy, onlyDuplicates.value);
     invoices.value = res.rows;
     total.value = res.total;
+    // Soi tồn nền để tô màu dòng — không chặn bảng, lỗi thì mất màu thôi.
+    void loadShortages();
   } catch (e) {
     toast.add({ severity: "error", summary: "Lỗi tải hóa đơn", detail: String(e) });
   } finally {
     loading.value = false;
   }
 });
+
+// ─── Màu nền dòng: vàng = nháp, đỏ = thiếu tồn kho ───
+// Chỉ soi hóa đơn CHƯA ghi số và CHƯA có phiếu xuất — phiếu đã trừ kho lúc lập
+// nên không thể thiếu nữa (cùng cửa kiểm với lúc ghi số HĐĐT).
+const shortages = ref<Record<string, string[]>>({});
+let shortageSeq = 0;
+async function loadShortages() {
+  const seq = ++shortageSeq;
+  try {
+    const ids = invoices.value
+      .filter(
+        (i) => ["draft", "pasted", "exported"].includes(i.status) && !(i.voucher_no ?? "").trim(),
+      )
+      .map((i) => i.id);
+    const map = ids.length ? await api.invoiceShortageMap(ids) : {};
+    if (seq === shortageSeq) shortages.value = map;
+  } catch {
+    if (seq === shortageSeq) shortages.value = {};
+  }
+}
+
+/** Class cho dòng: thiếu tồn ưu tiên đỏ, kế đến nháp = nền vàng. */
+function invoiceRowClass(inv: Invoice) {
+  if (shortages.value[inv.id]?.length) return "hkd-row-short";
+  if (inv.status === "draft") return "hkd-row-draft";
+  return "";
+}
 
 const draftDialog = ref(false);
 const detailDialog = ref(false);
@@ -397,6 +426,7 @@ useKeepAliveRefresh(reload);
           filter-toggle
           :global-filter-fields="['number', 'customer', 'voucher_no', 'e_invoice_no']"
           stripedRows
+          :row-class="invoiceRowClass"
           actions-header="Hành động"
           actions-width="220"
           @page="page.onPage"
