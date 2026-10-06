@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.1...v0.19.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **production:** list only BOM goods in lot dialog and stop dropdown overflow ([3d3c626](https://github.com/tachibana-shin/hkd-tt152-app/commit/3d3c62699c63b38d7cc4c092567a3337ff8e70c1))
+
 ## [0.19.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.0...v0.19.1) (2026-10-05)
 
 
