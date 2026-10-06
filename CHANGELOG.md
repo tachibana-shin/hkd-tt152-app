@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.20.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.3...v0.20.0) (2026-10-06)
+
+
+### Features
+
+* **ui:** color invoice rows, add dashboard shortcuts, default auto-sync on ([43ecf8e](https://github.com/tachibana-shin/hkd-tt152-app/commit/43ecf8e7a12614d4c25e28b670cd48f8fb58d116))
+
 ## [0.19.3](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.2...v0.19.3) (2026-10-06)
 
 
