@@ -5050,3 +5050,104 @@ test("Chờ xuất HĐĐT: popup lập hóa đơn nháp vẫn chọn được m�
   await box.fill("SP001");
   await expect(page.getByRole("option", { name: /Bottled water/ }).first()).toBeVisible();
 });
+
+// ─── TẠO LÔ SẢN XUẤT: DROPDOWN THÀNH PHẨM CHỈ NHẬN HÀNG CÓ ĐỊNH MỨM ───
+// Dropdown từng liệt kê mọi mặt hàng (dịch vụ, phí…) — và vì danh sách option
+// tên DÀI, panel giãn theo nội dung vượt bề rộng màn hình → PrimeVue kẹp
+// inset-inline-start=0 làm dropdown bật từ mép TRÁI tràn ra ngoài popup. Giờ:
+// chỉ hàng có định mức (lọc qua catalog.hasBom) + cắt bề rộng panel (style.css).
+test("Tạo lô sản xuất: dropdown thành phẩm chỉ hiện hàng có định mức, panel không tràn", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // 2 hàng tên DÀI (dài đủ để panel nội dung vượt cap nếu không cắt bề rộng):
+  // 1 hàng CHẾ TẠO có định mức, 1 hàng mua về không có. Token riêng để gõ lọc.
+  const fgName =
+    "Thành phẩm chế tạo tên rất dài dùng để kiểm thử và chặn panel dropdown thành phẩm tràn khỏi popup ABCDEFGHIJ";
+  const rawName = "Hàng mua về không có định mức tên rất dài dùng để kiểm thử bộ lọc dropdown XYZ";
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-DD-LSX",
+      name: fgName,
+      unit: "Cái",
+      salePrice: 100_000,
+      costPrice: 80_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-DD-LSX: ${await fg.text()}`).toBe(true);
+  const raw = await request.post("/api/save_product", {
+    data: {
+      code: "SP-DD-MUA",
+      name: rawName,
+      unit: "Cái",
+      salePrice: 50_000,
+      costPrice: 40_000,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(raw.ok(), `save_product SP-DD-MUA: ${await raw.text()}`).toBe(true);
+  // Định mức: 1 thành phẩm = 2 SP001 (SP001 là VẬT TƯ — không được liệt kê làm thành phẩm).
+  const bom = await request.post("/api/save_product_bom", {
+    data: { productCode: "SP-DD-LSX", items: [{ material_code: "SP001", quantity: 2 }] },
+  });
+  expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
+
+  await sidebarButton(page, "Lô sản xuất").click();
+  await expect(page.locator("header h2")).toHaveText("Lô sản xuất");
+  await page.getByRole("button", { name: "Tạo lô sản xuất" }).click();
+  const dlg = page.getByRole("dialog", { name: "Tạo lô sản xuất" });
+  await expect(dlg).toBeVisible();
+
+  await dlg.getByTestId("lot-fg").locator(".p-select").click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await expect(box).toBeVisible();
+
+  // ── 1) Gõ MÃ hàng chỉ làm VẬT TƯ (không có định mức) → trống + nói rõ lý do ──
+  await box.fill("SP001");
+  await expect(page.getByRole("option", { name: /Bottled water/ })).toHaveCount(0);
+  await expect(page.getByText("Không có hàng chế tạo nào khớp")).toBeVisible();
+
+  // ── 2) Hàng CHẾ TẠO vẫn hiện → đo panel: không tràn khỏi popup ──
+  await box.fill("ABCDEFGHIJ");
+  await expect(page.getByRole("option", { name: /Thành phẩm chế tạo tên rất dài/ })).toBeVisible();
+  const overlay = page.locator(".p-select-overlay").last();
+  const ovBox = await overlay.boundingBox();
+  const dlgBox = await dlg.boundingBox();
+  const selBox = await dlg.getByTestId("lot-fg").locator(".p-select").boundingBox();
+  if (!ovBox || !dlgBox || !selBox) throw new Error("boundingBox null (overlay/popup/ô chọn)");
+  // Cắt bề rộng theo style.css: không quá 30rem (480px) + hở làm tròn.
+  expect(ovBox.width, "panel giãn theo nội dung, tràn khỏi popup").toBeLessThanOrEqual(485);
+  // Panel mở từ mép TRÁI màn hình thay vì dưới ô chọn (bug kẹp inset-inline-start=0)…
+  expect(ovBox.x, "panel bị đẩy về mép trái màn hình").toBeGreaterThanOrEqual(dlgBox.x - 2);
+  // …và không vươn qua mép popup…
+  expect(ovBox.x + ovBox.width, "panel tràn quá mép popup").toBeLessThanOrEqual(
+    dlgBox.x + dlgBox.width + 2,
+  );
+  // …nhưng phải bám sát ô Thành phẩm.
+  expect(Math.abs(ovBox.x - selBox.x), "panel lệch khỏi ô thành phẩm").toBeLessThanOrEqual(64);
+
+  // ── 3) Tên hàng mua về (không định mức) gõ thẳng vào cũng ra 0 option ──
+  await box.fill("XYZ");
+  await expect(page.getByRole("option", { name: /Hàng mua về không có định mức/ })).toHaveCount(0);
+
+  // ── 4) Chọn được hàng chế tạo → bản xem trước NVL đọc từ catalog.boms ──
+  await box.fill("ABCDEFGHIJ");
+  await page
+    .getByRole("option", { name: /Thành phẩm chế tạo tên rất dài/ })
+    .first()
+    .click();
+  await expect(
+    page.getByTestId("lot-preview-table").getByText(/Bottled water \(SP001\)/),
+  ).toBeVisible();
+});

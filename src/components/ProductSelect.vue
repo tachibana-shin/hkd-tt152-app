@@ -45,6 +45,11 @@ const props = withDefaults(
      * danh mục (mặc định tắt — màn không được thêm sản phẩm thì không hiện).
      */
     allowCreate?: boolean;
+    /**
+     * Chỉ hiện hàng CHẾ TẠO (có định mức vật tư) — dùng cho popup tạo lô sản
+     * xuất: chọn hàng không có định mức thì không có NVL để trừ kho.
+     */
+    onlyManufactured?: boolean;
   }>(),
   {
     modelValue: "",
@@ -53,6 +58,7 @@ const props = withDefaults(
     size: undefined,
     showClear: true,
     allowCreate: false,
+    onlyManufactured: false,
   },
 );
 
@@ -79,6 +85,8 @@ function splitAliases(aliases?: string): string[] {
 const options = computed<PickedOption[]>(() => {
   const out: PickedOption[] = [];
   for (const p of catalog.products) {
+    // Chỉ hàng chế tạo (có định mức) — dropdown của popup tạo lô sản xuất.
+    if (props.onlyManufactured && !catalog.hasBom(p.code)) continue;
     out.push({ code: p.code, name: p.name, unit: p.unit ?? "", isAlias: false });
     for (const alias of splitAliases(p.aliases)) {
       out.push({ code: p.code, name: alias, unit: p.unit ?? "", isAlias: true });
@@ -188,7 +196,22 @@ function onhandOf(code: string): number {
   return catalog.onhandAt(code, props.warehouseCode ?? "");
 }
 
+/** Chữ trong dropdown khi danh mục rỗng / gõ không khớp (slot #empty). */
+const emptyText = computed(() =>
+  props.onlyManufactured
+    ? "Chưa có mặt hàng nào khai định mức vật tư — mở màn Sản phẩm → Định mức để khai."
+    : "Chưa có mặt hàng nào.",
+);
+const emptyFilterText = computed(() =>
+  props.onlyManufactured
+    ? "Không có hàng chế tạo nào khớp — chỉ nhận hàng đã khai định mức."
+    : "Không tìm thấy mặt hàng phù hợp.",
+);
+
 void catalog.loadOnhand();
+// Lọc theo định mức (popup tạo lô): nạp định mức 1 lần để hasBom có dữ liệu —
+// store tự gộp request trùng, không bắn query mới nếu đang tải.
+if (props.onlyManufactured) void catalog.loadBoms();
 </script>
 
 <template>
@@ -238,6 +261,13 @@ void catalog.loadOnhand();
           {{ slotProps.option.unit }}
         </span>
       </div>
+    </template>
+    <!-- Dropdown rỗng / gõ không khớp: nói rõ vì sao (hàng phải có định mức). -->
+    <template #empty>
+      <span class="block text-sm text-gray-500">{{ emptyText }}</span>
+    </template>
+    <template #emptyfilter>
+      <span class="block text-sm text-gray-500">{{ emptyFilterText }}</span>
     </template>
   </Select>
 </template>

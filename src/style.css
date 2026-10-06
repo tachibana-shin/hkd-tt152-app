@@ -61,6 +61,17 @@ input {
   max-width: 100%;
 }
 
+/* ─── Dropdown ô chọn (Select) ───
+   PrimeVue 5 gắn panel vào <body> và chỉ đặt `min-width` bằng ô chọn — danh
+   sách option tên DÀI làm panel giãn theo NỘI DUNG rồi vượt mép phải màn hình,
+   PrimeVue kẹp `inset-inline-start: 0` → dropdown bật từ mép TRÁI, tràn ra ngoài
+   popup (bug dropdown Thành phẩm trong popup Tạo lô sản xuất). Cắt bề rộng để
+   panel luôn mở ngay dưới ô chọn; khi ô chọn rộng hơn cap thì `min-width` inline
+   vẫn thắng (CSS2.1: dùng giá trị max-width = min-width). */
+.p-select-overlay {
+  max-width: min(30rem, calc(100vw - 2rem));
+}
+
 /* ─── Dark mode ─── */
 /* Nền chung trang (view nào không tự set nền cũng không bị lóa trắng). */
 body {

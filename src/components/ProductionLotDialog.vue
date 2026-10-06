@@ -19,7 +19,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import { api } from "@/db";
 import { fmtDec, fmtVnd, toIsoDate } from "@/utils/format";
-import type { BomItem, StockLot } from "@/types";
+import type { StockLot } from "@/types";
 
 const props = defineProps<{
   /** Thành phẩm gợi ý sẵn khi mở (popup hóa đơn gắn hàng vừa tạo xong). */
@@ -54,8 +54,9 @@ const form = reactive({
   description: "Nhập kho thành phẩm — lô sản xuất",
 });
 
-// Định mức + lô tồn kho (để tính giá thành và soi tồn trước khi lưu).
-const bomItems = ref<BomItem[]>([]);
+// Lô tồn kho (soi tồn + tính giá thành FIFO trước khi lưu). Định mức đọc trực
+// tiếp từ catalog.boms — nạp lại mỗi lần mở (xem watch dưới) để ô Thành phẩm
+// chỉ nhận hàng CHẾ TẠO và bản xem trước theo định mức hiện hành.
 const stockLots = ref<StockLot[]>([]);
 
 watch(
@@ -77,11 +78,15 @@ watch(
     });
     try {
       // Số lô do backend sinh (PN0001…) — không đoán từ danh sách đang lọc.
-      [form.voucher_no, stockLots.value, bomItems.value] = await Promise.all([
+      // Định mức nạp LẠI mỗi lần mở (force): ô Thành phẩm chỉ nhận hàng có định
+      // mức, và định mức có thể vừa được đổi ở màn Sản phẩm.
+      const [voucherNo, lots] = await Promise.all([
         api.nextVoucherNo("PN"),
         api.getStockLots(""),
-        api.getProductBoms(),
+        catalog.loadBoms(true),
       ]);
+      form.voucher_no = voucherNo;
+      stockLots.value = lots;
     } catch (e) {
       toast.add({ severity: "error", summary: "Không mở được hộp thoại", detail: String(e) });
     }
@@ -110,7 +115,7 @@ type PreviewLine = {
 
 const preview = computed<PreviewLine[]>(() => {
   const qty = form.quantity > 0 ? form.quantity : 0;
-  return bomItems.value
+  return catalog.boms
     .filter((b) => b.product_code === form.product_code)
     .map((b) => {
       // Làm tròn 6 chữ số — nhân float hay dính nhiễu, đúng cách backend tính.
@@ -243,7 +248,7 @@ async function save() {
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-2">
       <FormField label="Thành phẩm">
         <div data-testid="lot-fg">
-          <ProductSelect v-model="form.product_code" size="small" />
+          <ProductSelect v-model="form.product_code" size="small" only-manufactured />
         </div>
       </FormField>
       <FormField label="Sản lượng">
