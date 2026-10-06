@@ -7,6 +7,7 @@ import {
   exportTaxEntry,
   taxEntryFileName,
   taxEntryGroupLabel,
+  taxIdentityLine,
   unmappedRevenue,
   type TaxEntryPayload,
   type TaxEntryRow,
@@ -65,10 +66,19 @@ const periodLabel = computed(() =>
   describeRange(new Date(props.periodFrom), new Date(props.periodTo)),
 );
 const taxpayer = computed(() => business.config?.name ?? "");
+/** MST + địa chỉ cho đầu tờ khai — Excel và bản in ghép từ cùng bộ này. */
+const taxCode = computed(() => business.config?.tax_code ?? "");
+const taxAddress = computed(() => business.config?.address || business.config?.location || "");
+/** Dòng "Mã số thuế: … — Địa chỉ: …" của bản in — dùng chung helper với Excel. */
+const taxIdentity = computed(() =>
+  taxIdentityLine({ taxCode: taxCode.value, address: taxAddress.value }),
+);
 const exportPayload = (): TaxEntryPayload => ({
   periodLabel: periodLabel.value,
   locationCode: locationCode.value,
   taxpayer: taxpayer.value,
+  taxCode: taxCode.value,
+  address: taxAddress.value,
   enabled: enabled.value,
   rows: rows.value.map((r) => ({ ...r })),
   unmapped: unmapped.value,
@@ -378,12 +388,15 @@ void (async () => {
   <!-- Bản in: ẩn trên màn hình, chỉ hiện khi body nhận class `print-tax-entry`. -->
   <Teleport to="body">
     <div class="tax-entry-print">
-      <h1>Chọn địa điểm kinh doanh cần kê khai doanh thu</h1>
+      <!-- Tiêu đề = tên hộ (data hồ sơ) — dòng placeholder "Chọn địa điểm kinh
+           doanh cần kê khai doanh thu" của portal chỉ đúng ở màn chọn, in ra
+           tờ khai thì vô nghĩa. -->
+      <h1>{{ taxpayer || "HỘ KINH DOANH" }}</h1>
+      <p v-if="taxIdentity" class="tax-entry-print-id">{{ taxIdentity }}</p>
       <p class="tax-entry-print-form">
         Mẫu số 01/CNKD — Tờ khai thuế đối với hộ kinh doanh, cá nhân kinh doanh
       </p>
       <p>Kỳ kê khai: {{ periodLabel }}</p>
-      <p v-if="taxpayer">Người nộp thuế: {{ taxpayer }}</p>
       <p class="tax-entry-print-sec">
         I. Hoạt động sản xuất, kinh doanh hàng hóa, cung cấp dịch vụ có địa điểm kinh doanh cố định
       </p>
@@ -444,7 +457,14 @@ void (async () => {
   margin: 5px 0;
 }
 
-/* Dòng nêu mã mẫu ngay dưới tiêu đề — người cầm bản in biết đây là mẫu nào. */
+/* Dòng MST + địa chỉ dưới tiêu đề — data hồ sơ HKD, cùng cách ghép với Excel. */
+.tax-entry-print-id {
+  margin: 0 0 4px;
+  font-size: 11pt;
+  text-align: center;
+}
+
+/* Dòng nêu mã mẫu trong khối đầu tờ khai — người cầm bản in biết đây là mẫu nào. */
 .tax-entry-print-form {
   margin: 0 0 10px;
   font-size: 11pt;

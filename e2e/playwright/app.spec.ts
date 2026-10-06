@@ -3179,6 +3179,35 @@ test("Tờ khai 01/CNKD: đủ 6 dòng cố định, ô sửa tay giữ qua tả
   await expect(page.getByTestId("tax-entry-table")).toHaveCount(0);
   await toggle.click();
   await expect(page.getByTestId("tax-entry-table")).toBeVisible();
+
+  // Đầu tờ khai lấy DATA HKD (tên + MST/địa chỉ) — không còn dòng placeholder
+  // "Chọn địa điểm kinh doanh cần kê khai doanh thu" chép từ portal.
+  const print = page.locator(".tax-entry-print");
+  await expect(print.locator("h1")).toHaveText("E2E TEST BUSINESS");
+  await expect(print).toContainText("Mã số thuế: 010000000000");
+  await expect(print).toContainText("Địa chỉ: 123 Lang Road, Hanoi");
+  await expect(print).not.toContainText("Chọn địa điểm kinh doanh cần kê khai doanh thu");
+
+  // Excel phải lấy CÙNG data — tải file về mở ra soi ô A1/A2.
+  const entryCard = page
+    .locator("div")
+    .filter({ has: page.getByTestId("tax-entry-table") })
+    .filter({ has: page.getByRole("button", { name: "Xuất Excel" }) })
+    .last();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    entryCard.getByRole("button", { name: "Xuất Excel" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^to-khai-ke-khai-.*\.xlsx$/);
+  const xlsxPath = await download.path();
+  expect(xlsxPath, "trình duyệt phải lưu file về").toBeTruthy();
+  const xlsx = XLSX.read(readFileSync(xlsxPath as string), { type: "buffer" });
+  const sheet = xlsx.Sheets[xlsx.SheetNames[0]];
+  const cell = (addr: string) => String(sheet[addr]?.v ?? "");
+  expect(cell("A1"), "A1 = tên HKD").toContain("E2E TEST BUSINESS");
+  expect(cell("A2"), "A2 = MST + địa chỉ").toBe(
+    "Mã số thuế: 010000000000 — Địa chỉ: 123 Lang Road, Hanoi",
+  );
 });
 
 /**

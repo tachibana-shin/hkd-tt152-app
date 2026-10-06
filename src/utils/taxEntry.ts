@@ -161,6 +161,10 @@ export interface TaxEntryExport {
   locationCode: string;
   /** Tên hộ / người nộp thuế. */
   taxpayer: string;
+  /** Mã số thuế của hộ — dòng nhận diện trên đầu tờ khai. */
+  taxCode: string;
+  /** Địa chỉ đăng ký kinh doanh — dòng nhận diện trên đầu tờ khai (trống thì bỏ). */
+  address: string;
   /**
    * Công tắc cạnh mã địa điểm trên cổng — tắt là **địa điểm này không tham
    * gia kê khai** kỳ này. Bản in/Excel phải ghi rõ trạng thái, không được ra
@@ -190,9 +194,25 @@ export function taxEntryFileName(fromIso: string, toIso: string): string {
 }
 
 /**
- * Dựng file `.xlsx` của tờ khai — bố cục đúng màn trên cổng: tiêu đề, mục I, mã
- * địa điểm kinh doanh, rồi bảng 3 cột 6 dòng. Không cộng thêm dòng tổng vì mẫu
- * gốc không có.
+ * Dòng nhận diện hộ kê khai — "Mã số thuế: … — Địa chỉ: …".
+ *
+ * Dùng chung cho Excel (`buildTaxEntryXlsx`) và bản in (`TaxEntryForm`) để
+ * hai bản không lệch nhau; phần hồ sơ chưa khai thì bỏ, không nhét placeholder.
+ */
+export function taxIdentityLine(o: { taxCode: string; address: string }): string {
+  const parts: string[] = [];
+  const tax = o.taxCode.trim();
+  const addr = o.address.trim();
+  if (tax) parts.push(`Mã số thuế: ${tax}`);
+  if (addr) parts.push(`Địa chỉ: ${addr}`);
+  return parts.join(" — ");
+}
+
+/**
+ * Dựng file `.xlsx` của tờ khai — đầu file lấy **data hồ sơ HKD** (tên hộ +
+ * mã số thuế / địa chỉ) thay dòng placeholder "Chọn địa điểm kinh doanh cần
+ * kê khai doanh thu" chép từ portal, rồi kỳ kê khai, mục I, mã địa điểm,
+ * bảng 3 cột 6 dòng. Không cộng thêm dòng tổng vì mẫu gốc không có.
  */
 export async function buildTaxEntryXlsx(o: TaxEntryExport): Promise<Blob> {
   const wb = new Workbook();
@@ -208,23 +228,25 @@ export async function buildTaxEntryXlsx(o: TaxEntryExport): Promise<Blob> {
     return c;
   };
 
-  mergeText(1, "CHỌN ĐỊA ĐIỂM KINH DOANH CẦN KÊ KHAI DOANH THU", true, 13);
-  mergeText(2, `Kỳ kê khai: ${o.periodLabel}`);
+  // Đầu file: tên hộ + MST/địa chỉ (data hồ sơ) — không phải dòng placeholder.
+  mergeText(1, o.taxpayer.trim() || "HỘ KINH DOANH", true, 13);
+  mergeText(2, taxIdentityLine(o));
+  mergeText(3, `Kỳ kê khai: ${o.periodLabel}`);
   mergeText(
-    3,
+    4,
     "I. Hoạt động sản xuất, kinh doanh hàng hóa, cung cấp dịch vụ có địa điểm kinh doanh cố định",
     true,
   );
   mergeText(
-    4,
+    5,
     o.enabled
       ? `1. ${o.locationCode} - ${o.taxpayer}`
       : `1. ${o.locationCode} - ${o.taxpayer} — KHÔNG KÊ KHAI ĐỊA ĐIỂM NÀY`,
   );
   ws.getRow(1).height = 22;
-  ws.getRow(3).height = 20;
+  ws.getRow(4).height = 20;
 
-  const head = ws.getRow(5);
+  const head = ws.getRow(6);
   head.values = [
     "Nhóm ngành nghề",
     "Doanh thu thuế giá trị gia tăng",
@@ -241,7 +263,7 @@ export async function buildTaxEntryXlsx(o: TaxEntryExport): Promise<Blob> {
   // Địa điểm bị tắt công tắc: ô doanh thu để TRỐNG chứ không phải 0 — 0 là số
   // liệu kê khai, trống mới là "không kê khai", không để nhầm lẫn khi nộp.
   o.rows.forEach((r, i) => {
-    const row = ws.getRow(6 + i);
+    const row = ws.getRow(7 + i);
     row.values = [
       taxEntryGroupLabel(r),
       o.enabled ? r.revenueVat : null,
@@ -271,7 +293,7 @@ export async function buildTaxEntryXlsx(o: TaxEntryExport): Promise<Blob> {
     );
   }
   notes.forEach((text, i) => {
-    const noteRow = 6 + o.rows.length + i;
+    const noteRow = 7 + o.rows.length + i;
     ws.mergeCells(noteRow, 1, noteRow, 3);
     const c = ws.getCell(noteRow, 1);
     c.value = text;
