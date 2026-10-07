@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.20.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.20.0...v0.20.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **hddt:** default the lookup check-result filter to All ([7d67957](https://github.com/tachibana-shin/hkd-tt152-app/commit/7d679578ee39c7e90be2436548a910664f0225c9)), closes [#1](https://github.com/tachibana-shin/hkd-tt152-app/issues/1)
+* **profile:** ask which profile to open at startup before auto login ([adf90f8](https://github.com/tachibana-shin/hkd-tt152-app/commit/adf90f8169a5a33909b9e173d0115a34862c1eeb)), closes [#2](https://github.com/tachibana-shin/hkd-tt152-app/issues/2)
+* **profile:** reject duplicate profile names on create and rename ([672fe0d](https://github.com/tachibana-shin/hkd-tt152-app/commit/672fe0dd02d560632cea538cb55f95f429509f2d)), closes [#2](https://github.com/tachibana-shin/hkd-tt152-app/issues/2)
+
 # [0.20.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.19.3...v0.20.0) (2026-10-06)
 
 
