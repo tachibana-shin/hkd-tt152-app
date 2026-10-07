@@ -362,13 +362,16 @@ const bizConfigVisible = ref(false);
           <i class="pi pi-info-circle shrink-0 text-sky-500" />
           <span>Dữ liệu riêng biệt; tài khoản quản trị mặc định <b>admin/admin123</b>.</span>
         </div>
-        <FormField label="Tên hồ sơ" required>
-          <InputText
-            v-model="newName"
-            class="w-full"
-            placeholder="vd: Tạp hóa Minh Anh — 268B Trần Phú"
-            @keyup.enter="doCreate"
-          />
+        <FormField label="Tên hồ sơ" required input-id="profile-create-name">
+          <template #default="{ inputId }">
+            <InputText
+              v-model="newName"
+              :id="inputId"
+              class="w-full"
+              placeholder="vd: Tạp hóa Minh Anh — 268B Trần Phú"
+              @keyup.enter="doCreate"
+            />
+          </template>
         </FormField>
       </div>
     </AppDialog>
@@ -382,8 +385,10 @@ const bizConfigVisible = ref(false);
       :saving="renaming"
       @action="doRename"
     >
-      <FormField label="Tên hồ sơ" required>
-        <InputText v-model="renameName" class="w-full" @keyup.enter="doRename" />
+      <FormField label="Tên hồ sơ" required input-id="profile-rename-name">
+        <template #default="{ inputId }">
+          <InputText v-model="renameName" :id="inputId" class="w-full" @keyup.enter="doRename" />
+        </template>
       </FormField>
     </AppDialog>
 
@@ -404,22 +409,28 @@ const bizConfigVisible = ref(false);
             được lưu trên máy này).</span
           >
         </div>
-        <FormField label="Tên đăng nhập" required>
-          <InputText
-            v-model="autoUsername"
-            class="w-full"
-            placeholder="admin"
-            @keyup.enter="doAutoLogin"
-          />
+        <FormField label="Tên đăng nhập" required input-id="profile-auto-username">
+          <template #default="{ inputId }">
+            <InputText
+              v-model="autoUsername"
+              :id="inputId"
+              class="w-full"
+              placeholder="admin"
+              @keyup.enter="doAutoLogin"
+            />
+          </template>
         </FormField>
-        <FormField label="Mật khẩu" required>
-          <InputText
-            v-model="autoPassword"
-            type="password"
-            class="w-full"
-            placeholder="••••••••"
-            @keyup.enter="doAutoLogin"
-          />
+        <FormField label="Mật khẩu" required input-id="profile-auto-password">
+          <template #default="{ inputId }">
+            <InputText
+              v-model="autoPassword"
+              :id="inputId"
+              type="password"
+              class="w-full"
+              placeholder="••••••••"
+              @keyup.enter="doAutoLogin"
+            />
+          </template>
         </FormField>
       </div>
     </AppDialog>

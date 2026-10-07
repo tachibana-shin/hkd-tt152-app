@@ -5198,3 +5198,87 @@ test("Tạo lô sản xuất: dropdown thành phẩm chỉ hiện hàng có đ�
     page.getByTestId("lot-preview-table").getByText(/Bottled water \(SP001\)/),
   ).toBeVisible();
 });
+
+test("Hồ sơ HKD: chặn trùng tên + hỏi chọn hồ sơ khi máy có nhiều hồ sơ", async ({
+  page,
+  request,
+}) => {
+  const TEMP_NAME = "E2E PICKER";
+  let tempKey = "";
+
+  // ── 1) Tạo hồ sơ tạm, rồi thử tạo lại CÙNG TÊN (khác hoa/thường) → backend chặn ──
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hồ sơ HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Hồ sơ HKD");
+
+  const createDlg = page.getByRole("dialog", { name: "Tạo hồ sơ HKD mới" });
+  await page.getByRole("button", { name: "Tạo hồ sơ mới", exact: true }).click();
+  await createDlg.getByLabel("Tên hồ sơ").fill(TEMP_NAME);
+  await createDlg.getByRole("button", { name: "Tạo hồ sơ", exact: true }).click();
+  await expect(page.getByText("Đã tạo hồ sơ")).toBeVisible({ timeout: 30_000 });
+
+  try {
+    await page.getByRole("button", { name: "Tạo hồ sơ mới", exact: true }).click();
+    await createDlg.getByLabel("Tên hồ sơ").fill(TEMP_NAME.toLowerCase());
+    await createDlg.getByRole("button", { name: "Tạo hồ sơ", exact: true }).click();
+    // Không tạo được → dialog mở + toast nói rõ tên đã tồn tại.
+    await expect(createDlg).toBeVisible();
+    await expect(page.getByText(/đã tồn tại/)).toBeVisible();
+    await createDlg.getByRole("button", { name: "Hủy", exact: true }).click();
+
+    // Bật auto-login cho hồ sơ TẠM (không phải hồ sơ đang mở) — đúng tình huống
+    // từng bug: app tự auto-login hồ sơ "gần nhất" mà không hỏi người dùng.
+    const profilesRes = await request.post("/api/get_profiles", { data: {} });
+    const profiles = JSON.parse(await profilesRes.text()) as Array<{
+      key: string;
+      name: string;
+    }>;
+    tempKey = profiles.find((p) => p.name === TEMP_NAME)?.key ?? "";
+    expect(tempKey, "phải có hồ sơ tạm sau khi tạo").not.toBe("");
+    const prefRes = await request.post("/api/save_profile_pref", {
+      data: {
+        key: tempKey,
+        prefs: {
+          last_username: ADMIN.username,
+          auto_login: true,
+          username: ADMIN.username,
+          password: ADMIN.password,
+        },
+      },
+    });
+    expect(prefRes.ok(), await prefRes.text()).toBe(true);
+
+    // ── 2) Mở app khi CHƯA đăng nhập, máy có2 hồ sơ → PHẢI hỏi chọn hồ sơ
+    //    (không auto-login ngay vào hồ sơ vừa cấu hình) ──
+    await request.post("/api/logout", { data: {} });
+    await page.goto("/");
+    await expect(page.getByText("Chọn hồ sơ để tiếp tục")).toBeVisible({ timeout: 30_000 });
+
+    // Chọn hồ sơ KHÔNG có auto-login → về màn đăng nhập, không tự vào app.
+    await page.getByRole("button", { name: /HKD mặc định/ }).click();
+    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 20_000 });
+
+    // ── 3) Chọn hồ sơ CÓ auto-login → vào thẳng app, không qua màn đăng nhập ──
+    await page.goto("/");
+    await expect(page.getByText("Chọn hồ sơ để tiếp tục")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: new RegExp(TEMP_NAME) }).click();
+    await expect(page.locator("header h2")).toHaveText("Tổng quan", { timeout: 30_000 });
+    await expect(page.getByTestId("login-username")).toBeHidden();
+  } finally {
+    // ── 4) Dọn: về hồ sơ mặc định rồi xóa hồ sơ tạm — để các test sau
+    //    không dính màn chọn hồ sơ (máy phải luôn còn đúng1 hồ sơ) ──
+    await request.post("/api/logout", { data: {} });
+    await request.post("/api/select_profile", { data: { key: "default" } });
+    await request.post("/api/login", { data: ADMIN });
+    if (tempKey) {
+      const del = await request.post("/api/delete_profile", { data: { key: tempKey } });
+      expect(del.ok(), `xóa hồ sơ tạm thất bại: ${await del.text()}`).toBe(true);
+    }
+    await request.post("/api/logout", { data: {} });
+  }
+
+  // Còn1 hồ sơ → mở app đi thẳng màn đăng nhập, không hiện chọn hồ sơ nữa.
+  await page.goto("/");
+  await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Chọn hồ sơ để tiếp tục")).toBeHidden();
+});
