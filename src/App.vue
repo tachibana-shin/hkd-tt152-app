@@ -51,10 +51,36 @@ function closeSidebar() {
   if (drawerMode.value) sidebarOpen.value = false;
 }
 
-// Luồng khởi động: nạp hồ sơ + prefs → thử auto-login → chọn hồ sơ (nhiều hồ sơ)
-// → màn hình đăng nhập. `bootstrapped` giữ màn chờ cho tới khi hoàn tất.
+// Luồng khởi động: nạp hồ sơ + prefs → máy nhiều hồ sơ HỎI chọn hồ sơ trước
+// (auto-login chỉ chạy cho đúng hồ sơ người dùng chọn); máy 1 hồ sơ thì auto-login
+// luôn nếu hồ sơ đó có cấu hình. `bootstrapped` giữ màn chờ cho tới khi hoàn tất.
 const bootstrapped = ref(false);
 const showPicker = ref(false);
+
+/** Tự động đăng nhập 1 hồ sơ — không cấu hình thì bỏ qua, sai mật khẩu thì
+ *  tắt auto-login của hồ sơ đó (tránh lặp lỗi mỗi lần mở app). */
+async function autoLogin(target: { key: string; username: string; password: string } | null) {
+  if (!target) return;
+  try {
+    if (profile.active?.key !== target.key) {
+      await profile.select(target.key);
+    }
+    await auth.login(target.username, target.password);
+  } catch {
+    // Sai mật khẩu / tài khoản bị khóa → bỏ cấu hình auto-login.
+    try {
+      await profile.setAutoLogin(target.key, false);
+    } catch {
+      /* bỏ qua */
+    }
+    toast.add({
+      severity: "warn",
+      summary: "Tự động đăng nhập thất bại",
+      detail: "Đã tắt tự động đăng nhập của hồ sơ này — đăng nhập lại để dùng.",
+      life: 6000,
+    });
+  }
+}
 
 async function bootstrap() {
   // Đổi hồ sơ từ màn Hồ sơ HKD reload cả app → vào thẳng màn hình đăng nhập
@@ -64,26 +90,13 @@ async function bootstrap() {
 
   await Promise.all([auth.load(), profile.load(), profile.loadPrefs()]);
 
-  if (!enterLoginDirectly) {
-    const target = profile.autoLoginTarget;
-    if (target) {
-      try {
-        if (profile.active?.key !== target.key) {
-          await profile.select(target.key);
-        }
-        await auth.login(target.username, target.password);
-      } catch {
-        // Sai mật khẩu / tài khoản bị khóa → bỏ cấu hình auto-login.
-        try {
-          await profile.setAutoLogin(target.key, false);
-        } catch {
-          /* bỏ qua */
-        }
-      }
-    }
-    // Chưa đăng nhập & máy có nhiều hồ sơ → màn chọn hồ sơ (kiểu Chrome).
-    if (!auth.isLoggedIn && profile.profiles.length > 1) {
+  if (!enterLoginDirectly && !auth.isLoggedIn) {
+    if (profile.profiles.length > 1) {
+      // Nhiều hồ sơ → hỏi người dùng vào hồ sơ nào, KHÔNG tự đoán "hồ sơ gần
+      // nhất". Hồ sơ được chọn có auto-login thì login ngay ở `onPickProfile`.
       showPicker.value = true;
+    } else {
+      await autoLogin(profile.autoLoginTarget);
     }
   }
   bootstrapped.value = true;
@@ -116,7 +129,6 @@ async function ensurePortalSession() {
 async function onPickProfile(key: string) {
   try {
     await profile.select(key);
-    showPicker.value = false; // LoginView sẽ hiển thị với hồ sơ vừa chọn
   } catch (e) {
     toast.add({
       severity: "error",
@@ -124,7 +136,15 @@ async function onPickProfile(key: string) {
       detail: String(e),
       life: 4000,
     });
+    return;
   }
+  // Hồ sơ được chọn có tự động đăng nhập → vào thẳng app; không có → màn đăng nhập.
+  // (Chỉ hồ sơ ĐƯỢC CHỌN mới auto-login, không phải hồ sơ vừa dùng gần nhất.)
+  const pref = profile.prefsOf(key);
+  if (pref.auto_login && pref.username && pref.password) {
+    await autoLogin({ key, username: pref.username, password: pref.password });
+  }
+  showPicker.value = false; // LoginView sẽ hiển thị nếu hồ sơ này chưa đăng nhập
 }
 
 // ─── Cổng thông tin hộ kinh doanh ───

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * Màn hình chọn hồ sơ lúc khởi động (kiểu Google Chrome profile picker):
- * hiện khi máy có NHIỀU hồ sơ HKD và chưa đăng nhập. Chọn hồ sơ nào thì vào
- * màn hình đăng nhập của hồ sơ đó.
+ * hiện khi máy có NHIỀU hồ sơ HKD và chưa đăng nhập — hỏi người dùng vào hồ
+ * sơ nào thay vì tự chọn hồ sơ gần nhất. Chọn hồ sơ nào thì vào hồ sơ đó;
+ * hồ sơ có bật tự động đăng nhập thì vào thẳng app, không qua màn đăng nhập.
  */
 import type { Profile } from "@/types";
 

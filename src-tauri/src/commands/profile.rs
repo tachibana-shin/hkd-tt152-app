@@ -162,6 +162,46 @@ fn unique_key() -> String {
     format!("p{}_{:04x}", now_secs(), n & 0xffff)
 }
 
+/// Tên các hồ sơ đã có trên máy (trừ `exclude_key`) — chỉ tính thư mục có
+/// `hkd.db`, đúng bộ hồ sơ mà `get_profiles` liệt kê ở UI.
+fn existing_profile_names(dir: &Path, exclude_key: Option<&str>) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let key = e.file_name().to_string_lossy().to_string();
+            if exclude_key == Some(key.as_str()) {
+                continue;
+            }
+            let pdir = e.path();
+            if !pdir.join("hkd.db").is_file() {
+                continue;
+            }
+            names.push(profile_name(&pdir, &key));
+        }
+    }
+    names
+}
+
+/// Chặn tạo/đổi tên hồ sơ trùng tên hồ sơ đã có (không phân biệt hoa/thường):
+/// hai hồ sơ cùng tên thì người dùng không phân biệt được ở màn chọn hồ sơ
+/// lúc khởi động. `exclude_key` = hồ sơ đang giữ tên đó (dùng khi đổi tên).
+fn ensure_profile_name_free(
+    dir: &Path,
+    name: &str,
+    exclude_key: Option<&str>,
+) -> Result<(), String> {
+    let lower = name.to_lowercase();
+    if existing_profile_names(dir, exclude_key)
+        .iter()
+        .any(|n| n.to_lowercase() == lower)
+    {
+        return Err(format!(
+            "Tên hồ sơ \"{name}\" đã tồn tại. Hãy chọn tên khác."
+        ));
+    }
+    Ok(())
+}
+
 // ─── Commands ───
 
 /// Danh sách hồ sơ HKD trên máy (mỗi hồ sơ = 1 folder chứa hkd.db) + hồ sơ đang mở.
@@ -204,6 +244,7 @@ pub(crate) async fn create_profile(
     if name.is_empty() || name.len() > 60 {
         return Err("Tên hồ sơ phải có 1–60 ký tự".into());
     }
+    ensure_profile_name_free(&profiles_dir(&app), &name, None)?;
     let key = unique_key();
     let dir = profile_dir(&app, &key);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -242,6 +283,7 @@ pub(crate) async fn rename_profile(
     if !dir.join("hkd.db").is_file() {
         return Err("Hồ sơ không tồn tại".into());
     }
+    ensure_profile_name_free(&profiles_dir(&app), &name, Some(&key))?;
     write_profile_meta(&dir, &name);
     // Nếu đang mở → cập nhật luôn file active để tên hiển thị ở màn hình đăng nhập
     let app_dir = app_data_dir(&app)?;
@@ -397,4 +439,55 @@ pub(crate) async fn select_profile(
     *state.pool.write().await = new_pool;
 
     Ok(json!({ "ok": true, "key": key, "name": name, "active": true }).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Thư mục `profiles/` tạm cho test (xong thì tự dọn).
+    fn temp_profiles(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("hkd-profile-test-{tag}-{}", unique_key()));
+        std::fs::create_dir_all(&dir).expect("tạo thư mục test");
+        dir
+    }
+
+    /// Giả lập 1 hồ sơ: `profile.json` + `hkd.db` (điều kiện để được liệt kê).
+    fn add_profile(dir: &Path, key: &str, name: &str) {
+        let pdir = dir.join(key);
+        std::fs::create_dir_all(&pdir).expect("tạo thư mục hồ sơ test");
+        write_profile_meta(&pdir, name);
+        std::fs::write(pdir.join("hkd.db"), b"").expect("tạo hkd.db test");
+    }
+
+    #[test]
+    fn ten_ho_so_trung_bi_tu_choi_khi_tao_va_doi_ten() {
+        let dir = temp_profiles("dup");
+        add_profile(&dir, "p1", "Tạp hóa Minh Anh");
+
+        // Tạo mới trùng tên (kể cả khác hoa/thường) → từ chối.
+        assert!(ensure_profile_name_free(&dir, "Tạp hóa Minh Anh", None).is_err());
+        assert!(ensure_profile_name_free(&dir, "tạp hóa MINH anh", None).is_err());
+        // Hồ sơ khác tên → cho qua.
+        assert!(ensure_profile_name_free(&dir, "Tạp hóa An Nam", None).is_ok());
+        // Đổi tên chính nó giữ nguyên tên cũ → vẫn cho qua (`exclude_key`).
+        assert!(ensure_profile_name_free(&dir, "Tạp hóa Minh Anh", Some("p1")).is_ok());
+        // Đổi tên sang tên của hồ sơ khác → từ chối.
+        add_profile(&dir, "p2", "Nhà thuốc Tiên Phượng");
+        assert!(ensure_profile_name_free(&dir, "Nhà thuốc Tiên Phượng", Some("p1")).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn thu_muc_khong_co_hkd_khong_phai_la_ho_so() {
+        let dir = temp_profiles("nodb");
+        // Thư mục rác (chỉ có profile.json, thiếu hkd.db) không được chặn tên.
+        let pdir = dir.join("junk");
+        std::fs::create_dir_all(&pdir).expect("tạo thư mục rác test");
+        write_profile_meta(&pdir, "Tên Bị Bỏ Quên");
+        assert!(ensure_profile_name_free(&dir, "Tên Bị Bỏ Quên", None).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

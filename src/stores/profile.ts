@@ -66,8 +66,10 @@ export const useProfileStore = defineStore("profile", () => {
   }
 
   /**
-   * Hồ sơ cần tự động đăng nhập khi khởi động (có lưu tài khoản + mật khẩu):
-   * ưu tiên hồ sơ đang mở; nếu không, chỉ tự đăng nhập khi chỉ đúng 1 hồ sơ
+   * Hồ sơ tự động đăng nhập khi khởi động (có lưu tài khoản + mật khẩu) —
+   * chỉ dùng cho máy có 1 hồ sơ (máy nhiều hồ sơ sẽ hiện màn chọn hồ sơ trước,
+   * auto-login chạy cho đúng hồ sơ người dùng chọn). Ưu tiên hồ sơ đang mở;
+   * nếu hồ sơ đang mở không cấu hình thì chỉ tự đăng nhập khi đúng 1 hồ sơ
    * cấu hình auto-login (tránh đoán mò khi có nhiều).
    */
   const autoLoginTarget = computed<{

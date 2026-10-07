@@ -2324,7 +2324,7 @@ test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đ
   // Sang "mua vào": bộ lọc phải là bộ mặc định của ô đó, không kế thừa ô trước.
   await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
   await expect(soHoaDon).toHaveValue("");
-  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
+  await expect(ttxlySelect(page)).toContainText("Tất cả");
 
   // Quay lại "bán ra" → nhớ đúng giá trị đã đặt.
   await page.getByRole("tab", { name: /Hóa đơn ra/ }).click();
@@ -2398,11 +2398,14 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeHidden();
   // Nhãn đối tác đổi theo hướng tra cứu.
   await expect(page.getByText("MST người bán", { exact: true })).toBeVisible();
-  // Mặc định của cổng: "Kết quả kiểm tra" = Đã cấp mã hóa đơn (ttxly==5).
-  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
+  // Mặc định của mọi ô: "Kết quả kiểm tra" = Tất cả — tra cứu không ẩn hóa đơn
+  // (hóa đơn vào từ máy tính tiền không mang ttxly==5 nên từng mất hút).
+  await expect(ttxlySelect(page)).toContainText("Tất cả");
 
-  // Mỗi ô tab giữ bộ lọc riêng: quay lại "bán ra" phải là "Tất cả", không phải
-  // "Đã cấp mã hóa đơn" của ô vừa rời; sang lại "mua vào" thì vẫn "Đã cấp mã".
+  // Mỗi ô tab giữ bộ lọc riêng: đổi ô "mua vào" sang "Đã cấp mã" rồi quay lại
+  // "bán ra" vẫn là "Tất cả"; sang lại "mua vào" thì vẫn nhớ "Đã cấp mã".
+  await ttxlySelect(page).click();
+  await page.getByRole("option", { name: "Đã cấp mã hóa đơn", exact: true }).click();
   await page.getByRole("tab", { name: /Hóa đơn ra/ }).click();
   await expect(ttxlySelect(page)).toContainText("Tất cả");
   await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
@@ -5194,4 +5197,88 @@ test("Tạo lô sản xuất: dropdown thành phẩm chỉ hiện hàng có đ�
   await expect(
     page.getByTestId("lot-preview-table").getByText(/Bottled water \(SP001\)/),
   ).toBeVisible();
+});
+
+test("Hồ sơ HKD: chặn trùng tên + hỏi chọn hồ sơ khi máy có nhiều hồ sơ", async ({
+  page,
+  request,
+}) => {
+  const TEMP_NAME = "E2E PICKER";
+  let tempKey = "";
+
+  // ── 1) Tạo hồ sơ tạm, rồi thử tạo lại CÙNG TÊN (khác hoa/thường) → backend chặn ──
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hồ sơ HKD").click();
+  await expect(page.locator("header h2")).toHaveText("Hồ sơ HKD");
+
+  const createDlg = page.getByRole("dialog", { name: "Tạo hồ sơ HKD mới" });
+  await page.getByRole("button", { name: "Tạo hồ sơ mới", exact: true }).click();
+  await createDlg.getByLabel("Tên hồ sơ").fill(TEMP_NAME);
+  await createDlg.getByRole("button", { name: "Tạo hồ sơ", exact: true }).click();
+  await expect(page.getByText("Đã tạo hồ sơ")).toBeVisible({ timeout: 30_000 });
+
+  try {
+    await page.getByRole("button", { name: "Tạo hồ sơ mới", exact: true }).click();
+    await createDlg.getByLabel("Tên hồ sơ").fill(TEMP_NAME.toLowerCase());
+    await createDlg.getByRole("button", { name: "Tạo hồ sơ", exact: true }).click();
+    // Không tạo được → dialog mở + toast nói rõ tên đã tồn tại.
+    await expect(createDlg).toBeVisible();
+    await expect(page.getByText(/đã tồn tại/)).toBeVisible();
+    await createDlg.getByRole("button", { name: "Hủy", exact: true }).click();
+
+    // Bật auto-login cho hồ sơ TẠM (không phải hồ sơ đang mở) — đúng tình huống
+    // từng bug: app tự auto-login hồ sơ "gần nhất" mà không hỏi người dùng.
+    const profilesRes = await request.post("/api/get_profiles", { data: {} });
+    const profiles = JSON.parse(await profilesRes.text()) as Array<{
+      key: string;
+      name: string;
+    }>;
+    tempKey = profiles.find((p) => p.name === TEMP_NAME)?.key ?? "";
+    expect(tempKey, "phải có hồ sơ tạm sau khi tạo").not.toBe("");
+    const prefRes = await request.post("/api/save_profile_pref", {
+      data: {
+        key: tempKey,
+        prefs: {
+          last_username: ADMIN.username,
+          auto_login: true,
+          username: ADMIN.username,
+          password: ADMIN.password,
+        },
+      },
+    });
+    expect(prefRes.ok(), await prefRes.text()).toBe(true);
+
+    // ── 2) Mở app khi CHƯA đăng nhập, máy có2 hồ sơ → PHẢI hỏi chọn hồ sơ
+    //    (không auto-login ngay vào hồ sơ vừa cấu hình) ──
+    await request.post("/api/logout", { data: {} });
+    await page.goto("/");
+    await expect(page.getByText("Chọn hồ sơ để tiếp tục")).toBeVisible({ timeout: 30_000 });
+
+    // Chọn hồ sơ KHÔNG có auto-login → về màn đăng nhập, không tự vào app.
+    await page.getByRole("button", { name: /HKD mặc định/ }).click();
+    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 20_000 });
+
+    // ── 3) Chọn hồ sơ CÓ auto-login → vào thẳng app, không qua màn đăng nhập ──
+    await page.goto("/");
+    await expect(page.getByText("Chọn hồ sơ để tiếp tục")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: new RegExp(TEMP_NAME) }).click();
+    await expect(page.locator("header h2")).toHaveText("Tổng quan", { timeout: 30_000 });
+    await expect(page.getByTestId("login-username")).toBeHidden();
+  } finally {
+    // ── 4) Dọn: về hồ sơ mặc định rồi xóa hồ sơ tạm — để các test sau
+    //    không dính màn chọn hồ sơ (máy phải luôn còn đúng1 hồ sơ) ──
+    await request.post("/api/logout", { data: {} });
+    await request.post("/api/select_profile", { data: { key: "default" } });
+    await request.post("/api/login", { data: ADMIN });
+    if (tempKey) {
+      const del = await request.post("/api/delete_profile", { data: { key: tempKey } });
+      expect(del.ok(), `xóa hồ sơ tạm thất bại: ${await del.text()}`).toBe(true);
+    }
+    await request.post("/api/logout", { data: {} });
+  }
+
+  // Còn1 hồ sơ → mở app đi thẳng màn đăng nhập, không hiện chọn hồ sơ nữa.
+  await page.goto("/");
+  await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Chọn hồ sơ để tiếp tục")).toBeHidden();
 });
