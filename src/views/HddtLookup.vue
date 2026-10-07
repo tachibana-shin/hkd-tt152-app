@@ -41,7 +41,7 @@ const pageSize = ref(15);
 // ─── Bộ lọc nhớ theo từng ô tab ───
 // 2 tầng chọn = 4 ô (ra/vào × điện tử/máy tính tiền), mỗi ô gọi một endpoint
 // riêng. Ô nào cũng giữ bộ lọc của riêng nó, nên quay lại tab "bán ra" sau khi
-// sang "mua vào" không bị kế thừa "Kết quả kiểm tra = Đã cấp mã" của tab kia.
+// sang "mua vào" không bị kế thừa "Kết quả kiểm tra" của tab kia.
 interface TabFilters {
   from: Date | null;
   to: Date | null;
@@ -55,7 +55,7 @@ interface TabFilters {
   unhiem: boolean;
 }
 
-const filters = ref<TabFilters>(defaultFilters("sold"));
+const filters = ref<TabFilters>(defaultFilters());
 /** Bộ lọc đã dùng của từng ô, khóa `${hướng}:${loại}`. */
 const filtersByCell = new Map<string, TabFilters>();
 
@@ -63,15 +63,18 @@ function cellKey(direction: HddtInvoiceDirection, kind: HddtInvoiceKind) {
   return `${direction}:${kind}`;
 }
 
-/** Bộ lọc mặc định của một ô: mặc định "Kết quả kiểm tra" theo hướng của cổng —
- *  hóa đơn vào = "Đã cấp mã hóa đơn" (5), hóa đơn ra = "Tất cả". */
-function defaultFilters(direction: HddtInvoiceDirection): TabFilters {
+/** Bộ lọc mặc định của một ô: "Kết quả kiểm tra" = "Tất cả" — tra cứu là màn
+ *  xem dữ liệu, không được ẩn hóa đơn đi. Mặc định "Đã cấp mã hóa đơn" (5) của
+ *  cổng từng làm hóa đơn vào từ máy tính tiền biến mất (chúng không mang ttxly==5)
+ *  — muốn thấy phải tự đổi sang "Tất cả". Đồng bộ HĐĐT cũng kéo về (-1) để
+ *  không bỏ sót HĐ. */
+function defaultFilters(): TabFilters {
   const { from, to } = defaultRange();
   return {
     from,
     to,
     tthai: "0",
-    ttxly: direction === "purchase" ? "5" : HDDT_TTXLY_ALL,
+    ttxly: HDDT_TTXLY_ALL,
     khmshdon: "",
     khhdon: "",
     shdon: "",
@@ -87,7 +90,7 @@ function switchCell(next: { direction?: HddtInvoiceDirection; kind?: HddtInvoice
   if (next.direction) searchDirection.value = next.direction;
   if (next.kind) searchKind.value = next.kind;
   const key = cellKey(searchDirection.value, searchKind.value);
-  filters.value = filtersByCell.get(key) ?? defaultFilters(searchDirection.value);
+  filters.value = filtersByCell.get(key) ?? defaultFilters();
   // Kết quả cũ thuộc endpoint khác → xoá để không lẫn kết quả.
   resetSearchResults();
 }
@@ -280,7 +283,7 @@ async function onPrevPage() {
 
 /** Bấm "Bỏ tìm kiếm" → về bộ lọc mặc định của ô tab đang chọn. */
 function onResetSearch() {
-  filters.value = defaultFilters(searchDirection.value);
+  filters.value = defaultFilters();
 }
 
 /** Có trang sau không: pageIdx chưa tới cuối stack, hoặc chưa lấy hết. */

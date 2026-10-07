@@ -2324,7 +2324,7 @@ test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đ
   // Sang "mua vào": bộ lọc phải là bộ mặc định của ô đó, không kế thừa ô trước.
   await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
   await expect(soHoaDon).toHaveValue("");
-  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
+  await expect(ttxlySelect(page)).toContainText("Tất cả");
 
   // Quay lại "bán ra" → nhớ đúng giá trị đã đặt.
   await page.getByRole("tab", { name: /Hóa đơn ra/ }).click();
@@ -2398,11 +2398,14 @@ test("HĐĐT đổi sang hóa đơn vào xóa kết quả tab trước và mặc
   await expect(page.getByText(/Có \d[\d.]* kết quả/)).toBeHidden();
   // Nhãn đối tác đổi theo hướng tra cứu.
   await expect(page.getByText("MST người bán", { exact: true })).toBeVisible();
-  // Mặc định của cổng: "Kết quả kiểm tra" = Đã cấp mã hóa đơn (ttxly==5).
-  await expect(ttxlySelect(page)).toContainText("Đã cấp mã hóa đơn");
+  // Mặc định của mọi ô: "Kết quả kiểm tra" = Tất cả — tra cứu không ẩn hóa đơn
+  // (hóa đơn vào từ máy tính tiền không mang ttxly==5 nên từng mất hút).
+  await expect(ttxlySelect(page)).toContainText("Tất cả");
 
-  // Mỗi ô tab giữ bộ lọc riêng: quay lại "bán ra" phải là "Tất cả", không phải
-  // "Đã cấp mã hóa đơn" của ô vừa rời; sang lại "mua vào" thì vẫn "Đã cấp mã".
+  // Mỗi ô tab giữ bộ lọc riêng: đổi ô "mua vào" sang "Đã cấp mã" rồi quay lại
+  // "bán ra" vẫn là "Tất cả"; sang lại "mua vào" thì vẫn nhớ "Đã cấp mã".
+  await ttxlySelect(page).click();
+  await page.getByRole("option", { name: "Đã cấp mã hóa đơn", exact: true }).click();
   await page.getByRole("tab", { name: /Hóa đơn ra/ }).click();
   await expect(ttxlySelect(page)).toContainText("Tất cả");
   await page.getByRole("tab", { name: /Hóa đơn vào/ }).click();
