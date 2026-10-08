@@ -596,6 +596,8 @@ useKeepAliveRefresh(reload);
         phiếu thường.
       </p>
 
+      <!-- Nhập kho đang TĂNG tồn → tắt cảnh báo "Thiếu" của bảng dòng; riêng
+           điều chỉnh hướng "Giảm (trả lại NCC)" mới bật lại. -->
       <LineItemsEditor
         :items="form.items"
         :products="products"
@@ -605,11 +607,12 @@ useKeepAliveRefresh(reload);
         compact
         show-add-product
         show-discount
+        :warn-shortage="form.inbound_type === 'adjust' && form.adjust_dir === 'down'"
         :total-label="form.inbound_type === 'purchase' ? 'Giá trị nhập kho:' : 'Tổng tiền:'"
         @add="addRow"
         @remove="removeRow"
       >
-        <!-- Nhập hàng từ Excel: cột Tên · ĐVT · Số lượng · Tổng tiền, thiếu hàng tự tạo mới. -->
+        <!-- Nhập hàng từ Excel: tự dò cột (sửa tay được — file TT88 không có tiêu đề), thiếu hàng tự tạo mới. -->
         <template #actions>
           <Button
             v-if="auth.canStock"
@@ -624,7 +627,7 @@ useKeepAliveRefresh(reload);
       </LineItemsEditor>
     </AppDialog>
 
-    <!-- Xem trước file Excel rồi thêm hàng loạt vào phiếu (phân trang vì file có thể vài nghìn dòng) -->
+    <!-- Chọn cột → xem trước file (phân trang vì file có thể vài nghìn dòng) rồi thêm hàng loạt -->
     <InboundExcelDialog
       v-model:visible="excelVisible"
       :products="products"

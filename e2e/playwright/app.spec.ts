@@ -4963,6 +4963,137 @@ test("Nhập kho: nhập Excel — preview phân trang, tự tạo mặt hàng m
   expect(created?.unit).toBe("Cái");
 });
 
+// ─── NHẬP FILE PHỤ LỤC TỒN KHO TT88 — FILE KHÔNG CÓ TIÊU ĐỀ CHUẨN → CHỌN CỘT TAY ───
+// File "Phụ lục bảng kê hoạt động kinh doanh" của phần mềm kế toán TT88: tiêu
+// đề gộp ô nhiều hàng + mã cột [06]…[15], tên hàng ở cột C, dữ liệu từ hàng 7.
+// Khối số liệu có 4 NHÓM cột (Số dư đầu kỳ / Nhập / Xuất / Tồn cuối kỳ):
+//   · mặc định lấy nhóm ĐANG CÓ số liệu, ưu tiên "Nhập trong kỳ";
+//   · đổi nhóm ở ô chọn → preview đổi theo, VÙNG DỮ LIỆU VẪN LÀ HÀNG 7;
+//   · kỳ nhập bằng 0 (file thuần xuất) → rơi về "Số dư đầu kỳ".
+// Tên chưa có trong danh mục vẫn tự tạo mới kèm ĐVT.
+test("Nhập kho: file phụ lục tồn kho TT88 — chọn cột tay, đổi nhóm số liệu", async ({
+  page,
+  request,
+}) => {
+  const header: unknown[][] = [
+    [""],
+    ["", "PHỤ LỤC\r\nBẢNG KÊ HOẠT ĐỘNG KINH DOANH TRONG KỲ CỦA HỘ KINH DOANH, CÁ NHÂN KINH DOANH"],
+    [""],
+    [
+      "",
+      "STT",
+      "Vật liệu, dụng cụ, sản phẩm, hàng hóa/ Nhóm hàng hóa",
+      "Đơn vị tính của vật liệu, dụng cụ, sản phẩm, hàng hoá",
+      "Số dư đầu kỳ",
+      "",
+      "Nhập trong kỳ",
+      "",
+      "Xuất trong kỳ",
+      "",
+      "Tồn cuối kỳ",
+      "",
+    ],
+    [
+      "",
+      "",
+      "",
+      "",
+      "Số lượng",
+      "Thành tiền",
+      "Số lượng",
+      "Thành tiền",
+      "Số lượng",
+      "Thành tiền",
+      "Số lượng",
+      "Thành tiền",
+    ],
+    ["", "", "[06]", "[07]", "[08]", "[09]", "[10]", "[11]", "[12]", "[13]", "[14]", "[15]"],
+  ];
+  const toXlsx = (rows: unknown[][]) => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Sheet1");
+    return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  };
+
+  // File A — cột: STT · Tên · ĐVT · SL/Tiền đầu kỳ · SL/Tiền nhập · SL/Tiền xuất · SL/Tiền tồn.
+  const fileA = toXlsx([
+    ...header,
+    ["", 0, "Bột mì T152 A", "Kg", 10, 100_000, 0, 0, 2, 20_000, 8, 80_000],
+    ["", 0, "Đường trắng T152", "Kg", 5, 50_000, 0, 0, 0, 0, 5, 50_000],
+    ["", 0, "Sữa đặc T152", "Thùng", 0, 0, 3, 300_000, 1, 100_000, 2, 200_000],
+  ]);
+  // File B — kỳ nhập bằng 0 (như file thật của người dùng) + số dư đầu kỳ dòng
+  // "Đường trắng" lên 60.000 đ → tổng 160.000 đ, khác hẳn 150.000 đ của file A
+  // để chắc file B được đọc thật chứ không phải preview cũ còn sót.
+  const fileB = toXlsx([
+    ...header,
+    ["", 0, "Bột mì T152 A", "Kg", 10, 100_000, 0, 0, 2, 20_000, 8, 80_000],
+    ["", 0, "Đường trắng T152", "Kg", 6, 60_000, 0, 0, 0, 0, 6, 60_000],
+    ["", 0, "Sữa đặc T152", "Thùng", 0, 0, 0, 0, 1, 100_000, 2, 200_000],
+  ]);
+
+  await ensureLoggedIn(page);
+  await openTab(page, "Nhập kho", "/inbound");
+  await page.getByRole("button", { name: "Tạo phiếu nhập" }).click();
+  await page.getByTestId("inbound-excel-open").click();
+  const xlsx = page.getByRole("dialog", { name: "Nhập hàng từ Excel" });
+  await expect(xlsx).toBeVisible();
+  const summary = xlsx.getByTestId("excel-preview-summary");
+  const detail = xlsx.getByTestId("excel-mapping-detail");
+  // PrimeVue Select không phải <select> thường → mở popup qua label[for] + ô chọn.
+  const groupSelect = xlsx.locator('label[for="excel-map-group"] + div');
+  const upload = (buffer: Buffer, name: string) =>
+    page.getByTestId("inbound-excel-file").setInputFiles({
+      name,
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer,
+    });
+
+  // File A: tự dò cột C/D/E/F + vùng dữ liệu từ hàng 7; kỳ này CÓ nhập phát sinh
+  // → mặc định nhóm "Nhập trong kỳ" (1 dòng, cột G/H).
+  await upload(fileA, "Xuat_01_1_a.xlsx");
+  await expect(summary).toContainText("1 dòng", { timeout: 20_000 });
+  await expect(summary).toContainText("Tổng tiền: 300.000 đ");
+  await expect(groupSelect).toContainText("Nhập trong kỳ");
+  await expect(detail).toContainText("Đọc cột C (tên) · D (ĐVT) · G (số lượng) · H (thành tiền)");
+  await expect(detail).toContainText("dữ liệu từ dòng 7");
+
+  // Đổi nhóm sang "Số dư đầu kỳ" → 2 dòng có số dư (dòng thiếu số dư bị bỏ qua);
+  // đổi nhóm KHÔNG được làm vùng dữ liệu nhảy xuống giữa file.
+  await groupSelect.click();
+  await page.getByRole("option", { name: "Số dư đầu kỳ", exact: true }).click();
+  await expect(summary).toContainText("2 dòng");
+  await expect(summary).toContainText("2 mặt hàng mới");
+  await expect(summary).toContainText("1 dòng thiếu số liệu");
+  await expect(summary).toContainText("Tổng tiền: 150.000 đ");
+  await expect(detail).toContainText("Đọc cột C (tên) · D (ĐVT) · E (số lượng) · F (thành tiền)");
+  await expect(detail).toContainText("dữ liệu từ dòng 7");
+
+  // File B (kỳ nhập = 0) → tự rơi về "Số dư đầu kỳ", đọc file mới thật sự.
+  await upload(fileB, "Xuat_01_1_b.xlsx");
+  await expect(summary).toContainText("Tổng tiền: 160.000 đ", { timeout: 20_000 });
+  await expect(summary).toContainText("2 dòng");
+  await expect(groupSelect).toContainText("Số dư đầu kỳ");
+
+  // Thêm vào phiếu → popup đóng, dòng vào bảng; mặt hàng mới tự vào danh mục kèm ĐVT.
+  await xlsx.getByRole("button", { name: /Thêm 2 dòng/ }).click();
+  await expect(xlsx).toBeHidden();
+  const dlg = page.getByRole("dialog", { name: "Tạo phiếu nhập kho" });
+  await expect(dlg.locator("tbody tr").first()).toContainText("Bột mì T152 A", { timeout: 20_000 });
+  // Nhập kho đang CỘNG tồn → bảng dòng không được hiện cảnh báo "Thiếu X".
+  // Mặt hàng mới từ Excel còn tồn 0 là bình thường; trước đây nó hiện
+  // "Thiếu 10", "Thiếu 6" ngay dưới ô SL làm người dùng hiểu nhầm.
+  await expect(dlg.getByText(/^Thiếu \d/)).toHaveCount(0);
+
+  const products = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
+    name: string;
+    unit: string;
+  }>;
+  const created = products.find((p) => p.name === "Bột mì T152 A");
+  expect(created, "mặt hàng mới phải có trong danh mục").toBeTruthy();
+  expect(created?.unit).toBe("Kg");
+});
+
 // ─── GỢI Ý THÔNG MINH: CHỌN HÀNG CHẾ TẠO MÀ KHO THIẾU → TẠO LÔ NGAY ───
 // Chọn hàng có ĐỊNH MỨC mà tồn không đủ trong popup lập hóa đơn → hiện prompt
 // báo đúng phần thiếu + mở popup tạo lô với thành phẩm/sản lượng điền sẵn.

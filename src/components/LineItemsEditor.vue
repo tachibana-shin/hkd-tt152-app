@@ -31,6 +31,14 @@ const props = withDefaults(
     canEdit?: boolean;
     showIndustry?: boolean;
     showWarehouse?: boolean;
+    /**
+     * Hiện cảnh báo đỏ "Thiếu X" (SL > tồn) dưới ô Số lượng. Mặc định bật cùng
+     * `showWarehouse` (bảng có cột Kho xuất = dòng đang RÚT tồn); phiếu nhập
+     * TĂNG tồn truyền `false` — kho sắp cộng thêm nên so "SL > tồn" vô nghĩa
+     * (dòng mới tạo từ Excel còn tồn 0 là bình thường). Nhập điều chỉnh hướng
+     * "Giảm (trả lại NCC)" tự bật lại vì dòng đó có giảm tồn thật.
+     */
+    warnShortage?: boolean;
     showAmount?: boolean;
     /** Hiện cột CK% + Tiền CK (thay cột Thành tiền) — dùng cho phiếu nhập mua. */
     showDiscount?: boolean;
@@ -63,6 +71,8 @@ const props = withDefaults(
     canEdit: true,
     showIndustry: false,
     showWarehouse: false,
+    // Không truyền gì → theo `showWarehouse`; phiếu nhập sẽ ghi đè khi tăng tồn.
+    warnShortage: (p) => p.showWarehouse ?? false,
     showAmount: false,
     showDiscount: false,
     showUnit: false,
@@ -116,9 +126,11 @@ const {
 }, 50);
 
 // Cảnh báo thiếu tồn realtime (báo đỏ ngay trên dòng khi SL > tồn đúng kho):
-// chỉ bật khi bảng có cột Kho xuất (kho trên dòng quyết định tồn so sánh).
+// chỉ bật khi bảng có cột Kho xuất (kho trên dòng quyết định tồn so sánh) hoặc
+// dòng đang GIẢM tồn (phiếu nhập điều chỉnh "Giảm"). Phiếu nhập tăng tồn thì
+// tắt: kho sắp cộng thêm, so "SL > tồn" ở đó không có nghĩa.
 // Không đồng bộ block; loadOnhand nạp 1 lần (có guard in catalog store).
-if (props.showWarehouse) catalog.loadOnhand();
+if (props.showWarehouse || props.warnShortage) catalog.loadOnhand();
 
 /** Sản phẩm trên dòng có cần tồn kho không (dịch vụ/nhân công → không). */
 function needsStock(it: LineItem): boolean {
@@ -135,6 +147,14 @@ function shortageOf(it: LineItem): number {
   if (!it.quantity || !needsStock(it)) return 0;
   const avail = catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
   return Math.max(0, it.quantity - avail);
+}
+
+/**
+ * Số thiếu hiển thị lên dòng — trả 0 khi bảng không bật `warnShortage`
+ * (vd phiếu nhập kho: đang cộng tồn nên không có khái niệm "thiếu").
+ */
+function warnShortageOf(it: LineItem): number {
+  return props.warnShortage ? shortageOf(it) : 0;
 }
 
 /** Tồn còn lại tại kho trên dòng (cho tooltip "còn X"); 0 nếu chưa nạp. */
@@ -457,16 +477,16 @@ watch(
             :min="0"
             :size="compact || preInput ? 'small' : undefined"
             class="w-full"
-            :class="{ '!ring-2 !ring-red-500 !border-red-500': shortageOf(data) > 0 }"
+            :class="{ '!ring-2 !ring-red-500 !border-red-500': warnShortageOf(data) > 0 }"
             :tooltip="
               showWarehouse && onhandOf(data) > 0 ? `Còn ${fmt(onhandOf(data))}` : undefined
             "
           />
           <span
-            v-if="shortageOf(data) > 0"
+            v-if="warnShortageOf(data) > 0"
             class="text-[11px] font-semibold leading-none text-red-600"
           >
-            Thiếu {{ fmt(shortageOf(data)) }}
+            Thiếu {{ fmt(warnShortageOf(data)) }}
           </span>
         </div>
       </template>
