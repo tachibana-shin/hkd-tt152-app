@@ -46,7 +46,7 @@ const sepOptions = [
 
 type PasteLayout = "full" | "no_discount" | "no_unit" | "amount_only";
 const pasteLayout = ref<PasteLayout>("no_discount");
-const pasteSep = ref(",");
+const pasteSep = ref("\t");
 
 const errors = computed(() => pack.value?.checks.filter((c) => c.level === "error") ?? []);
 const warns = computed(() => pack.value?.checks.filter((c) => c.level === "warn") ?? []);
