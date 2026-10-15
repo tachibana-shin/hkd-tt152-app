@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.23.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.22.0...v0.23.0) (2026-10-15)
+
+
+### Features
+
+* **catalog,invoice,stock:** auto-assign PPHH industry and remember latest product prices ([837fb21](https://github.com/tachibana-shin/hkd-tt152-app/commit/837fb210d0f0010d48917cba02dfe8f5533c51fe)), closes [#4](https://github.com/tachibana-shin/hkd-tt152-app/issues/4)
+
 # [0.22.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.21.0...v0.22.0) (2026-10-15)
 
 
