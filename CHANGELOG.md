@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.21.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.20.1...v0.21.0) (2026-10-08)
+
+
+### Features
+
+* **inbound:** đọc file phụ lục tồn kho TT88 với chọn cột tay ([6db0998](https://github.com/tachibana-shin/hkd-tt152-app/commit/6db0998a4ce5fd91992f29a01a90d8310ed9b895))
+
 ## [0.20.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.20.0...v0.20.1) (2026-10-07)
 
 
