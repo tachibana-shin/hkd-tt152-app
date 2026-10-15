@@ -406,41 +406,67 @@ pub(crate) async fn save_customer(
     Ok("ok".into())
 }
 
-#[tauri::command]
+/// Nhóm ngành cho lần lưu mặt hàng (#4 — tự động gán nhóm ngành):
+/// - hàng hóa (`is_service = 0`) để trống nhóm → mặc định `PPHH` ("Phân phối,
+///   cung cấp hàng hóa") nếu danh mục còn nhóm này;
+/// - dịch vụ để trống → giữ nguyên (tỷ lệ thuế của dịch vụ theo ngành thực
+///   tế, người dùng tự chọn khi biết ngành thật);
+/// - khai sẵn giá trị gì → giữ nguyên giá trị đó.
+///
+/// Trả về rỗng khi danh mục đã xoá nhóm PPHH — không gán mã không tồn tại
+/// (màn Sản phẩm sẽ báo cần gán nhóm ngành).
+pub(crate) async fn resolve_industry_code(
+    pool: &SqlitePool,
+    industry_code: &str,
+    is_service: bool,
+) -> Result<String, String> {
+    if is_service || !industry_code.trim().is_empty() {
+        return Ok(industry_code.to_string());
+    }
+    let found: Option<String> = sqlx::query_scalar!(
+        "SELECT code FROM industry_group WHERE code = ?",
+        GOODS_INDUSTRY_CODE
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(found.unwrap_or_default())
+}
+
+/// Lưu mặt hàng (tạo mới hoặc cập nhật) — tách riêng để test trực tiếp.
+///
+/// Không cho đổi tên sản phẩm đã tồn tại (tên cũ đã ghi trong phiếu kho /
+/// hóa đơn / bút toán) — tránh sự cố lệch số liệu. Người dùng cần đổi tên
+/// thì xóa (nếu chưa dùng) và tạo sản phẩm mới.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn save_product(
-    state: State<'_, AppState>,
-    code: String,
-    name: String,
-    unit: String,
+pub(crate) async fn save_product_core(
+    pool: &SqlitePool,
+    code: &str,
+    name: &str,
+    unit: &str,
     sale_price: f64,
     cost_price: f64,
     min_stock: f64,
     vat_rate: f64,
     import_tax_rate: f64,
     is_service: bool,
-    industry_code: String,
-) -> Result<String, String> {
-    require_role(&state, &["admin", "ketoan", "kho"]).await?;
-    // Không cho đổi tên sản phẩm đã tồn tại (tên cũ đã ghi trong phiếu kho /
-    // hóa đơn / bút toán) — tránh sự cố lệch số liệu. Người dùng cần đổi tên
-    // thì xóa (nếu chưa dùng) và tạo sản phẩm mới.
-    {
-        let pool = state.pool.read().await;
-        let existing: Option<String> =
-            sqlx::query_scalar!("SELECT name FROM product WHERE code = ?", code)
-                .fetch_optional(&*pool)
-                .await
-                .map_err(|e| e.to_string())?;
-        if let Some(old_name) = existing {
-            if old_name != name {
-                return Err(format!(
-                    "Không được đổi tên sản phẩm '{}' — tên gốc đã ghi trong sổ: '{}'",
-                    code, old_name
-                ));
-            }
+    industry_code: &str,
+) -> Result<(), String> {
+    let existing: Option<String> =
+        sqlx::query_scalar!("SELECT name FROM product WHERE code = ?", code)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    if let Some(old_name) = existing {
+        if old_name != name {
+            return Err(format!(
+                "Không được đổi tên sản phẩm '{}' — tên gốc đã ghi trong sổ: '{}'",
+                code, old_name
+            ));
         }
     }
+    // Hàng hóa chưa có nhóm ngành → gán nhóm mặc định (#4).
+    let industry_code = resolve_industry_code(pool, industry_code, is_service).await?;
     sqlx::query!(
         "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, vat_rate, import_tax_rate, is_service, industry_code)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -461,9 +487,42 @@ pub(crate) async fn save_product(
         is_service,
         industry_code
     )
-    .execute(&*state.pool.read().await)
+    .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn save_product(
+    state: State<'_, AppState>,
+    code: String,
+    name: String,
+    unit: String,
+    sale_price: f64,
+    cost_price: f64,
+    min_stock: f64,
+    vat_rate: f64,
+    import_tax_rate: f64,
+    is_service: bool,
+    industry_code: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    save_product_core(
+        &*state.pool.read().await,
+        &code,
+        &name,
+        &unit,
+        sale_price,
+        cost_price,
+        min_stock,
+        vat_rate,
+        import_tax_rate,
+        is_service,
+        &industry_code,
+    )
+    .await?;
     audit(&state, "save", "product", &code).await;
     Ok("ok".into())
 }
@@ -1090,19 +1149,22 @@ pub(crate) async fn save_products_bulk(
     // 3) Sinh mã + chèn tất cả trong 1 transaction (3000 dòng vẫn ~vài chục ms).
     let created = pending.len();
     if created > 0 {
+        // Hàng hóa import chưa có nhóm ngành → nhóm mặc định PPHH (#4).
+        let default_industry = resolve_industry_code(&pool, "", false).await?;
         let codes = next_product_codes(&pool, created).await?;
         let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
         for ((name, key, unit, price), code) in pending.iter().zip(codes) {
             sqlx::query(
                 "INSERT INTO product (code, name, unit, sale_price, cost_price, min_stock, \
                  vat_rate, import_tax_rate, is_service, industry_code) \
-                 VALUES (?, ?, ?, 0, ?, 0, 0.1, 0, 0, '') \
+                 VALUES (?, ?, ?, 0, ?, 0, 0.1, 0, 0, ?) \
                  ON CONFLICT(code) DO NOTHING",
             )
             .bind(&code)
             .bind(name)
             .bind(unit)
             .bind(price)
+            .bind(&default_industry)
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
@@ -1429,6 +1491,73 @@ pub(crate) async fn get_products_page(
 mod tests {
     use super::*;
     use crate::test_support::*;
+
+    // #4 — mặt hàng hàng hóa chưa có nhóm ngành lúc lưu được gán mặc định
+    // "Phân phối, cung cấp hàng hóa" (PPHH); dịch vụ để trống giữ nguyên
+    // (tỷ lệ thuế theo ngành thực tế); khai sẵn nhóm khác thì giữ nguyên.
+    #[tokio::test]
+    async fn luu_mat_hang_de_trong_nhom_nganh_thi_mac_dinh_pphh() {
+        let pool = test_pool().await;
+        save_product_core(
+            &pool,
+            "SP-IND1",
+            "Hàng mới",
+            "Cái",
+            0.0,
+            0.0,
+            0.0,
+            0.1,
+            0.0,
+            false,
+            "",
+        )
+        .await
+        .expect("lưu hàng hóa không khai nhóm ngành");
+        save_product_core(
+            &pool,
+            "SP-IND2",
+            "Dịch vụ mới",
+            "Lần",
+            0.0,
+            0.0,
+            0.0,
+            0.1,
+            0.0,
+            true,
+            "",
+        )
+        .await
+        .expect("lưu dịch vụ không khai nhóm ngành");
+        save_product_core(
+            &pool,
+            "SP-IND3",
+            "Hàng khai sẵn",
+            "Cái",
+            0.0,
+            0.0,
+            0.0,
+            0.1,
+            0.0,
+            false,
+            "DVCH",
+        )
+        .await
+        .expect("lưu hàng đã khai nhóm khác");
+
+        let rows = sqlx::query!(
+            "SELECT code, industry_code FROM product WHERE code LIKE 'SP-IND%' ORDER BY code"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let map: std::collections::HashMap<String, String> = rows
+            .into_iter()
+            .map(|r| (r.code, r.industry_code))
+            .collect();
+        assert_eq!(map["SP-IND1"], "PPHH", "hàng hóa trống → nhóm mặc định");
+        assert_eq!(map["SP-IND2"], "", "dịch vụ trống → giữ nguyên");
+        assert_eq!(map["SP-IND3"], "DVCH", "nhóm khai sẵn → giữ nguyên");
+    }
 
     async fn run_products(pool: &SqlitePool, q: &ProductPageQuery) -> Vec<ProductRow> {
         let mut query = sqlx::query_as::<_, ProductRow>(&q.sql);

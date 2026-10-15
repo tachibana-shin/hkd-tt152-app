@@ -154,46 +154,45 @@ async function openTab(page: Page, tab: string, path: string) {
   throw new Error(`Không chuyển được tới "${tab}" (${path}) sau 3 lần bấm`);
 }
 
-test(
-  "navigating all main tabs updates the header title correctly",
-  // CI/dev chậm có tab mất >30s để Vite biên dịch chunk lazy —24 tab liên tiếp
-  // rất dễ chạm giới hạn90s mặc định dù mọi tab đều chuyển đúng.
-  { timeout: 180_000 },
-  async ({ page }) => {
-    await ensureLoggedIn(page);
-    // [sidebar button label, header h2 title, route]
-    const cases: Array<[string, string, string]> = [
-      ["Tổng quan", "Tổng quan", "/"],
-      ["Sản phẩm", "Danh mục sản phẩm", "/products"],
-      ["Tài khoản", "Danh mục tài khoản", "/accounts"],
-      ["Đối tác & Kho", "Danh mục đối tác & kho", "/catalogs"],
-      ["Bảng lương", "Bảng lương", "/payroll"],
-      ["Chấm công", "Chấm công", "/attendance"],
-      ["Thu / Chi", "Phiếu thu / chi", "/cash"],
-      ["Sổ nhật ký", "Sổ nhật ký chung", "/ledger"],
-      ["Nhập liệu", "Nhập liệu Excel", "/import"],
-      ["Nhập kho", "Nhập kho", "/inbound"],
-      ["Lô sản xuất", "Lô sản xuất", "/production-lots"],
-      ["Xuất kho", "Xuất kho / Bán hàng", "/outbound"],
-      ["Tồn kho", "Tồn kho", "/inventory"],
-      ["Hóa đơn", "Hóa đơn", "/invoices"],
-      ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT", "/invoice-queue"],
-      ["HĐĐT", "Hóa đơn điện tử", "/hddt"],
-      ["Tra cứu HĐĐT", "Tra cứu HĐĐT", "/hddt-lookup"],
-      ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua", "/hddt-sync"],
-      ["Nhật ký HĐ", "Nhật ký hoạt động", "/audit"],
-      ["Kế toán HKD", "Kế toán HKD", "/accounting"],
-      ["Sổ kế toán", "Sổ kế toán", "/books"],
-      ["Người dùng", "Người dùng & phân quyền", "/users"],
-      ["Hồ sơ HKD", "Hồ sơ HKD", "/profiles"],
-      ["Cài đặt", "Cài đặt", "/settings"],
-    ];
-    for (const [tab, title, path] of cases) {
-      await openTab(page, tab, path);
-      await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
-    }
-  },
-);
+test("navigating all main tabs updates the header title correctly", async ({ page }) => {
+  // CI/dev chậm có tab mất >30s để Vite biên dịch chunk lazy — 24 tab liên
+  // tiếp rất dễ chạm giới hạn 90s mặc định dù mọi tab đều chuyển đúng.
+  // Playwright 1.63 BỎ QUA options object `{ timeout }` ở tham số 2 của
+  // `test()` (vẫn báo "Test timeout of 90000ms") → bắt buộc `test.setTimeout`.
+  test.setTimeout(180_000);
+  await ensureLoggedIn(page);
+  // [sidebar button label, header h2 title, route]
+  const cases: Array<[string, string, string]> = [
+    ["Tổng quan", "Tổng quan", "/"],
+    ["Sản phẩm", "Danh mục sản phẩm", "/products"],
+    ["Tài khoản", "Danh mục tài khoản", "/accounts"],
+    ["Đối tác & Kho", "Danh mục đối tác & kho", "/catalogs"],
+    ["Bảng lương", "Bảng lương", "/payroll"],
+    ["Chấm công", "Chấm công", "/attendance"],
+    ["Thu / Chi", "Phiếu thu / chi", "/cash"],
+    ["Sổ nhật ký", "Sổ nhật ký chung", "/ledger"],
+    ["Nhập liệu", "Nhập liệu Excel", "/import"],
+    ["Nhập kho", "Nhập kho", "/inbound"],
+    ["Lô sản xuất", "Lô sản xuất", "/production-lots"],
+    ["Xuất kho", "Xuất kho / Bán hàng", "/outbound"],
+    ["Tồn kho", "Tồn kho", "/inventory"],
+    ["Hóa đơn", "Hóa đơn", "/invoices"],
+    ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT", "/invoice-queue"],
+    ["HĐĐT", "Hóa đơn điện tử", "/hddt"],
+    ["Tra cứu HĐĐT", "Tra cứu HĐĐT", "/hddt-lookup"],
+    ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua", "/hddt-sync"],
+    ["Nhật ký HĐ", "Nhật ký hoạt động", "/audit"],
+    ["Kế toán HKD", "Kế toán HKD", "/accounting"],
+    ["Sổ kế toán", "Sổ kế toán", "/books"],
+    ["Người dùng", "Người dùng & phân quyền", "/users"],
+    ["Hồ sơ HKD", "Hồ sơ HKD", "/profiles"],
+    ["Cài đặt", "Cài đặt", "/settings"],
+  ];
+  for (const [tab, title, path] of cases) {
+    await openTab(page, tab, path);
+    await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
+  }
+});
 
 test("Products tab renders real data from the DB (seeded product)", async ({ page }) => {
   await ensureLoggedIn(page);
@@ -3351,109 +3350,112 @@ test("Chi tiết hóa đơn: nút Tải XML lưu file XML hóa đơn bán ra", a
  * hộp thoại **tiến độ + nhật ký**: bấm nút là hiện ngay, log do backend ghi qua
  * lệnh hỏi `get_job_progress`, và vẫn đóng được khi chưa xong ("Chạy nền").
  */
-test(
-  "Xuất báo cáo kỳ thuế: có tiến độ + nhật ký, ZIP gộp tờ khai, đủ 7 sổ, hóa đơn và sao lưu CSDL",
-  { timeout: 120_000 },
-  async ({ page }) => {
-    await ensureLoggedIn(page);
-    await openTab(page, "Kế toán HKD", "/accounting");
-    // Chờ tờ khai nạp xong — nó là 1 trong những file phải có trong ZIP.
-    await expect(page.getByTestId("tax-entry-table")).toBeVisible({ timeout: 30_000 });
+test("Xuất báo cáo kỳ thuế: có tiến độ + nhật ký, ZIP gộp tờ khai, đủ 7 sổ, hóa đơn và sao lưu CSDL", async ({
+  page,
+}) => {
+  // Full-run tích lũy vài chục hóa đơn trong kỳ (các test khác tạo) → dựng
+  // từng chục PDF bán ra rồi nén ZIP mất hơn 90s trên máy dev — thời gian phải
+  // rộng, không được cắt giữa chừng khi việc đã chạy tới 98%.
+  // Playwright 1.63 BỎ QUA options object `{ timeout }` ở tham số 2 của
+  // `test()` (vẫn cắt ở 90s mặc định) → bắt buộc `test.setTimeout` trong body.
+  test.setTimeout(300_000);
+  await ensureLoggedIn(page);
+  await openTab(page, "Kế toán HKD", "/accounting");
+  // Chờ tờ khai nạp xong — nó là 1 trong những file phải có trong ZIP.
+  await expect(page.getByTestId("tax-entry-table")).toBeVisible({ timeout: 30_000 });
 
-    const btn = page.getByTestId("export-tax-report");
-    await expect(btn).toBeVisible();
+  const btn = page.getByTestId("export-tax-report");
+  await expect(btn).toBeVisible();
 
-    // Tự tạo 1 hóa đơn trong kỳ TRƯỚC khi xuất: PDF bán ra là mục bắt buộc có
-    // trong ZIP — không để phụ thuộc thứ tự chạy của test khác (test khác có
-    // thể tạo hóa đơn trong kỳ hoặc không, tùy môi trường CI hay dev).
-    const now = new Date();
-    const p2 = (n: number) => String(n).padStart(2, "0");
-    const todayIso = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
-    const seeded = await page.request.post("/api/save_invoice", {
-      data: {
-        number: "HD9991",
-        date: todayIso,
-        customer: "Khách báo cáo kỳ thuế",
-        customer_tax_code: "0100000000",
-        items: [
-          {
-            product_code: "SP001",
-            quantity: 1,
-            unit_price: 10000,
-            industry_code: "PPHH",
-            discount: 0,
-            warehouse_code: "",
-          },
-        ],
-      },
-    });
-    expect(seeded.ok(), `save_invoice failed ${seeded.status()}: ${await seeded.text()}`).toBe(
-      true,
-    );
+  // Tự tạo 1 hóa đơn trong kỳ TRƯỚC khi xuất: PDF bán ra là mục bắt buộc có
+  // trong ZIP — không để phụ thuộc thứ tự chạy của test khác (test khác có
+  // thể tạo hóa đơn trong kỳ hoặc không, tùy môi trường CI hay dev).
+  const now = new Date();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  const todayIso = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
+  const seeded = await page.request.post("/api/save_invoice", {
+    data: {
+      number: "HD9991",
+      date: todayIso,
+      customer: "Khách báo cáo kỳ thuế",
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 10000,
+          industry_code: "PPHH",
+          discount: 0,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(seeded.ok(), `save_invoice failed ${seeded.status()}: ${await seeded.text()}`).toBe(true);
 
-    // Phải đăng ký TRƯỚC khi bấm — chờ file xong rồi mới nghe là đã lỡ event.
-    const downloadPromise = page.waitForEvent("download");
-    await btn.click();
+  // Phải đăng ký TRƯỚC khi bấm — chờ file xong rồi mới nghe là đã lỡ event.
+  // Timeout riêng to hơn mặc định (90s): nén ZIP chục file PDF trên dev chậm.
+  const downloadPromise = page.waitForEvent("download", { timeout: 240_000 });
+  await btn.click();
 
-    // ── Tiến độ phải hiện NGAY khi bấm, không để im hàng chục giây ──
-    const progress = page.getByTestId("export-progress");
-    await expect(progress).toBeVisible();
-    await expect(page.getByTestId("export-progress-bar")).toBeVisible();
-    // Chưa xong thì chỉ được đóng bằng "Chạy nền" — không có nút Đóng, sợ người
-    // dùng lỡ tay mất log khi chưa có gì để đọc.
-    await expect(page.getByTestId("export-progress-background")).toBeVisible();
+  // ── Tiến độ phải hiện NGAY khi bấm, không để im hàng chục giây ──
+  const progress = page.getByTestId("export-progress");
+  await expect(progress).toBeVisible();
+  await expect(page.getByTestId("export-progress-bar")).toBeVisible();
+  // Chưa xong thì chỉ được đóng bằng "Chạy nền" — không có nút Đóng, sợ người
+  // dùng lỡ tay mất log khi chưa có gì để đọc.
+  await expect(page.getByTestId("export-progress-background")).toBeVisible();
 
-    // Đóng đi vẫn mở lại được — nhật ký giữ cho tới khi người dùng chủ động đóng,
-    // nên không phụ thuộc việc backend đã chạy xong hay chưa.
-    await page.getByTestId("export-progress-background").click();
-    await expect(progress).toBeHidden();
-    await page.getByTestId("export-progress-open").click();
-    await expect(progress).toBeVisible();
+  // Đóng đi vẫn mở lại được — nhật ký giữ cho tới khi người dùng chủ động đóng,
+  // nên không phụ thuộc việc backend đã chạy xong hay chưa.
+  await page.getByTestId("export-progress-background").click();
+  await expect(progress).toBeHidden();
+  await page.getByTestId("export-progress-open").click();
+  await expect(progress).toBeVisible();
 
-    const log = page.getByTestId("export-progress-log");
-    // Dòng đầu do frontend ghi (dựng Excel chạy ở máy này, backend chưa nhận việc).
-    await expect(log).toContainText("Bắt đầu xuất báo cáo kỳ thuế");
+  const log = page.getByTestId("export-progress-log");
+  // Dòng đầu do frontend ghi (dựng Excel chạy ở máy này, backend chưa nhận việc).
+  await expect(log).toContainText("Bắt đầu xuất báo cáo kỳ thuế");
 
-    const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(
-      /^bao-cao-ky-thue-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.zip$/,
-    );
-    await expect(page.getByText("Đã tải báo cáo kỳ thuế")).toBeVisible({ timeout: 60_000 });
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^bao-cao-ky-thue-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.zip$/,
+  );
+  await expect(page.getByText("Đã tải báo cáo kỳ thuế")).toBeVisible({ timeout: 60_000 });
 
-    // XONG — hộp thoại phải còn mở để đọc nhật ký. Dòng sau phải do BACKEND trả
-    // về qua `get_job_progress` (chứng tỏ việc hỏi tiến độ nối thật tới server,
-    // không chỉ có spinner tự xoay), và dòng cuối phải là kết thúc có suy ra
-    // từ việc đã làm, chứ không phải mẩu chữ chung chung.
-    await expect(log).toContainText(/Kỳ \d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}/);
-    await expect(log).toContainText("✓ Hoàn tất");
-    await page.getByTestId("export-progress-close").click();
-    await expect(progress).toBeHidden();
+  // XONG — hộp thoại phải còn mở để đọc nhật ký. Dòng sau phải do BACKEND trả
+  // về qua `get_job_progress` (chứng tỏ việc hỏi tiến độ nối thật tới server,
+  // không chỉ có spinner tự xoay), và dòng cuối phải là kết thúc có suy ra
+  // từ việc đã làm, chứ không phải mẩu chữ chung chung.
+  await expect(log).toContainText(/Kỳ \d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}/);
+  await expect(log).toContainText("✓ Hoàn tất");
+  await page.getByTestId("export-progress-close").click();
+  await expect(progress).toBeHidden();
 
-    const zipPath = await download.path();
-    expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();
-    const bytes = readFileSync(zipPath as string);
-    expect([bytes[0], bytes[1]], "phải là ZIP thật").toEqual([0x50, 0x4b]);
+  const zipPath = await download.path();
+  expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();
+  const bytes = readFileSync(zipPath as string);
+  expect([bytes[0], bytes[1]], "phải là ZIP thật").toEqual([0x50, 0x4b]);
 
-    // Tên file nằm nguyên trong header của ZIP (nén chỉ áp cho nội dung) → soi
-    // được danh mục mà không cần thư viện giải ZIP.
-    const raw = bytes.toString("latin1");
-    for (const path of [
-      "CHU-THICH.txt",
-      "to-khai/",
-      "so-ke-toan/",
-      "hoa-don/pdf/",
-      "hoa-don/xml/",
-      "sao-luu/hkd.db",
-    ]) {
-      expect(raw, `ZIP phải chứa ${path}`).toContain(path);
-    }
-    // Đủ 7 mẫu sổ TT 152 — thiếu một mẫu là hồ sơ thiếu sổ.
-    for (const book of ["S1a", "S2a", "S2b", "S2c", "S2d", "S2e", "S3a"]) {
-      expect(raw, `ZIP phải chứa sổ ${book}`).toContain(`so-ke-toan/${book}-`);
-    }
-    expect(bytes.length, "không được ZIP rỗng").toBeGreaterThan(5_000);
-  },
-);
+  // Tên file nằm nguyên trong header của ZIP (nén chỉ áp cho nội dung) → soi
+  // được danh mục mà không cần thư viện giải ZIP.
+  const raw = bytes.toString("latin1");
+  for (const path of [
+    "CHU-THICH.txt",
+    "to-khai/",
+    "so-ke-toan/",
+    "hoa-don/pdf/",
+    "hoa-don/xml/",
+    "sao-luu/hkd.db",
+  ]) {
+    expect(raw, `ZIP phải chứa ${path}`).toContain(path);
+  }
+  // Đủ 7 mẫu sổ TT 152 — thiếu một mẫu là hồ sơ thiếu sổ.
+  for (const book of ["S1a", "S2a", "S2b", "S2c", "S2d", "S2e", "S3a"]) {
+    expect(raw, `ZIP phải chứa sổ ${book}`).toContain(`so-ke-toan/${book}-`);
+  }
+  expect(bytes.length, "không được ZIP rỗng").toBeGreaterThan(5_000);
+});
 
 /**
  * Nhóm hộ để khác với doanh thu thực tế thì phải cảnh báo ở cả hai nơi người

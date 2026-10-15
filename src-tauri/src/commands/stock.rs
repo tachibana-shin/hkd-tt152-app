@@ -434,6 +434,19 @@ pub(crate) async fn save_inbound_core(
         // ─── Nhập kho thường (mua ngoài / tự sản xuất / điều chỉnh tăng / khác) ───
         let wh_id = resolve_warehouse(&mut tx, warehouse_code, &item.product_code).await?;
         let product_id = resolve_product(&mut tx, &item.product_code).await?.id;
+        // Đơn giá nhập vừa giao làm GIÁ VỐN HIỆN TẠI của mặt hàng — lần nhập sau
+        // lấy làm mặc định (giá 0 không xoá giá đã lưu). Nhập kho không đụng giá
+        // bán — giá bán chỉ nhớ từ luồng bán (lập hóa đơn / xuất bán).
+        if item.unit_price > 0.0 {
+            sqlx::query!(
+                "UPDATE product SET cost_price = ? WHERE id = ?",
+                item.unit_price,
+                product_id
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
         // Đơn giá thực tế sau chiết khấu — dùng cho giá vốn FIFO và ghi sổ.
         let unit_cost = round2(net / item.quantity);
         // tạo stock_lot FIFO — giá vốn = đơn giá thực tế sau chiết khấu (chưa thuế khi khấu trừ)
@@ -1115,6 +1128,14 @@ pub(crate) async fn save_outbound_core(
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
+            // Giá bán vừa ghi trên phiếu xuất → giá bán hiện tại của mặt hàng,
+            // lần sau chọn mặt hàng là tự lấy đúng giá này (giá 0 giữ nguyên giá cũ).
+            if price > 0.0 {
+                sqlx::query!("UPDATE product SET sale_price = ? WHERE id = ?", price, pid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
         }
     }
 
@@ -2091,6 +2112,97 @@ mod tests {
     }
 
     // ─── save_outbound_core (DB) ───
+
+    // "Giá tiền tự nhớ": đơn giá nhập vừa giao làm GIÁ VỐN HIỆN TẠI của mặt
+    // hàng — lần nhập sau lấy làm mặc định; nhập kho KHÔNG đụng giá bán.
+    #[tokio::test]
+    async fn nhap_kho_nho_lai_gia_von_hien_tai_khong_dung_gia_ban() {
+        let pool = test_pool().await;
+        seed_product(&pool, "PN-GIA", "Hàng nhập nhớ giá", 0.01).await;
+        sqlx::query!(
+            "UPDATE product SET sale_price = 12345.0, cost_price = 111.0 WHERE code = 'PN-GIA'"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let items = [InboundItemInput {
+            product_code: "PN-GIA".into(),
+            quantity: 2.0,
+            unit_price: 9_999.0,
+            discount: 0.0,
+        }];
+        save_inbound_core(
+            &pool,
+            "2026-02-10",
+            "PN-GIA1",
+            "Nhập nhớ giá",
+            "",
+            "", // kho rỗng → kho mặc định KHO-CHINH (migration seed)
+            "HKD",
+            &items,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+        )
+        .await
+        .expect("nhập kho");
+
+        let row = sqlx::query!("SELECT sale_price, cost_price FROM product WHERE code = 'PN-GIA'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.cost_price, 9_999.0, "giá nhập làm giá vốn hiện tại");
+        assert_eq!(row.sale_price, 12_345.0, "nhập kho không đụng giá bán");
+    }
+
+    // Xuất bán LẬP KÈM hóa đơn → giá bán trên phiếu cũng làm giá hiện tại.
+    #[tokio::test]
+    async fn xuat_ban_lap_kem_hoa_don_nho_lai_gia_ban() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "PX-GIA", "Hàng bán nhớ giá", 0.01).await;
+        // Kho mặc định KHO-CHINH do migration seed sẵn.
+        let w: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM warehouse WHERE code = 'KHO-CHINH'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+
+        let r = save_outbound_core(
+            &pool,
+            "2026-03-10",
+            "PXK-GIA1",
+            "Bán nhớ giá",
+            "",
+            "HKD",
+            &[out("PX-GIA", 1.0, 8888.0)],
+            "",
+            false,
+            "sale",
+            "",
+            &OutboundInvoiceInput {
+                number: "HD-XP1".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("xuất bán có hóa đơn kèm");
+        assert!(!r.invoice_no.is_empty(), "phải lập hóa đơn kèm phiếu");
+
+        let sale = sqlx::query!("SELECT sale_price FROM product WHERE code = 'PX-GIA'")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .sale_price;
+        assert_eq!(sale, 8888.0, "giá bán trên phiếu xuất làm giá hiện tại");
+    }
 
     #[tokio::test]
     async fn xuat_kho_fifo_va_ghi_so_ban_hang() {

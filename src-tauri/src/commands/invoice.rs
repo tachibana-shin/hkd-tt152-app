@@ -436,6 +436,28 @@ async fn insert_invoice_items(
         .execute(&mut **tx)
         .await
         .map_err(|e| e.to_string())?;
+        remember_sale_price(tx, l.product_id, l.unit_price).await?;
+    }
+    Ok(())
+}
+
+/// Ghi giá bán vừa lập lên mặt hàng làm GIÁ BÁN HIỆN TẠI — lần sau chọn mặt
+/// hàng trên form bán là tự lấy đúng giá này. Giá 0 (khuyến mại / dòng thiếu
+/// giá) không xoá giá đã lưu.
+async fn remember_sale_price(
+    tx: &mut SqliteTransaction<'_>,
+    product_id: i64,
+    unit_price: f64,
+) -> Result<(), String> {
+    if unit_price > 0.0 {
+        sqlx::query!(
+            "UPDATE product SET sale_price = ? WHERE id = ?",
+            unit_price,
+            product_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -1897,6 +1919,8 @@ pub(crate) async fn replace_invoice_core(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
+        // Giá bán vừa chép sang hóa đơn thay thế cũng làm giá hiện tại của mặt hàng.
+        remember_sale_price(&mut tx, l.product_id, l.unit_price).await?;
     }
     // Hóa đơn cũ: đánh dấu đã bị thay thế, ghi số hóa đơn thay thế + phiếu đảo doanh thu.
     sqlx::query!(
@@ -2208,6 +2232,50 @@ mod tests {
         let (subtotal, discount, wh) = (row.subtotal, row.discount, row.warehouse_code);
         assert_eq!((subtotal, discount), (15_000.0, 5_000.0));
         assert_eq!(wh, "W1");
+    }
+
+    // "Giá tiền tự nhớ": giá bán ghi trên hóa đơn trở thành GIÁ BÁN HIỆN TẠI
+    // của mặt hàng để lần sau chọn mặt hàng là tự lấy đúng giá; dòng giá 0
+    // (khuyến mại / thiếu giá) không xoá giá đã lưu.
+    #[tokio::test]
+    async fn lap_hoa_don_nho_lai_gia_ban_ra_hien_tai_cua_mat_hang() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-GIA", "Hàng nhớ giá", 0.01).await;
+        let p0 = seed_product(&pool, "HD-GIA0", "Hàng giá 0", 0.01).await;
+        let w = seed_warehouse(&pool, "W1", "Kho 1").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+        add_stock_lot(&pool, p0, w, 10.0, 1000.0, "2026-01-01").await;
+        sqlx::query!("UPDATE product SET sale_price = 5555.0 WHERE code = 'HD-GIA0'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        save_invoice_core(
+            &pool,
+            "HD-GIA1",
+            "2026-03-10",
+            "Khách nhớ giá",
+            "",
+            &[
+                line("HD-GIA", 1.0, 7777.0, 0.0, "W1"),
+                line("HD-GIA0", 1.0, 0.0, 0.0, "W1"),
+            ],
+        )
+        .await
+        .expect("lưu hóa đơn");
+
+        let sale = sqlx::query!("SELECT sale_price FROM product WHERE code = 'HD-GIA'")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .sale_price;
+        assert_eq!(sale, 7777.0, "giá bán trên hóa đơn làm giá hiện tại");
+        let sale0 = sqlx::query!("SELECT sale_price FROM product WHERE code = 'HD-GIA0'")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .sale_price;
+        assert_eq!(sale0, 5555.0, "dòng giá 0 không xoá giá đã lưu");
     }
 
     #[tokio::test]

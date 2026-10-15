@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET sale_price = 5555.0 WHERE code = 'HD-GIA0'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4749073ba26aaec30de7fcd38c0f9b612e7740882b903f958d94a17f6b4069c9"
+}

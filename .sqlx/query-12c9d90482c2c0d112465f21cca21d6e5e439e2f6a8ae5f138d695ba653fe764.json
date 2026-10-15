@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sale_price FROM product WHERE code = 'PX-GIA'",
+  "describe": {
+    "columns": [
+      {
+        "name": "sale_price",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "12c9d90482c2c0d112465f21cca21d6e5e439e2f6a8ae5f138d695ba653fe764"
+}

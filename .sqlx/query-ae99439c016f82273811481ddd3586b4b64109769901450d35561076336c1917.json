@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET sale_price = 12345.0, cost_price = 111.0 WHERE code = 'PN-GIA'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "ae99439c016f82273811481ddd3586b4b64109769901450d35561076336c1917"
+}

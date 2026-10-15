@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sale_price FROM product WHERE code = 'HD-GIA0'",
+  "describe": {
+    "columns": [
+      {
+        "name": "sale_price",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cfea45273357e5705172f64262d0e94ce44b39c1d30f98ce69cd7827fec96cac"
+}

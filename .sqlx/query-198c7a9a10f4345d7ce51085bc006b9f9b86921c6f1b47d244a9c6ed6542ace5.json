@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET sale_price = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "198c7a9a10f4345d7ce51085bc006b9f9b86921c6f1b47d244a9c6ed6542ace5"
+}

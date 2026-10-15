@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sale_price, cost_price FROM product WHERE code = 'PN-GIA'",
+  "describe": {
+    "columns": [
+      {
+        "name": "sale_price",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "cost_price",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "178fd7db3297eabf9f3cd01244b32778aa69388e9ca6f46e40cba33977b8fb3b"
+}
