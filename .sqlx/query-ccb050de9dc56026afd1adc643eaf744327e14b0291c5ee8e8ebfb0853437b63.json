@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO tax_period_closed (from_date, to_date, note, actor)\n               VALUES (?, ?, ?, ?)\n               ON CONFLICT(from_date, to_date)\n               DO UPDATE SET note = excluded.note, actor = excluded.actor,\n                             closed_at = datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "ccb050de9dc56026afd1adc643eaf744327e14b0291c5ee8e8ebfb0853437b63"
+}

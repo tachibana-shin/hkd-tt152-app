@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM tax_period_closed WHERE from_date = ? AND to_date = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7e8208f0c5c978db6d5cf11c147fe13a91736da211c856937f91326679a73254"
+}

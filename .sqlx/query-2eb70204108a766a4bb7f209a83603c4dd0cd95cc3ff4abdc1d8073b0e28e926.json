@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"n!\" FROM journal_entry",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2eb70204108a766a4bb7f209a83603c4dd0cd95cc3ff4abdc1d8073b0e28e926"
+}

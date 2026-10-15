@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO tax_period_closed (from_date, to_date, note, actor)\n               VALUES ('2026-05-01', '2026-05-31', 'đã gửi CQT', 'admin')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "616dbd70d18af2b321789b632ab80e83288f24e4bf7dfd0d714d2eb20a08e1d2"
+}

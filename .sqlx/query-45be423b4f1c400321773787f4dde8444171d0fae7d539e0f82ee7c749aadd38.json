@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity, unit_price, amount, product_code, industry_code,\n                      vat_rate, pit_rate, discount, adjust_code\n                 FROM journal_entry\n                WHERE voucher_no IN (?, ?) AND entry_type = 'PX'\n                  AND (credit_account = '511'\n                       OR (debit_account = '511' AND adjust_code = 'GiamDT'))",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "amount",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "product_code",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "industry_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "vat_rate",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "pit_rate",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "discount",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "adjust_code",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "45be423b4f1c400321773787f4dde8444171d0fae7d539e0f82ee7c749aadd38"
+}

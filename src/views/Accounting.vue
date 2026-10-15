@@ -16,6 +16,7 @@ import type {
   TaxOverview,
   TaxSettlement,
   JobProgress,
+  QuickSaleRow,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
 import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
@@ -130,6 +131,15 @@ async function doBackfillCogs() {
 // ——— Tờ khai thuế theo kỳ (To Khai Thue) + tổng hợp thuế theo quy định 2026 ———
 const declRows = ref<TaxDeclarationRow[]>([]);
 const declLoading = ref(false);
+// Báo cáo nhanh hóa đơn ĐÃ XUẤT trong kỳ — nạp cùng tờ khai (cùng khoảng ngày).
+const quickRows = ref<QuickSaleRow[]>([]);
+const quickTotal = computed(() => quickRows.value.reduce((s, r) => s + r.total, 0));
+/** Tag màu cho cột Loại: hàng hóa xanh, dịch vụ xanh dương, hỗn hợp vàng. */
+function kindSeverity(kind: string): "success" | "info" | "warning" {
+  if (kind === "Dịch vụ") return "info";
+  if (kind === "Hỗn hợp") return "warning";
+  return "success";
+}
 const overview = ref<TaxOverview | null>(null);
 /**
  * Căn cứ tính thuế của kỳ: hộ thuộc diện nộp cả năm, hay kỳ này chưa vượt ngưỡng.
@@ -257,20 +267,65 @@ function printReport() {
   window.print();
 }
 
+// ─── Cờ "kỳ tờ khai ĐÃ NỘP" (nội bộ theo khoảng đang xem) ───
+// App không liên kết hệ thống thuế: đây chỉ là dấu để app NHẮC khi sửa hóa đơn
+// thuộc kỳ đã gửi — vẫn cho sửa, chỉ đòi người dùng tự kê khai bổ sung.
+const periodClosed = ref<{
+  from_date: string;
+  to_date: string;
+  actor: string;
+  closed_at: string;
+} | null>(null);
+
+async function loadPeriodClosed() {
+  try {
+    const { from, to } = declRange.value;
+    periodClosed.value = await api.getTaxPeriodClosed(from, to);
+  } catch {
+    periodClosed.value = null; // không tra được thì bỏ cờ — đừng chặn màn tờ khai
+  }
+}
+
+async function togglePeriodClosed() {
+  const { from, to } = declRange.value;
+  const willClose = !periodClosed.value;
+  try {
+    await api.setTaxPeriodClosed({ fromDate: from, toDate: to, closed: willClose, note: "" });
+    periodClosed.value = willClose
+      ? { from_date: from, to_date: to, actor: "", closed_at: "" }
+      : null;
+    toast.add({
+      severity: willClose ? "success" : "info",
+      summary: willClose ? "Đã đánh dấu kỳ ĐÃ NỘP tờ khai" : "Đã gỡ đánh dấu kỳ tờ khai",
+      detail: willClose
+        ? "Sửa hóa đơn trong kỳ này vẫn được nhưng app sẽ nhắc kiểm tra, kê khai bổ sung."
+        : "Hóa đơn trong kỳ không còn bị nhắc khi sửa.",
+      life: 5000,
+    });
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không đổi được trạng thái kỳ", detail: String(e) });
+  }
+}
+
 async function loadDeclaration() {
   declLoading.value = true;
   try {
     // Cùng khoảng ngày với các bảng khác trên màn → tờ khai luôn khớp số liệu.
     const f = declRange.value.from;
     const t = declRange.value.to;
-    const [rows, ov] = await Promise.all([
+    const [rows, ov, quick] = await Promise.all([
       api.getTaxDeclaration(f, t, unitCode.value),
       api.getTaxOverview(f, t, unitCode.value),
+      // Báo cáo nhanh hóa đơn đã xuất — cùng kỳ với tờ khai nên hai bảng khớp nhau.
+      api.quickSalesReport(f, t),
     ]);
     declRows.value = rows;
     overview.value = ov;
+    quickRows.value = quick;
     // Số tạm nộp cả năm — bảng quyết toán vẫn nằm trên màn này.
     await loadSettlement();
+    // Cờ kỳ đã nộp tờ khai theo đúng khoảng đang xem — nút ở ngay card tờ khai.
+    await loadPeriodClosed();
   } catch (e) {
     toast.add({
       severity: "error",
@@ -813,6 +868,29 @@ useKeepAliveRefresh(reload);
       </template>
       <template #actions>
         <Button
+          v-if="periodClosed"
+          :label="`Đã nộp: ${periodClosed.from_date} → ${periodClosed.to_date}`"
+          icon="pi pi-flag-fill"
+          size="small"
+          severity="success"
+          outlined
+          v-tooltip="
+            `Đánh dấu bởi ${periodClosed.actor || 'chưa rõ'}${periodClosed.closed_at ? ' lúc ' + periodClosed.closed_at : ''}. Sửa hóa đơn trong kỳ vẫn được nhưng app sẽ nhắc kê khai bổ sung — bấm để gỡ đánh dấu.`
+          "
+          @click="togglePeriodClosed"
+        />
+        <Button
+          v-else
+          label="Đánh dấu đã nộp tờ khai"
+          icon="pi pi-flag"
+          size="small"
+          outlined
+          v-tooltip="
+            'Kỳ này đã gửi CQT — đánh dấu để app nhắc kê khai bổ sung khi sửa hóa đơn trong kỳ (không chặn sửa)'
+          "
+          @click="togglePeriodClosed"
+        />
+        <Button
           label="Xuất Excel"
           icon="pi pi-file-excel"
           size="small"
@@ -900,6 +978,47 @@ useKeepAliveRefresh(reload);
         </Column>
         <template #empty
           ><EmptyState text="Chưa có dữ liệu doanh thu trong kỳ này." icon="pi pi-chart-line"
+        /></template>
+      </AppDataTable>
+    </SectionCard>
+
+    <!-- Báo cáo nhanh hóa đơn đã xuất — cùng khoảng ngày với tờ khai:
+         1 dòng = 1 hóa đơn (tên / loại hàng hóa-dịch vụ / tổng tiền). -->
+    <SectionCard>
+      <template #icon><i-mdi-file-document-outline class="text-emerald-500" /></template>
+      <template #title>
+        <span>Báo cáo nhanh hóa đơn đã xuất</span>
+        <span class="text-xs font-normal text-gray-400">Cùng khoảng ngày với tờ khai</span>
+      </template>
+      <template #actions>
+        <Tag
+          v-if="quickRows.length"
+          :value="`${quickRows.length} hóa đơn · ${fmtVnd(quickTotal)} đ`"
+          severity="info"
+        />
+        <Button
+          label="Tải lại"
+          icon="pi pi-refresh"
+          size="small"
+          :loading="declLoading"
+          @click="loadDeclaration"
+        />
+      </template>
+      <AppDataTable :value="quickRows" :loading="declLoading" stripedRows>
+        <Column header="Tên hóa đơn" field="label" />
+        <Column header="Loại" style="width: 130px">
+          <template #body="{ data }">
+            <Tag :value="data.kind" :severity="kindSeverity(data.kind)" />
+          </template>
+        </Column>
+        <Column header="Tổng tiền" align="right" style="width: 170px">
+          <template #body="{ data }">{{ fmtVnd(data.total) }}</template>
+          <template #footer>{{ quickRows.length ? fmtVnd(quickTotal) : "" }}</template>
+        </Column>
+        <template #empty
+          ><EmptyState
+            text="Trong kỳ này chưa có hóa đơn nào được xuất (nháp và hóa đơn đã hủy không tính)."
+            icon="pi pi-file"
         /></template>
       </AppDataTable>
     </SectionCard>

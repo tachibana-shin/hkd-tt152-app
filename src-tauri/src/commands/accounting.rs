@@ -170,6 +170,168 @@ pub(crate) async fn get_trial_balance(
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
+/// Trạng thái "kỳ tờ khai ĐÃ NỘP" của khoảng ngày đang xem trên màn Tờ khai.
+/// Trả `null` nếu chưa đánh dấu.
+#[tauri::command]
+pub(crate) async fn get_tax_period_closed(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let row = sqlx::query!(
+        r#"SELECT from_date, to_date, note, actor, closed_at
+             FROM tax_period_closed WHERE from_date = ? AND to_date = ?"#,
+        from_date,
+        to_date
+    )
+    .fetch_optional(&*state.pool.read().await)
+    .await
+    .map_err(|e| e.to_string())?;
+    let info = row.map(|r| {
+        json!({
+            "from_date": r.from_date,
+            "to_date": r.to_date,
+            "note": r.note,
+            "actor": r.actor,
+            "closed_at": r.closed_at,
+        })
+    });
+    Ok(serde_json::to_string(&info).unwrap_or_else(|_| "null".into()))
+}
+
+/// Đánh dấu / gỡ "kỳ tờ khai đã nộp" cho khoảng ngày đang xem. App KHÔNG liên
+/// kết hệ thống thuế — đây là cờ nội bộ để app nhắc người dùng khi sửa hóa đơn
+/// thuộc kỳ đã gửi (vẫn cho sửa, chỉ cảnh báo kê khai bổ sung).
+#[tauri::command]
+pub(crate) async fn set_tax_period_closed(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+    closed: bool,
+    note: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let from_date = from_date.trim().to_string();
+    let to_date = to_date.trim().to_string();
+    if from_date.is_empty() || to_date.is_empty() {
+        return Err("Cần chọn khoảng ngày tờ khai trước".into());
+    }
+    let actor = state
+        .current_user
+        .lock()
+        .await
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_default();
+    if closed {
+        sqlx::query!(
+            r#"INSERT INTO tax_period_closed (from_date, to_date, note, actor)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(from_date, to_date)
+               DO UPDATE SET note = excluded.note, actor = excluded.actor,
+                             closed_at = datetime('now')"#,
+            from_date,
+            to_date,
+            note,
+            actor
+        )
+        .execute(&*state.pool.read().await)
+        .await
+        .map_err(|e| e.to_string())?;
+    } else {
+        sqlx::query!(
+            "DELETE FROM tax_period_closed WHERE from_date = ? AND to_date = ?",
+            from_date,
+            to_date
+        )
+        .execute(&*state.pool.read().await)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    let detail = format!("{from_date} → {to_date}");
+    audit(
+        &state,
+        if closed {
+            "close_tax_period"
+        } else {
+            "reopen_tax_period"
+        },
+        "tax_period",
+        &detail,
+    )
+    .await;
+    Ok(json!({ "ok": true }).to_string())
+}
+
+/// Một dòng trong báo cáo nhanh hóa đơn ĐÃ XUẤT của kỳ (màn Tờ khai).
+#[derive(serde::Serialize)]
+pub(crate) struct QuickSaleRow {
+    pub(crate) number: String,
+    /// Tên hiển thị đúng mẫu chứng từ bán hàng: "Bán hàng theo hóa đơn HD0001".
+    pub(crate) label: String,
+    pub(crate) date: String,
+    pub(crate) customer: String,
+    /// Hàng hóa / Dịch vụ / Hỗn hợp — gom từ nhóm dịch vụ của từng dòng hàng.
+    pub(crate) kind: String,
+    pub(crate) total: f64,
+}
+
+/// Báo cáo nhanh hóa đơn đã xuất trong khoảng ngày đang xem (quý tờ khai):
+/// 1 dòng = 1 hóa đơn — tên, loại (hàng hóa/dịch vụ) và tổng tiền. Nháp, đã
+/// bị thay thế hay đã hủy không tính là "đã xuất" nên bị loại.
+pub(crate) async fn quick_sales_report_core(
+    pool: &SqlitePool,
+    from_date: &str,
+    to_date: &str,
+) -> Result<Vec<QuickSaleRow>, String> {
+    let rows = sqlx::query_as::<_, (String, String, String, f64, i64, i64)>(
+        r#"SELECT i.number, i.date, i.customer, i.total,
+                  MAX(CASE WHEN p.is_service = 0 THEN 1 ELSE 0 END),
+                  MAX(CASE WHEN p.is_service = 1 THEN 1 ELSE 0 END)
+             FROM invoice i
+             JOIN invoice_item ii ON ii.invoice_id = i.id
+             JOIN product p ON p.id = ii.product_id
+            WHERE i.date >= ? AND i.date <= ?
+              AND i.status IN ('exported', 'pasted', 'official', 'adjusted')
+            GROUP BY i.id
+            ORDER BY i.date, i.id"#,
+    )
+    .bind(from_date)
+    .bind(to_date)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(number, date, customer, total, has_goods, has_service)| {
+            let kind = match (has_goods > 0, has_service > 0) {
+                (true, true) => "Hỗn hợp",
+                (true, false) => "Hàng hóa",
+                _ => "Dịch vụ",
+            };
+            QuickSaleRow {
+                label: format!("Bán hàng theo hóa đơn {number}"),
+                number,
+                date,
+                customer,
+                kind: kind.to_string(),
+                total,
+            }
+        })
+        .collect())
+}
+
+/// Lệnh giao diện: báo cáo nhanh hóa đơn đã xuất theo khoảng ngày đang xem.
+#[tauri::command]
+pub(crate) async fn quick_sales_report(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+) -> Result<String, String> {
+    let rows = quick_sales_report_core(&*state.pool.read().await, &from_date, &to_date).await?;
+    Ok(serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into()))
+}
+
 /// Doanh thu + thuế theo nhóm ngành nghề, trong khoảng ngày người dùng chọn.
 ///
 /// Sửa so với bản cũ: bản cũ **không xét nhóm hộ lẫn phương pháp TNCN** nên
@@ -3483,6 +3645,133 @@ mod tests {
         .execute(pool)
         .await
         .expect("add journal row");
+    }
+
+    /// Báo cáo nhanh kỳ: 1 dòng = 1 hóa đơn ĐÃ XUẤT trong kỳ — tên đúng mẫu
+    /// "Bán hàng theo hóa đơn {số}", phân loại hàng hóa / dịch vụ / hỗn hợp,
+    /// cộng đúng tổng. Nháp, đã thay thế và hóa đơn ngoài kỳ đều bị loại.
+    #[tokio::test]
+    async fn bao_cao_nhanh_hoa_don_da_xuat_theo_loai_trong_ky() {
+        let pool = test_pool().await;
+        let goods = seed_product(&pool, "QR-G", "Hàng báo cáo", 0.01).await;
+        let service = seed_product(&pool, "QR-S", "Dịch vụ báo cáo", 0.01).await;
+        sqlx::query!("UPDATE product SET is_service = 1 WHERE id = ?", service)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        async fn add(
+            pool: &SqlitePool,
+            number: &str,
+            date: &str,
+            status: &str,
+            items: &[(i64, f64)],
+            total: f64,
+        ) {
+            sqlx::query!(
+                "INSERT INTO invoice (number, date, customer, customer_tax_code, total, status)
+                 VALUES (?, ?, 'Khách báo cáo', '', ?, ?)",
+                number,
+                date,
+                total,
+                status
+            )
+            .execute(pool)
+            .await
+            .unwrap();
+            let id: i64 = sqlx::query_scalar!(
+                r#"SELECT id as "id!" FROM invoice WHERE number = ?"#,
+                number
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            for (product_id, qty) in items {
+                let subtotal = qty * 1000.0;
+                sqlx::query!(
+                    "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal)
+                     VALUES (?, ?, ?, 1000.0, ?)",
+                    id,
+                    product_id,
+                    qty,
+                    subtotal
+                )
+                .execute(pool)
+                .await
+                .unwrap();
+            }
+        }
+
+        // Trong kỳ 05: từng loại 1 hóa đơn + 1 hóa đơn hỗn hợp.
+        add(
+            &pool,
+            "HD0201",
+            "2026-05-10",
+            "exported",
+            &[(goods, 50.0)],
+            100_000.0,
+        )
+        .await;
+        add(
+            &pool,
+            "HD0202",
+            "2026-05-15",
+            "official",
+            &[(service, 10.0)],
+            50_000.0,
+        )
+        .await;
+        add(
+            &pool,
+            "HD0203",
+            "2026-05-20",
+            "adjusted",
+            &[(goods, 100.0), (service, 20.0)],
+            150_000.0,
+        )
+        .await;
+        // Loại khỏi báo cáo: nháp, đã thay thế, ngoài kỳ.
+        add(
+            &pool,
+            "HD0204",
+            "2026-05-11",
+            "draft",
+            &[(goods, 7.0)],
+            70_000.0,
+        )
+        .await;
+        add(
+            &pool,
+            "HD0205",
+            "2026-07-10",
+            "exported",
+            &[(goods, 9.0)],
+            90_000.0,
+        )
+        .await;
+        add(
+            &pool,
+            "HD0206",
+            "2026-05-12",
+            "replaced",
+            &[(goods, 3.0)],
+            30_000.0,
+        )
+        .await;
+
+        let rows = quick_sales_report_core(&pool, "2026-05-01", "2026-05-31")
+            .await
+            .expect("báo cáo nhanh");
+        assert_eq!(rows.len(), 3, "chỉ hóa đơn đã xuất trong kỳ");
+        let by_no: std::collections::HashMap<&str, &QuickSaleRow> =
+            rows.iter().map(|r| (r.number.as_str(), r)).collect();
+        let first = by_no["HD0201"];
+        assert_eq!(first.label, "Bán hàng theo hóa đơn HD0201");
+        assert_eq!(first.kind, "Hàng hóa");
+        assert_eq!(by_no["HD0202"].kind, "Dịch vụ");
+        assert_eq!(by_no["HD0203"].kind, "Hỗn hợp");
+        let sum: f64 = rows.iter().map(|r| r.total).sum();
+        assert_eq!(sum, 300_000.0, "cộng đúng tổng 3 hóa đơn trong kỳ");
     }
 
     /// PC trả nhà cung cấp là **thanh toán phải trả** (Nợ 331), không phải chi phí:

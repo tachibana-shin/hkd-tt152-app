@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, date, customer FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b9745ab97651bdee267fa1a119de1c9e4f6e3c346ba74f3c099857c957d1748c"
+}

@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT from_date, to_date, note, actor, closed_at\n             FROM tax_period_closed WHERE from_date = ? AND to_date = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "from_date",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "to_date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "note",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "closed_at",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "429405c7541bffb9bcff1754386580cd29eac4a12bea908193e140b98b4166fd"
+}

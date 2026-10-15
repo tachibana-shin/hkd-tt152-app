@@ -553,6 +553,27 @@ pub(crate) struct ClearCacheOutcome {
     pub(crate) days_deleted: usize,
 }
 
+/// Bỏ dấu "ngày đã quét" + xoá cache hóa đơn CỦA NGÀY ĐÓ để lần quét tới tải
+/// lại từ cổng — hóa đơn xuất hiện SAU khi ngày đó đã quét (đã ký trễ, cổng
+/// cập nhật chậm) trước đây bị bỏ sót vĩnh viễn vì cache theo ngày. Hóa đơn
+/// đã nhập kho nằm ở `hddt_imported_invoice` nên không bị đụng tới.
+pub(crate) async fn uncache_day(pool: &SqlitePool, day: &str) -> Result<(usize, usize), String> {
+    let invoices = sqlx::query!(
+        "DELETE FROM hddt_purchase_invoice WHERE posting_date = ?",
+        day
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .rows_affected();
+    let days = sqlx::query!("DELETE FROM hddt_sync_day WHERE day = ?", day)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected();
+    Ok((invoices as usize, days as usize))
+}
+
 /// Đưa hóa đơn lỗi chi tiết về lại 'pending' để lần quét sau thử tải lại.
 ///
 /// Hóa đơn bị đánh 'manual' vì `tthai != 1` thì giữ nguyên (không tự tạo phiếu).
@@ -1119,6 +1140,66 @@ mod tests {
         .fetch_one(pool)
         .await
         .unwrap()
+    }
+
+    /// Quét lại ngày: xoá cache hóa đơn + dấu "ngày đã quét" CỦA NGÀY ĐÓ, giữ
+    /// nguyên ngày khác (hóa đơn ngày kế không bị đụng tới).
+    #[tokio::test]
+    async fn uncache_day_xoa_cache_va_dau_ngay_cua_ngay_do() {
+        let pool = test_pool().await;
+        sqlx::query!(
+            "INSERT INTO hddt_sync_day (day, kind, scanned_at, invoice_count)
+             VALUES ('2026-09-02', 'purchase', '2026-09-02T10:00:00Z', 2),
+                    ('2026-09-03', 'purchase', '2026-09-03T10:00:00Z', 1)"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let line = r#"{"ten":"Hàng test","dvtinh":"Cái","mhhdvu":"t1","sluong":1.0,
+                       "dgia":1000.0,"stckhau":0.0,"tsuat":0.01}"#;
+        // 2 hóa đơn ngày 02 (seed_invoice ghi cứng posting_date '2026-09-02').
+        let _a = seed_invoice(&pool, "uuid-a", 1, line).await;
+        let _b = seed_invoice(&pool, "uuid-b", 1, line).await;
+        // 1 hóa đơn ngày 03.
+        let c = seed_invoice(&pool, "uuid-c", 1, line).await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice SET posting_date = '2026-09-03' WHERE id = ?",
+            c
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let (invoices, days) = uncache_day(&pool, "2026-09-02").await.unwrap();
+        assert_eq!((invoices, days), (2, 1), "xoá 2 hóa đơn cache + 1 dấu ngày");
+
+        let left: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_purchase_invoice WHERE posting_date = '2026-09-02'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(left, 0, "cache ngày đã quét bị xoá hết");
+        let day_mark: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_sync_day WHERE day = '2026-09-02'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(day_mark, 0, "dấu ngày đã quét bị bỏ");
+        let other: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM hddt_sync_day WHERE day = '2026-09-03'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(other, 1, "ngày khác vẫn giữ dấu đã quét");
+        let kept: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_purchase_invoice WHERE posting_date = '2026-09-03'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(kept, 1, "hóa đơn ngày khác không bị đụng");
+        // Lần quét sau sẽ thử tải lại ngày 02 từ cổng.
     }
 
     #[tokio::test]

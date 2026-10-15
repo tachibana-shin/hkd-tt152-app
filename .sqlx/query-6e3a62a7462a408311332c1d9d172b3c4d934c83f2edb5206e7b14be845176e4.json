@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(SUM(amount), 0.0) as \"q!: f64\" FROM journal_entry WHERE entry_type = 'PX'",
+  "describe": {
+    "columns": [
+      {
+        "name": "q!: f64",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6e3a62a7462a408311332c1d9d172b3c4d934c83f2edb5206e7b14be845176e4"
+}

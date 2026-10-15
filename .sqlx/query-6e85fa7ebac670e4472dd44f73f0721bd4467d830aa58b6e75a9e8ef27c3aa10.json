@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_sync_day (day, kind, scanned_at, invoice_count)\n             VALUES ('2026-09-02', 'purchase', '2026-09-02T10:00:00Z', 2),\n                    ('2026-09-03', 'purchase', '2026-09-03T10:00:00Z', 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "6e85fa7ebac670e4472dd44f73f0721bd4467d830aa58b6e75a9e8ef27c3aa10"
+}

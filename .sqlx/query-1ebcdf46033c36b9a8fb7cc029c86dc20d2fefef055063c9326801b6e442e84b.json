@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(SUM(CASE\n                     WHEN entry_type = 'PX' AND credit_account = '511' THEN amount\n                     WHEN entry_type = 'PX' AND debit_account = '511' THEN -amount\n                     ELSE 0.0 END), 0.0) as \"net!: f64\"\n                 FROM journal_entry WHERE voucher_no IN (?, ?)",
+  "describe": {
+    "columns": [
+      {
+        "name": "net!: f64",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1ebcdf46033c36b9a8fb7cc029c86dc20d2fefef055063c9326801b6e442e84b"
+}

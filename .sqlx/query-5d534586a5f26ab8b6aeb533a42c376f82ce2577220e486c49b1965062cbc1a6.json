@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE invoice SET total = ?, vat_amount = 0.0 WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "5d534586a5f26ab8b6aeb533a42c376f82ce2577220e486c49b1965062cbc1a6"
+}

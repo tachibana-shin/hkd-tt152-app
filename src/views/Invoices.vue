@@ -165,6 +165,15 @@ function openStatus(inv: Invoice, mode: "replace" | "adjusted") {
   statusVisible.value = true;
 }
 
+// ─── Sửa theo HĐ chính thức (hóa đơn đã chép / đã phát hành) ───
+const headerEditVisible = ref(false);
+const headerEditTarget = ref<Invoice | null>(null);
+
+function openHeaderEdit(inv: Invoice) {
+  headerEditTarget.value = inv;
+  headerEditVisible.value = true;
+}
+
 /** Sau khi thay thế: mở ngay hóa đơn nháp mới để sửa dòng hàng sai rồi xuất lại. */
 async function onReplaced(res: InvoiceReplaceResult) {
   await reload();
@@ -557,6 +566,20 @@ useKeepAliveRefresh(reload);
                   severity="warn"
                   @click="openStatus(data, 'adjusted')"
                 />
+                <!-- Sửa thông tin hồ sơ cho khớp hóa đơn chính thức (không đổi dòng hàng) -->
+                <Button
+                  v-if="data.status !== 'draft'"
+                  icon="pi pi-user-edit"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Sửa thông tin theo HĐ chính thức"
+                  v-tooltip="
+                    'Sửa thông tin theo HĐ chính thức (số, ngày, khách, MST, số/ký hiệu HĐĐT — không đổi dòng hàng, phiếu xuất)'
+                  "
+                  severity="secondary"
+                  @click="openHeaderEdit(data)"
+                />
                 <!-- Nháp thì sửa/xoá được; các trạng thái sau nháp giữ lại dấu vết -->
                 <!-- Đã phát hành mà chưa có phiếu xuất → sổ đang thiếu khoản bán này -->
                 <Button
@@ -736,6 +759,13 @@ useKeepAliveRefresh(reload);
       :mode="statusMode"
       @done="afterStatusChange"
       @replaced="onReplaced"
+    />
+
+    <!-- Sửa thông tin hồ sơ theo hóa đơn chính thức (số, ngày, khách, MST, HĐĐT) -->
+    <InvoiceHeaderDialog
+      v-model:visible="headerEditVisible"
+      :invoice="headerEditTarget"
+      @done="reload"
     />
 
     <!-- Xem trước / in / tải PDF của chính hóa đơn ở dòng -->

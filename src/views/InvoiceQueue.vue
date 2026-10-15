@@ -15,7 +15,7 @@ import { useAuthStore } from "@/stores/auth";
 // PrimeVue không được auto-import trong dự án (resolver chỉ khai các component đã
 // dùng) — phải import tường minh, nếu không SelectButton không render.
 import SelectButton from "primevue/selectbutton";
-import type { Invoice, InvoiceQueueItem } from "@/types";
+import type { Invoice, InvoiceQueueItem, MissingNumbersReport } from "@/types";
 import { fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
@@ -74,6 +74,35 @@ function openLink(inv: Invoice) {
 function openDraft(inv: Invoice | null) {
   draftTarget.value = inv;
   draftVisible.value = true;
+}
+const headerEditVisible = ref(false);
+const headerEditTarget = ref<Invoice | null>(null);
+
+// ─── Báo cáo số hiệu HỔNG giữa dãy (nhập trễ / quên một số giữa chừng) ───
+// Số nội bộ HD#### + số HĐĐT chính thức gom theo từng ký hiệu — để đối chiếu
+// ngay với hệ thống ký bên kia trước khi phát hành tiếp.
+const missingVisible = ref(false);
+const missingLoading = ref(false);
+const missingReport = ref<MissingNumbersReport | null>(null);
+
+async function loadMissingNumbers() {
+  missingLoading.value = true;
+  try {
+    missingReport.value = await api.invoiceMissingNumbers();
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không đọc được báo cáo số hiệu", detail: String(e) });
+  } finally {
+    missingLoading.value = false;
+  }
+}
+
+function toggleMissing() {
+  missingVisible.value = !missingVisible.value;
+  if (missingVisible.value && !missingReport.value) void loadMissingNumbers();
+}
+function openHeaderEdit(inv: Invoice) {
+  headerEditTarget.value = inv;
+  headerEditVisible.value = true;
 }
 
 /** Xem trước PDF hóa đơn ở hàng chờ — backend dựng `detail_json` từ hóa đơn nội bộ. */
@@ -220,6 +249,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             {{ readyCount }} hóa đơn sẵn sàng chép · {{ copiedCount }} đã chép ·
             {{ blockedCount }} cần sửa
           </span>
+          <!-- Đối chiếu dãy số hiệu với hệ thống ký bên kia — nhập trễ hay quên
+               1 số giữa chừng là nhảy cóc, hiện ngay ở đây. -->
+          <Button
+            icon="pi pi-hashtag"
+            label="Số hiệu hổng"
+            severity="warn"
+            outlined
+            :loading="missingLoading"
+            v-tooltip="
+              'Liệt kê số HD#### và số HĐĐT bị hổng GIỮA dãy — đối chiếu với hệ thống ký bên kia'
+            "
+            @click="toggleMissing"
+          />
           <Button
             icon="pi pi-refresh"
             text
@@ -232,6 +274,78 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         </div>
       </template>
     </Toolbar>
+
+    <!-- Báo cáo số hiệu hổng giữa dãy — chỉ các số NẰM GIỮA hai số đã có. -->
+    <Card v-if="missingVisible">
+      <template #content>
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="text-sm font-semibold">
+            <i class="pi pi-hashtag mr-1 text-amber-600" />Số hiệu bị hổng giữa dãy
+            <span class="ml-2 text-xs font-normal text-gray-500">
+              Chỉ liệt kê số nằm giữa hai số đã có — số ngoài biên chưa chắc đã tới lượt.
+            </span>
+          </div>
+          <div class="flex items-center gap-1">
+            <Button
+              label="Đọc lại"
+              icon="pi pi-refresh"
+              text
+              size="small"
+              :loading="missingLoading"
+              @click="loadMissingNumbers"
+            />
+            <Button
+              icon="pi pi-times"
+              text
+              rounded
+              size="small"
+              aria-label="Đóng báo cáo số hiệu"
+              v-tooltip="'Đóng'"
+              @click="missingVisible = false"
+            />
+          </div>
+        </div>
+        <div v-if="missingReport" class="grid gap-4 md:grid-cols-2">
+          <div>
+            <div class="mb-1 text-xs font-semibold uppercase text-gray-500">Số nội bộ (HD####)</div>
+            <div v-if="missingReport.internal_missing.length" class="flex flex-wrap gap-1">
+              <Tag
+                v-for="n in missingReport.internal_missing"
+                :key="n"
+                :value="n"
+                severity="danger"
+              />
+            </div>
+            <p v-else class="text-sm text-gray-500">
+              Dãy số nội bộ liền mạch — không thiếu số nào giữa chừng.
+            </p>
+          </div>
+          <div>
+            <div class="mb-1 text-xs font-semibold uppercase text-gray-500">
+              Số HĐĐT chính thức (theo ký hiệu)
+            </div>
+            <div v-if="missingReport.official.length" class="space-y-2">
+              <div v-for="g in missingReport.official" :key="g.symbol">
+                <div class="mb-1 text-xs text-gray-600">
+                  Ký hiệu <b>{{ g.symbol }}</b> — đã ghi {{ g.present }} số
+                </div>
+                <div class="flex flex-wrap gap-1">
+                  <Tag
+                    v-for="n in g.missing"
+                    :key="`${g.symbol}-${n}`"
+                    :value="n"
+                    severity="danger"
+                  />
+                </div>
+              </div>
+            </div>
+            <p v-else class="text-sm text-gray-500">
+              Không có số HĐĐT nào hổng giữa dãy trong các ký hiệu đã ghi.
+            </p>
+          </div>
+        </div>
+      </template>
+    </Card>
 
     <Card>
       <template #content>
@@ -398,6 +512,20 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   severity="secondary"
                   @click="openDraft(data.invoice)"
                 />
+                <!-- Đã chép sang bên kia: chỉ sửa được thông tin hồ sơ theo HĐ chính thức -->
+                <Button
+                  v-if="data.invoice.status === 'exported'"
+                  icon="pi pi-user-edit"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Sửa thông tin theo HĐ chính thức"
+                  v-tooltip="
+                    'Sửa thông tin theo HĐ chính thức (số, ngày, khách, MST — không đổi dòng hàng, phiếu xuất)'
+                  "
+                  severity="secondary"
+                  @click="openHeaderEdit(data.invoice)"
+                />
                 <Button
                   v-if="data.invoice.status === 'draft'"
                   icon="pi pi-trash"
@@ -439,6 +567,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
     <InvoiceExportDialog v-model:visible="exportVisible" :invoice="exportTarget" @done="load" />
     <InvoiceLinkDialog v-model:visible="linkVisible" :invoice="linkTarget" @done="load" />
+    <InvoiceHeaderDialog
+      v-model:visible="headerEditVisible"
+      :invoice="headerEditTarget"
+      @done="load"
+    />
     <InvoiceDraftDialog v-model:visible="draftVisible" :edit-invoice="draftTarget" @done="load" />
     <InvoicePdfDialog v-model:visible="pdfVisible" :detail-json="pdfDetail" :title="pdfTitle" />
   </div>

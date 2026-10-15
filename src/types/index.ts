@@ -715,6 +715,33 @@ export interface IndustryRevenue {
   revenue_down: number;
 }
 
+/** Một dòng trong báo cáo nhanh hóa đơn **đã xuất** của kỳ (màn Tờ khai):
+ *  tên, loại hàng hóa/dịch vụ và tổng tiền — cùng khoảng ngày với tờ khai. */
+export interface QuickSaleRow {
+  number: string;
+  /** Tên hiển thị đúng mẫu chứng từ bán hàng: "Bán hàng theo hóa đơn HD0001". */
+  label: string;
+  date: string;
+  customer: string;
+  /** Hàng hóa | Dịch vụ | Hỗn hợp. */
+  kind: string;
+  total: number;
+}
+
+/** Một dãy số HĐĐT chính thức bị hổng giữa chừng trong một ký hiệu. */
+export interface MissingOfficialGroup {
+  symbol: string;
+  /** Số dòng hóa đơn đã ghi số trong ký hiệu này. */
+  present: number;
+  missing: string[];
+}
+
+/** Báo cáo số hiệu bị hổng giữa dãy — số nội bộ HD#### + số HĐĐT theo ký hiệu. */
+export interface MissingNumbersReport {
+  internal_missing: string[];
+  official: MissingOfficialGroup[];
+}
+
 export interface TaxDeclarationRow {
   industry_code: string;
   industry_name: string;

@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, date, status, voucher_no, total, customer, customer_tax_code\n             FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "total",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "customer",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_tax_code",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a536a3c605814725dca7fec5d170c5a3b05b1e10294f169e08098814719f65ae"
+}

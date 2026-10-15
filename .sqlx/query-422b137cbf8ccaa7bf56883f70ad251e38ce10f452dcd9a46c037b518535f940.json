@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT total, payload_json FROM invoice_export WHERE invoice_id = ? ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "total",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "payload_json",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "422b137cbf8ccaa7bf56883f70ad251e38ce10f452dcd9a46c037b518535f940"
+}

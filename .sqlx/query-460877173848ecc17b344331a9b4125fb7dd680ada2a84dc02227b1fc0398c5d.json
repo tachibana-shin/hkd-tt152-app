@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT from_status, to_status, reason, actor, ref\n                 FROM invoice_event WHERE invoice_id = ? ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "from_status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "to_status",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "reason",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "actor",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "ref",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "460877173848ecc17b344331a9b4125fb7dd680ada2a84dc02227b1fc0398c5d"
+}

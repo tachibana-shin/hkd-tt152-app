@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT total FROM invoice_export WHERE invoice_id = ? ORDER BY id DESC LIMIT 1",
+  "query": "SELECT COALESCE(SUM(quantity), 0.0) as \"q!: f64\" FROM stock_lot WHERE product_id = ?",
   "describe": {
     "columns": [
       {
-        "name": "total",
+        "name": "q!: f64",
         "ordinal": 0,
         "type_info": "Float"
       }
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "3871ae89f3a5bf8c62eae10d8937253d66d79a25d3a99d3c9f2660eb4d0a36fe"
+  "hash": "5d2592f7ace606589c1387298348e44eb602bf3815e6c77a69389a3250a41044"
 }

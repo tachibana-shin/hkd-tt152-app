@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT total FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "total",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a087c511d5d1e5861d1529d396e4d13741314d7b7131029c15187541079d6a37"
+}

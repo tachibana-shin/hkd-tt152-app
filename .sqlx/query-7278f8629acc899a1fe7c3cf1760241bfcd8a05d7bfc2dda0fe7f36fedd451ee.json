@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, date, customer, customer_tax_code, status, voucher_no,\n                  e_invoice_no, e_invoice_symbol, e_invoice_date\n             FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_tax_code",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_no",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_symbol",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_date",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7278f8629acc899a1fe7c3cf1760241bfcd8a05d7bfc2dda0fe7f36fedd451ee"
+}

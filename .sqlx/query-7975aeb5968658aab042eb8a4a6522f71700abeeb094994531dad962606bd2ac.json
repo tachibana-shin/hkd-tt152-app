@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT quantity, unit_cost FROM stock_lot\n                WHERE product_id = ? ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "quantity",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_cost",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7975aeb5968658aab042eb8a4a6522f71700abeeb094994531dad962606bd2ac"
+}

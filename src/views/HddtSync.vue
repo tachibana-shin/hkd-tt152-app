@@ -40,6 +40,9 @@ function fmtMoney(v: unknown) {
 // vẫn còn phát sinh nên mỗi lượt quét đều lấy lại. Mốc bắt đầu = hddt_start_date.
 const syncFrom = ref<Date | null>(null);
 const syncTo = ref<Date | null>(null);
+/** Ngày cần quét LẠI (bỏ dấu "đã quét" + xoá cache của đúng ngày đó) — hóa
+ *  đơn ký trễ / cổng cập nhật chậm thường rơi vào trường hợp này. */
+const rescanDay = ref<Date | null>(null);
 const syncKinds = ref<{ regular: boolean; cashRegister: boolean }>({
   regular: true,
   cashRegister: true,
@@ -318,6 +321,48 @@ function onSyncClearCache() {
   });
 }
 
+/**
+ * Quét lại MỘT NGÀY: bỏ dấu "ngày đã quét" + xoá cache hóa đơn CỦA NGÀY ĐÓ để
+ * lần bấm "Quét cổng" sau tải lại từ cổng. Hóa đơn ký trễ / cổng cập nhật chậm
+ * sau khi ngày đó đã quét trước đây bị cache theo ngày bỏ sót vĩnh viễn.
+ * Hóa đơn đã nhập kho (bảng riêng) giữ nguyên.
+ */
+function onRescanDay() {
+  const day = syncIsoDate(rescanDay.value);
+  if (!day) {
+    toast.add({ severity: "warn", summary: "Chọn ngày cần quét lại", life: 3000 });
+    return;
+  }
+  confirm.require({
+    header: "Quét lại ngày này",
+    message:
+      `Xoá cache hóa đơn của ngày ${day} và bỏ dấu "ngày đã quét" — lần bấm ` +
+      '"Quét cổng" sau sẽ tải lại toàn bộ hóa đơn ngày này từ cổng. Hóa đơn đã nhập kho giữ nguyên.',
+    icon: "pi pi-exclamation-triangle",
+    acceptLabel: "Xoá cache ngày",
+    rejectLabel: "Huỷ",
+    acceptProps: { severity: "danger" },
+    accept: async () => {
+      syncScanning.value = true;
+      try {
+        const out = await api.hddtUncacheDay(day);
+        toast.add({
+          severity: "success",
+          summary: "Đã bỏ cache ngày để quét lại",
+          detail: `${day}: xoá ${out.invoices_deleted} hóa đơn cache · ${out.days_deleted} dấu ngày — bấm "Quét cổng" để tải lại.`,
+          life: 6000,
+        });
+        syncScanMsg.value = "";
+        await loadSyncPreview();
+      } catch (e) {
+        toastError("Không bỏ được cache ngày", e);
+      } finally {
+        syncScanning.value = false;
+      }
+    },
+  });
+}
+
 function syncStatusSeverity(s: string) {
   return s === "imported" ? "success" : s === "manual" ? "warn" : "info";
 }
@@ -447,6 +492,27 @@ void (async () => {
           :disabled="syncScanning || !syncSummary || syncSummary.total === 0"
           @click="onSyncClearCache"
         />
+        <!-- Quét lại 1 ngày: hóa đơn ký trễ / cổng cập nhật chậm bị cache theo ngày bỏ sót. -->
+        <div class="flex items-end gap-2">
+          <div>
+            <label class="mb-1 block text-xs text-gray-500">Ngày quét lại</label>
+            <DatePicker
+              v-model="rescanDay"
+              dateFormat="dd/mm/yy"
+              placeholder="Chọn ngày"
+              class="w-40"
+              :max-date="new Date()"
+            />
+          </div>
+          <Button
+            label="Quét lại ngày này"
+            icon="pi pi-replay"
+            severity="warning"
+            :disabled="syncScanning || !rescanDay"
+            v-tooltip="'Bỏ dấu ngày đã quét + xoá cache hóa đơn của ngày đó để tải lại từ cổng'"
+            @click="onRescanDay"
+          />
+        </div>
         <!-- Gộp file XML của đúng các dòng đang xem thành 1 ZIP để nộp/gửi. -->
         <Button
           :label="exportableXmlCount > 0 ? `Tải ZIP XML (${exportableXmlCount})` : 'Tải ZIP XML'"

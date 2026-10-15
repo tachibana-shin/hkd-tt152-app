@@ -105,6 +105,8 @@ import type {
   InvoiceReplaceResult,
   InvoiceDuplicateNumber,
   JobProgress,
+  QuickSaleRow,
+  MissingNumbersReport,
 } from "@/types";
 
 // ─── parse helper: backend trả JSON string ───
@@ -606,6 +608,65 @@ export const api = {
       customer_tax_code: args.customer_tax_code,
       items: args.items,
     }),
+  /**
+   * Sửa thông tin NGOÀI SỔ của hóa đơn đã xử lý (đã chép / đã phát hành) cho
+   * khớp hóa đơn chính thức ở hệ thống ký bên kia: số, ngày, khách hàng, MST,
+   * số/ký hiệu/ngày HĐĐT. Không đổi dòng hàng, bút toán hay phiếu xuất.
+   */
+  updateInvoiceHeader: async (args: {
+    id: number;
+    number: string;
+    date: string;
+    customer: string;
+    customer_tax_code: string;
+    e_invoice_no: string;
+    e_invoice_symbol: string;
+    e_invoice_date: string;
+  }) =>
+    parse<{ ok: boolean; warning: string; changes: string[] }>(
+      await call<string>("update_invoice_header", {
+        id: args.id,
+        number: args.number,
+        date: args.date,
+        customer: args.customer,
+        customerTaxCode: args.customer_tax_code,
+        eInvoiceNo: args.e_invoice_no,
+        eInvoiceSymbol: args.e_invoice_symbol,
+        eInvoiceDate: args.e_invoice_date,
+      }),
+    ),
+  /**
+   * Sửa DÒNG HÀNG của hóa đơn đã xử lý cho khớp hóa đơn chính thức — có phiếu
+   * xuất thì tự ghi phiếu {số}DT (đảo + ghi lại doanh thu, bù tồn/giá vốn theo
+   * chênh lệch số lượng); thiếu tồn kho tăng thêm thì backend chặn.
+   */
+  updateInvoiceLines: async (args: {
+    id: number;
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      industry_code?: string;
+      discount?: number;
+      warehouse_code?: string;
+      line_name?: string;
+    }[];
+  }) =>
+    parse<{
+      ok: boolean;
+      old_total: number;
+      new_total: number;
+      voucher_dt: string;
+      booked: number;
+      warning: string;
+    }>(await call<string>("update_invoice_lines", { id: args.id, items: args.items })),
+  /**
+   * Báo cáo số hiệu bị HỔNG giữa dãy — số nội bộ HD#### và số HĐĐT chính thức
+   * (gom theo từng ký hiệu). Nhập trễ / quên một số giữa chừng hiện ngay để
+   * đối chiếu với hệ thống ký bên kia.
+   */
+  invoiceMissingNumbers: async () =>
+    parse<MissingNumbersReport>(await call<string>("invoice_missing_numbers")),
   getInvoiceDetail: async (id: number) =>
     parse<{ invoice: Invoice; items: InvoiceItem[] }>(
       await call<string>("get_invoice_detail", { id }),
@@ -871,6 +932,15 @@ export const api = {
     const r = JSON.parse(await call<string>("hddt_sync_clear_cache", {}));
     return { invoicesDeleted: r.invoices_deleted ?? 0, daysDeleted: r.days_deleted ?? 0 };
   },
+  /**
+   * Quét lại MỘT NGÀY: bỏ dấu "ngày đã quét" + xoá cache hóa đơn của ngày đó để
+   * lần quét sau tải lại từ cổng (hóa đơn ký trễ / cổng cập nhật chậm trước đây
+   * bị cache theo ngày bỏ sót vĩnh viễn). Hóa đơn đã nhập kho giữ nguyên.
+   */
+  hddtUncacheDay: async (day: string) =>
+    parse<{ ok: boolean; invoices_deleted: number; days_deleted: number }>(
+      await call<string>("hddt_uncache_day", { day }),
+    ),
 
   // ─── XEM PDF HÓA ĐƠN ĐIỆN TỬ ───
   /** Chi tiết hóa đơn lấy trực tiếp từ cổng — màn Tra cứu HĐĐT chưa có trong DB. */
@@ -1031,6 +1101,30 @@ export const api = {
     parse<TaxDeclarationRow[]>(
       await call<string>("get_tax_declaration", { fromDate, toDate, unitCode }),
     ),
+
+  /**
+   * Kỳ tờ khai đã đánh dấu ĐÃ NỘP (cờ nội bộ theo khoảng ngày đang xem trên
+   * màn Tờ khai) — trả null nếu chưa đánh dấu.
+   */
+  getTaxPeriodClosed: async (fromDate: string, toDate: string) =>
+    parse<{
+      from_date: string;
+      to_date: string;
+      note: string;
+      actor: string;
+      closed_at: string;
+    } | null>(await call<string>("get_tax_period_closed", { fromDate, toDate })),
+  /** Đánh dấu / gỡ "kỳ tờ khai đã nộp" — sửa hóa đơn trong kỳ vẫn được, chỉ cảnh báo. */
+  setTaxPeriodClosed: (args: { fromDate: string; toDate: string; closed: boolean; note: string }) =>
+    call<string>("set_tax_period_closed", args),
+
+  /**
+   * Báo cáo nhanh hóa đơn **đã xuất** trong khoảng ngày đang xem (quý tờ khai):
+   * 1 dòng = 1 hóa đơn — tên, loại (hàng hóa/dịch vụ/hỗn hợp), tổng tiền.
+   * Nháp / đã thay thế / đã hủy không vào báo cáo.
+   */
+  quickSalesReport: async (fromDate: string, toDate: string) =>
+    parse<QuickSaleRow[]>(await call<string>("quick_sales_report", { fromDate, toDate })),
 
   /**
    * Tổng hợp thuế phải nộp theo NĐ 68/2026 + NĐ 141/2026 (xếp nhóm hộ, GTGT/TNCN)

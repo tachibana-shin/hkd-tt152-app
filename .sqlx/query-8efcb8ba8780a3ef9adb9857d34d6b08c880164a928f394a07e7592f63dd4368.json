@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"n!\" FROM journal_entry WHERE voucher_no = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8efcb8ba8780a3ef9adb9857d34d6b08c880164a928f394a07e7592f63dd4368"
+}

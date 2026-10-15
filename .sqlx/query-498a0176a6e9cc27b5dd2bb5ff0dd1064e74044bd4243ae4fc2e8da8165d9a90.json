@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT e_invoice_no FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "e_invoice_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "498a0176a6e9cc27b5dd2bb5ff0dd1064e74044bd4243ae4fc2e8da8165d9a90"
+}

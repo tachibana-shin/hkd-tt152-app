@@ -566,10 +566,18 @@ pub(crate) async fn build_pack(
     let edited_after_export = if export_count == 0 {
         false
     } else {
-        match latest_snapshot_total(pool, invoice_id).await? {
-            Some(before) => {
+        match latest_snapshot(pool, invoice_id).await? {
+            Some((before, json)) => {
+                let saved: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
                 (before - header.total).abs() > 1.0
                     || !lines_equal_snapshot(pool, invoice_id).await?
+                    || snapshot_header_differs(
+                        &saved,
+                        &header.number,
+                        &header.date_vn,
+                        &header.customer,
+                        &header.customer_tax_code,
+                    )
             }
             None => false,
         }
@@ -591,15 +599,18 @@ pub(crate) async fn build_pack(
     })
 }
 
-async fn latest_snapshot_total(pool: &SqlitePool, invoice_id: i64) -> Result<Option<f64>, String> {
+async fn latest_snapshot(
+    pool: &SqlitePool,
+    invoice_id: i64,
+) -> Result<Option<(f64, String)>, String> {
     let row = sqlx::query!(
-        r#"SELECT total FROM invoice_export WHERE invoice_id = ? ORDER BY id DESC LIMIT 1"#,
+        r#"SELECT total, payload_json FROM invoice_export WHERE invoice_id = ? ORDER BY id DESC LIMIT 1"#,
         invoice_id
     )
     .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?;
-    Ok(row.map(|r| r.total))
+    Ok(row.map(|r| (r.total, r.payload_json)))
 }
 
 /// So 2 danh sách (mã hàng, SL, đơn giá) của bản chốt và hiện tại.
@@ -609,6 +620,33 @@ fn pairs_match(saved: &[(String, f64, f64)], now: &[(String, f64, f64)]) -> bool
             .iter()
             .zip(now.iter())
             .all(|(a, b)| a.0 == b.0 && (a.1 - b.1).abs() < 1e-6 && (a.2 - b.2).abs() < 1e-6)
+}
+
+/// Số hiệu / ngày / khách hàng / MST của bản chốt còn khớp hóa đơn hiện tại
+/// không. Sửa header theo HĐ chính thức (`update_invoice_header_core`) cũng phải
+/// hiện cờ "đã sửa sau lần chép" — tiền và dòng hàng không đổi nhưng những gì đã
+/// dán sang bên kia thì lệch rồi. Snapshot lưu ngày theo dạng dd/mm/yyyy.
+fn snapshot_header_differs(
+    saved: &serde_json::Value,
+    number: &str,
+    date_vn: &str,
+    customer: &str,
+    customer_tax_code: &str,
+) -> bool {
+    let field = |obj: &serde_json::Value, key: &str| -> String {
+        obj.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (saved_customer, saved_tax) = match saved.get("customer") {
+        Some(c) => (field(c, "name"), field(c, "tax_code")),
+        None => (String::new(), String::new()),
+    };
+    field(saved, "number") != number
+        || field(saved, "date") != date_vn
+        || saved_customer != customer
+        || saved_tax != customer_tax_code
 }
 
 /// Bản chốt (đã chép sang bên kia) còn khớp với hóa đơn hiện tại không.
@@ -944,6 +982,13 @@ async fn assemble_queue_items(
                 .map(|(_, code, qty, price)| (code.clone(), *qty, *price))
                 .collect();
             snapshot_differs(*saved_total, inv.total, &saved_pairs, &now)
+                || snapshot_header_differs(
+                    &saved,
+                    &inv.number,
+                    &header.date_vn,
+                    &inv.customer,
+                    &inv.customer_tax_code,
+                )
         });
 
         out.push(QueueItem {

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as \"n!\"\n                 FROM journal_entry WHERE voucher_no IN (?, ?) AND entry_type = 'CP'",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7de613119c98c41fd045c5dae24b12d8af44d9593ade8726c0ad8031f8217c27"
+}

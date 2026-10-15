@@ -659,6 +659,28 @@ pub(crate) async fn hddt_sync_scan(
     Ok(v.to_string())
 }
 
+/// Bỏ dấu "ngày đã quét" + xoá cache hóa đơn CỦA NGÀY ĐÓ để lần quét tới tải
+/// lại từ cổng. Dùng khi hóa đơn xuất hiện SAU khi ngày đó đã quét (ký trễ,
+/// cổng cập nhật chậm) — cache theo ngày trước đây bỏ sót vĩnh viễn những hóa
+/// đơn như thế. Hóa đơn đã nhập kho nằm ở bảng riêng nên không bị đụng tới.
+#[tauri::command]
+pub(crate) async fn hddt_uncache_day(
+    state: State<'_, AppState>,
+    day: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let day = day.trim().to_string();
+    if chrono::NaiveDate::parse_from_str(&day, "%Y-%m-%d").is_err() {
+        return Err(format!("Ngày '{day}' không hợp lệ (cần yyyy-mm-dd)"));
+    }
+    let (invoices, days) = sync::uncache_day(&*state.pool.read().await, &day).await?;
+    audit(&state, "hddt_uncache_day", "hddt", &day).await;
+    Ok(
+        serde_json::json!({ "ok": true, "invoices_deleted": invoices, "days_deleted": days })
+            .to_string(),
+    )
+}
+
 /// Xem trước kết quả trong cache (không gọi cổng) + cho phép thử lại các
 /// hóa đơn lần trước chưa lấy được chi tiết.
 #[tauri::command]

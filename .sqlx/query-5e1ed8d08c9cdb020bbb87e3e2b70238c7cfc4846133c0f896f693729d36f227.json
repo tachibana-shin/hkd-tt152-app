@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, e_invoice_no, e_invoice_symbol FROM invoice",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_no",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_symbol",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5e1ed8d08c9cdb020bbb87e3e2b70238c7cfc4846133c0f896f693729d36f227"
+}

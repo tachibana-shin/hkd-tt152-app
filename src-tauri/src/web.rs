@@ -544,6 +544,25 @@ pub async fn api_invoke(
             customer_tax_code: String,
             items: Vec<InvoiceItemInput>
         ),
+        "update_invoice_header" => mx!(
+            commands::invoice::update_invoice_header,
+            body,
+            id: i64,
+            number: String,
+            date: String,
+            customer: String,
+            customer_tax_code: String,
+            e_invoice_no: String,
+            e_invoice_symbol: String,
+            e_invoice_date: String
+        ),
+        "update_invoice_lines" => mx!(
+            commands::invoice::update_invoice_lines,
+            body,
+            id: i64,
+            items: Vec<InvoiceItemInput>
+        ),
+        "invoice_missing_numbers" => mx!(commands::invoice::invoice_missing_numbers, body),
         "get_invoice_detail" => mx!(commands::invoice::get_invoice_detail, body, id: i64),
         "invoice_draft_detail" => mx!(commands::invoice::invoice_draft_detail, body, id: i64),
         "save_invoice" => mx!(
@@ -623,6 +642,7 @@ pub async fn api_invoke(
             to: Option<String>,
             kinds: Option<String>
         ),
+        "hddt_uncache_day" => mx!(commands::hddt::hddt_uncache_day, body, day: String),
         "hddt_sync_preview" => mx!(
             commands::hddt::hddt_sync_preview,
             body,
@@ -715,6 +735,26 @@ pub async fn api_invoke(
             body,
             from_date: String,
             to_date: String
+        ),
+        "get_tax_period_closed" => mx!(
+            commands::accounting::get_tax_period_closed,
+            body,
+            from_date: String,
+            to_date: String
+        ),
+        "quick_sales_report" => mx!(
+            commands::accounting::quick_sales_report,
+            body,
+            from_date: String,
+            to_date: String
+        ),
+        "set_tax_period_closed" => mx!(
+            commands::accounting::set_tax_period_closed,
+            body,
+            from_date: String,
+            to_date: String,
+            closed: bool,
+            note: String
         ),
         "get_tax_declaration" => mx!(
             commands::accounting::get_tax_declaration,

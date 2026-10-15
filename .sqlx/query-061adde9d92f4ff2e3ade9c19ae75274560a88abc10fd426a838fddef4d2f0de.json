@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM hddt_purchase_invoice WHERE posting_date = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "061adde9d92f4ff2e3ade9c19ae75274560a88abc10fd426a838fddef4d2f0de"
+}

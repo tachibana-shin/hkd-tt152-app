@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT from_date, to_date, closed_at FROM tax_period_closed\n            WHERE ? >= from_date AND ? <= to_date\n            ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "from_date",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "to_date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "closed_at",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b54da1e5b8fbdfd1c116ac17d850e5b137ad2551667906dbd22bf9f356902fdd"
+}
