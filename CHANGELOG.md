@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.22.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.21.0...v0.22.0) (2026-10-15)
+
+
+### Features
+
+* **invoice:** edit processed invoices to match official HĐĐT, rescan day, missing numbers, quick sales report ([cee0bb7](https://github.com/tachibana-shin/hkd-tt152-app/commit/cee0bb7e269c9aec9d04797f968043e8eab3f29e))
+
 # [0.21.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.20.1...v0.21.0) (2026-10-08)
 
 
