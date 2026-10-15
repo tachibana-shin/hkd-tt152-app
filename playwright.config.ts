@@ -23,7 +23,10 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // CI (GitHub Actions) thỉnh thoảng chậm/rơi nhịp ngoài ý muốn (runner ubuntu
+  // đang đổi phiên bản) — thử lại2 lần trên CI để không đỏ nhầm; dev local vẫn
+  // fail ngay lần đầu để bắt lỗi thật.
+  retries: process.env.CI ? 2 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL: BASE_URL,

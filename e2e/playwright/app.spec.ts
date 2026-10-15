@@ -154,40 +154,46 @@ async function openTab(page: Page, tab: string, path: string) {
   throw new Error(`Không chuyển được tới "${tab}" (${path}) sau 3 lần bấm`);
 }
 
-test("navigating all main tabs updates the header title correctly", async ({ page }) => {
-  await ensureLoggedIn(page);
-  // [sidebar button label, header h2 title, route]
-  const cases: Array<[string, string, string]> = [
-    ["Tổng quan", "Tổng quan", "/"],
-    ["Sản phẩm", "Danh mục sản phẩm", "/products"],
-    ["Tài khoản", "Danh mục tài khoản", "/accounts"],
-    ["Đối tác & Kho", "Danh mục đối tác & kho", "/catalogs"],
-    ["Bảng lương", "Bảng lương", "/payroll"],
-    ["Chấm công", "Chấm công", "/attendance"],
-    ["Thu / Chi", "Phiếu thu / chi", "/cash"],
-    ["Sổ nhật ký", "Sổ nhật ký chung", "/ledger"],
-    ["Nhập liệu", "Nhập liệu Excel", "/import"],
-    ["Nhập kho", "Nhập kho", "/inbound"],
-    ["Lô sản xuất", "Lô sản xuất", "/production-lots"],
-    ["Xuất kho", "Xuất kho / Bán hàng", "/outbound"],
-    ["Tồn kho", "Tồn kho", "/inventory"],
-    ["Hóa đơn", "Hóa đơn", "/invoices"],
-    ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT", "/invoice-queue"],
-    ["HĐĐT", "Hóa đơn điện tử", "/hddt"],
-    ["Tra cứu HĐĐT", "Tra cứu HĐĐT", "/hddt-lookup"],
-    ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua", "/hddt-sync"],
-    ["Nhật ký HĐ", "Nhật ký hoạt động", "/audit"],
-    ["Kế toán HKD", "Kế toán HKD", "/accounting"],
-    ["Sổ kế toán", "Sổ kế toán", "/books"],
-    ["Người dùng", "Người dùng & phân quyền", "/users"],
-    ["Hồ sơ HKD", "Hồ sơ HKD", "/profiles"],
-    ["Cài đặt", "Cài đặt", "/settings"],
-  ];
-  for (const [tab, title, path] of cases) {
-    await openTab(page, tab, path);
-    await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
-  }
-});
+test(
+  "navigating all main tabs updates the header title correctly",
+  // CI/dev chậm có tab mất >30s để Vite biên dịch chunk lazy —24 tab liên tiếp
+  // rất dễ chạm giới hạn90s mặc định dù mọi tab đều chuyển đúng.
+  { timeout: 180_000 },
+  async ({ page }) => {
+    await ensureLoggedIn(page);
+    // [sidebar button label, header h2 title, route]
+    const cases: Array<[string, string, string]> = [
+      ["Tổng quan", "Tổng quan", "/"],
+      ["Sản phẩm", "Danh mục sản phẩm", "/products"],
+      ["Tài khoản", "Danh mục tài khoản", "/accounts"],
+      ["Đối tác & Kho", "Danh mục đối tác & kho", "/catalogs"],
+      ["Bảng lương", "Bảng lương", "/payroll"],
+      ["Chấm công", "Chấm công", "/attendance"],
+      ["Thu / Chi", "Phiếu thu / chi", "/cash"],
+      ["Sổ nhật ký", "Sổ nhật ký chung", "/ledger"],
+      ["Nhập liệu", "Nhập liệu Excel", "/import"],
+      ["Nhập kho", "Nhập kho", "/inbound"],
+      ["Lô sản xuất", "Lô sản xuất", "/production-lots"],
+      ["Xuất kho", "Xuất kho / Bán hàng", "/outbound"],
+      ["Tồn kho", "Tồn kho", "/inventory"],
+      ["Hóa đơn", "Hóa đơn", "/invoices"],
+      ["Chờ xuất HĐĐT", "Chờ xuất HĐĐT", "/invoice-queue"],
+      ["HĐĐT", "Hóa đơn điện tử", "/hddt"],
+      ["Tra cứu HĐĐT", "Tra cứu HĐĐT", "/hddt-lookup"],
+      ["Đồng bộ HĐĐT", "Đồng bộ hóa đơn mua", "/hddt-sync"],
+      ["Nhật ký HĐ", "Nhật ký hoạt động", "/audit"],
+      ["Kế toán HKD", "Kế toán HKD", "/accounting"],
+      ["Sổ kế toán", "Sổ kế toán", "/books"],
+      ["Người dùng", "Người dùng & phân quyền", "/users"],
+      ["Hồ sơ HKD", "Hồ sơ HKD", "/profiles"],
+      ["Cài đặt", "Cài đặt", "/settings"],
+    ];
+    for (const [tab, title, path] of cases) {
+      await openTab(page, tab, path);
+      await expect(page.locator("header h2")).toHaveText(title, { timeout: 30_000 });
+    }
+  },
+);
 
 test("Products tab renders real data from the DB (seeded product)", async ({ page }) => {
   await ensureLoggedIn(page);
@@ -1913,7 +1919,7 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   await expect(dlg.getByText("20.000 đ", { exact: true }).first()).toBeVisible();
   await expect(dlg.getByText("20.200 đ")).toHaveCount(0);
 
-  // Khối dán mặc định: "Tên · ĐVT · SL · Đơn giá · Thành tiền", tách bằng dấu phẩy,
+  // Khối dán mặc định: "Tên · ĐVT · SL · Đơn giá · Thành tiền", tách bằng TAB,
   // số không dấu phân cách nghìn, không kèm thuế suất (bên kia tự áp tỷ lệ %).
   const pasteBox = dlg.getByRole("textbox");
   // Nút chuyển kiểu chép phải render (SelectButton của PrimeVue không auto-import).
@@ -1922,7 +1928,7 @@ test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản c
   await expect(pasteBox).toHaveValue(/Tổng tiền: 20\.000/);
   await dlg.getByRole("button", { name: "Dán dòng hàng" }).click();
 
-  await expect(pasteBox).toHaveValue(/^Bottled water,Bottle,2,10000,20000\s*$/);
+  await expect(pasteBox).toHaveValue(/^Bottled water\tBottle\t2\t10000\t20000\s*$/);
   await expect(dlg.getByText("Tên hàng · ĐVT · SL · Đơn giá · Thành tiền")).toBeVisible();
 
   // 3) Bấm "Đã chép sang bên kia" → lưu bản chốt, trạng thái chuyển sang đã chép.
@@ -2050,10 +2056,12 @@ test("HĐĐT: app tự đăng nhập cổng lúc khởi động, không cần m�
   request,
 }) => {
   // Cấu hình trỏ mock portal + đăng nhập một lần để app có token hợp lệ.
-  await request.post("/api/hddt_save_config", {
+  const cfg = await request.post("/api/hddt_save_config", {
     data: { username: "0100000000", password: "mock", baseUrl: MOCK_PORTAL_URL },
   });
-  await request.post("/api/hddt_login", { data: {} });
+  expect(cfg.ok(), `hddt_save_config failed ${cfg.status()}: ${await cfg.text()}`).toBe(true);
+  const login = await request.post("/api/hddt_login", { data: {} });
+  expect(login.ok(), `hddt_login failed ${login.status()}: ${await login.text()}`).toBe(true);
 
   // Mở app (đăng nhập nội bộ) — không chạm vào menu HĐĐT.
   await ensureLoggedIn(page);
@@ -2061,7 +2069,8 @@ test("HĐĐT: app tự đăng nhập cổng lúc khởi động, không cần m�
     .poll(
       async () => (await (await request.post("/api/hddt_status", { data: {} })).json()).logged_in,
       {
-        timeout: 20_000,
+        // CI2-core chậm hơn máy dev nhiều khi khởi động app + tự đăng nhập cổng.
+        timeout: 60_000,
       },
     )
     .toBe(true);
@@ -2082,9 +2091,10 @@ test("HĐĐT: lưu tài khoản qua UI không lỗi ảo, mắt soi mật khẩu
   request,
 }) => {
   test.skip(LIVE_PORTAL, "Test UI luôn trỏ mock portal — bỏ qua khi chạy cổng thật");
-  await request.post("/api/hddt_save_config", {
+  const cfg = await request.post("/api/hddt_save_config", {
     data: { username: "0100000000", password: "mock", baseUrl: MOCK_PORTAL_URL },
   });
+  expect(cfg.ok(), `hddt_save_config failed ${cfg.status()}: ${await cfg.text()}`).toBe(true);
   await ensureLoggedIn(page);
   await openTab(page, "HĐĐT", "/hddt");
   await expect(page.locator("header h2")).toHaveText("Hóa đơn điện tử");
@@ -3352,6 +3362,34 @@ test(
 
     const btn = page.getByTestId("export-tax-report");
     await expect(btn).toBeVisible();
+
+    // Tự tạo 1 hóa đơn trong kỳ TRƯỚC khi xuất: PDF bán ra là mục bắt buộc có
+    // trong ZIP — không để phụ thuộc thứ tự chạy của test khác (test khác có
+    // thể tạo hóa đơn trong kỳ hoặc không, tùy môi trường CI hay dev).
+    const now = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const todayIso = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
+    const seeded = await page.request.post("/api/save_invoice", {
+      data: {
+        number: "HD9991",
+        date: todayIso,
+        customer: "Khách báo cáo kỳ thuế",
+        customer_tax_code: "0100000000",
+        items: [
+          {
+            product_code: "SP001",
+            quantity: 1,
+            unit_price: 10000,
+            industry_code: "PPHH",
+            discount: 0,
+            warehouse_code: "",
+          },
+        ],
+      },
+    });
+    expect(seeded.ok(), `save_invoice failed ${seeded.status()}: ${await seeded.text()}`).toBe(
+      true,
+    );
 
     // Phải đăng ký TRƯỚC khi bấm — chờ file xong rồi mới nghe là đã lỡ event.
     const downloadPromise = page.waitForEvent("download");
