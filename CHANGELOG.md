@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.23.0...v0.23.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **inbound,accounting,invoice,e2e:** audit fixes for Excel import, UI states and reports ([95a85df](https://github.com/tachibana-shin/hkd-tt152-app/commit/95a85df2906a0e33b84c144fc34744282d9667c3))
+
 # [0.23.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.22.0...v0.23.0) (2026-10-15)
 
 
