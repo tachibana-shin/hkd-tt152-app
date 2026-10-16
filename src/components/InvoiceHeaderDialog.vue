@@ -57,13 +57,16 @@ let origHeader = "";
 let origItems = "[]";
 
 function headerJson() {
+  // Trim NGAY khi đối chiếu — giá trị gửi lên backend (save) đã trim, nếu so
+  // bản chưa trim thì gõ thêm dấu cách cuối là bị coi "có đổi", gọi backend
+  // rồi nhận lỗi "không có gì để đổi" (toast đỏ oan).
   return JSON.stringify([
-    form.number,
+    form.number.trim(),
     toIsoDate(form.date),
-    form.customer,
-    form.customerTaxCode,
-    form.eInvoiceNo,
-    form.eInvoiceSymbol,
+    form.customer.trim(),
+    form.customerTaxCode.trim(),
+    form.eInvoiceNo.trim(),
+    form.eInvoiceSymbol.trim(),
     form.eInvoiceDate ? toIsoDate(form.eInvoiceDate) : "",
   ]);
 }
@@ -279,12 +282,13 @@ async function save() {
 
     <div class="border-t pt-2">
       <div class="mb-1 text-sm font-medium">Dòng hàng (theo hóa đơn chính thức)</div>
+      <!-- Khoá sửa dòng khi đang nạp (prefill ghi đè form.items từ DB) hoặc đang lưu. -->
       <LineItemsEditor
         :items="form.items"
         :products="products"
         :industry-groups="industryGroups"
         :warehouses="warehouses"
-        :can-edit="auth.canAccounting"
+        :can-edit="auth.canAccounting && !saving"
         :warn-shortage="false"
         price-field="sale_price"
         show-industry

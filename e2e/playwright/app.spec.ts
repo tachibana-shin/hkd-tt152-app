@@ -3375,7 +3375,9 @@ test("Xuất báo cáo kỳ thuế: có tiến độ + nhật ký, ZIP gộp t�
   const todayIso = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
   const seeded = await page.request.post("/api/save_invoice", {
     data: {
-      number: "HD9991",
+      // Số theo LẦN RETRY: chạy lại (retries khi flake) mà dùng lại số cũ sẽ
+      // chết vì trùng số hóa đơn — đổi số mỗi lượt để retry thật sự cứu được.
+      number: `HD999${test.info().retry + 1}`,
       date: todayIso,
       customer: "Khách báo cáo kỳ thuế",
       customer_tax_code: "0100000000",
@@ -5114,6 +5116,35 @@ test("Nhập kho: file phụ lục tồn kho TT88 — chọn cột tay, đổi n
   await expect(summary).toContainText("Tổng tiền: 160.000 đ", { timeout: 20_000 });
   await expect(summary).toContainText("2 dòng");
   await expect(groupSelect).toContainText("Số dư đầu kỳ");
+
+  // Hồi quy nhãn số viết tắt: "SL" không khớp từ điển — trước đây cột Số lượng bị
+  // bỏ trống, mọi dòng thành SL = 1 / đơn giá = thành tiền (âm thầm sai số lượng).
+  // Nay phải tự dò được cột C làm số lượng, đơn giá = thành tiền ÷ số lượng.
+  const fileC = toXlsx([
+    ["Tên mặt hàng", "ĐVT", "SL", "Tổng tiền"],
+    ["Bút bi E2E", "Cái", 10, 50_000],
+  ]);
+  await upload(fileC, "sl-viet-tat.xlsx");
+  await expect(summary).toContainText("Tổng tiền: 50.000 đ", { timeout: 20_000 });
+  await expect(detail).toContainText("C (số lượng)");
+  const rowC = xlsx.locator("tbody tr").filter({ hasText: "Bút bi E2E" });
+  await expect(rowC).toContainText("10");
+  await expect(rowC).toContainText("5.000");
+
+  // Sửa "Dòng bắt đầu" bằng tay rồi đổi cột khác — giá trị sửa tay phải được giữ
+  // nguyên (trước đây mỗi lần đổi cột là dò lại và ghi đè về giá trị máy dò).
+  const startInput = xlsx.locator("#excel-map-start");
+  await startInput.fill("1");
+  await startInput.press("Tab");
+  await expect(startInput).toHaveValue("1");
+  const qtySelect = xlsx.locator('label[for="excel-map-qty"] + div');
+  await qtySelect.click();
+  await page.getByRole("option", { name: /^A —/ }).click();
+  await expect(startInput).toHaveValue("1");
+
+  // Trả lại file B cho luồng "Thêm 2 dòng" bên dưới.
+  await upload(fileB, "Xuat_01_1_b.xlsx");
+  await expect(summary).toContainText("Tổng tiền: 160.000 đ", { timeout: 20_000 });
 
   // Thêm vào phiếu → popup đóng, dòng vào bảng; mặt hàng mới tự vào danh mục kèm ĐVT.
   await xlsx.getByRole("button", { name: /Thêm 2 dòng/ }).click();

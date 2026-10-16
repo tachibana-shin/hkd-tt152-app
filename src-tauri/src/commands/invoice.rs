@@ -1275,12 +1275,22 @@ pub(crate) async fn update_invoice_lines(
     Ok(res.to_string())
 }
 
-/// Các số bị hổng GIỮA hai số đã có trong một dãy đã sắp xếp.
+/// Trần số hổng liệt kê cho mỗi dãy: hộ nhỏ hổng vài chục số đã là nhiều, còn
+/// một số dài bất thường (do nhập nhầm, ví dụ HD99999999) sẽ đòi liệt kê hàng
+/// chục triệu số — tràn bộ nhớ ngay khi mở báo cáo thiếu số hiệu. Chạm trần thì
+/// dừng; báo cáo vẫn có ích.
+const MAX_MISSING_NUMBERS: usize = 1000;
+
+/// Các số bị hổng GIỮA hai số đã có trong một dãy đã sắp xếp (tối đa
+/// [`MAX_MISSING_NUMBERS`] số).
 fn number_gaps(sorted: &[i64]) -> Vec<i64> {
     let mut out = Vec::new();
-    for w in sorted.windows(2) {
-        if w[1] - w[0] > 1 {
-            out.extend(w[0] + 1..w[1]);
+    'outer: for w in sorted.windows(2) {
+        for n in w[0].saturating_add(1)..w[1] {
+            out.push(n);
+            if out.len() >= MAX_MISSING_NUMBERS {
+                break 'outer;
+            }
         }
     }
     out
@@ -2154,6 +2164,16 @@ mod tests {
             warehouse_code: warehouse_code.into(),
             line_name: String::new(),
         }
+    }
+
+    // Số "rác" dài (nhập nhầm HD99999999) không được kéo theo việc liệt kê cả
+    // chục triệu số hổng — chạm trần là dừng; khoảng hổng nhỏ vẫn liệt kê đủ.
+    #[test]
+    fn number_gaps_dung_o_tran_voi_khoang_khong_lo() {
+        assert_eq!(number_gaps(&[1, 4]), vec![2, 3]);
+        let gaps = number_gaps(&[1, 1_000_000_000]);
+        assert_eq!(gaps.len(), MAX_MISSING_NUMBERS);
+        assert_eq!(gaps.first(), Some(&2));
     }
 
     /// Báo thiếu số hiệu: gom số nội bộ HD#### và số HĐĐT theo TỪNG ký hiệu —

@@ -237,7 +237,7 @@ useKeepAliveRefresh(load);
                     : data.role === 'ketoan'
                       ? 'info'
                       : data.role === 'kho'
-                        ? 'warning'
+                        ? 'warn'
                         : 'secondary'
                 "
               />

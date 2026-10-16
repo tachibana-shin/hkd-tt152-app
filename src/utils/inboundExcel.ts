@@ -273,13 +273,20 @@ function guessMapping(rows: unknown[][]): { mapping: ColumnMapping; groups: Colu
     new Set([unit0, quantity0, amount0].filter((c) => c >= 0)),
   );
 
-  // Thiếu nhãn cột số → lấy từ chính dữ liệu; riêng khi đã có 1 trong 2 cột số
-  // thì giữ nguyên (cột còn lại chủ động bỏ trống, người dùng chọn tay nếu cần).
-  const noNumber = quantity0 < 0 && amount0 < 0;
+  // Thiếu nhãn cột số → đoán từ chính dữ liệu:
+  // + Số lượng: lấp ngay khi nhãn không khớp, nhưng KHÔNG trùng cột đã khớp
+  //   nhãn Thành tiền (file chỉ có một cột tiền thì cột đó phải giữ nghĩa
+  //   thành tiền — gán nó cho Số lượng sẽ ra SL = tiền). Trước đây thiếu nhãn
+  //   kiểu "SL" là cột Số lượng bị bỏ trống → mọi dòng thành SL = 1, đơn giá
+  //   = thành tiền, âm thầm sai toàn bộ số lượng nhập kho.
+  // + Thành tiền: chỉ đoán khi CẢ HAI nhãn đều không khớp; còn nhãn Số lượng
+  //   mà cột tiền không nhận ra thì để trống (-1) cho người dùng chọn tay —
+  //   đoán bừa một cột số làm thành tiền dễ ra số sai trông-như-đúng.
+  const free = (guess: number, taken: number) => (guess >= 0 && guess !== taken ? guess : -1);
   const name = name0 >= 0 ? name0 : data.name;
   const unit = unit0 >= 0 ? unit0 : data.unit;
-  const quantity = quantity0 >= 0 ? quantity0 : noNumber ? data.quantity : -1;
-  const amount = amount0 >= 0 ? amount0 : noNumber ? data.amount : -1;
+  const quantity = quantity0 >= 0 ? quantity0 : free(data.quantity, amount0);
+  const amount = amount0 >= 0 ? amount0 : quantity0 < 0 ? free(data.amount, quantity0) : -1;
 
   const mapping: ColumnMapping = { name, unit, quantity, amount, start: 0 };
   mapping.start = findStart(rows, mapping);

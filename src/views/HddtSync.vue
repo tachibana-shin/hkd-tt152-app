@@ -507,7 +507,7 @@ void (async () => {
           <Button
             label="Quét lại ngày này"
             icon="pi pi-replay"
-            severity="warning"
+            severity="warn"
             :disabled="syncScanning || !rescanDay"
             v-tooltip="'Bỏ dấu ngày đã quét + xoá cache hóa đơn của ngày đó để tải lại từ cổng'"
             @click="onRescanDay"

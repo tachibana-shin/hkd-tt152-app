@@ -566,7 +566,7 @@ useKeepAliveRefresh(reload);
                   severity="warn"
                   @click="openStatus(data, 'adjusted')"
                 />
-                <!-- Sửa thông tin hồ sơ cho khớp hóa đơn chính thức (không đổi dòng hàng) -->
+                <!-- Sửa theo hóa đơn chính thức: hồ sơ + dòng hàng (có thể sinh phiếu điều chỉnh) -->
                 <Button
                   v-if="data.status !== 'draft'"
                   icon="pi pi-user-edit"
@@ -575,7 +575,7 @@ useKeepAliveRefresh(reload);
                   size="small"
                   aria-label="Sửa thông tin theo HĐ chính thức"
                   v-tooltip="
-                    'Sửa thông tin theo HĐ chính thức (số, ngày, khách, MST, số/ký hiệu HĐĐT — không đổi dòng hàng, phiếu xuất)'
+                    'Sửa theo HĐ chính thức (số, ngày, khách, MST, số/ký hiệu HĐĐT + dòng hàng — dòng hàng đụng sổ/tồn sẽ tự lập phiếu điều chỉnh)'
                   "
                   severity="secondary"
                   @click="openHeaderEdit(data)"

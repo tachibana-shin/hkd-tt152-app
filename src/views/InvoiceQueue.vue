@@ -521,7 +521,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   size="small"
                   aria-label="Sửa thông tin theo HĐ chính thức"
                   v-tooltip="
-                    'Sửa thông tin theo HĐ chính thức (số, ngày, khách, MST — không đổi dòng hàng, phiếu xuất)'
+                    'Sửa theo HĐ chính thức (số, ngày, khách, MST + dòng hàng — dòng hàng đụng sổ/tồn sẽ tự lập phiếu điều chỉnh)'
                   "
                   severity="secondary"
                   @click="openHeaderEdit(data.invoice)"

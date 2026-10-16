@@ -81,14 +81,14 @@ function clearInheritedRange() {
   return applyFilters();
 }
 
-function tagSeverity(et: string): "success" | "info" | "warning" | "danger" {
+function tagSeverity(et: string): "success" | "info" | "warn" | "danger" {
   switch (et) {
     case "PN":
       return "success";
     case "PX":
       return "info";
     case "PT":
-      return "warning";
+      return "warn";
     default:
       return "danger"; // PC
   }

@@ -19,7 +19,14 @@ import type {
   QuickSaleRow,
 } from "@/types";
 import { useAuthStore } from "@/stores/auth";
-import { fmtInt as fmt, fmtPct as pct, fmtThreshold, fmtVnd, toIsoDate } from "@/utils/format";
+import {
+  fmtInt as fmt,
+  fmtLocalDateTime,
+  fmtPct as pct,
+  fmtThreshold,
+  fmtVnd,
+  toIsoDate,
+} from "@/utils/format";
 import { describeRange, monthRange, quarterRange, sameDay, taxPeriodRange } from "@/utils/period";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
@@ -135,9 +142,9 @@ const declLoading = ref(false);
 const quickRows = ref<QuickSaleRow[]>([]);
 const quickTotal = computed(() => quickRows.value.reduce((s, r) => s + r.total, 0));
 /** Tag màu cho cột Loại: hàng hóa xanh, dịch vụ xanh dương, hỗn hợp vàng. */
-function kindSeverity(kind: string): "success" | "info" | "warning" {
+function kindSeverity(kind: string): "success" | "info" | "warn" {
   if (kind === "Dịch vụ") return "info";
-  if (kind === "Hỗn hợp") return "warning";
+  if (kind === "Hỗn hợp") return "warn"; // PrimeVue: "warn" — "warning" không có style
   return "success";
 }
 const overview = ref<TaxOverview | null>(null);
@@ -288,11 +295,20 @@ async function loadPeriodClosed() {
 
 async function togglePeriodClosed() {
   const { from, to } = declRange.value;
+  // Tra lại trạng thái của CHÍNH khoảng đang chọn: người dùng có thể vừa đổi
+  // ngày trên ô lọc mà chưa bấm tải lại — cờ đang hiển thị là của khoảng cũ,
+  // bấm nút sẽ làm ngược ý muốn.
+  try {
+    periodClosed.value = await api.getTaxPeriodClosed(from, to);
+  } catch {
+    toast.add({ severity: "error", summary: "Không tra được trạng thái kỳ", life: 5000 });
+    return;
+  }
   const willClose = !periodClosed.value;
   try {
     await api.setTaxPeriodClosed({ fromDate: from, toDate: to, closed: willClose, note: "" });
     periodClosed.value = willClose
-      ? { from_date: from, to_date: to, actor: "", closed_at: "" }
+      ? { from_date: from, to_date: to, actor: auth.currentUser?.username ?? "", closed_at: "" }
       : null;
     toast.add({
       severity: willClose ? "success" : "info",
@@ -305,6 +321,12 @@ async function togglePeriodClosed() {
   } catch (e) {
     toast.add({ severity: "error", summary: "Không đổi được trạng thái kỳ", detail: String(e) });
   }
+}
+
+/** yyyy-mm-dd → dd/mm/yyyy cho nhãn cờ kỳ đã nộp (cả màn đang dùng kiểu ngày VN). */
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso;
 }
 
 async function loadDeclaration() {
@@ -869,13 +891,13 @@ useKeepAliveRefresh(reload);
       <template #actions>
         <Button
           v-if="periodClosed"
-          :label="`Đã nộp: ${periodClosed.from_date} → ${periodClosed.to_date}`"
+          :label="`Đã nộp: ${shortDate(periodClosed.from_date)} → ${shortDate(periodClosed.to_date)}`"
           icon="pi pi-flag-fill"
           size="small"
           severity="success"
           outlined
           v-tooltip="
-            `Đánh dấu bởi ${periodClosed.actor || 'chưa rõ'}${periodClosed.closed_at ? ' lúc ' + periodClosed.closed_at : ''}. Sửa hóa đơn trong kỳ vẫn được nhưng app sẽ nhắc kê khai bổ sung — bấm để gỡ đánh dấu.`
+            `Đánh dấu bởi ${periodClosed.actor || 'chưa rõ'}${periodClosed.closed_at ? ' lúc ' + fmtLocalDateTime(periodClosed.closed_at) : ''}. Sửa hóa đơn trong kỳ vẫn được nhưng app sẽ nhắc kê khai bổ sung — bấm để gỡ đánh dấu.`
           "
           @click="togglePeriodClosed"
         />
@@ -914,7 +936,7 @@ useKeepAliveRefresh(reload);
         <Tag
           v-if="overview"
           :value="groupLabel"
-          :severity="overview.group === 1 ? 'success' : 'warning'"
+          :severity="overview.group === 1 ? 'success' : 'warn'"
         />
         <Tag
           v-if="overview?.deadline"
@@ -993,7 +1015,7 @@ useKeepAliveRefresh(reload);
       <template #actions>
         <Tag
           v-if="quickRows.length"
-          :value="`${quickRows.length} hóa đơn · ${fmtVnd(quickTotal)} đ`"
+          :value="`${quickRows.length} hóa đơn · ${fmtVnd(quickTotal)}`"
           severity="info"
         />
         <Button
@@ -1145,7 +1167,7 @@ useKeepAliveRefresh(reload);
               label="Ghi bổ sung bút toán 632/152"
               icon="pi pi-plus-circle"
               size="small"
-              severity="warning"
+              severity="warn"
               outlined
               :loading="backfilling"
               data-testid="cogs-backfill-run"

@@ -645,7 +645,7 @@ useKeepAliveRefresh(reload);
                   <template #body="{ data }">
                     <Tag
                       :value="data.is_service ? 'Dịch vụ' : 'Hàng hóa'"
-                      :severity="data.is_service ? 'warning' : 'info'"
+                      :severity="data.is_service ? 'warn' : 'info'"
                     />
                   </template>
                 </Column>

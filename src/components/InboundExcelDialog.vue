@@ -66,8 +66,15 @@ function splitAliases(aliases?: string): string[] {
 /** Tên và tên khác đã chuẩn hoá → hàng hoá trong danh mục. */
 const byName = computed(() => {
   const m = new Map<string, Product>();
+  // Hai lượt: TÊN CHÍNH trước, "tên khác" sau — để tên khác của mặt hàng này
+  // không cướp chỗ tên chính của mặt hàng khác (danh mục duyệt theo mã hàng).
   for (const p of props.products) {
-    for (const key of [p.name, ...splitAliases(p.aliases)].map(normInboundName)) {
+    const key = normInboundName(p.name);
+    if (key && !m.has(key)) m.set(key, p);
+  }
+  for (const p of props.products) {
+    for (const alias of splitAliases(p.aliases)) {
+      const key = normInboundName(alias);
       if (key && !m.has(key)) m.set(key, p);
     }
   }
@@ -144,12 +151,19 @@ const maxLine = computed(() => sheet.value?.rows.length ?? 1);
 /** Nhãn cột hiển thị trong tóm tắt: A, B, C… (—"chưa chọn"). */
 const colName = (c: number) => (c >= 0 ? colLetter(c) : "—");
 
-// Đổi cột (đặc biệt cột Tên) → dò lại hàng đầu vùng dữ liệu. Đổi "Dòng bắt đầu"
-// bằng tay không nằm trong danh sách này nên không bị ghi đè.
+/** Giá trị "Dòng bắt đầu" máy tự dò lần gần nhất — người dùng đã sửa tay
+ *  (giá trị khác) thì không bị ghi đè khi họ chỉnh tiếp các cột khác. */
+let autoStart: number | null = null;
+
+// Đổi cột (đặc biệt cột Tên) → dò lại hàng đầu vùng dữ liệu, nhưng CHỈ khi
+// "Dòng bắt đầu" vẫn là giá trị máy dò — sửa tay rồi thì tôn trọng lựa chọn.
 watch(
   () => [mapping.name, mapping.unit, mapping.quantity, mapping.amount],
   () => {
-    if (sheet.value) mapping.start = findStart(sheet.value.rows, mapping);
+    if (!sheet.value) return;
+    const detected = findStart(sheet.value.rows, mapping);
+    if (autoStart === null || mapping.start === autoStart) mapping.start = detected;
+    autoStart = detected;
   },
 );
 
@@ -192,6 +206,7 @@ async function onFile(e: Event) {
     fileName.value = file.name;
     sheet.value = parsed;
     Object.assign(mapping, parsed.mapping);
+    autoStart = mapping.start;
     keyword.value = "";
     reset();
     if (!mapInboundRows(parsed, mapping).rows.length) {
@@ -245,6 +260,7 @@ watch(
       fileName.value = "";
       keyword.value = "";
       Object.assign(mapping, { name: -1, unit: -1, quantity: -1, amount: -1, start: 0 });
+      autoStart = null;
       reset();
     }
   },

@@ -124,7 +124,7 @@ useKeepAliveRefresh(reload);
           v-if="auth.canStock"
           label="Kiểm kê"
           icon="pi pi-clipboard"
-          severity="warning"
+          severity="warn"
           @click="openCounting"
         />
       </template>
