@@ -605,9 +605,34 @@ export const api = {
       number: args.number,
       date: args.date,
       customer: args.customer,
-      customer_tax_code: args.customer_tax_code,
+      // Tauri đổi tham số command đúng theo camelCase — snake_case khiến
+      // desktop báo "missing required key customerTaxCode" (web thì bằng cả
+      // hai kiểu nên lỗi này chỉ thấy khi chạy app thật).
+      customerTaxCode: args.customer_tax_code,
       items: args.items,
     }),
+  /**
+   * Soi tồn kho cho form nháp TRƯỚC khi lưu (đúng logic `prepare_invoice`):
+   * tồn trống tính sau khi trừ các nháp khác đã "giữ chỗ". Chỉ đọc, không ghi.
+   */
+  checkInvoiceStock: async (args: {
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      industry_code?: string;
+      discount?: number;
+      warehouse_code?: string;
+      line_name?: string;
+    }[];
+    except_id?: number | null;
+  }) =>
+    parse<{ shortage: string[] }>(
+      await call<string>("check_invoice_stock", {
+        items: args.items,
+        exceptId: args.except_id ?? null,
+      }),
+    ),
   /**
    * Sửa thông tin NGOÀI SỔ của hóa đơn đã xử lý (đã chép / đã phát hành) cho
    * khớp hóa đơn chính thức ở hệ thống ký bên kia: số, ngày, khách hàng, MST,
