@@ -414,6 +414,8 @@ export interface InvoiceExportPack {
     date_vn: string;
     customer: string;
     customer_tax_code: string;
+    /** Địa chỉ tra từ danh mục khách — không có bản ghi khớp thì rỗng. */
+    customer_address: string;
     status: Invoice["status"];
     total: number;
     vat_amount: number;

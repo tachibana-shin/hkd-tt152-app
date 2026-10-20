@@ -213,6 +213,8 @@ pub(crate) struct ExportHeader {
     pub(crate) date_vn: String,
     pub(crate) customer: String,
     pub(crate) customer_tax_code: String,
+    /// Địa chỉ người mua tra từ danh mục khách (hóa đơn không lưu địa chỉ).
+    pub(crate) customer_address: String,
     pub(crate) status: String,
     pub(crate) total: f64,
     pub(crate) vat_amount: f64,
@@ -330,6 +332,21 @@ async fn load_header_and_lines(
     .map_err(|e| e.to_string())?
     .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
 
+    // Địa chỉ người mua: hóa đơn KHÔNG lưu địa chỉ nên tra từ danh mục khách —
+    // khớp MST trước, còn MST trống thì khớp TÊN. (Query riêng: truy vấn con
+    // gộp vào SELECT trên làm sqlx suy đoán kiểu/nullable sai cho cả bảng.)
+    let customer_address: String = sqlx::query_scalar!(
+        r#"SELECT COALESCE(NULLIF((SELECT c.address FROM customer c
+                                   WHERE c.tax_code <> '' AND c.tax_code = ? LIMIT 1), ''),
+                          (SELECT c.address FROM customer c WHERE c.name = ? LIMIT 1), '')
+           as "addr!: String""#,
+        row.customer_tax_code,
+        row.customer,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
     let groups = load_industry_groups(pool).await?;
 
     let items: Vec<RawItem> = sqlx::query_as!(
@@ -363,6 +380,7 @@ async fn load_header_and_lines(
         date_vn,
         customer: row.customer,
         customer_tax_code: row.customer_tax_code,
+        customer_address,
         status: row.status,
         total: row.total,
         vat_amount: row.vat_amount,
@@ -959,6 +977,8 @@ async fn assemble_queue_items(
             date_vn: fmt_date_vn(&inv.date),
             customer: inv.customer.clone(),
             customer_tax_code: inv.customer_tax_code.clone(),
+            // Bảng chốt gọn không tra địa chỉ khách — checklist không dùng.
+            customer_address: String::new(),
             status: inv.status.clone(),
             total: inv.total,
             vat_amount: inv.vat_amount,

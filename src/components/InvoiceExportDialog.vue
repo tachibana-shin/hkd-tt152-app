@@ -219,6 +219,12 @@ async function markExported() {
           <div class="text-gray-500">MST</div>
           <div class="font-medium">{{ pack.header.customer_tax_code || "—" }}</div>
         </div>
+        <div class="sm:col-span-2">
+          <!-- Địa chỉ tra từ danh mục khách (hóa đơn không lưu địa chỉ) —
+               thiếu thì hiện "—" thay vì ẩn ô, người dùng mù điểm này tưởng quên. -->
+          <div class="text-gray-500">Địa chỉ người mua</div>
+          <div class="font-medium">{{ pack.header.customer_address || "—" }}</div>
+        </div>
         <div>
           <div class="text-gray-500">Ngày</div>
           <div class="font-medium">{{ pack.header.date_vn }}</div>
