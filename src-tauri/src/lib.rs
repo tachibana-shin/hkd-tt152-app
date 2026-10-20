@@ -146,6 +146,7 @@ pub fn run() {
             commands::catalog::assign_goods_industry,
             commands::invoice::delete_invoice,
             commands::invoice::update_invoice,
+            commands::invoice::check_invoice_stock,
             commands::invoice::update_invoice_header,
             commands::invoice::update_invoice_lines,
             commands::invoice::invoice_missing_numbers,

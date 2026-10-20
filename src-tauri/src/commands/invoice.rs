@@ -288,18 +288,60 @@ struct PreparedInvoice {
     total: f64,
     tax_payable: f64,
     lines: Vec<PreparedLine>,
-    /// Dòng thiếu tồn (rỗng = đủ) theo ĐÚNG kho xuất trên dòng. Nháp KHÔNG bị
-    /// chặn: HĐĐT đã xuất vẫn cần thời gian mới lên cổng thông tin điện tử, nên
-    /// app hỏi người dùng rồi vẫn lưu — nhưng phải trả danh sách này về để báo.
+    /// Dòng thiếu tồn (rỗng = đủ) theo ĐÚNG kho xuất trên dòng, tính trên TỒN
+    /// CÒN TRỐNG sau khi trừ phần hàng đã bị các hóa đơn nháp khác "giữ chỗ"
+    /// (giả lập trừ kho cho nháp — nháp chưa ghi phiếu xuất lần nào nhưng hàng
+    /// đã được hứa). Nháp KHÔNG bị chặn: HĐĐT đã xuất vẫn cần thời gian mới
+    /// lên cổng thông tin điện tử, nên app hỏi người dùng rồi vẫn lưu — nhưng
+    /// phải trả danh sách này về để báo.
     shortage: Vec<String>,
+}
+
+/// Phần số lượng MẶT HÀNG đang bị các hóa đơn nháp KHÁC "giữ chỗ".
+///
+/// Giả lập trừ kho cho nháp (issue #5): nháp chưa ghi phiếu xuất lần nào nên
+/// chưa trừ kho thật, nhưng số hàng đã được hứa cho hóa đơn đó — lập thêm hóa
+/// đơn nháp nữa phải coi phần này đã hết. Chỉ đếm nháp CHƯA gắn phiếu xuất:
+/// hóa đơn đã gắn phiếu xuất là kho đã trừ thật, trừ tiếp là tính hai lần.
+/// Dòng nháp không khai kho (rỗng) lấy máy nào cũng được nên tính vào MỌI kho.
+/// `except_id` mở trừ chính hóa đơn đang xét (lúc sửa).
+async fn draft_reserved_qty(
+    tx: &mut SqliteTransaction<'_>,
+    product_id: i64,
+    warehouse_code: &str,
+    except_id: Option<i64>,
+) -> Result<f64, String> {
+    let wh = warehouse_code.trim();
+    sqlx::query_scalar!(
+        r#"SELECT COALESCE(SUM(ii.quantity), 0.0) as "qty!: f64"
+             FROM invoice_item ii
+             JOIN invoice i ON i.id = ii.invoice_id
+            WHERE ii.product_id = ?
+              AND i.status = 'draft'
+              AND COALESCE(i.voucher_no, '') = ''
+              AND (? = '' OR COALESCE(ii.warehouse_code, '') = ? OR COALESCE(ii.warehouse_code, '') = '')
+              AND (? IS NULL OR i.id <> ?)"#,
+        product_id,
+        wh,
+        wh,
+        except_id,
+        except_id,
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Kiểm tra + dựng dòng hóa đơn từ input người dùng: nhóm ngành phải hợp lệ,
 /// soi tồn kho theo ĐÚNG kho xuất trên từng dòng (rỗng → tổng mọi kho) và tính
 /// tổng tiền. Dùng chung cho lập mới và sửa hóa đơn nháp.
+///
+/// `except_id` = hóa đơn đang xét (sửa nháp thì bỏ qua chính nó — không tự soi
+/// phần "giữ chỗ" của chính mình). `None` khi lập hóa đơn mới.
 async fn prepare_invoice(
     tx: &mut SqliteTransaction<'_>,
     items: &[InvoiceItemInput],
+    except_id: Option<i64>,
 ) -> Result<PreparedInvoice, String> {
     if items.is_empty() {
         return Err("Chưa có mặt hàng nào trong hóa đơn".into());
@@ -359,16 +401,27 @@ async fn prepare_invoice(
             .await
             .map_err(|e| e.to_string())?
         };
+        // Giả lập trừ kho cho nháp: phần hàng đã bị các hóa đơn nháp khác
+        // "giữ chỗ" không còn trống, lập tiếp phải coi là hết hàng.
+        let reserved = draft_reserved_qty(tx, product.id, &item.warehouse_code, except_id).await?;
+        let free = (available - reserved).max(0.0);
         let where_str = if item.warehouse_code.trim().is_empty() {
             "tổng các kho"
         } else {
             "kho đã chọn"
         };
-        if item.quantity - available > 1e-9 {
-            shortage.push(format!(
-                "{}: cần {:.2}, tồn {} {:.2}",
-                item.product_code, item.quantity, where_str, available
-            ));
+        if item.quantity - free > 1e-9 {
+            if reserved > 1e-9 {
+                shortage.push(format!(
+                    "{}: cần {:.2}, tồn {} chỉ còn {:.2} — tổng tồn {:.2}, các hóa đơn nháp khác đã chiếm {:.2}",
+                    item.product_code, item.quantity, where_str, free, available, reserved
+                ));
+            } else {
+                shortage.push(format!(
+                    "{}: cần {:.2}, tồn {} {:.2}",
+                    item.product_code, item.quantity, where_str, available
+                ));
+            }
         }
     }
 
@@ -503,7 +556,7 @@ async fn save_invoice_core(
     if invoice_number_taken(&mut tx, number, None).await? {
         return Err(format!("Số hóa đơn {number} đã tồn tại"));
     }
-    let prepared = prepare_invoice(&mut tx, items).await?;
+    let prepared = prepare_invoice(&mut tx, items, None).await?;
 
     // `vat_amount` luôn 0: hộ không tách thuế trên hóa đơn (tính cuối kỳ).
     let res = sqlx::query!(
@@ -567,7 +620,7 @@ async fn update_invoice_core(
     if invoice_number_taken(&mut tx, number, Some(id)).await? {
         return Err(format!("Số hóa đơn {number} đã tồn tại"));
     }
-    let prepared = prepare_invoice(&mut tx, items).await?;
+    let prepared = prepare_invoice(&mut tx, items, Some(id)).await?;
     sqlx::query!(
         "UPDATE invoice SET number = ?, date = ?, customer = ?, customer_tax_code = ?, total = ?
           WHERE id = ?",
@@ -623,6 +676,24 @@ pub(crate) async fn update_invoice(
     .await?;
     audit(&state, "update", "invoice", &number).await;
     Ok(res.to_string())
+}
+
+/// "Đo trước" tồn kho cho form hóa đơn nháp — chạy đúng `prepare_invoice`
+/// (kể cả giả lập trừ kho của các nháp khác) nhưng KHÔNG ghi gì: app hỏi người
+/// dùng "thiếu kho, vẫn lưu nháp?" với số liệu chính xác trước khi chốt.
+/// `except_id` = nháp đang sửa thì bỏ qua chính nó.
+#[tauri::command]
+pub(crate) async fn check_invoice_stock(
+    state: State<'_, AppState>,
+    items: Vec<InvoiceItemInput>,
+    except_id: Option<i64>,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let prepared = prepare_invoice(&mut tx, &items, except_id).await?;
+    // Chỉ đọc — transaction bỏ đi, không cần commit.
+    Ok(serde_json::json!({ "shortage": prepared.shortage }).to_string())
 }
 
 /// Cảnh báo khi hóa đơn nằm trong khoảng kỳ tờ khai đã được đánh dấu ĐÃ NỘP
@@ -901,7 +972,7 @@ pub(crate) async fn update_invoice_lines_core(
     // Chuẩn bị dòng mới: kiểm tra nhóm ngành, tính lại thành tiền / tổng.
     // (Thiếu tồn ở bước này KHÔNG dùng — sách đã trừ kho từ lúc lập phiếu,
     // soi tổng sẽ sai; delta được tính riêng bên dưới theo từng mã/kho.)
-    let prepared = prepare_invoice(&mut tx, items).await?;
+    let prepared = prepare_invoice(&mut tx, items, Some(id)).await?;
 
     let voucher_dt = if inv.voucher_no.trim().is_empty() {
         String::new()
@@ -2392,6 +2463,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(wh, "");
+    }
+
+    /// Giả lập trừ kho cho hóa đơn nháp (issue #5): 10 đèn còn lưu, nháp 1 chiếm
+    /// hết 10 → nháp 2 lập thêm phải BÁO HẾT HÀNG (dù kho thật chưa trừ lần nào).
+    /// Sửa chính nháp 1 thì không tự trừ phần giữ chỗ của mình.
+    #[tokio::test]
+    async fn nhap_kho_nhap_giu_cho_nan_con_hang_nhap_sau_bao_het() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "HD-GIU", "Đèn GIU", 0.01).await;
+        let w = seed_warehouse(&pool, "W-GIU", "Kho GIU").await;
+        add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
+
+        // Nháp 1 chiếm hết 10 → lưu được, không thiếu gì (kho thật đủ).
+        let r1 = save_invoice_core(
+            &pool,
+            "HD0001",
+            "2026-03-10",
+            "Khách G",
+            "MST-G",
+            &[line("HD-GIU", 10.0, 2000.0, 0.0, "W-GIU")],
+        )
+        .await
+        .expect("nháp 1 chiếm hết tồn, kho thật đủ");
+        assert!(
+            r1["shortage"].as_array().unwrap().is_empty(),
+            "kho đủ thì nháp 1 không thiếu: {r1}"
+        );
+        let id1: i64 =
+            sqlx::query_scalar!(r#"SELECT id as "id!" FROM invoice WHERE number = 'HD0001'"#)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        // Sửa lại nháp 1 (cùng số lượng) → chỉ soi phần giữ chỗ của NHÁP KHÁC,
+        // chưa có nháp nào khác → không tự trừ chính mình, không báo thiếu oan.
+        let r1b = update_invoice_core(
+            &pool,
+            id1,
+            "HD0001",
+            "2026-03-10",
+            "Khách G",
+            "MST-G",
+            &[line("HD-GIU", 10.0, 2000.0, 0.0, "W-GIU")],
+        )
+        .await
+        .expect("sửa nháp 1 không tự soi chính mình");
+        assert!(
+            r1b["shortage"].as_array().unwrap().is_empty(),
+            "tự trừ chính mình là sai: {r1b}"
+        );
+
+        // Nháp 2 lập thêm cùng số lượng → HẾT HÀNG đã bị nháp khác giữ chỗ.
+        let r2 = save_invoice_core(
+            &pool,
+            "HD0002",
+            "2026-03-11",
+            "Khách G",
+            "MST-G",
+            &[line("HD-GIU", 10.0, 2000.0, 0.0, "W-GIU")],
+        )
+        .await
+        .expect("nháp vẫn lưu được nhưng phải báo hết");
+        let shortage = r2["shortage"].as_array().cloned().unwrap_or_default();
+        assert_eq!(shortage.len(), 1, "nháp 2 phải báo đúng 1 dòng hết: {r2}");
+        let detail = shortage[0].as_str().unwrap_or_default();
+        assert!(detail.contains("chỉ còn 0.00"), "{detail}");
+        assert!(detail.contains("đã chiếm 10.00"), "{detail}");
     }
 
     /// Lập 1 hóa đơn nháp có dòng hàng, trả về id. Mã hàng suy ra từ số hóa đơn

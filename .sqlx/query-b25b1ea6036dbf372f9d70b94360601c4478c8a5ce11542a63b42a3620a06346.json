@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(NULLIF((SELECT c.address FROM customer c\n                                   WHERE c.tax_code <> '' AND c.tax_code = ? LIMIT 1), ''),\n                          (SELECT c.address FROM customer c WHERE c.name = ? LIMIT 1), '')\n           as \"addr!: String\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "addr!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b25b1ea6036dbf372f9d70b94360601c4478c8a5ce11542a63b42a3620a06346"
+}

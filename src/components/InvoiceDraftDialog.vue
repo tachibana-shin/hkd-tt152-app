@@ -281,18 +281,21 @@ async function save() {
     return;
   }
 
-  // Soi tồn NGAY LÚC CHỐT (có thể vừa tạo lô / nhập kho trong lúc mở popup).
-  await catalog.loadOnhand(true);
-  const missing = rows
-    .map((it) => {
-      const p = catalog.productByCode(it.product_code);
-      // Hàng dịch vụ / nhân công không theo dõi tồn kho.
-      if (!p || p.is_service || !(it.quantity > 0)) return "";
-      const avail = catalog.onhandAt(it.product_code, it.warehouse_code ?? "");
-      const short = it.quantity - avail;
-      return short > 1e-9 ? `${p.name}: thiếu ${fmt(short)}` : "";
-    })
-    .filter(Boolean);
+  // Soi tồn NGAY LÚC CHỐT bằng backend (đúng logic lúc lưu thật, kể cả phần
+  // hàng đã bị các hóa đơn nháp khác "giữ chỗ" — số trên dòng có thể lạc hậu
+  // sau khi vừa tạo lô / sửa nháp khác). Kiểm không được thì bỏ tường báo
+  // trước: khâu lưu vẫn tự soi thiếu và báo như cũ, lỗi nhỏ không cản việc.
+  let missing: string[] = [];
+  try {
+    missing = await invoiceStore.checkStock({ items: rows, except_id: editingId.value });
+  } catch (e) {
+    toast.add({
+      severity: "warn",
+      summary: "Không kiểm được tồn kho trước khi lưu",
+      detail: String(e),
+    });
+    return persist(rows);
+  }
 
   if (missing.length) {
     // Nháp THÌ vẫn lưu được (HĐĐT đã xuất cũng cần thời gian mới lên cổng thông

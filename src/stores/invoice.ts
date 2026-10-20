@@ -63,6 +63,28 @@ export const useInvoiceStore = defineStore("invoice", () => {
     return res;
   }
 
+  /**
+   * Soi tồn kho cho form hóa đơn nháp TRƯỚC khi lưu — tính trên tồn trống
+   * sau khi trừ các nháp khác đã "giữ chỗ", cùng một logic lúc lưu thật nên
+   * số báo không lệch. Trả về danh sách dòng thiếu (rỗng = đủ).
+   */
+  async function checkStock(args: {
+    items: {
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      industry_code?: string;
+      discount?: number;
+      warehouse_code?: string;
+      line_name?: string;
+    }[];
+    /** Nháp đang sửa thì bỏ qua phần giữ chỗ của chính nó. */
+    except_id?: number | null;
+  }) {
+    const r = await api.checkInvoiceStock(args);
+    return r.shortage;
+  }
+
   /** Lập phiếu xuất từ hóa đơn (1-1) rồi nạp lại danh sách. */
   async function createOutbound(invoiceId: number) {
     const no = await api.createInvoiceOutbound(invoiceId);
@@ -104,6 +126,7 @@ export const useInvoiceStore = defineStore("invoice", () => {
     loadDetail,
     saveDraft,
     updateInvoice,
+    checkStock,
     createOutbound,
     deleteInvoice,
     loadCounts,

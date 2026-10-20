@@ -544,6 +544,12 @@ pub async fn api_invoke(
             customer_tax_code: String,
             items: Vec<InvoiceItemInput>
         ),
+        "check_invoice_stock" => mx!(
+            commands::invoice::check_invoice_stock,
+            body,
+            items: Vec<InvoiceItemInput>,
+            except_id: Option<i64>
+        ),
         "update_invoice_header" => mx!(
             commands::invoice::update_invoice_header,
             body,
