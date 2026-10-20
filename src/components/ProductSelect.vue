@@ -4,6 +4,10 @@
 // warehouseCode rỗng → tổng mọi kho; dịch vụ/nhân công → chỉ ĐVT, không tồn).
 // Tồn nạp lazy 1 lần qua catalog.loadOnhand() (guard trong store).
 //
+// DANH SÁCH LỚN: bật VirtualScroller (`virtualScrollerOptions`) — mặt hàng +
+// tên khác dễ lên hàng nghìn option, render đủ liền là khựng dấu; scroller chỉ
+// dựng các dòng đang thấy (itemSize 38px khớp độ cao một dòng option).
+//
 // F5 — tên khác (alias): mỗi sản phẩm đóng góp 1 option tên CHÍNH + 1 option cho
 // MỖI tên khác (cùng mã sản phẩm). Ô vẫn ghi mã hàng qua `modelValue`, nhưng
 // emit thêm `picked(tên)` để dòng dữ liệu ghi đúng tên người dùng đã chọn
@@ -21,8 +25,8 @@ interface PickedOption {
   /** Đang hiển thị một "tên khác" chứ không phải tên chính của sản phẩm. */
   isAlias: boolean;
   /**
-   * Dòng "Tạo nhanh" đặt CUỐI dropdown — không phải sản phẩm thật, chọn nó là
-   * báo với người gọi rằng người dùng muốn tạo hàng mới từ tên vừa gõ.
+   * Dòng "Tạo nhanh" — KHÔNG nằm trong danh sách option (render ở footer),
+   * bấm nó là báo với người gọi rằng người dùng muốn tạo hàng mới từ tên vừa gõ.
    */
   isQuick?: boolean;
 }
@@ -138,8 +142,9 @@ function onHide() {
 
 /**
  * Dòng "Tạo nhanh" — chỉ hiện khi gõ tên MỚI (chưa trùng tên chính/tên khác/mã
- * nào) và đặt CUỐI dropdown. Nhãn chứa nguyên chữ vừa gõ nên không bị bộ lọc
- * PrimeVue (contains theo optionLabel) loại mất.
+ * nào). Để ở slot #footer của overlay (không trong danh sách): virtual scroller
+ * chỉ dựng các option đang thấy nên đặt CUỐI danh sách là bị khuất phải cuộn —
+ * ở footer dòng này luôn đứng sẵn dưới cùng, gõ nhìn thấy ngay.
  */
 const quickOption = computed<PickedOption | null>(() => {
   if (!props.allowCreate) return null;
@@ -150,34 +155,30 @@ const quickOption = computed<PickedOption | null>(() => {
     (o) => o.name.trim().toLowerCase() === key || o.code.trim().toLowerCase() === key,
   );
   if (taken) return null;
-  // Nhãn chứa CHUỖI LỌC NGUYÊN VĂN để luôn qua bộ lọc contains của PrimeVue.
   return {
     code: "",
-    name: `Tạo nhanh “${filterText.value}”`,
+    name: `Tạo nhanh “${text}”`,
     unit: "",
     isAlias: false,
     isQuick: true,
   };
 });
 
-const selectOptions = computed<PickedOption[]>(() =>
-  quickOption.value ? [...options.value, quickOption.value] : options.value,
-);
-
-/** Bấm dòng "Tạo nhanh" — PrimeVue không đổi mã hàng, chỉ báo cha tạo mới. */
-function onQuickClick() {
+/** Bấm dòng "Tạo nhanh" (trong footer) — không đổi mã hàng, chỉ báo cha tạo mới. */
+function onQuickClick(e?: MouseEvent) {
   const text = filterText.value.trim();
   if (!text) return;
+  // Footer không phải option nên PrimeVue không tự đóng dropdown — giả cặp
+  // phím Escape trên ô lọc của CHÍNH overlay này (nhiều Select cùng màn thì
+  // phải khoanh đúng vùng) để dropdown thu về như người dùng bấm Esc.
+  const overlay = (e?.currentTarget as HTMLElement | null)?.closest(".p-select-overlay");
+  const box = overlay?.querySelector('[role="searchbox"]');
+  if (box) box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   filterText.value = "";
   emit("create", text);
 }
 
 function onUpdate(v: PickedOption | null) {
-  // Chọn dòng "Tạo nhanh" bằng bàn phím (Enter) cũng tạo mới, không đổi mã hàng.
-  if (v?.isQuick) {
-    onQuickClick();
-    return;
-  }
   if (!v) {
     emit("update:modelValue", "");
     emit("picked", "");
@@ -219,7 +220,8 @@ if (props.onlyManufactured) void catalog.loadBoms();
        theo optionLabel (tên) nên gõ mã ra dropdown trống. -->
   <Select
     :model-value="selected"
-    :options="selectOptions"
+    :options="options"
+    :virtual-scroller-options="{ itemSize: 38 }"
     optionLabel="name"
     :filter-fields="['name', 'code']"
     filter
@@ -232,20 +234,7 @@ if (props.onlyManufactured) void catalog.loadBoms();
     @hide="onHide"
   >
     <template #option="slotProps">
-      <!-- Dòng "Tạo nhanh": chọn nó (mousedown/Enter) PrimeVue cũng gọi
-           update:modelValue — ta chặn không đổi mã hàng, chỉ báo cha mở form
-           thêm hàng; vì đã đọc xong filterText nên lần click chuột kế tiếp
-           (nếu có) là no-op. -->
-      <div
-        v-if="slotProps.option.isQuick"
-        class="flex w-full cursor-pointer items-center gap-2 py-1 font-semibold text-primary-600 hover:bg-primary-50"
-        data-testid="product-quick-create"
-        @click="onQuickClick"
-      >
-        <i class="pi pi-plus-circle" aria-hidden="true" />
-        <span class="min-w-0 flex-1 truncate">{{ slotProps.option.name }}</span>
-      </div>
-      <div v-else class="flex w-full items-center justify-between gap-3">
+      <div class="flex w-full items-center justify-between gap-3">
         <span class="min-w-0 flex-1 truncate font-medium">{{ slotProps.option.name }}</span>
         <span v-if="slotProps.option.isAlias" class="whitespace-nowrap text-xs text-gray-400">
           tên khác
@@ -260,6 +249,21 @@ if (props.onlyManufactured) void catalog.loadBoms();
         <span v-else-if="slotProps.option.unit" class="whitespace-nowrap text-xs text-gray-400">
           {{ slotProps.option.unit }}
         </span>
+      </div>
+    </template>
+    <!-- Dòng "Tạo nhanh" (gõ tên chưa có): đứng ở footer để luôn thấy —
+         scroller chỉ render option đang thấy nên đặt cuối danh sách sẽ bị
+         khuất phải cuộn. Bấm là báo cha mở form thêm hàng; vì đã đọc xong
+         filterText nên lần click kế tiếp (nếu có) là no-op. -->
+    <template #footer>
+      <div
+        v-if="quickOption"
+        class="flex w-full cursor-pointer items-center gap-2 border-t border-gray-100 px-3 py-1.5 font-semibold text-primary-600 hover:bg-primary-50"
+        data-testid="product-quick-create"
+        @click="onQuickClick($event)"
+      >
+        <i class="pi pi-plus-circle" aria-hidden="true" />
+        <span class="min-w-0 flex-1 truncate">{{ quickOption.name }}</span>
       </div>
     </template>
     <!-- Dropdown rỗng / gõ không khớp: nói rõ vì sao (hàng phải có định mức). -->
