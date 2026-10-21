@@ -1,5 +1,23 @@
 # Changelog
 
+# [0.24.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.23.1...v0.24.0) (2026-10-21)
+
+
+### Bug Fixes
+
+* **invoice:** send camelCase customerTaxCode to update_invoice ([ca2758f](https://github.com/tachibana-shin/hkd-tt152-app/commit/ca2758ff9592e897792742cfe972f74d3a41baf6))
+
+
+### Features
+
+* **invoice-export:** show buyer address in the copy-to-service popup ([19b7a78](https://github.com/tachibana-shin/hkd-tt152-app/commit/19b7a789109cc77bec7bc74bddb0cd4a08ca1838))
+* **invoice:** simulate stock reservation for draft invoices ([2339b21](https://github.com/tachibana-shin/hkd-tt152-app/commit/2339b21c4b3bb7959cd11e2ce0bde9059b6db761))
+
+
+### Performance Improvements
+
+* **products:** virtual-scroll product dropdown, pin quick-create row ([862ebfc](https://github.com/tachibana-shin/hkd-tt152-app/commit/862ebfce4e86dfc73aed79066444161962871b64)), closes [#footer](https://github.com/tachibana-shin/hkd-tt152-app/issues/footer)
+
 ## [0.23.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.23.0...v0.23.1) (2026-10-16)
 
 
