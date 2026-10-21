@@ -75,6 +75,9 @@ const referencePlaceholder = computed(() =>
 function onTypeChange() {
   // Ô "Tự xuất NVL theo định mức" chỉ dành cho loại sản xuất — đổi loại thì tắt.
   form.auto_bom = false;
+  // Thuế GTGT đầu vào chỉ áp dụng cho mua hàng ngoài — đổi loại thì xoá mức thuế
+  // cũ để không cộng/tách thuế nhầm vào phiếu sản xuất hay nhập khác.
+  if (form.inbound_type !== "purchase") form.vat_rate = 0;
   if (form.inbound_type === "production") {
     form.debit_account = "155";
     form.credit_account = "154";
@@ -169,6 +172,28 @@ const form = reactive({
   // F4 — Tự xuất NVL theo định mức: chỉ loại nhập "production". Bật → app tự
   // tính NVL = định mức × SL, tự trừ tồn FIFO + tự sinh phiếu xuất (Nợ 154 / Có 152).
   auto_bom: false,
+});
+
+/**
+ * Tiền hàng (chưa thuế GTGT) của phiếu nhập — khớp công thức LineItemsEditor:
+ * SL × đơn giá − tiền chiết khấu. Dùng cho dòng tổng kết thuế dưới bảng.
+ */
+const purchaseNet = computed(() =>
+  form.items.reduce(
+    (s, it) => s + (it.product_code ? it.quantity * it.unit_price - (it.discount ?? 0) : 0),
+    0,
+  ),
+);
+/** Thuế GTGT đầu vào tạm tính theo % đang nhập (làm tròn 2 chữ số). */
+const purchaseVat = computed(() => Math.round(purchaseNet.value * form.vat_rate) / 100);
+/**
+ * Nhãn tổng của bảng dòng hàng. Hộ không khấu trừ + có % thuế: bảng mới cộng
+ * giá CHƯA thuế, còn giá trị nhập kho thật (gồm thuế) hiện ở dòng tổng kết dưới.
+ */
+const lineTotalLabel = computed(() => {
+  if (form.inbound_type !== "purchase") return "Tổng tiền:";
+  if (form.vat_rate > 0 && !settings.deductVat) return "Tiền hàng (chưa thuế):";
+  return "Giá trị nhập kho:";
 });
 
 /** Số phiếu do backend sinh (PN0001…) — không đoán từ danh sách đang lọc. */
@@ -522,18 +547,29 @@ useKeepAliveRefresh(reload);
             />
           </div>
         </FormField>
+        <!-- Luôn hiện cho mua hàng ngoài: hộ không được khấu trừ vẫn cần nhập
+             thuế để app cộng vào giá nhập kho (trước đây ô này bị ẩn hoàn toàn). -->
         <FormField
-          v-if="form.inbound_type === 'purchase' && settings.deductVat"
+          v-if="form.inbound_type === 'purchase'"
           label="Thuế GTGT đầu vào (%)"
+          input-id="inbound-vat-rate"
         >
           <InputNumber
             v-model="form.vat_rate"
+            input-id="inbound-vat-rate"
             :min="0"
             :max="30"
             suffix=" %"
             size="small"
             class="w-full"
           />
+          <p class="text-xs text-gray-400">
+            {{
+              settings.deductVat
+                ? "Tách thuế vào 133 (được khấu trừ)."
+                : "Hộ chưa bật khấu trừ — thuế được cộng vào giá nhập kho, không ghi 133."
+            }}
+          </p>
         </FormField>
         <FormField label="TK Nợ (kho)">
           <Select
@@ -590,10 +626,10 @@ useKeepAliveRefresh(reload);
         Thành tiền − Tiền CK. Tự sản xuất, gia công: nhập kho thành phẩm theo lệnh sản xuất (Nợ 155
         / Có 154) — bật "Tự xuất NVL theo định mức" để app tự trừ NVL và tự sinh phiếu xuất NVL (Nợ
         154 / Có 152) theo định mức đã khai ở màn Sản phẩm. Nhập khác: tùy chọn TK Nợ/Có (thừa kiểm
-        kê, điều chỉnh…). Đơn giá nhập = giá sau chiết khấu, chưa thuế khi bật khấu trừ GTGT, ngược
-        lại là giá đã gồm thuế. Điều chỉnh hóa đơn mua — Giảm: trả lại NCC, trừ lô FIFO theo ngày
-        nhập, ghi Nợ TK đối ứng / Có TK hàng (kèm giảm thuế 133 nếu khấu trừ); Tăng: nhập kho như
-        phiếu thường.
+        kê, điều chỉnh…). Đơn giá nhập = giá sau chiết khấu, CHƯA thuế khi có nhập % GTGT: bật khấu
+        trừ thì tách Nợ 133, chưa bật thì cộng thuế vào giá nhập kho. Điều chỉnh hóa đơn mua — Giảm:
+        trả lại NCC, trừ lô FIFO theo ngày nhập, ghi Nợ TK đối ứng / Có TK hàng (kèm giảm thuế 133
+        nếu khấu trừ); Tăng: nhập kho như phiếu thường.
       </p>
 
       <!-- Nhập kho đang TĂNG tồn → tắt cảnh báo "Thiếu" của bảng dòng; riêng
@@ -608,7 +644,7 @@ useKeepAliveRefresh(reload);
         show-add-product
         show-discount
         :warn-shortage="form.inbound_type === 'adjust' && form.adjust_dir === 'down'"
-        :total-label="form.inbound_type === 'purchase' ? 'Giá trị nhập kho:' : 'Tổng tiền:'"
+        :total-label="lineTotalLabel"
         @add="addRow"
         @remove="removeRow"
       >
@@ -625,6 +661,24 @@ useKeepAliveRefresh(reload);
           />
         </template>
       </LineItemsEditor>
+
+      <!-- Tổng kết thuế: nói rõ thuế vào 133 (khấu trừ) hay cộng vào giá nhập kho. -->
+      <div
+        v-if="form.inbound_type === 'purchase' && form.vat_rate > 0"
+        class="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-sm"
+      >
+        <span>
+          Thuế GTGT {{ form.vat_rate }}%:
+          <b>{{ fmt(purchaseVat) }} đ</b>
+        </span>
+        <span v-if="settings.deductVat" class="text-gray-500">
+          khấu trừ — Nợ 133 / Có {{ form.credit_account || "331" }}
+        </span>
+        <span v-else>
+          Giá trị nhập kho gồm thuế:
+          <b>{{ fmt(purchaseNet + purchaseVat) }} đ</b>
+        </span>
+      </div>
     </AppDialog>
 
     <!-- Chọn cột → xem trước file (phân trang vì file có thể vài nghìn dòng) rồi thêm hàng loạt -->

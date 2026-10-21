@@ -71,6 +71,14 @@ input {
 .p-select-overlay {
   max-width: min(30rem, calc(100vw - 2rem));
 }
+/* Riêng dropdown SẢN PHẨM: PrimeVue chỉ đặt min-width bằng đúng ô chọn, nên
+   trong cột hẹp (bảng dòng hàng) panel co theo cột — tên hàng dài bị cắt và
+   hiện thanh cuộn ngang sau khi bật virtual scroller. Nâng sàn 30rem để đọc
+   được tên; max-width ở trên vẫn giữ panel trong màn hình. `!important` cần
+   thiết vì min-width của ô chọn là style inline do PrimeVue ghi đè mỗi lần mở. */
+.p-select-overlay.product-select-overlay {
+  min-width: min(30rem, calc(100vw - 2rem)) !important;
+}
 
 /* ─── Dark mode ─── */
 /* Nền chung trang (view nào không tự set nền cũng không bị lóa trắng). */

@@ -50,7 +50,7 @@ pub(crate) fn allocate_fifo(
 #[derive(Debug)]
 pub(crate) struct InboundResult {
     pub(crate) entries: usize,
-    /// Tổng giá trị hàng nhập kho (chưa gồm thuế khi khấu trừ GTGT).
+    /// Tổng giá trị hàng nhập kho: chưa thuế nếu hộ khấu trừ GTGT, gồm thuế nếu không.
     pub(crate) total: f64,
     /// Tổng thuế GTGT đầu vào được khấu trừ (0 nếu không khấu trừ).
     pub(crate) vat: f64,
@@ -259,6 +259,17 @@ pub(crate) async fn save_inbound_core(
         return Err(format!("Số phiếu nhập {voucher_no} đã tồn tại"));
     }
 
+    // Hộ có được khấu trừ GTGT đầu vào không (app_setting 'vat_deduct')?
+    //   Bật  → tách thuế: Nợ 133 / Có 331, giá vốn = giá chưa thuế.
+    //   Tắt  → thuế nằm trong giá vốn: Nợ 152 (gồm thuế) / Có 331, không ghi 133.
+    let vat_deduct: String = sqlx::query_scalar!(
+        r#"SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0') as "v!: String""#
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let vat_deductible = vat_deduct == "1";
+
     // Đầu phiếu nhập (inbound_voucher) — id này là điểm neo để hóa đơn chính
     // thức liên kết chặt với phiếu nhập. Tạo TRƯỚC các dòng bút toán để
     // gắn inbound_voucher_id ngay khi ghi.
@@ -331,12 +342,21 @@ pub(crate) async fn save_inbound_core(
         // Tiền CK không thể vượt quá thành tiền (tránh giá trị âm).
         let discount = round2(item.discount.clamp(0.0, gross));
         let net = round2(gross - discount);
-        // Thuế GTGT đầu vào — chỉ hạch toán khi hộ được khấu trừ (vat_rate > 0).
+        // Thuế GTGT đầu vào tính trên giá sau chiết khấu.
         let vat = if vat_rate > 0.0 {
             round2(net * vat_rate)
         } else {
             0.0
         };
+        // Giá trị nhập kho / giá vốn: hộ khấu trừ thì là giá chưa thuế; hộ không
+        // khấu trừ thì thuế nằm luôn trong giá vốn (không sinh bút toán 133).
+        let cost_value = if vat_deductible {
+            net
+        } else {
+            round2(net + vat)
+        };
+        // Đơn giá thực tế sau chiết khấu (+ thuế nếu không khấu trừ) — giá vốn FIFO.
+        let unit_cost = round2(cost_value / item.quantity);
 
         // ─── Điều chỉnh GIẢM hóa đơn mua (bên bán trừ bớt): hàng trả lại NCC ───
         // Trừ FIFO khỏi lô (giảm tồn thực tế, giống xuất kho) + ghi sổ đảo ngược:
@@ -387,8 +407,8 @@ pub(crate) async fn save_inbound_core(
                 supplier_code,
                 "",
                 item.quantity,
-                item.unit_price,
-                net,
+                unit_cost,
+                cost_value,
                 credit,
                 debit,
                 "",
@@ -401,7 +421,7 @@ pub(crate) async fn save_inbound_core(
                 discount,
             )
             .await?;
-            if vat > 0.0 {
+            if vat_deductible && vat > 0.0 {
                 insert_journal_entry(
                     &mut tx,
                     posting_date,
@@ -426,8 +446,8 @@ pub(crate) async fn save_inbound_core(
                 )
                 .await?;
             }
-            total += net;
-            vat_total += vat;
+            total += cost_value;
+            vat_total += if vat_deductible { vat } else { 0.0 };
             continue;
         }
 
@@ -437,19 +457,24 @@ pub(crate) async fn save_inbound_core(
         // Đơn giá nhập vừa giao làm GIÁ VỐN HIỆN TẠI của mặt hàng — lần nhập sau
         // lấy làm mặc định (giá 0 không xoá giá đã lưu). Nhập kho không đụng giá
         // bán — giá bán chỉ nhớ từ luồng bán (lập hóa đơn / xuất bán).
-        if item.unit_price > 0.0 {
+        // Hộ không khấu trừ: giá mặc định gồm luôn thuế (đúng số tiền đã trả).
+        let default_cost = if vat_deductible {
+            item.unit_price
+        } else {
+            round2(item.unit_price * (1.0 + vat_rate))
+        };
+        if default_cost > 0.0 {
             sqlx::query!(
                 "UPDATE product SET cost_price = ? WHERE id = ?",
-                item.unit_price,
+                default_cost,
                 product_id
             )
             .execute(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
         }
-        // Đơn giá thực tế sau chiết khấu — dùng cho giá vốn FIFO và ghi sổ.
-        let unit_cost = round2(net / item.quantity);
-        // tạo stock_lot FIFO — giá vốn = đơn giá thực tế sau chiết khấu (chưa thuế khi khấu trừ)
+        // tạo stock_lot FIFO — giá vốn = đơn giá thực tế sau chiết khấu
+        // (chưa thuế khi khấu trừ; gồm thuế khi không khấu trừ)
         sqlx::query!(
             "INSERT INTO stock_lot (product_id, warehouse_id, quantity, unit_cost, received_at, depleted)
              VALUES (?, ?, ?, ?, ?, 0)",
@@ -462,7 +487,8 @@ pub(crate) async fn save_inbound_core(
         .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-        // ghi sổ nhập — giá trị nhập kho = Thành tiền − Tiền CK (chưa gồm thuế khi khấu trừ)
+        // ghi sổ nhập — giá trị nhập kho = Thành tiền − Tiền CK
+        // (chưa thuế khi khấu trừ; gồm thuế khi không khấu trừ)
         insert_journal_entry(
             &mut tx,
             posting_date,
@@ -474,7 +500,7 @@ pub(crate) async fn save_inbound_core(
             "",
             item.quantity,
             unit_cost,
-            net,
+            cost_value,
             debit,
             credit,
             "",
@@ -487,8 +513,9 @@ pub(crate) async fn save_inbound_core(
         )
         .await?;
         // Khấu trừ GTGT: bút toán bổ sung Nợ 133 (thuế được khấu trừ) / Có credit.
+        // Hộ không khấu trừ thì thuế đã nằm trong cost_value ở trên → không ghi 133.
         // Số lượng 0 để không ảnh hưởng tồn kho / báo cáo số lượng.
-        if vat > 0.0 {
+        if vat_deductible && vat > 0.0 {
             insert_journal_entry(
                 &mut tx,
                 posting_date,
@@ -513,14 +540,14 @@ pub(crate) async fn save_inbound_core(
             )
             .await?;
         }
-        total += net;
-        vat_total += vat;
+        total += cost_value;
+        vat_total += if vat_deductible { vat } else { 0.0 };
     }
 
     // Công tắc "Trả tiền ngay" (mặc định BẬT): mua hàng ngoài có nhà cung cấp → tự tạo
     // phiếu chi (PC) thanh toán trong cùng transaction: Nợ TK đối ứng của PNK (mặc định
     // 331 — phải trả người bán) / Có 111 tiền mặt. Số tiền = Giá trị nhập kho + Thuế
-    // GTGT đầu vào (nếu hộ được khấu trừ). Không tạo khi TK Có PNK đã là tiền mặt /
+    // GTGT đầu vào khấu trừ (nếu có). Không tạo khi TK Có PNK đã là tiền mặt /
     // ngân hàng (hàng đã trả ngay ngay trên PNK) hoặc chưa chọn nhà cung cấp.
     let mut pc_no = String::new();
     let credit_is_cash = credit == "111" || credit == "112";
@@ -1152,7 +1179,8 @@ pub(crate) async fn save_outbound_core(
 
 /// Nhập kho: tạo journal_entry (PN) + stock_lot (FIFO) trong 1 transaction.
 /// inbound_type: "purchase" (mua ngoài) | "production" (tự sản xuất, gia công) | "other".
-/// vat_rate (%): chỉ được khấu trừ khi bật app_setting 'vat_deduct' (= '1').
+/// vat_rate (%): bật app_setting 'vat_deduct' (= '1') thì tách Nợ 133 (khấu trừ);
+/// tắt thì cộng thuế vào giá trị nhập kho / giá vốn (không ghi 133).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn save_inbound(
@@ -1201,8 +1229,8 @@ pub(crate) async fn save_inbound(
     } else {
         ""
     };
-    // Công tắc "khấu trừ GTGT đầu vào" (mặc định TẮT) — tắt thì bỏ qua thuế nhập
-    // kể cả khi form gửi lên (hộ nộp thuế theo doanh thu không được khấu trừ).
+    // Công tắc "khấu trừ GTGT đầu vào" (mặc định TẮT): bật thì core tách 133,
+    // tắt thì core cộng thuế vào giá vốn (hộ nộp thuế theo doanh thu).
     let pool = state.pool.read().await;
     let vat_deduct: String = sqlx::query_scalar!(
         r#"SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0') as "v!: String""#
@@ -1210,7 +1238,6 @@ pub(crate) async fn save_inbound(
     .fetch_one(&*pool)
     .await
     .map_err(|e| e.to_string())?;
-    let vat_rate = if vat_deduct == "1" { vat_rate } else { 0.0 };
 
     // TK Nợ/Có (kể cả mặc định theo loại nhập) phải có trong danh mục tài khoản.
     let debit = if debit_account.trim().is_empty() {
@@ -1232,7 +1259,9 @@ pub(crate) async fn save_inbound(
         &credit_account
     };
     let mut checked = vec![debit.to_string(), credit.to_string()];
-    if vat_rate > 0.0 {
+    // Chỉ cần TK 133 khi thực sự tách thuế khấu trừ; hộ không khấu trừ cộng thuế
+    // vào giá vốn nên không phụ thuộc tài khoản 133.
+    if vat_deduct == "1" && vat_rate > 0.0 {
         checked.push("133".to_string());
     }
     // "Trả tiền ngay": phiếu chi tự tạo ghi Có 111 tiền mặt → TK này cũng phải có
@@ -2817,6 +2846,7 @@ mod tests {
         let pool = test_pool().await;
         seed_product(&pool, "P1", "Hàng A", 0.01).await;
         seed_warehouse(&pool, "W1", "Kho 1").await;
+        set_vat_deduct(&pool, true).await; // hộ nộp thuế theo lợi nhuận
 
         // Mua 10 x 10.000, VAT 10% → Nợ 152/Có 331: 100.000 + Nợ 133/Có 331: 10.000
         let r = save_inbound_core(
@@ -2866,6 +2896,95 @@ mod tests {
         assert_eq!(
             scalar_i64(&pool, "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'PNK-02' AND note LIKE 'Theo chứng từ: HĐ 123%'").await,
             2
+        );
+    }
+
+    /// Hộ KHÔNG khấu trừ GTGT (mặc định): thuế đầu vào phải nằm trong giá vốn
+    /// và giá trị nhập kho, không sinh bút toán 133.
+    #[tokio::test]
+    async fn nhap_kho_khong_khau_tru_cong_thue_vao_gia_von() {
+        let pool = test_pool().await;
+        seed_product(&pool, "P1", "Hàng A", 0.01).await;
+        seed_warehouse(&pool, "W1", "Kho 1").await;
+        // test_pool seed sẵn vat_deduct = '0' (hộ nộp thuế theo doanh thu).
+
+        // Mua 10 × 10.000, VAT 10% → Nợ 152 / Có 331: 110.000 (gồm thuế).
+        let r = save_inbound_core(
+            &pool,
+            "2026-02-11",
+            "PNK-KT01",
+            "Mua hàng theo HĐ 124",
+            "NCC1",
+            "W1",
+            "HKD",
+            &[inp("P1", 10.0, 10_000.0)],
+            "",
+            "purchase",
+            "HĐ 124",
+            0.1,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+        )
+        .await
+        .expect("nhập kho không khấu trừ");
+
+        assert_eq!(r.total, 110_000.0, "giá trị nhập kho phải gồm thuế");
+        assert_eq!(r.vat, 0.0, "không khấu trừ thì không tách VAT");
+
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE voucher_no = 'PNK-KT01'"
+            )
+            .await,
+            1
+        );
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT COALESCE(SUM(amount),0) FROM journal_entry
+                 WHERE voucher_no = 'PNK-KT01' AND debit_account = '152' AND credit_account = '331'"
+            )
+            .await,
+            110_000.0
+        );
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry
+                 WHERE voucher_no = 'PNK-KT01' AND debit_account = '133'"
+            )
+            .await,
+            0
+        );
+        // Giá vốn FIFO + giá vốn mặc định của mặt hàng đều đã gồm thuế.
+        assert_eq!(
+            scalar_f64(&pool, "SELECT unit_cost FROM stock_lot").await,
+            11_000.0
+        );
+        assert_eq!(
+            scalar_f64(&pool, "SELECT cost_price FROM product WHERE code = 'P1'").await,
+            11_000.0
+        );
+        // Đầu phiếu: tổng gồm thuế, vat_amount = 0 (không được khấu trừ).
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT total FROM inbound_voucher WHERE voucher_no = 'PNK-KT01'"
+            )
+            .await,
+            110_000.0
+        );
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT vat_amount FROM inbound_voucher WHERE voucher_no = 'PNK-KT01'"
+            )
+            .await,
+            0.0
         );
     }
 
@@ -2983,6 +3102,7 @@ mod tests {
         let pool = test_pool().await;
         seed_product(&pool, "P1", "Hàng A", 0.01).await;
         seed_warehouse(&pool, "W1", "Kho 1").await;
+        set_vat_deduct(&pool, true).await; // hộ nộp thuế theo lợi nhuận
 
         // Mua 10 x 10.000, VAT 10% khấu trừ, trả tiền ngay → PC Nợ 331 / Có 111: 110.000
         let r = save_inbound_core(
@@ -3143,6 +3263,7 @@ mod tests {
         let w = seed_warehouse(&pool, "W1", "Kho 1").await;
         add_stock_lot(&pool, p, w, 10.0, 1000.0, "2026-01-01").await;
         add_stock_lot(&pool, p, w, 10.0, 1200.0, "2026-02-01").await;
+        set_vat_deduct(&pool, true).await; // hộ nộp thuế theo lợi nhuận
 
         // Trả lại NCC 5 (đơn giá 1.000) → trừ FIFO lô đầu (5/10), ghi đảo ngược, VAT 10%.
         let r = save_inbound_core(

@@ -22,6 +22,17 @@ pub(crate) async fn test_pool() -> SqlitePool {
     pool
 }
 
+/// Bật/tắt khấu trừ GTGT đầu vào (app_setting 'vat_deduct') cho test.
+pub(crate) async fn set_vat_deduct(pool: &SqlitePool, on: bool) {
+    let value = if on { "1" } else { "0" };
+    // Runtime query: helper test dùng chung, không cần thêm vào cache .sqlx.
+    sqlx::query("UPDATE app_setting SET value = ? WHERE key = 'vat_deduct'")
+        .bind(value)
+        .execute(pool)
+        .await
+        .expect("set vat_deduct");
+}
+
 pub(crate) async fn seed_product(pool: &SqlitePool, code: &str, name: &str, vat_rate: f64) -> i64 {
     sqlx::query!(
         "INSERT INTO product (code, name, unit, vat_rate) VALUES (?, ?, 'Cái', ?)",

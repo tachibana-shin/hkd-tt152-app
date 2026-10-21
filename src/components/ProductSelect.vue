@@ -228,6 +228,7 @@ if (props.onlyManufactured) void catalog.loadBoms();
     reset-filter-on-hide
     :showClear="showClear"
     :size="size"
+    overlay-class="product-select-overlay"
     class="w-full"
     @update:model-value="onUpdate"
     @filter="onFilter"

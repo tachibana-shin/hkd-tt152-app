@@ -714,6 +714,10 @@ pub(crate) async fn import_invoice(
     // 1) Mặt hàng: khớp theo (tên, đơn vị); thiếu thì tạo mới.
     let mut items: Vec<InboundItemInput> = Vec::new();
     let mut created = 0usize;
+    // Tổng giá chưa thuế + tổng thuế theo từng dòng (tsuat) để quy ra 1 mức
+    // thuế bình quân cho đầu phiếu nhập.
+    let mut net_total = 0.0;
+    let mut vat_total = 0.0;
     let goods_industry = goods_industry_code(pool).await?;
     for line in &lines {
         let name = f(line, "ten");
@@ -729,6 +733,15 @@ pub(crate) async fn import_invoice(
         if name.trim().is_empty() {
             continue;
         }
+        // dgia của HĐĐT là đơn giá CHƯA thuế; stckhau là tiền chiết khấu trên
+        // dòng. Tính đúng như save_inbound_core (CK không vượt quá thành tiền).
+        let quantity = num(line, "sluong");
+        let unit_price = num(line, "dgia");
+        let discount = num(line, "stckhau");
+        let gross = quantity * unit_price;
+        let net = gross - discount.clamp(0.0, gross);
+        net_total += net;
+        vat_total += net * num(line, "tsuat");
         let key = identity_key(&name, unit);
         let existing: Option<String> =
             sqlx::query_scalar!("SELECT code FROM product WHERE identity_key = ?", key)
@@ -778,17 +791,26 @@ pub(crate) async fn import_invoice(
         };
         items.push(InboundItemInput {
             product_code: code,
-            quantity: num(line, "sluong"),
-            unit_price: num(line, "dgia"),
+            quantity,
+            unit_price,
             // Chiết khấu: `stckhau` là SỐ TIỀN CK trên dòng (đã kiểm chứng
             // live 24/09/2026: tlckhau = 50.0 là TỶ LỆ %, stckhau = 2.860.000
             // là tiền CK, dùng cho dòng 2 × 2.860.000). Sổ của app cần số tiền.
-            discount: num(line, "stckhau"),
+            discount,
         });
     }
     if items.is_empty() {
         return Err("Hóa đơn không có dòng hàng hợp lệ".into());
     }
+    // Phiếu nhập chỉ lưu 1 mức thuế GTGT trên đầu phiếu, còn hóa đơn có thể nhiều
+    // thuế suất → quy đổi bình quân gia quyền trên giá chưa thuế để tổng thuế
+    // khớp hóa đơn. save_inbound_core tự tách 133 (hộ khấu trừ) hoặc cộng vào
+    // giá vốn (hộ nộp thuế theo doanh thu) theo app_setting 'vat_deduct'.
+    let vat_rate = if net_total > 0.0 {
+        vat_total / net_total
+    } else {
+        0.0
+    };
 
     // 2) Nhà cung cấp: khớp theo MST, thiếu thì tạo (mã = MST để đối chiếu).
     let supplier_code = ensure_supplier(pool, &inv.nbmst, &inv.nbten).await?;
@@ -807,7 +829,6 @@ pub(crate) async fn import_invoice(
         }
     );
     let reference_no = format!("{}{}", inv.khhdon, inv.shdon);
-    let vat_rate = 0.0; // hộ nộp thuế theo doanh thu: giá nhập đã gồm thuế
     let result = save_inbound_core(
         pool,
         &inv.posting_date,
@@ -1093,7 +1114,7 @@ pub(crate) async fn preview(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_pool;
+    use crate::test_support::{set_vat_deduct, test_pool};
 
     /// Chèn 1 hóa đơn cache + chi tiết giả, chạy import, kiểm tra chuỗi liên kết.
     async fn seed_invoice(pool: &SqlitePool, portal_id: &str, tthai: i64, lines: &str) -> i64 {
@@ -1228,6 +1249,22 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(header.source, "manual"); // save_inbound_core ghi source mặc định
+
+        // Hộ mặc định KHÔNG khấu trừ: đơn giá HĐĐT là giá chưa thuế, thuế 8%
+        // phải được cộng vào giá nhập kho (2 × 1.480.000 × 1,08).
+        assert_eq!(
+            header.total, 3_196_800.0,
+            "giá nhập kho phải gồm thuế khi hộ không khấu trừ"
+        );
+        let vat133: f64 = sqlx::query_scalar(
+            "SELECT CAST(COALESCE(SUM(amount), 0) AS REAL) FROM journal_entry
+             WHERE voucher_no = ? AND debit_account = '133'",
+        )
+        .bind(&out.voucher_no)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(vat133, 0.0, "không khấu trừ thì không sinh bút toán 133");
         let linked: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM journal_entry WHERE inbound_voucher_id = ?",
             header.id
@@ -1277,6 +1314,53 @@ mod tests {
         .unwrap();
         assert_eq!(p.identity_key, identity_key("Bình NN Rossi", "Cái"));
         assert_eq!(p.portal_code, "puro30SL");
+    }
+
+    /// Hộ BẬT khấu trừ GTGT: thuế trên HĐĐT được tách vào 133, giá nhập kho
+    /// (và giá vốn FIFO) là giá chưa thuế.
+    #[tokio::test]
+    async fn import_tach_thue_133_khi_bat_khau_tru() {
+        let pool = test_pool().await;
+        set_vat_deduct(&pool, true).await;
+
+        let lines = r#"{"ten":"Bình NN Rossi","dvtinh":"Cái","mhhdvu":"puro30SL","sluong":2.0,
+                        "dgia":1480000.0,"stckhau":0.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-vat", 1, lines).await;
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .expect("import thất bại");
+        assert!(out.ok);
+
+        let (total, vat_amount): (f64, f64) =
+            sqlx::query_as("SELECT total, vat_amount FROM inbound_voucher WHERE voucher_no = ?")
+                .bind(&out.voucher_no)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(total, 2_960_000.0, "giá nhập kho chưa thuế khi khấu trừ");
+        assert_eq!(vat_amount, 236_800.0, "thuế tách riêng vào 133");
+
+        let vat133: f64 = sqlx::query_scalar(
+            "SELECT CAST(COALESCE(SUM(amount), 0) AS REAL) FROM journal_entry
+             WHERE voucher_no = ? AND debit_account = '133'",
+        )
+        .bind(&out.voucher_no)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(vat133, 236_800.0);
+
+        // Giá vốn FIFO + giá vốn mặc định không gồm thuế.
+        let unit_cost: f64 = sqlx::query_scalar("SELECT unit_cost FROM stock_lot")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(unit_cost, 1_480_000.0);
+        let cost_price: f64 = sqlx::query_scalar("SELECT cost_price FROM product")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(cost_price, 1_480_000.0);
     }
 
     #[tokio::test]
@@ -1817,10 +1901,11 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        // 2 × 2.860.000 − 2.860.000 CK = 2.860.000
+        // 2 × 2.860.000 − 2.860.000 CK = 2.860.000 (chưa thuế). Hộ mặc định
+        // không khấu trừ → VAT 8% cộng vào giá nhập: 2.860.000 × 1,08.
         assert!(
-            (amount - 2_860_000.0).abs() < 1.0,
-            "giá trị nhập = thành tiền − tiền CK, thấy {}",
+            (amount - 3_088_800.0).abs() < 1.0,
+            "giá trị nhập = (thành tiền − tiền CK) × (1 + thuế), thấy {}",
             amount
         );
         // Cột `discount` phải được GHI LẠI (không chỉ trừ vào amount): nếu mất ở
@@ -1843,9 +1928,13 @@ mod tests {
         // Hóa đơn import trước 30/09/2026 được trừ CK vào `amount` nhưng chưa có
         // cột `discount` → màn xem phiếu hiện "Tiền CK —". Migration
         // 20261002001 phải dựng lại được số tiền CK từ detail_json.
+        //
+        // Import thời đó luôn ghi vat_rate = 0 (amount = giá chưa thuế), nên
+        // tái tạo dữ liệu legacy bằng dòng tsuat = 0 — nếu để 8% thì amount
+        // mới đã gồm thuế (hộ không khấu trừ) và không khớp công thức backfill.
         let pool = test_pool().await;
         let lines = r#"{"ten":"Aptomat ABN203c","dvtinh":"Cái","mhhdvu":null,"sluong":2.0,
-                        "dgia":2860000.0,"stckhau":2860000.0,"tlckhau":50.0,"tsuat":0.08}"#;
+                        "dgia":2860000.0,"stckhau":2860000.0,"tlckhau":50.0,"tsuat":0.0}"#;
         let id = seed_invoice(&pool, "uuid-ck-legacy", 1, lines).await;
         let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
             .await

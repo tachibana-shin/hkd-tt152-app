@@ -136,9 +136,9 @@ async function onLinePicked(it: {
     header: "Thiếu tồn kho — hàng chế tạo",
     message: `${p.name} (${p.code}): cần ${fmt(it.quantity)}, kho chỉ có ${fmt(
       avail,
-    )} → thiếu ${fmt(short)}. Đây là hàng có định mức — tạo lô sản xuất ngay để đủ hàng bán?`,
+    )} → thiếu ${fmt(short)}. Đây là hàng có định mức — mở form tạo lô sản xuất ngay? (Lô chỉ được tạo khi bấm Lưu trong form. Phiếu kho độc lập với hoá đơn nháp — xoá hoá đơn không xoá lô.)`,
     icon: "pi pi-factory",
-    acceptLabel: "Tạo lô sản xuất",
+    acceptLabel: "Mở tạo lô",
     rejectLabel: "Để sau",
     accept: () => {
       prompting.value = false;

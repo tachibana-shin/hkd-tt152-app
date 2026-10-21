@@ -340,7 +340,8 @@ async function save() {
       </Message>
       <p v-else class="mt-2 text-xs text-gray-400">
         Lưu lô: nhập thành phẩm (Nợ 155 / Có 154) theo giá thành ước tính, đồng thời tự xuất vật tư
-        theo định mức (Nợ 154 / Có 152) — thiếu tồn thì cả lô không được lưu.
+        theo định mức (Nợ 154 / Có 152) — thiếu tồn thì cả lô không được lưu. Lô đã lưu là chứng từ
+        kho chính thức, độc lập với hoá đơn bán — xoá hoá đơn nháp không xoá lô.
       </p>
     </div>
   </AppDialog>
