@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE stock_lot SET quantity = 1 WHERE inbound_voucher_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "565a7d83ec2219ae7b11d626ddfb31d94f325d19b90f9582147621f9389121bb"
+}

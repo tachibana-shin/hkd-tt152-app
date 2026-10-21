@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM journal_entry\n              WHERE voucher_no = 'PN-TAY-1' AND product_code = 'SP-TAY'",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9c8c2bed809abf740606737bc2762d8be3d017f986cbcd7591bf855fc20a5a33"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM journal_entry WHERE inbound_voucher_id = ? AND entry_type = 'PN'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c21e0a4c4a9a596cd375c0e814904a856348c872f3c97cbe706cb52b70ee2964"
+}

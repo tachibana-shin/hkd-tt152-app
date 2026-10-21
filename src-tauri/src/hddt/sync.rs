@@ -14,8 +14,8 @@ use serde::Serialize;
 use serde_json::Value;
 use sqlx::{FromRow, SqlitePool};
 
-use crate::commands::stock::save_inbound_core;
 use crate::hddt::{HddtClient, InvoiceKind, InvoiceQuery};
+use crate::helpers::round2;
 use crate::models::InboundItemInput;
 
 /// Ngày cổng chấp nhận trong 1 request (HTTP 400 nếu vượt: "Khoảng thời gian
@@ -145,6 +145,12 @@ pub(crate) struct CachedInvoice {
     pub(crate) shdon: String,
     pub(crate) status: String,
     pub(crate) detail_json: String,
+    /// Tổng tiền hàng trước thuế (theo hóa đơn) — dùng đối chiếu với tổng dòng.
+    pub(crate) tgtcthue: f64,
+    /// Tổng thuế GTGT của hóa đơn.
+    pub(crate) tgtthue: f64,
+    /// Tổng thanh toán cuối cùng — chuẩn để phân bổ ngược về từng dòng.
+    pub(crate) tgtttbso: f64,
 }
 
 /// Tóm tắt 1 lần quét cổng.
@@ -502,7 +508,8 @@ async fn pending_without_detail(pool: &SqlitePool) -> Result<Vec<CachedInvoice>,
     let rows: Vec<CachedInvoice> = sqlx::query_as!(
         CachedInvoice,
         r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
-                  khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                  khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
+                  tgtcthue, tgtthue, tgtttbso
              FROM hddt_purchase_invoice
             WHERE status = 'pending' AND detail_json = '' AND detail_error = ''"#
     )
@@ -663,9 +670,46 @@ async fn goods_industry_code(pool: &SqlitePool) -> Result<String, String> {
 pub(crate) struct ImportOutcome {
     pub(crate) portal_id: String,
     pub(crate) ok: bool,
+    /// true = ghi đè lên phiếu nhập tay đã khớp, false = tạo phiếu mới.
+    pub(crate) updated: bool,
     pub(crate) message: String,
     pub(crate) voucher_no: String,
     pub(crate) products_created: usize,
+}
+
+/// Phân bổ `total` theo trọng số `weights`, làm tròn 2 chữ số, dồn phần lệch
+/// vào dòng có trọng số lớn nhất để tổng khớp tuyệt đối (tránh lệch 1–2 đồng
+/// khi cộng từng dòng).
+fn allocate_amount(total: f64, weights: &[f64]) -> Vec<f64> {
+    let n = weights.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let abs_sum: f64 = weights.iter().map(|w| w.abs()).sum();
+    if abs_sum < 1e-12 {
+        let each = round2(total / n as f64);
+        let mut out = vec![each; n];
+        let diff = round2(total - out.iter().sum::<f64>());
+        if diff.abs() >= 0.005 {
+            out[0] = round2(out[0] + diff);
+        }
+        return out;
+    }
+    let mut out: Vec<f64> = weights
+        .iter()
+        .map(|w| round2(total * w.abs() / abs_sum))
+        .collect();
+    let diff = round2(total - out.iter().sum::<f64>());
+    if diff.abs() >= 0.005 {
+        let idx = weights
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.abs().total_cmp(&b.abs()))
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        out[idx] = round2(out[idx] + diff);
+    }
+    out
 }
 
 /// Nhập kho 1 hóa đơn đã cache. Trả về lỗi (không panic) để caller báo từng HĐ.
@@ -692,6 +736,7 @@ pub(crate) async fn import_invoice(
         return Ok(ImportOutcome {
             portal_id: inv.portal_id.clone(),
             ok: true,
+            updated: false,
             message: format!("Đã nhập kho trước đó — phiếu {voucher_no}"),
             voucher_no,
             products_created: 0,
@@ -714,10 +759,6 @@ pub(crate) async fn import_invoice(
     // 1) Mặt hàng: khớp theo (tên, đơn vị); thiếu thì tạo mới.
     let mut items: Vec<InboundItemInput> = Vec::new();
     let mut created = 0usize;
-    // Tổng giá chưa thuế + tổng thuế theo từng dòng (tsuat) để quy ra 1 mức
-    // thuế bình quân cho đầu phiếu nhập.
-    let mut net_total = 0.0;
-    let mut vat_total = 0.0;
     let goods_industry = goods_industry_code(pool).await?;
     for line in &lines {
         let name = f(line, "ten");
@@ -738,10 +779,8 @@ pub(crate) async fn import_invoice(
         let quantity = num(line, "sluong");
         let unit_price = num(line, "dgia");
         let discount = num(line, "stckhau");
-        let gross = quantity * unit_price;
-        let net = gross - discount.clamp(0.0, gross);
-        net_total += net;
-        vat_total += net * num(line, "tsuat");
+        // Thuế suất của RIÊNG dòng hàng — hóa đơn có thể trộn 8%/10%/KCT.
+        let line_vat_rate = num(line, "tsuat");
         let key = identity_key(&name, unit);
         let existing: Option<String> =
             sqlx::query_scalar!("SELECT code FROM product WHERE identity_key = ?", key)
@@ -765,18 +804,18 @@ pub(crate) async fn import_invoice(
                     ""
                 };
                 // Biểu thức tạm phải bind trước (macro giữ tham chiếu tới hết await).
-                let vat_rate = num(line, "tsuat");
                 let portal_code = f(line, "mhhdvu");
                 sqlx::query!(
                     "INSERT INTO product (code, name, unit, sale_price, cost_price,
                                           min_stock, vat_rate, import_tax_rate, is_service,
                                           industry_code, identity_key, portal_code)
-                     VALUES (?, ?, ?, 0, ?, 0, ?, 0, ?, ?, ?, ?)",
+                     VALUES (?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?)",
                     code,
                     name,
                     unit,
                     cost,
-                    vat_rate,
+                    line_vat_rate,
+                    line_vat_rate,
                     is_service,
                     industry,
                     key,
@@ -797,28 +836,133 @@ pub(crate) async fn import_invoice(
             // live 24/09/2026: tlckhau = 50.0 là TỶ LỆ %, stckhau = 2.860.000
             // là tiền CK, dùng cho dòng 2 × 2.860.000). Sổ của app cần số tiền.
             discount,
+            vat_rate: Some(line_vat_rate),
+            vat_amount: None,
         });
     }
     if items.is_empty() {
         return Err("Hóa đơn không có dòng hàng hợp lệ".into());
     }
-    // Phiếu nhập chỉ lưu 1 mức thuế GTGT trên đầu phiếu, còn hóa đơn có thể nhiều
-    // thuế suất → quy đổi bình quân gia quyền trên giá chưa thuế để tổng thuế
-    // khớp hóa đơn. save_inbound_core tự tách 133 (hộ khấu trừ) hoặc cộng vào
-    // giá vốn (hộ nộp thuế theo doanh thu) theo app_setting 'vat_deduct'.
-    let vat_rate = if net_total > 0.0 {
-        vat_total / net_total
-    } else {
-        0.0
+
+    // ─── Đối chiếu tổng hóa đơn → phân bổ xuống từng dòng ───
+    // Giá trị hàng trước thuế theo hóa đơn = tổng thanh toán − tổng thuế. Nếu
+    // hóa đơn có chiết khấu cấp hóa đơn / làm tròn, phần lệch được phân bổ
+    // xuống dòng để Σ giá trị hàng khớp tuyệt đối với hóa đơn.
+    let net_of = |it: &InboundItemInput| -> f64 {
+        let gross = round2(it.quantity * it.unit_price);
+        let discount = if gross >= 0.0 {
+            it.discount.clamp(0.0, gross)
+        } else {
+            it.discount
+        };
+        round2(gross - round2(discount))
     };
+    let line_net_total = round2(items.iter().map(net_of).sum());
+    let base_total = if inv.tgtttbso.abs() > 0.0 {
+        round2(inv.tgtttbso - inv.tgtthue)
+    } else if inv.tgtcthue.abs() > 0.0 {
+        round2(inv.tgtcthue)
+    } else {
+        line_net_total
+    };
+    if base_total > 0.0 && line_net_total > 0.0 {
+        let extra = round2(line_net_total - base_total);
+        if extra.abs() >= 0.005 {
+            if extra > 0.0 {
+                // Giảm giá cấp hóa đơn (ttcktmai) / làm tròn: phân bổ theo giá
+                // trị từng dòng (sau CK dòng) để dòng lớn chịu nhiều hơn.
+                let weights: Vec<f64> = items.iter().map(|it| net_of(it).max(0.0)).collect();
+                let alloc = allocate_amount(extra, &weights);
+                for (it, add) in items.iter_mut().zip(alloc) {
+                    let gross = round2(it.quantity * it.unit_price).max(0.0);
+                    it.discount = round2((it.discount + add).clamp(0.0, gross));
+                }
+            } else {
+                // Hóa đơn cao hơn tổng dòng (làm tròn / phụ phí): giảm chiết
+                // khấu trước, còn thiếu thì cộng vào đơn giá dòng lớn nhất.
+                let need = -extra;
+                let disc_total: f64 = items.iter().map(|it| it.discount.max(0.0)).sum();
+                if disc_total > 0.0 {
+                    let weights: Vec<f64> = items.iter().map(|it| it.discount.max(0.0)).collect();
+                    let alloc = allocate_amount(need.min(disc_total), &weights);
+                    for (it, sub) in items.iter_mut().zip(alloc) {
+                        it.discount = round2((it.discount - sub).max(0.0));
+                    }
+                }
+            }
+            // Dồn phần lệch còn lại vào chiết khấu (hoặc đơn giá) dòng lớn nhất.
+            let now = round2(items.iter().map(net_of).sum());
+            let diff = round2(base_total - now);
+            if diff.abs() >= 0.005 {
+                if let Some(it) = items
+                    .iter_mut()
+                    .filter(|it| it.quantity.abs() > 1e-9)
+                    .max_by(|a, b| net_of(a).abs().total_cmp(&net_of(b).abs()))
+                {
+                    let gross = round2(it.quantity * it.unit_price).max(0.0);
+                    let new_discount = round2(it.discount - diff);
+                    if new_discount >= -0.005 && new_discount <= gross + 0.005 {
+                        it.discount = new_discount.clamp(0.0, gross);
+                    } else {
+                        it.unit_price = round2(it.unit_price + diff / it.quantity);
+                    }
+                }
+            }
+        }
+    }
+
+    // Phân bổ tổng thuế của hóa đơn xuống từng dòng theo giá trị hàng. Dùng số
+    // tuyệt đối (`vat_amount`) để tổng 133 khớp `tgtthue` dù làm tròn từng dòng.
+    let net_after: Vec<f64> = items.iter().map(net_of).collect();
+    let line_vat_calc = round2(
+        items
+            .iter()
+            .map(|it| round2(net_of(it) * it.vat_rate.unwrap_or(0.0)))
+            .sum(),
+    );
+    let target_vat = if inv.tgtttbso.abs() > 0.0 {
+        round2(inv.tgtthue)
+    } else {
+        line_vat_calc
+    };
+    // Phân bổ theo SỐ THUẾ TÍNH ĐƯỢC CỦA TỪNG DÒNG (net × thuế suất), không
+    // theo giá trị hàng — hóa đơn trộn 8%/10% phải giữ đúng thuế từng dòng.
+    let vat_weights: Vec<f64> = items
+        .iter()
+        .map(|it| round2(net_of(it) * it.vat_rate.unwrap_or(0.0)))
+        .collect();
+    let vat_alloc = if vat_weights.iter().any(|w| w.abs() > 0.005) {
+        allocate_amount(target_vat, &vat_weights)
+    } else {
+        allocate_amount(target_vat, &net_after)
+    };
+    for (it, vat) in items.iter_mut().zip(vat_alloc) {
+        it.vat_amount = Some(vat);
+    }
 
     // 2) Nhà cung cấp: khớp theo MST, thiếu thì tạo (mã = MST để đối chiếu).
     let supplier_code = ensure_supplier(pool, &inv.nbmst, &inv.nbten).await?;
 
-    // 3) Số phiếu nhập — đánh số trên bảng đầu phiếu (authoritative).
-    let voucher_no = next_inbound_voucher_no(pool).await?;
+    // 3) Khớp phiếu nhập tay đã có (cùng ký hiệu + số + ngày) để ghi đè.
+    // Không so MST người bán — số hiệu + ngày là đủ theo yêu cầu.
+    let matched = crate::commands::stock::find_matching_inbound(
+        pool,
+        &inv.khhdon,
+        &inv.shdon,
+        &inv.posting_date,
+    )
+    .await?;
+    let overwrite = matched.is_some();
+    let voucher_no = match &matched {
+        Some(m) => m.voucher_no.clone(),
+        None => next_inbound_voucher_no(pool).await?,
+    };
+    let effective_warehouse = match &matched {
+        Some(m) if warehouse_code.trim().is_empty() => m.warehouse_code.clone(),
+        _ => warehouse_code.to_string(),
+    };
 
-    // 4) Ghi phiếu: save_inbound_core tạo journal_entry + stock_lot trong 1 tx.
+    // 4) Ghi phiếu trong CÙNG transaction với liên kết hóa đơn + xoá cache.
     let description = format!(
         "Nhập hàng theo hóa đơn {}{}",
         inv.khhdon,
@@ -829,13 +973,25 @@ pub(crate) async fn import_invoice(
         }
     );
     let reference_no = format!("{}{}", inv.khhdon, inv.shdon);
-    let result = save_inbound_core(
-        pool,
+    let extra = crate::commands::stock::InboundExtra {
+        source: "hddt",
+        invoice_serial: &inv.khhdon,
+        invoice_no: &inv.shdon,
+        invoice_date: &inv.posting_date,
+        overwrite,
+        exclude_id: matched.as_ref().map(|m| m.id),
+    };
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    if let Some(m) = &matched {
+        crate::commands::stock::clear_inbound_for_overwrite(&mut tx, m).await?;
+    }
+    let result = crate::commands::stock::save_inbound_core_tx(
+        &mut tx,
         &inv.posting_date,
         &voucher_no,
         &description,
         &supplier_code,
-        warehouse_code,
+        &effective_warehouse,
         if unit_code.is_empty() {
             "HKD"
         } else {
@@ -845,29 +1001,40 @@ pub(crate) async fn import_invoice(
         "",
         "purchase",
         &reference_no,
-        vat_rate,
+        0.0, // thuế lấy theo từng dòng / vat_amount
         debit_account,
         credit_account,
         false, // không tự tạo phiếu chi — thanh toán do người dùng quyết định
         "",
         false, // không tự xuất NVL theo định mức — HĐĐT nhập là mua ngoài
+        &extra,
     )
     .await?;
 
+    // 4b) Phiếu chi "trả tiền ngay" cũ (nếu có) phải theo tổng mới.
+    if overwrite {
+        let pay = round2(result.total + result.vat);
+        let pc_note = format!("Theo chứng từ: {}", voucher_no);
+        sqlx::query!(
+            "UPDATE journal_entry SET unit_price = ?, amount = ?
+              WHERE entry_type = 'PC' AND note = ?",
+            pay,
+            pay,
+            pc_note
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
     // 5) Hóa đơn chính thức + liên kết chặt với phiếu nhập (FK thật). Dữ liệu
     // này nằm ở bảng riêng `hddt_imported_invoice`, sau đó dòng cache bị xoá.
-    let header_id: i64 = sqlx::query_scalar!(
-        r#"SELECT id as "id!" FROM inbound_voucher WHERE voucher_no = ?"#,
-        voucher_no
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let header_id = result.inbound_voucher_id;
     let supplier_id: Option<i64> = sqlx::query_scalar!(
         r#"SELECT id as "id!" FROM supplier WHERE code = ?"#,
         supplier_code
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
     let new_product_count = created as i64;
@@ -885,22 +1052,31 @@ pub(crate) async fn import_invoice(
         header_id,
         inv.id
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
     // Cache đã "tiêu" rồi → xoá khỏi cache, dữ liệu chính thức nằm ở bảng trên.
     sqlx::query!("DELETE FROM hddt_purchase_invoice WHERE id = ?", inv.id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
 
     Ok(ImportOutcome {
         portal_id: inv.portal_id.clone(),
         ok: true,
-        message: format!(
-            "Đã tạo phiếu {} · {} dòng · {} hàng mới · tổng {}",
-            voucher_no, result.entries, created, result.total
-        ),
+        updated: overwrite,
+        message: if overwrite {
+            format!(
+                "Đã cập nhật phiếu {} theo hóa đơn · {} dòng · tổng {}",
+                voucher_no, result.entries, result.total
+            )
+        } else {
+            format!(
+                "Đã tạo phiếu {} · {} dòng · {} hàng mới · tổng {}",
+                voucher_no, result.entries, created, result.total
+            )
+        },
         voucher_no,
         products_created: created,
     })
@@ -1114,16 +1290,37 @@ pub(crate) async fn preview(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{set_vat_deduct, test_pool};
+    use crate::commands::stock::{save_inbound_core_with, InboundExtra};
+    use crate::test_support::{seed_product, set_vat_deduct, test_pool};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Số hóa đơn tăng dần: mỗi test có thể seed nhiều hóa đơn, không được trùng
+    /// bộ ký hiệu + số + ngày (trùng là cùng 1 hóa đơn, import sẽ chặn).
+    static SEED_SEQ: AtomicU64 = AtomicU64::new(1);
 
     /// Chèn 1 hóa đơn cache + chi tiết giả, chạy import, kiểm tra chuỗi liên kết.
     async fn seed_invoice(pool: &SqlitePool, portal_id: &str, tthai: i64, lines: &str) -> i64 {
         let status = if tthai == 1 { "pending" } else { "manual" };
-        let line_count = serde_json::from_str::<Value>(&format!("[{lines}]"))
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len() as i64;
+        let parsed: Value = serde_json::from_str(&format!("[{lines}]")).unwrap();
+        let arr = parsed.as_array().unwrap();
+        let line_count = arr.len() as i64;
+        // Tổng hóa đơn phải khớp chính các dòng — import đối chiếu `tgtttbso`
+        // với tổng dòng và phân bổ phần lệch xuống từng dòng.
+        let mut tgtcthue = 0.0;
+        let mut tgtthue = 0.0;
+        for line in arr {
+            let quantity = num(line, "sluong");
+            let unit_price = num(line, "dgia");
+            let discount = num(line, "stckhau");
+            let gross = quantity * unit_price;
+            let net = gross - discount.clamp(0.0, gross);
+            tgtcthue += net;
+            tgtthue += net * num(line, "tsuat");
+        }
+        let tgtcthue = round2(tgtcthue);
+        let tgtthue = round2(tgtthue);
+        let tgtttbso = round2(tgtcthue + tgtthue);
+        let shdon = format!("{:03}", SEED_SEQ.fetch_add(1, Ordering::Relaxed));
         let detail = format!("{{\"hdhhdvu\":[{lines}]}}");
         sqlx::query!(
             "INSERT INTO hddt_purchase_invoice
@@ -1131,9 +1328,13 @@ mod tests {
                  khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue, ttcktmai,
                  tgtttbso, status, skip_reason, line_count, raw_json, detail_json)
              VALUES (?, 'regular', '2026-09-01T17:00:00Z', '2026-09-02', '0106773786',
-                     'Cty TNHH ABC', '001170019085', 1, 'C26ABC', '001', 1, 1,
-                     100000, 8000, 0, 108000, ?, '', ?, '{}', ?)",
+                     'Cty TNHH ABC', '001170019085', 1, 'C26ABC', ?, 1, 1,
+                     ?, ?, 0, ?, ?, '', ?, '{}', ?)",
             portal_id,
+            shdon,
+            tgtcthue,
+            tgtthue,
+            tgtttbso,
             status,
             line_count,
             detail
@@ -1154,7 +1355,8 @@ mod tests {
         sqlx::query_as!(
             CachedInvoice,
             r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
-                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
+                  tgtcthue, tgtthue, tgtttbso
                  FROM hddt_purchase_invoice WHERE id = ?"#,
             id
         )
@@ -1248,7 +1450,8 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(header.source, "manual"); // save_inbound_core ghi source mặc định
+        assert_eq!(header.source, "hddt"); // phiếu tạo từ đồng bộ cổng
+        assert!(!out.updated, "hóa đơn mới → tạo phiếu, không ghi đè");
 
         // Hộ mặc định KHÔNG khấu trừ: đơn giá HĐĐT là giá chưa thuế, thuế 8%
         // phải được cộng vào giá nhập kho (2 × 1.480.000 × 1,08).
@@ -1583,7 +1786,8 @@ mod tests {
         let row: CachedInvoice = sqlx::query_as!(
             CachedInvoice,
             r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
-                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
+                  tgtcthue, tgtthue, tgtttbso
                  FROM hddt_purchase_invoice LIMIT 1"#
         )
         .fetch_one(&pool)
@@ -2050,6 +2254,433 @@ mod tests {
             portal.count("/invoices/purchase"),
             0,
             "không được gọi cổng khi chưa tới mốc bắt đầu"
+        );
+    }
+
+    /// Hóa đơn trộn 8% + 10%: lưu đúng thuế suất từng dòng, tổng 133 khớp
+    /// `tgtthue` (kể cả khi hóa đơn làm tròn lệch 1 đồng so với tích từng dòng).
+    #[tokio::test]
+    async fn import_luu_thue_tung_dong_va_khop_tong_hoa_don() {
+        let pool = test_pool().await;
+        set_vat_deduct(&pool, true).await;
+        let lines = r#"{"ten":"Hàng 8%","dvtinh":"Cái","mhhdvu":"a","sluong":2.0,
+                         "dgia":100000.0,"stckhau":0.0,"tsuat":0.08},
+                       {"ten":"Hàng 10%","dvtinh":"Cái","mhhdvu":"b","sluong":1.0,
+                         "dgia":200000.0,"stckhau":0.0,"tsuat":0.10}"#;
+        let id = seed_invoice(&pool, "uuid-multi-vat", 1, lines).await;
+        // Tổng dòng: 200.000 + 200.000 = 400.000; thuế 16.000 + 20.000 = 36.000.
+        // Giả lập hóa đơn làm tròn thuế lên 1 đồng.
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice SET tgtthue = 36001, tgtttbso = 436001 WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+        assert!(!out.updated);
+
+        let (total, vat_amount, vat_rate): (f64, f64, f64) = sqlx::query_as(
+            "SELECT total, vat_amount, vat_rate FROM inbound_voucher WHERE voucher_no = ?",
+        )
+        .bind(&out.voucher_no)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(total, 400_000.0, "tổng hàng chưa thuế");
+        assert_eq!(vat_amount, 36_001.0, "thuế đầu vào khớp hóa đơn");
+        assert!(
+            (vat_rate - 0.09).abs() < 1e-6,
+            "tỷ lệ bình quân đầu phiếu = 36.001/400.000"
+        );
+
+        // Bút toán 133 tách theo từng dòng, giữ đúng thuế suất 8% / 10%.
+        let vat_rows: Vec<(f64, f64)> = sqlx::query_as(
+            "SELECT vat_rate, amount FROM journal_entry
+              WHERE voucher_no = ? AND debit_account = '133' ORDER BY id",
+        )
+        .bind(&out.voucher_no)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(vat_rows.len(), 2);
+        assert!((vat_rows[0].0 - 0.08).abs() < 1e-9);
+        assert!((vat_rows[1].0 - 0.10).abs() < 1e-9);
+        let vat_sum: f64 = vat_rows.iter().map(|r| r.1).sum();
+        assert!(
+            (vat_sum - 36_001.0).abs() < 0.01,
+            "tổng 133 phải khớp tgtthue, thấy {vat_sum}"
+        );
+
+        // Tổng phiếu nhập + thuế = tổng thanh toán của hóa đơn.
+        let invoice_total: f64 = sqlx::query_scalar!(
+            r#"SELECT tgtttbso as "tgtttbso!" FROM hddt_imported_invoice WHERE portal_id = ?"#,
+            "uuid-multi-vat"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!((total + vat_amount - invoice_total).abs() < 0.01);
+
+        // Mặt hàng mới lưu thuế nhập mặc định đúng thuế suất dòng.
+        let import_rates: Vec<f64> = sqlx::query_scalar(
+            "SELECT import_tax_rate FROM product WHERE name IN ('Hàng 8%', 'Hàng 10%')
+              ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(import_rates, vec![0.10, 0.08]);
+    }
+
+    /// Chiết khấu cấp hóa đơn (ttcktmai) phải được phân bổ xuống dòng để
+    /// Σ giá trị hàng = `tgtttbso − tgtthue`, không chỉ lấy tổng dòng.
+    #[tokio::test]
+    async fn import_phan_bo_chiet_khau_cap_hoa_don_va_khop_tong() {
+        let pool = test_pool().await;
+        set_vat_deduct(&pool, true).await;
+        let lines = r#"{"ten":"Hàng CK hóa đơn","dvtinh":"Cái","mhhdvu":"c","sluong":10.0,
+                         "dgia":100000.0,"stckhau":0.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-inv-discount", 1, lines).await;
+        // Giá gốc 1.000.000 + VAT 80.000 = 1.080.000; chiết khấu hóa đơn 100.000
+        // → khách trả 980.000, thuế giữ nguyên 80.000.
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice SET ttcktmai = 100000, tgtttbso = 980000 WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .unwrap();
+
+        let (total, vat_amount): (f64, f64) =
+            sqlx::query_as("SELECT total, vat_amount FROM inbound_voucher WHERE voucher_no = ?")
+                .bind(&out.voucher_no)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(total, 900_000.0, "giá trị hàng sau chiết khấu hóa đơn");
+        assert_eq!(vat_amount, 80_000.0);
+        assert!((total + vat_amount - 980_000.0).abs() < 0.01);
+
+        let (amount, discount): (f64, f64) = sqlx::query_as(
+            "SELECT amount, discount FROM journal_entry
+              WHERE voucher_no = ? AND entry_type = 'PN' AND product_code <> ''",
+        )
+        .bind(&out.voucher_no)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(amount, 900_000.0);
+        assert_eq!(discount, 100_000.0, "chiết khấu hóa đơn dồn xuống dòng");
+    }
+
+    /// Phiếu nhập tay trùng ký hiệu + số + ngày hóa đơn phải được CẬP NHẬT
+    /// (giữ số phiếu), không tạo phiếu mới; lô cũ còn nguyên mới được ghi đè.
+    #[tokio::test]
+    async fn import_ghi_de_phieu_nhap_tay_cung_hoa_don() {
+        let pool = test_pool().await;
+        set_vat_deduct(&pool, true).await;
+        seed_product(&pool, "SP-TAY", "Hàng nhập tay", 0.08).await;
+        let lines = r#"{"ten":"Hàng hóa đơn","dvtinh":"Cái","mhhdvu":"h1","sluong":2.0,
+                         "dgia":100000.0,"stckhau":0.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-overwrite", 1, lines).await;
+        let inv_row = sqlx::query!(
+            "SELECT khhdon, shdon, posting_date FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let manual_items = [InboundItemInput {
+            product_code: "SP-TAY".into(),
+            quantity: 3.0,
+            unit_price: 50_000.0,
+            discount: 0.0,
+            vat_rate: Some(0.08),
+            vat_amount: None,
+        }];
+        let extra = InboundExtra {
+            source: "manual",
+            invoice_serial: &inv_row.khhdon,
+            invoice_no: &inv_row.shdon,
+            invoice_date: &inv_row.posting_date,
+            overwrite: false,
+            exclude_id: None,
+        };
+        let manual = save_inbound_core_with(
+            &pool,
+            &inv_row.posting_date,
+            "PN-TAY-1",
+            "Phiếu nhập tay",
+            "",
+            "KHO-CHINH",
+            "HKD",
+            &manual_items,
+            "",
+            "purchase",
+            "TAY-REF",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+            &extra,
+        )
+        .await
+        .expect("lưu phiếu tay");
+        assert_eq!(manual.total, 150_000.0);
+
+        let out = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .expect("import phải ghi đè phiếu tay");
+        assert!(out.updated, "phải báo đã cập nhật");
+        assert_eq!(out.voucher_no, "PN-TAY-1", "giữ nguyên số phiếu nội bộ");
+
+        // Chỉ còn 1 đầu phiếu, đã chuyển source=hddt và cập nhật tổng/hóa đơn.
+        let header = sqlx::query!(
+            r#"SELECT id as "id!", source, total, vat_amount, warehouse_code,
+                      invoice_serial, invoice_no, invoice_date
+                 FROM inbound_voucher WHERE voucher_no = 'PN-TAY-1'"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(header.id, manual.inbound_voucher_id, "giữ nguyên id");
+        assert_eq!(header.source, "hddt");
+        assert_eq!(header.total, 200_000.0);
+        assert_eq!(header.vat_amount, 16_000.0);
+        assert_eq!(header.warehouse_code, "KHO-CHINH");
+        assert_eq!(header.invoice_serial, inv_row.khhdon);
+        assert_eq!(header.invoice_no, inv_row.shdon);
+        assert_eq!(header.invoice_date, inv_row.posting_date);
+        let count: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM inbound_voucher")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "không được tạo thêm phiếu");
+
+        // Lô + bút toán của mặt hàng nhập tay cũ đã bị thay bằng hàng hóa đơn.
+        let old_lots: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM stock_lot sl JOIN product p ON p.id = sl.product_id
+              WHERE p.code = 'SP-TAY'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old_lots, 0, "lô phiếu tay phải bị xoá");
+        let old_entries: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM journal_entry
+              WHERE voucher_no = 'PN-TAY-1' AND product_code = 'SP-TAY'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old_entries, 0, "bút toán phiếu tay phải bị xoá");
+
+        let new_lot: f64 = sqlx::query_scalar!(
+            r#"SELECT COALESCE(SUM(sl.quantity), 0.0) as "q!: f64"
+                 FROM stock_lot sl JOIN product p ON p.id = sl.product_id
+                WHERE p.name = 'Hàng hóa đơn'"#
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(new_lot, 2.0, "lô hàng hóa đơn phải được tạo đúng SL");
+
+        let linked: i64 = sqlx::query_scalar!(
+            "SELECT inbound_voucher_id FROM hddt_imported_invoice WHERE portal_id = ?",
+            "uuid-overwrite"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(linked, manual.inbound_voucher_id);
+    }
+
+    /// Lô của phiếu tay đã bị xuất một phần → từ chối ghi đè, không nhân đôi
+    /// tồn kho hoặc làm lệch giá vốn đã bán.
+    #[tokio::test]
+    async fn import_tu_choi_ghi_de_khi_lo_da_xuat() {
+        let pool = test_pool().await;
+        set_vat_deduct(&pool, true).await;
+        seed_product(&pool, "SP-TAY-2", "Hàng nhập tay 2", 0.08).await;
+        let lines = r#"{"ten":"Hàng hóa đơn 2","dvtinh":"Cái","mhhdvu":"h2","sluong":2.0,
+                         "dgia":100000.0,"stckhau":0.0,"tsuat":0.08}"#;
+        let id = seed_invoice(&pool, "uuid-overwrite-used", 1, lines).await;
+        let inv_row = sqlx::query!(
+            "SELECT khhdon, shdon, posting_date FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let manual_items = [InboundItemInput {
+            product_code: "SP-TAY-2".into(),
+            quantity: 3.0,
+            unit_price: 50_000.0,
+            discount: 0.0,
+            vat_rate: Some(0.08),
+            vat_amount: None,
+        }];
+        let extra = InboundExtra {
+            source: "manual",
+            invoice_serial: &inv_row.khhdon,
+            invoice_no: &inv_row.shdon,
+            invoice_date: &inv_row.posting_date,
+            overwrite: false,
+            exclude_id: None,
+        };
+        let manual = save_inbound_core_with(
+            &pool,
+            &inv_row.posting_date,
+            "PN-TAY-2",
+            "Phiếu nhập tay 2",
+            "",
+            "KHO-CHINH",
+            "HKD",
+            &manual_items,
+            "",
+            "purchase",
+            "TAY-REF-2",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+            &extra,
+        )
+        .await
+        .expect("lưu phiếu tay");
+        // Giả lập đã xuất 2/3: lô chỉ còn 1.
+        sqlx::query!(
+            "UPDATE stock_lot SET quantity = 1 WHERE inbound_voucher_id = ?",
+            manual.inbound_voucher_id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .expect_err("lô đã xuất thì phải từ chối");
+        assert!(
+            err.contains("đã bị xuất/điều chỉnh"),
+            "thông báo phải nói rõ lô đã dùng: {err}"
+        );
+
+        // Rollback: phiếu tay + lô + cache còn nguyên, chưa có liên kết hóa đơn.
+        let source: String = sqlx::query_scalar!(
+            "SELECT source FROM inbound_voucher WHERE id = ?",
+            manual.inbound_voucher_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(source, "manual");
+        let old_lot: f64 = sqlx::query_scalar!(
+            r#"SELECT COALESCE(SUM(quantity), 0.0) as "q!: f64"
+                 FROM stock_lot WHERE inbound_voucher_id = ?"#,
+            manual.inbound_voucher_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old_lot, 1.0);
+        let cache: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cache, 1);
+        let linked: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM hddt_imported_invoice WHERE inbound_voucher_id = ?",
+            manual.inbound_voucher_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(linked, 0);
+    }
+
+    /// Không cho lưu 2 phiếu nhập tay cùng ký hiệu + số + ngày hóa đơn.
+    #[tokio::test]
+    async fn save_inbound_chan_trung_hoa_don() {
+        let pool = test_pool().await;
+        seed_product(&pool, "SP-TRUNG", "Hàng trùng hóa đơn", 0.08).await;
+        let items = [InboundItemInput {
+            product_code: "SP-TRUNG".into(),
+            quantity: 1.0,
+            unit_price: 100_000.0,
+            discount: 0.0,
+            vat_rate: Some(0.08),
+            vat_amount: None,
+        }];
+        let extra = InboundExtra {
+            source: "manual",
+            invoice_serial: "C26XYZ",
+            invoice_no: "999",
+            invoice_date: "2026-09-02",
+            overwrite: false,
+            exclude_id: None,
+        };
+        save_inbound_core_with(
+            &pool,
+            "2026-09-02",
+            "PN-TRUNG-1",
+            "Phiếu 1",
+            "",
+            "KHO-CHINH",
+            "HKD",
+            &items,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+            &extra,
+        )
+        .await
+        .expect("phiếu đầu lưu được");
+
+        let err = save_inbound_core_with(
+            &pool,
+            "2026-09-02",
+            "PN-TRUNG-2",
+            "Phiếu 2",
+            "",
+            "KHO-CHINH",
+            "HKD",
+            &items,
+            "",
+            "purchase",
+            "",
+            0.0,
+            "152",
+            "331",
+            false,
+            "",
+            false,
+            &extra,
+        )
+        .await
+        .expect_err("trùng hóa đơn phải bị chặn");
+        assert!(
+            err.contains("đã có trong phiếu nhập PN-TRUNG-1"),
+            "thông báo phải chỉ phiếu cũ: {err}"
         );
     }
 }

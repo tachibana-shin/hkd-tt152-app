@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!\", portal_id, posting_date, nbmst, nbten,\n                      khmshdon as \"khmshdon!\", khhdon, shdon, status, detail_json\n                 FROM hddt_purchase_invoice LIMIT 1",
+  "query": "SELECT id as \"id!\", portal_id, posting_date, nbmst, nbten,\n                          khmshdon as \"khmshdon!\", khhdon, shdon, status, detail_json,\n                  tgtcthue, tgtthue, tgtttbso\n                     FROM hddt_purchase_invoice WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -52,10 +52,25 @@
         "name": "detail_json",
         "ordinal": 9,
         "type_info": "Text"
+      },
+      {
+        "name": "tgtcthue",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "tgtthue",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "tgtttbso",
+        "ordinal": 12,
+        "type_info": "Float"
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
@@ -67,8 +82,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "14ad85d70f0c95fbe6076b4830b6fbd60e001d17ac5fb34989ad3971054cc23e"
+  "hash": "0712c141acc22ad570f50aa70a6f0f1b0189130a547c64977cd9f28b869ff401"
 }

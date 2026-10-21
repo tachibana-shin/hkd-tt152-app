@@ -49,6 +49,8 @@ const lineUnitGross = (r: VoucherRow) => (r.quantity ? lineGross(r) / r.quantity
 const grossTotal = computed(() => lines.value.reduce((s, r) => s + lineGross(r), 0));
 const discountTotal = computed(() => lines.value.reduce((s, r) => s + disc(r), 0));
 const netTotal = computed(() => grossTotal.value - discountTotal.value);
+/** Phiếu nào có dòng hàng mang % GTGT riêng (hóa đơn mua đa thuế suất) mới hiện cột. */
+const hasVatRows = computed(() => lines.value.some((r) => r.vat_rate > 0));
 
 /** "YYYY-MM-DD" → "dd/MM/yyyy" (ngày lập phiếu trong DB là ngày, không cần giờ). */
 const postingDate = computed(() => {
@@ -163,6 +165,7 @@ watch(
               <th class="w-14 px-2 py-1 text-left">ĐVT</th>
               <th class="w-24 px-2 py-1 text-right">SL</th>
               <th class="w-32 px-2 py-1 text-right">Đơn giá</th>
+              <th v-if="hasVatRows" class="w-20 px-2 py-1 text-right">GTGT</th>
               <th class="w-36 px-2 py-1 text-right">Thành tiền</th>
               <th class="w-28 px-2 py-1 text-right">Tiền CK</th>
             </tr>
@@ -175,6 +178,10 @@ watch(
               <td class="px-2 py-1">{{ r.unit }}</td>
               <td class="px-2 py-1 text-right">{{ fmt(r.quantity) }}</td>
               <td class="px-2 py-1 text-right">{{ money(lineUnitGross(r)) }}</td>
+              <td v-if="hasVatRows" class="px-2 py-1 text-right">
+                <!-- Vòng 2 số lẻ để 0.08×100 không in ra "8.000000000000002". -->
+                {{ r.vat_rate > 0 ? `${Math.round(r.vat_rate * 1000) / 10} %` : "—" }}
+              </td>
               <td class="px-2 py-1 text-right font-medium">{{ money(lineGross(r)) }}</td>
               <td class="px-2 py-1 text-right">
                 <span v-if="r.discount" class="text-emerald-600">−{{ money(r.discount) }}</span>
@@ -182,21 +189,25 @@ watch(
               </td>
             </tr>
             <tr v-if="!lines.length">
-              <td colspan="8" class="px-2 py-3 text-center text-gray-400">
+              <td :colspan="hasVatRows ? 9 : 8" class="px-2 py-3 text-center text-gray-400">
                 Phiếu không có dòng hàng hóa
               </td>
             </tr>
           </tbody>
           <tfoot>
             <tr class="border-t border-gray-200 font-semibold">
-              <td colspan="6" class="px-2 py-1 text-right text-gray-500">Cộng thành tiền</td>
+              <td :colspan="hasVatRows ? 7 : 6" class="px-2 py-1 text-right text-gray-500">
+                Cộng thành tiền
+              </td>
               <td class="px-2 py-1 text-right">{{ money(grossTotal) }}</td>
               <td class="px-2 py-1 text-right text-emerald-600">
                 {{ discountTotal ? `−${money(discountTotal)}` : "" }}
               </td>
             </tr>
             <tr class="font-semibold">
-              <td colspan="6" class="px-2 py-1 text-right text-gray-500">Thành tiền (sau CK)</td>
+              <td :colspan="hasVatRows ? 7 : 6" class="px-2 py-1 text-right text-gray-500">
+                Thành tiền (sau CK)
+              </td>
               <td class="px-2 py-1 text-right">{{ money(netTotal) }}</td>
               <td class="px-2 py-1 text-right"></td>
             </tr>

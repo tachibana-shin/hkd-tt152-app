@@ -1277,6 +1277,8 @@ export interface VoucherRow {
   amount: number;
   /** Tiền chiết khấu của dòng (0 nếu không CK) — cộng lại với `amount` ra thành tiền GỐC. */
   discount: number;
+  /** % GTGT đầu vào của RIÊNG dòng (0-1) — hóa đơn mua có thể trộn nhiều mức. */
+  vat_rate: number;
   debit_account: string;
   credit_account: string;
   industry_code: string;

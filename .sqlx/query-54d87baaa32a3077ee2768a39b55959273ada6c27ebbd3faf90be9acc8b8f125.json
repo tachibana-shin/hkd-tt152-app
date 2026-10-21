@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice SET tgtthue = 36001, tgtttbso = 436001 WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "54d87baaa32a3077ee2768a39b55959273ada6c27ebbd3faf90be9acc8b8f125"
+}

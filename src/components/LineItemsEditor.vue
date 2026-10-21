@@ -16,6 +16,12 @@ interface LineItem {
   /** Số tiền chiết khấu thương mại (đ) — cột "Tiền CK" của CT MH (TT88). */
   discount?: number;
   /**
+   * % thuế GTGT đầu vào của RIÊNG dòng (phiếu nhập mua: hóa đơn có thể trộn
+   * 8%/10%/KCT). Rỗng (null/undefined) = theo mức chung đầu phiếu — backend
+   * tự lấy mức `vat_rate` gửi đầu phiếu.
+   */
+  vat_pct?: number | null;
+  /**
    * Tên hiển thị dòng (tên khác / alias người dùng chọn trên ô sản phẩm).
    * Rỗng = tên chính. Hóa đơn giữ nguyên tên này khi in (F5).
    */
@@ -42,6 +48,12 @@ const props = withDefaults(
     showAmount?: boolean;
     /** Hiện cột CK% + Tiền CK (thay cột Thành tiền) — dùng cho phiếu nhập mua. */
     showDiscount?: boolean;
+    /**
+     * Hiện cột thuế % RIÊNG từng dòng — đặt cạnh mức thuế chung đầu phiếu.
+     * Cột trống = dòng theo mức chung; chỉ bảng có `showDiscount` (phiếu nhập
+     * mua) mới bật vì thuế tính trên giá sau chiết khấu.
+     */
+    showVat?: boolean;
     /** Hiện cột ĐVT (đơn vị tính) chỉ đọc trên từng dòng. */
     showUnit?: boolean;
     /**
@@ -75,6 +87,7 @@ const props = withDefaults(
     warnShortage: (p) => p.showWarehouse ?? false,
     showAmount: false,
     showDiscount: false,
+    showVat: false,
     showUnit: false,
     amountInput: false,
     compact: false,
@@ -548,6 +561,27 @@ watch(
           :size="compact || preInput ? 'small' : undefined"
           class="w-full"
           placeholder="Kho mặc định"
+        />
+      </template>
+    </Column>
+    <Column
+      v-if="showVat"
+      header="VAT %"
+      :style="compact || preInput ? 'width: 96px' : 'width: 110px'"
+    >
+      <template #body="{ data }">
+        <!-- Thuế suất RIÊNG dòng; bỏ trống (placeholder "Chung") = mức chung
+             đầu phiếu — hóa đơn trộn nhiều thuế suất mới cần điền từng dòng. -->
+        <InputNumber
+          v-model="data.vat_pct"
+          :min="0"
+          :max="30"
+          :max-fraction-digits="1"
+          suffix=" %"
+          placeholder="Chung"
+          input-class="w-full !px-2 text-center"
+          :size="compact || preInput ? 'small' : undefined"
+          class="w-full"
         />
       </template>
     </Column>

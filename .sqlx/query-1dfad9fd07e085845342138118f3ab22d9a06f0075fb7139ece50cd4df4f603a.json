@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE inbound_voucher SET total = ?, vat_amount = ?, reference_no = ?,\n                posting_date = ?, supplier_code = ?, description = ?, unit_code = ?,\n                warehouse_code = ?, vat_rate = ?, source = ?,\n                invoice_serial = ?, invoice_no = ?, invoice_date = ?\n          WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "1dfad9fd07e085845342138118f3ab22d9a06f0075fb7139ece50cd4df4f603a"
+}

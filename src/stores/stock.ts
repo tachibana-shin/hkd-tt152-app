@@ -48,6 +48,8 @@ export const useStockStore = defineStore("stock", () => {
       quantity: number;
       unit_price: number;
       discount: number; // số tiền CK — giá trị nhập kho = Thành tiền − Tiền CK
+      /** Tỷ lệ GTGT RIÊNG của dòng (0-1) — bỏ trống thì dùng mức chung đầu phiếu. */
+      vat_rate?: number;
     }[];
     inbound_type: string; // purchase | production | other | adjust
     reference_no: string;
@@ -64,6 +66,14 @@ export const useStockStore = defineStore("stock", () => {
      * (Nợ 154 / Có 152) trong cùng transaction. Trả về `material_voucher`.
      */
     auto_bom?: boolean;
+    /**
+     * Hóa đơn gốc (chỉ purchase): ký hiệu + số + ngày hóa đơn bán — backend lưu
+     * vào đầu phiếu để Đồng bộ HĐĐT nối được phiếu tay trùng hóa đơn (cập nhật
+     * thay vì tạo phiếu mới) và chặn lưu 2 phiếu cùng một hóa đơn.
+     */
+    invoice_serial?: string;
+    invoice_no?: string;
+    invoice_date?: string;
   }) {
     const res = await api.saveInbound(args);
     await Promise.all([loadEntries("PN"), loadSummary(), loadLots()]);

@@ -536,6 +536,35 @@ pub(crate) async fn hddt_sync_test_seed(
         .unwrap_or(0);
     // Biểu thức tạm bind trước: macro giữ tham chiếu tới hết `.await`.
     let line_count = lines as i64;
+    // Tổng hóa đơn tính TỪ các dòng chi tiết: import đối chiếu `tgtttbso`
+    // với tổng dòng và dàn phần lệch xuống từng dòng, nên giả "tổng 2 triệu"
+    // cho hóa đơn 250 nghìn sẽ để đơn giá dòng bị đẩy lên để bù chênh lệch.
+    let num = |v: &serde_json::Value| v.as_f64().unwrap_or(0.0);
+    let r2 = |n: f64| (n * 100.0).round() / 100.0;
+    let mut tgtcthue = 0.0;
+    let mut tgtthue = 0.0;
+    for line in detail
+        .get("hdhhdvu")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+    {
+        let gross = num(line.get("sluong").unwrap_or(&serde_json::json!(0)))
+            * num(line.get("dgia").unwrap_or(&serde_json::json!(0)));
+        // Tiền CK không vượt quá thành tiền (hóa đơn âm → giữ nguyên CK).
+        let discount_raw = num(line.get("stckhau").unwrap_or(&serde_json::json!(0)));
+        let discount = if gross >= 0.0 {
+            discount_raw.clamp(0.0, gross)
+        } else {
+            discount_raw
+        };
+        let net = r2(gross - discount);
+        tgtcthue += net;
+        tgtthue += r2(net * num(line.get("tsuat").unwrap_or(&serde_json::json!(0))));
+    }
+    let tgtcthue = r2(tgtcthue);
+    let tgtthue = r2(tgtthue);
+    let tgtttbso = r2(tgtcthue + tgtthue);
     let detail_json = detail.to_string();
     sqlx::query!(
         "INSERT INTO hddt_purchase_invoice
@@ -544,9 +573,12 @@ pub(crate) async fn hddt_sync_test_seed(
              tgtttbso, status, line_count, raw_json, detail_json, created_at)
          VALUES (?, 'regular', '2026-09-01T17:00:00Z', '2026-09-02', '0106773786',
                  'Cty TNHH ABC', '001170019085', 1, 'C26E2E', '001', 1, 1,
-                 2000000, 160000, 0, 2160000, 'pending', ?, '{}', ?, datetime('now'))
+                 ?, ?, 0, ?, 'pending', ?, '{}', ?, datetime('now'))
          ON CONFLICT(portal_id) DO NOTHING",
         portal_id,
+        tgtcthue,
+        tgtthue,
+        tgtttbso,
         line_count,
         detail_json
     )
@@ -726,7 +758,8 @@ pub(crate) async fn hddt_sync_import(
             let row: Option<CachedInvoice> = sqlx::query_as!(
                 CachedInvoice,
                 r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
-                          khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                          khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
+                  tgtcthue, tgtthue, tgtttbso
                      FROM hddt_purchase_invoice WHERE id = ?"#,
                 id
             )
@@ -742,7 +775,8 @@ pub(crate) async fn hddt_sync_import(
         sqlx::query_as!(
             CachedInvoice,
             r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
-                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json
+                      khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
+                  tgtcthue, tgtthue, tgtttbso
                  FROM hddt_purchase_invoice
                 WHERE status = 'pending' AND detail_json <> '' AND detail_error = ''
                 ORDER BY posting_date, khhdon, shdon"#

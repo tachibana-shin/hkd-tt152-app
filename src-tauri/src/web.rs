@@ -70,10 +70,12 @@ fn to_camel_case(s: &str) -> String {
 #[allow(clippy::result_large_err)] // Response của axum là kiểu opaque lớn — không thể thu nhỏ.
 fn extract_arg<T: DeserializeOwned>(body: &serde_json::Value, name: &str) -> Result<T, Response> {
     let key = to_camel_case(name);
-    let v = body
-        .get(&key)
-        .or_else(|| body.get(name))
-        .ok_or_else(|| err_json(StatusCode::BAD_REQUEST, format!("Thiếu tham số '{}'", name)))?;
+    let Some(v) = body.get(&key).or_else(|| body.get(name)) else {
+        // Tham số `Option<T>` được phép vắng mặt (serde đọc null thành None).
+        // Kiểu bắt buộc vẫn báo "Thiếu tham số" như cũ.
+        return serde_json::from_value(serde_json::Value::Null)
+            .map_err(|_| err_json(StatusCode::BAD_REQUEST, format!("Thiếu tham số '{}'", name)));
+    };
     serde_json::from_value(v.clone()).map_err(|e| {
         err_json(
             StatusCode::BAD_REQUEST,
@@ -412,7 +414,10 @@ pub async fn api_invoke(
             credit_account: String,
             pay_now: bool,
             adjust_dir: String,
-            auto_bom: bool
+            auto_bom: bool,
+            invoice_serial: Option<String>,
+            invoice_no: Option<String>,
+            invoice_date: Option<String>
         ),
         "save_outbound" => mx!(
             commands::stock::save_outbound,

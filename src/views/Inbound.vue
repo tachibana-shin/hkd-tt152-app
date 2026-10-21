@@ -76,8 +76,14 @@ function onTypeChange() {
   // Ô "Tự xuất NVL theo định mức" chỉ dành cho loại sản xuất — đổi loại thì tắt.
   form.auto_bom = false;
   // Thuế GTGT đầu vào chỉ áp dụng cho mua hàng ngoài — đổi loại thì xoá mức thuế
-  // cũ để không cộng/tách thuế nhầm vào phiếu sản xuất hay nhập khác.
-  if (form.inbound_type !== "purchase") form.vat_rate = 0;
+  // cũ để không cộng/tách thuế nhầm vào phiếu sản xuất hay nhập khác; % riêng
+  // từng dòng và thông tin hóa đơn gốc cũng chỉ có nghĩa với mua hàng ngoài.
+  if (form.inbound_type !== "purchase") {
+    form.vat_rate = 0;
+    form.invoice_serial = "";
+    form.invoice_no = "";
+    form.items.forEach((it) => (it.vat_pct = undefined));
+  }
   if (form.inbound_type === "production") {
     form.debit_account = "155";
     form.credit_account = "154";
@@ -128,6 +134,8 @@ async function adjustFromVoucher(row: { voucher_no: string }) {
       adjust_dir: "down",
       reference_no: row.voucher_no,
       vat_rate: 0,
+      invoice_serial: "",
+      invoice_no: "",
       debit_account: "152",
       credit_account: "331",
       pay_now: false,
@@ -157,10 +165,20 @@ const form = reactive({
     quantity: number;
     unit_price: number;
     discount: number; // số tiền CK (đ)
+    /** % GTGT RIÊNG của dòng — không set (undefined) = theo mức chung đầu phiếu. */
+    vat_pct?: number;
   }[],
   inbound_type: "purchase" as "purchase" | "production" | "other" | "adjust",
   reference_no: "",
   vat_rate: 0,
+  /**
+   * Hóa đơn gốc ghi tay (chỉ loại nhập `purchase`): ký hiệu + số in trên hóa
+   * đơn bán (ngày hóa đơn lấy bằng ngày nhập). Điền đủ để Đồng bộ HĐĐT nhận ra
+   * phiếu này là của hóa đơn đã nhập tay → cập nhật thay vì tạo phiếu mới, và
+   * chặn lưu 2 phiếu cùng một hóa đơn.
+   */
+  invoice_serial: "",
+  invoice_no: "",
   debit_account: "152",
   credit_account: "331",
   // Hướng điều chỉnh hóa đơn mua (chỉ dùng khi loại = "adjust"):
@@ -184,15 +202,25 @@ const purchaseNet = computed(() =>
     0,
   ),
 );
-/** Thuế GTGT đầu vào tạm tính theo % đang nhập (làm tròn 2 chữ số). */
-const purchaseVat = computed(() => Math.round(purchaseNet.value * form.vat_rate) / 100);
+/** Thuế GTGT đầu vào tạm tính theo % đang nhập — tính THEO TỪNG DÒNG: dòng
+ * điền % riêng thì dùng % đó (hóa đơn trộn 8%/10%), dòng trống dùng mức chung
+ * đầu phiếu. Làm tròn từng dòng bằng đồng đúng như backend khi lưu. */
+const purchaseVat = computed(() =>
+  form.items.reduce((s, it) => {
+    if (!it.product_code) return s;
+    const net = it.quantity * it.unit_price - (it.discount ?? 0);
+    // % → đ: Math.round(net × %) / 100 giữ công thức cũ của mức chung, không
+    // lệch tổng so với bút toán backend (cũng làm tròn từng dòng).
+    return s + Math.round(net * (it.vat_pct ?? form.vat_rate)) / 100;
+  }, 0),
+);
 /**
  * Nhãn tổng của bảng dòng hàng. Hộ không khấu trừ + có % thuế: bảng mới cộng
  * giá CHƯA thuế, còn giá trị nhập kho thật (gồm thuế) hiện ở dòng tổng kết dưới.
  */
 const lineTotalLabel = computed(() => {
   if (form.inbound_type !== "purchase") return "Tổng tiền:";
-  if (form.vat_rate > 0 && !settings.deductVat) return "Tiền hàng (chưa thuế):";
+  if (purchaseVat.value > 0 && !settings.deductVat) return "Tiền hàng (chưa thuế):";
   return "Giá trị nhập kho:";
 });
 
@@ -212,6 +240,8 @@ function openCreate() {
     inbound_type: "purchase",
     reference_no: "",
     vat_rate: 0,
+    invoice_serial: "",
+    invoice_no: "",
     debit_account: "152",
     credit_account: "331",
     adjust_dir: "up",
@@ -287,11 +317,28 @@ async function save() {
         warehouse_code: form.warehouse_code,
         unit_code: "HKD",
         note: form.note,
-        items: rows.map((it) => ({ ...it })),
+        items: rows.map((it) => {
+          // Làm sạch trọng tải: chỉ gửi các trường backend đọc được; % riêng
+          // dòng → tỷ lệ 0-1, để trống thì KHÔNG gửi (backend dùng mức chung).
+          const { vat_pct, ...base } = it;
+          return {
+            ...base,
+            ...(vat_pct != null ? { vat_rate: vat_pct / 100 } : {}),
+          };
+        }),
         inbound_type: form.inbound_type,
         reference_no: form.reference_no,
         // % → tỷ lệ (0-1); backend tự bỏ qua thuế nếu hộ chưa bật khấu trừ GTGT.
         vat_rate: form.vat_rate / 100,
+        // Hóa đơn gốc: chỉ gửi khi điền đủ ký hiệu + số; ngày hóa đơn lấy bằng
+        // ngày nhập — tập 3 thông tin này để Đồng bộ HĐĐT nối được vào phiếu.
+        ...(form.invoice_serial.trim() && form.invoice_no.trim()
+          ? {
+              invoice_serial: form.invoice_serial,
+              invoice_no: form.invoice_no,
+              invoice_date: toIsoDate(form.posting_date),
+            }
+          : {}),
         debit_account: form.debit_account,
         credit_account: form.credit_account,
         // Trả tiền ngay: backend tự tạo + liên kết phiếu chi (PC) cho nhà cung cấp.
@@ -566,10 +613,40 @@ useKeepAliveRefresh(reload);
           <p class="text-xs text-gray-400">
             {{
               settings.deductVat
-                ? "Tách thuế vào 133 (được khấu trừ)."
-                : "Hộ chưa bật khấu trừ — thuế được cộng vào giá nhập kho, không ghi 133."
+                ? "Tách thuế vào 133 (được khấu trừ) — trừ khi từng dòng tự điền % riêng."
+                : "Hộ chưa bật khấu trừ — thuế được cộng vào giá nhập kho. Hóa đơn trộn nhiều thuế suất thì điền % riêng trên cột VAT % của bảng."
             }}
           </p>
+        </FormField>
+        <FormField
+          v-if="form.inbound_type === 'purchase'"
+          label="Ký hiệu hóa đơn"
+          input-id="inbound-invoice-serial"
+        >
+          <InputText
+            :id="'inbound-invoice-serial'"
+            v-model="form.invoice_serial"
+            v-tooltip="
+              'Ký hiệu in trên hóa đơn bán gốc (VD: C26ABC) — dùng để ghi nhận + chặn trùng hóa đơn; đồng bộ HĐĐT sẽ cập nhật phiếu này thay vì tạo phiếu mới.'
+            "
+            data-testid="inbound-invoice-serial"
+            size="small"
+            class="w-full"
+          />
+        </FormField>
+        <FormField
+          v-if="form.inbound_type === 'purchase'"
+          label="Số hóa đơn"
+          input-id="inbound-invoice-no"
+        >
+          <InputText
+            :id="'inbound-invoice-no'"
+            v-model="form.invoice_no"
+            v-tooltip="'Số hiệu hóa đơn bán gốc (VD: 001) — ngày lấy bằng ngày nhập trên phiếu.'"
+            data-testid="inbound-invoice-no"
+            size="small"
+            class="w-full"
+          />
         </FormField>
         <FormField label="TK Nợ (kho)">
           <Select
@@ -643,6 +720,7 @@ useKeepAliveRefresh(reload);
         compact
         show-add-product
         show-discount
+        :show-vat="form.inbound_type === 'purchase'"
         :warn-shortage="form.inbound_type === 'adjust' && form.adjust_dir === 'down'"
         :total-label="lineTotalLabel"
         @add="addRow"
@@ -662,13 +740,14 @@ useKeepAliveRefresh(reload);
         </template>
       </LineItemsEditor>
 
-      <!-- Tổng kết thuế: nói rõ thuế vào 133 (khấu trừ) hay cộng vào giá nhập kho. -->
+      <!-- Tổng kết thuế: nói rõ thuế vào 133 (khấu trừ) hay cộng vào giá nhập
+           kho; gộp theo từng dòng với mức riêng nên chỉ hiện tổng chung. -->
       <div
-        v-if="form.inbound_type === 'purchase' && form.vat_rate > 0"
+        v-if="form.inbound_type === 'purchase' && purchaseVat > 0"
         class="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-sm"
       >
         <span>
-          Thuế GTGT {{ form.vat_rate }}%:
+          Thuế GTGT đầu vào:
           <b>{{ fmt(purchaseVat) }} đ</b>
         </span>
         <span v-if="settings.deductVat" class="text-gray-500">

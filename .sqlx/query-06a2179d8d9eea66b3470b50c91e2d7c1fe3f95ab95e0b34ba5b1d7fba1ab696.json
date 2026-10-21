@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", source, total, vat_amount, warehouse_code,\n                      invoice_serial, invoice_no, invoice_date\n                 FROM inbound_voucher WHERE voucher_no = 'PN-TAY-1'",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "total",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_amount",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "warehouse_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "invoice_serial",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "invoice_no",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "invoice_date",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "06a2179d8d9eea66b3470b50c91e2d7c1fe3f95ab95e0b34ba5b1d7fba1ab696"
+}

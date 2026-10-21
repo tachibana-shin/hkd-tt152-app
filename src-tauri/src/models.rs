@@ -362,7 +362,7 @@ pub(crate) struct CountItemRow {
     pub(crate) variance: f64,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 pub(crate) struct InboundItemInput {
     pub(crate) product_code: String,
     pub(crate) quantity: f64,
@@ -371,6 +371,15 @@ pub(crate) struct InboundItemInput {
     /// (TT88). Giá trị nhập kho = Thành tiền − Tiền CK.
     #[serde(default)]
     pub(crate) discount: f64,
+    /// Thuế GTGT đầu vào của RIÊNG dòng này, dạng tỷ lệ (0.08 = 8%).
+    /// None = dùng mức thuế chung của đầu phiếu (tương thích dữ liệu cũ).
+    #[serde(default)]
+    pub(crate) vat_rate: Option<f64>,
+    /// Số tiền thuế tuyệt đối của dòng — chỉ dùng khi nhập từ HĐĐT để tổng
+    /// thuế khớp đúng `tgtthue` của hóa đơn (làm tròn theo từng dòng có thể lệch).
+    /// None = tính `net × vat_rate`.
+    #[serde(default)]
+    pub(crate) vat_amount: Option<f64>,
 }
 
 /// Một dòng định mức vật tư (BOM) gửi từ FE: NVL cần cho 1 đơn vị thành phẩm.
@@ -763,6 +772,9 @@ pub(crate) struct VoucherRow {
     pub(crate) debit_account: String,
     pub(crate) credit_account: String,
     pub(crate) industry_code: String,
+    /// Thuế GTGT của dòng, dạng tỷ lệ (0.08 = 8%). Với phiếu nhập, đây là thuế
+    /// đầu vào của từng mặt hàng (có thể khác nhau giữa các dòng).
+    pub(crate) vat_rate: f64,
     pub(crate) note: String,
 }
 

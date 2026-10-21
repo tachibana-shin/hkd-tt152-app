@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT product_code,\n                  SUM(quantity) as \"quantity!: f64\",\n                  unit_price\n             FROM journal_entry\n            WHERE inbound_voucher_id = ? AND entry_type = 'PN' AND product_code <> ''\n            GROUP BY product_code, unit_price",
+  "describe": {
+    "columns": [
+      {
+        "name": "product_code",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity!: f64",
+        "ordinal": 1,
+        "type_info": "Null"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "4d10f0eb804818b1d67784be9a184ff258f8945635c6f9c7e399121fc182301e"
+}

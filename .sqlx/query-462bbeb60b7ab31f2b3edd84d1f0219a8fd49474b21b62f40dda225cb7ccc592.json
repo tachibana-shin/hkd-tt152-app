@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT inbound_voucher_id FROM hddt_imported_invoice WHERE portal_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "inbound_voucher_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "462bbeb60b7ab31f2b3edd84d1f0219a8fd49474b21b62f40dda225cb7ccc592"
+}

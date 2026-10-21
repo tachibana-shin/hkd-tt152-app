@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", quantity\n                 FROM stock_lot\n                WHERE product_id = ? AND warehouse_id = ?\n                  AND inbound_voucher_id = ?\n                  AND ABS(unit_cost - ?) < 0.005\n                  AND depleted = 0\n                ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "63ed4c99db7fe9e98274f79b89edb99ed168d0c0b8708494b9e002c6f41d2cbb"
+}

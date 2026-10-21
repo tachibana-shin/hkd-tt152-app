@@ -1078,7 +1078,7 @@ pub(crate) async fn invoice_queue_page(
             ("customer", "customer"),
         ],
         &ev,
-        "date ASC, id ASC",
+        "date DESC, id DESC",
     );
     let sql = format!(
         "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,

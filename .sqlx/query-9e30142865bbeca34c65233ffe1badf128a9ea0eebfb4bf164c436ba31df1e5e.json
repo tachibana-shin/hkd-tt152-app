@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE journal_entry SET unit_price = ?, amount = ?\n              WHERE entry_type = 'PC' AND note = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "9e30142865bbeca34c65233ffe1badf128a9ea0eebfb4bf164c436ba31df1e5e"
+}

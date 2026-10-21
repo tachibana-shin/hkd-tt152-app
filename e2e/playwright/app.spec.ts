@@ -572,10 +572,16 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await expect(page.getByText("Đã nhập kho", { exact: true }).first()).toBeVisible({
     timeout: 15_000,
   });
-  const preview = await request.post("/api/hddt_sync_preview", {
-    data: { from: null, to: null, retry_failed: false },
-  });
-  const syncVoucher = String((await preview.json()).rows?.[0]?.voucher_no ?? "");
+  const preview = (await (
+    await request.post("/api/hddt_sync_preview", {
+      data: { from: null, to: null, retry_failed: false },
+    })
+  ).json()) as { rows: Array<{ portal_id: string; voucher_no: string }> };
+  // Dò đúng hóa đơn vừa seed theo portal_id — file lọc có thể còn thừa hóa đơn
+  // pending của test khác (rows[0] lúc đó chưa có phiếu và làm lệch assert).
+  const syncVoucher = String(
+    preview.rows.find((r) => r.portal_id === "e2e-uuid-view")?.voucher_no ?? "",
+  );
   expect(syncVoucher).toMatch(/^PN\d+$/);
   await page.getByRole("button", { name: `Xem phiếu ${syncVoucher}` }).click();
   const dlg = page.getByRole("dialog");
@@ -5050,7 +5056,9 @@ test("Nhập kho: hộ chưa khấu trừ vẫn nhập được thuế GTGT và 
   const vatInput = dlg.getByLabel("Thuế GTGT đầu vào (%)");
   await expect(vatInput).toBeVisible();
   await expect(
-    dlg.getByText("Hộ chưa bật khấu trừ — thuế được cộng vào giá nhập kho, không ghi 133."),
+    dlg.getByText(
+      "Hộ chưa bật khấu trừ — thuế được cộng vào giá nhập kho. Hóa đơn trộn nhiều thuế suất thì điền % riêng trên cột VAT % của bảng.",
+    ),
   ).toBeVisible();
 
   const expectedPn = await (
@@ -5072,7 +5080,7 @@ test("Nhập kho: hộ chưa khấu trừ vẫn nhập được thuế GTGT và 
 
   // Bảng cộng giá CHƯA thuế; dòng tổng kết mới là giá nhập kho gồm thuế.
   await expect(dlg.getByText("Tiền hàng (chưa thuế):")).toBeVisible();
-  await expect(dlg.getByText(/Thuế GTGT 8%:/)).toBeVisible();
+  await expect(dlg.getByText(/Thuế GTGT đầu vào:/)).toBeVisible();
   await expect(dlg.getByText(/Giá trị nhập kho gồm thuế:/)).toBeVisible();
   await expect(dlg.getByText(/216\.000 đ/)).toBeVisible();
 
@@ -5090,6 +5098,134 @@ test("Nhập kho: hộ chưa khấu trừ vẫn nhập được thuế GTGT và 
     rows.some((r) => r.debit_account === "133"),
     "không khấu trừ thì không được sinh bút toán 133",
   ).toBe(false);
+});
+
+// ─── PHIẾU NHẬP: THUẾ RIÊNG TỪNG DÒNG + CHẶN TRÙNG HÓA ĐƠN ───
+// Hóa đơn mua có thể trộn thuế suất (8% và 10% trên cùng phiếu): cột VAT % điền
+// RIÊNG từng dòng, dòng trống thì dùng mức chung đầu phiếu. Ký hiệu + số hóa
+// đơn ghi tay để Đồng bộ HĐĐT nối được và 2 phiếu cùng 1 hóa đơn bị chặn.
+test("Nhập kho: thuế GTGT từng dòng khác nhau và chặn lưu 2 phiếu cùng hóa đơn", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Bật khấu trừ GTGT (tạm) để thấy bút toán 133 tách theo % từng dòng; trả lại
+  // trạng thái cũ sau test vì tests chạy tuần tự trong 1 worker.
+  expect(
+    (
+      await request.post("/api/save_app_settings", { data: { settings: { vat_deduct: "1" } } })
+    ).ok(),
+    "bật vat_deduct cho test",
+  ).toBe(true);
+  // Nạp lại để store settings phía FE thấy vat_deduct mới (lấy từ view mount).
+  await page.reload();
+
+  for (const [code, name, vat] of [
+    ["SP-VAT8-E2E", "Hàng VAT 8 E2E", 0.08],
+    ["SP-VAT10-E2E", "Hàng VAT 10 E2E", 0.1],
+  ] as const) {
+    const created = await request.post("/api/save_product", {
+      data: {
+        code,
+        name,
+        unit: "Cái",
+        salePrice: 0,
+        costPrice: 100_000,
+        minStock: 0,
+        vatRate: vat,
+        importTaxRate: 0,
+        isService: false,
+        industryCode: "PPHH",
+      },
+    });
+    expect(created.ok(), `save_product ${code}: ${await created.text()}`).toBe(true);
+  }
+
+  await sidebarButton(page, "Nhập kho").click();
+  await expect(page.locator("header h2")).toHaveText("Nhập kho");
+  await page.getByRole("button", { name: "Tạo phiếu nhập" }).click();
+  const dlg = page.getByRole("dialog", { name: "Tạo phiếu nhập kho" });
+  await expect(dlg).toBeVisible();
+  const expectedPn = await (
+    await request.post("/api/next_voucher_no", { data: { entryType: "PN" } })
+  ).text();
+  await expect(dlg.getByLabel("Số phiếu")).toHaveValue(expectedPn);
+
+  // Mức chung để 0 — thuế chỉ lấy từ cột VAT % trên từng dòng.
+  const vatInput = dlg.getByLabel("Thuế GTGT đầu vào (%)");
+  await vatInput.fill("0");
+  await vatInput.press("Tab");
+  await dlg.getByLabel("Ký hiệu hóa đơn").fill("C26E2E");
+  await dlg.getByLabel("Số hóa đơn").fill("777");
+
+  // Dòng 1: Hàng VAT 8 → % riêng 8%. Cột spinbutton: SL, Đơn giá, VAT %, Tiền CK.
+  const row1 = dlg.locator("tbody tr").first();
+  await row1.getByRole("combobox").first().click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Hàng VAT 8 E2E");
+  await page
+    .getByRole("option", { name: /Hàng VAT 8 E2E/ })
+    .first()
+    .click();
+  await row1.getByRole("spinbutton").first().fill("1");
+  await row1.getByRole("spinbutton").nth(1).fill("100000");
+  await row1.getByRole("spinbutton").nth(2).fill("8");
+  await row1.getByRole("spinbutton").nth(2).press("Tab");
+
+  // Dòng 2 (tự thêm khi dòng 1 đã chọn hàng): Hàng VAT 10 → % riêng 10%.
+  const row2 = dlg.locator("tbody tr").nth(1);
+  await row2.getByRole("combobox").first().click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Hàng VAT 10 E2E");
+  await page
+    .getByRole("option", { name: /Hàng VAT 10 E2E/ })
+    .first()
+    .click();
+  await row2.getByRole("spinbutton").first().fill("1");
+  await row2.getByRole("spinbutton").nth(1).fill("100000");
+  await row2.getByRole("spinbutton").nth(2).fill("10");
+  await row2.getByRole("spinbutton").nth(2).press("Tab");
+
+  // Hộ khấu trừ: giá nhập kho chưa thuế 200.000, thuế tách 133 đúng 18.000.
+  await expect(dlg.getByText(/Thuế GTGT đầu vào:/)).toBeVisible();
+  await expect(dlg.getByText(/18\.000 đ/)).toBeVisible();
+  await expect(dlg.getByText(/khấu trừ — Nợ 133/)).toBeVisible();
+
+  await dlg.getByRole("button", { name: "Lưu phiếu" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.locator(".p-toast-detail").last()).toContainText("Giá trị nhập kho: 200.000 đ");
+  await expect(page.locator(".p-toast-detail").last()).toContainText("VAT khấu trừ: 18.000 đ");
+
+  // Backend: bút toán 133 tách theo đúng % TỪNG DÒNG (8% và 10%), tổng 18.000.
+  const rows = (await (
+    await request.post("/api/get_voucher", { data: { voucherNo: expectedPn } })
+  ).json()) as Array<{ amount: number; debit_account: string; vat_rate: number }>;
+  const vatRows = rows.filter((r) => r.debit_account === "133");
+  expect(vatRows.map((r) => Math.round(r.vat_rate * 100)).sort((a, b) => a - b)).toEqual([8, 10]);
+  expect(vatRows.reduce((s, r) => s + r.amount, 0)).toBe(18_000);
+
+  // Trả lại cài đặt cũ (tests chạy tuần tự — test sau giả định không khấu trừ).
+  expect(
+    (
+      await request.post("/api/save_app_settings", { data: { settings: { vat_deduct: "0" } } })
+    ).ok(),
+  ).toBe(true);
+
+  // Lưu LẦI cùng ký hiệu + số + ngày → backend chặn: mỗi hóa đơn 1 phiếu.
+  await page.getByRole("button", { name: "Tạo phiếu nhập" }).click();
+  await expect(dlg).toBeVisible();
+  const rowAgain = dlg.locator("tbody tr").first();
+  await dlg.getByLabel("Ký hiệu hóa đơn").fill("C26E2E");
+  await dlg.getByLabel("Số hóa đơn").fill("777");
+  await rowAgain.getByRole("combobox").first().click();
+  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("Hàng VAT 8 E2E");
+  await page
+    .getByRole("option", { name: /Hàng VAT 8 E2E/ })
+    .first()
+    .click();
+  await rowAgain.getByRole("spinbutton").first().fill("1");
+  await rowAgain.getByRole("spinbutton").nth(1).fill("100000");
+  await dlg.getByRole("button", { name: "Lưu phiếu" }).click();
+  await expect(page.locator(".p-toast-detail").last()).toContainText("đã có trong phiếu nhập");
 });
 
 // ─── NHẬP FILE PHỤ LỤC TỒN KHO TT88 — FILE KHÔNG CÓ TIÊU ĐỀ CHUẨN → CHỌN CỘT TAY ───

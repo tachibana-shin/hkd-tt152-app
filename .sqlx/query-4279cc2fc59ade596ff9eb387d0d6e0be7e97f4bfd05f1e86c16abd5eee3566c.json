@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) FROM stock_lot sl JOIN product p ON p.id = sl.product_id\n              WHERE p.code = 'SP-TAY'",
+  "describe": {
+    "columns": [
+      {
+        "name": "COUNT(*)",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4279cc2fc59ade596ff9eb387d0d6e0be7e97f4bfd05f1e86c16abd5eee3566c"
+}

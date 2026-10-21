@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(SUM(sl.quantity), 0.0) as \"q!: f64\"\n                 FROM stock_lot sl JOIN product p ON p.id = sl.product_id\n                WHERE p.name = 'Hàng hóa đơn'",
+  "describe": {
+    "columns": [
+      {
+        "name": "q!: f64",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "47a87132c4072e88e47c50e8849391a745b85edad90a39a9a51f9cddd4162983"
+}

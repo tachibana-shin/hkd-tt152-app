@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tgtttbso as \"tgtttbso!\" FROM hddt_imported_invoice WHERE portal_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "tgtttbso!",
+        "ordinal": 0,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4d95fbaabba98855dbcec3f941dba9ec844384fc7f77d44818330016385e11b2"
+}

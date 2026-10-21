@@ -417,6 +417,8 @@ export const api = {
       quantity: number;
       unit_price: number;
       discount: number; // số tiền CK (đ) — giá trị nhập kho = Thành tiền − Tiền CK
+      /** Tỷ lệ GTGT RIÊNG của dòng (0-1) — bỏ trống thì dùng mức chung đầu phiếu. */
+      vat_rate?: number;
     }[];
     inbound_type: string; // purchase | production | other
     reference_no: string; // số hóa đơn / lệnh nhập kho (cột "Theo..." mẫu 03-VT)
@@ -432,6 +434,10 @@ export const api = {
      * Bật → app tự tính NVL = định mức × SL, tự sinh phiếu xuất Nợ 154 / Có 152.
      */
     auto_bom?: boolean;
+    /** Hóa đơn gốc (purchase): tập 3 thông tin để Đồng bộ HĐĐT nối phiếu tay. */
+    invoice_serial?: string;
+    invoice_no?: string;
+    invoice_date?: string;
   }) =>
     call<string>("save_inbound", {
       postingDate: args.posting_date,
@@ -450,6 +456,11 @@ export const api = {
       payNow: args.pay_now,
       adjustDir: args.adjust_dir,
       autoBom: args.auto_bom ?? false,
+      // Clients HTTP/API cũ không gửi các trường này vẫn lưu được: web.rs đọc
+      // tham số optional, Tauri chấp nhận thiếu (None).
+      invoiceSerial: args.invoice_serial,
+      invoiceNo: args.invoice_no,
+      invoiceDate: args.invoice_date,
     }),
 
   saveOutbound: (args: {

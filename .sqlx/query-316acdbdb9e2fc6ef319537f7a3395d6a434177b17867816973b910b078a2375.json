@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT voucher_no FROM inbound_voucher\n                WHERE id <> ?\n                  AND inbound_type = 'purchase'\n                  AND lower(trim(invoice_serial)) = lower(trim(?))\n                  AND lower(trim(invoice_no)) = lower(trim(?))\n                  AND invoice_date = ?\n                LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "316acdbdb9e2fc6ef319537f7a3395d6a434177b17867816973b910b078a2375"
+}

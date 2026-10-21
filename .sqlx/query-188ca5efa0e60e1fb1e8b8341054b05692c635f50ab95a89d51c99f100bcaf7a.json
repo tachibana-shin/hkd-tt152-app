@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT khhdon, shdon, posting_date FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "khhdon",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "shdon",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "188ca5efa0e60e1fb1e8b8341054b05692c635f50ab95a89d51c99f100bcaf7a"
+}
