@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.24.0...v0.24.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **invoice:** show product name in stock-shortage confirm ([244e5c9](https://github.com/tachibana-shin/hkd-tt152-app/commit/244e5c981db8a1d9205c74604a03be88e6400789))
+
 # [0.24.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.23.1...v0.24.0) (2026-10-21)
 
 
