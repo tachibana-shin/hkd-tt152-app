@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.25.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.24.2...v0.25.0) (2026-10-21)
+
+
+### Features
+
+* **inbound,hddt:** per-line VAT, manual voucher match, queue DESC ([461b0b4](https://github.com/tachibana-shin/hkd-tt152-app/commit/461b0b497596f9b25cec134f8e2df52a634f6516))
+
 ## [0.24.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.24.1...v0.24.2) (2026-10-21)
 
 
