@@ -413,13 +413,13 @@ async fn prepare_invoice(
         if item.quantity - free > 1e-9 {
             if reserved > 1e-9 {
                 shortage.push(format!(
-                    "{}: cần {:.2}, tồn {} chỉ còn {:.2} — tổng tồn {:.2}, các hóa đơn nháp khác đã chiếm {:.2}",
-                    item.product_code, item.quantity, where_str, free, available, reserved
+                    "{} ({}): cần {:.2}, tồn {} chỉ còn {:.2} — tổng tồn {:.2}, các hóa đơn nháp khác đã chiếm {:.2}",
+                    product.name, item.product_code, item.quantity, where_str, free, available, reserved
                 ));
             } else {
                 shortage.push(format!(
-                    "{}: cần {:.2}, tồn {} {:.2}",
-                    item.product_code, item.quantity, where_str, available
+                    "{} ({}): cần {:.2}, tồn {} {:.2}",
+                    product.name, item.product_code, item.quantity, where_str, available
                 ));
             }
         }
@@ -2528,6 +2528,7 @@ mod tests {
         let shortage = r2["shortage"].as_array().cloned().unwrap_or_default();
         assert_eq!(shortage.len(), 1, "nháp 2 phải báo đúng 1 dòng hết: {r2}");
         let detail = shortage[0].as_str().unwrap_or_default();
+        assert!(detail.contains("Đèn GIU"), "{detail}");
         assert!(detail.contains("chỉ còn 0.00"), "{detail}");
         assert!(detail.contains("đã chiếm 10.00"), "{detail}");
     }

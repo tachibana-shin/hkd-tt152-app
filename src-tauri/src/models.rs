@@ -768,6 +768,8 @@ pub(crate) struct VoucherRow {
 
 pub(crate) struct ProductInfo {
     pub(crate) id: i64,
+    /// Tên hàng — thông báo thiếu tồn kho hiện cả tên lẫn mã cho dễ đọc.
+    pub(crate) name: String,
     /// Sản phẩm dịch vụ — không theo dõi tồn kho (không kiểm tra FIFO khi xuất).
     pub(crate) is_service: bool,
     /// Nhóm ngành mặc định — dùng khi dòng xuất/hóa đơn không chỉ định nhóm.

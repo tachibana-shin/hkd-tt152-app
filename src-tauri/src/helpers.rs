@@ -11,7 +11,7 @@ pub(crate) async fn resolve_product(
     code: &str,
 ) -> Result<ProductInfo, String> {
     let row = sqlx::query!(
-        r#"SELECT id as "id!", is_service as "is_service: bool", industry_code
+        r#"SELECT id as "id!", name as "name!", is_service as "is_service: bool", industry_code
              FROM product WHERE code = ?"#,
         code
     )
@@ -20,6 +20,7 @@ pub(crate) async fn resolve_product(
     .map_err(|_| format!("Không tìm thấy sản phẩm có mã '{}'", code))?;
     Ok(ProductInfo {
         id: row.id,
+        name: row.name,
         is_service: row.is_service,
         industry_code: row.industry_code,
     })
