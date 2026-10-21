@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.2](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.24.1...v0.24.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* **inbound:** calculate input VAT and widen product dropdown ([dc44d2e](https://github.com/tachibana-shin/hkd-tt152-app/commit/dc44d2e78330be13b28424c772035d07999b333f))
+
 ## [0.24.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.24.0...v0.24.1) (2026-10-21)
 
 
