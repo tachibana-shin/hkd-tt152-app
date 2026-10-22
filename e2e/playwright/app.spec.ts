@@ -360,6 +360,11 @@ test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu
   await sidebarButton(page, "Đồng bộ HĐĐT").click();
   await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
   await expect(page.getByRole("button", { name: "Quét cổng" })).toBeVisible();
+  // Issue #7 mục 1: cài đặt tự động nhập phải thấy được NGAY màn Đồng bộ, không
+  // chỉ nằm trong Cài đặt.
+  await expect(page.getByLabel(/Tự động nhập hóa đơn/)).toBeVisible();
+  await expect(page.getByLabel(/Quét xong tự tạo phiếu nhập/)).toBeVisible();
+  await expect(page.getByLabel(/Khoảng thời gian tự gọi lại/)).toBeVisible();
 
   // Cache rỗng ngay từ đầu → bảng không có dòng, nút nhập tất cả ẩn.
   const table = page.locator(".p-datatable").last();
@@ -3725,14 +3730,18 @@ test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sa
 
   const checkToggle = page.getByLabel(/Tự kiểm tra cập nhật/);
   const syncToggle = page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/);
+  const importToggle = page.getByLabel(/Quét xong tự tạo phiếu nhập/);
   const interval = page.getByLabel(/Khoảng thời gian tự gọi lại/);
   // Mặc định: kiểm tra cập nhật BẬT (bản web thì tự bỏ qua) và quét cổng CŨNG
   // BẬT — tự quét hóa đơn mua khi mở app; chưa đăng nhập cổng thì lặng lẽ bỏ qua.
   await expect(checkToggle).toBeChecked();
   await expect(syncToggle).toBeChecked();
+  await expect(importToggle, "quét xong tự tạo phiếu nhập mặc định BẬT").toBeChecked();
 
-  // Tắt quét cổng + rút ngắn khoảng thời gian, rồi Lưu — tắt cũng phải giữ sau tải lại.
+  // Tắt quét cổng + tự tạo phiếu nhập, rút ngắn khoảng thời gian, rồi Lưu —
+  // tắt cũng phải giữ sau tải lại.
   await syncToggle.click();
+  await importToggle.click();
   await interval.fill("30");
   await page.keyboard.press("Tab");
   await page.getByRole("button", { name: "Lưu cài đặt" }).click();
@@ -3745,6 +3754,7 @@ test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sa
     >;
   const saved = await readSettings();
   expect(saved.auto_sync_enabled, "quét cổng tắt được").toBe("0");
+  expect(saved.auto_sync_import, "tự tạo phiếu nhập tắt được").toBe("0");
   expect(saved.auto_check_update, "kiểm tra cập nhật vẫn bật").toBe("1");
   expect(saved.auto_sync_interval_min, "khoảng thời gian lưu đúng").toBe("30");
 
@@ -3753,12 +3763,15 @@ test("Cài đặt: việc chạy nền bật/tắt được và giữ nguyên sa
   await openTab(page, "Cài đặt", "/settings");
   await page.getByText("Tự động khi mở ứng dụng").scrollIntoViewIfNeeded();
   await expect(page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/)).not.toBeChecked();
+  await expect(page.getByLabel(/Quét xong tự tạo phiếu nhập/)).not.toBeChecked();
 
   // Bật lại = cấu hình xuất xưởng, vẫn giữ nguyên sau khi tải lại trang.
   await page.getByLabel(/Tự đồng bộ hóa đơn HĐĐT/).click();
+  await page.getByLabel(/Quét xong tự tạo phiếu nhập/).click();
   await page.getByRole("button", { name: "Lưu cài đặt" }).click();
   await expect(page.getByText("Đã lưu cài đặt")).toBeVisible({ timeout: 10_000 });
   expect((await readSettings()).auto_sync_enabled).toBe("1");
+  expect((await readSettings()).auto_sync_import).toBe("1");
 });
 
 /**

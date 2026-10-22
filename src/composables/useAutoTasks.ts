@@ -9,9 +9,10 @@ import type { AppSettings } from "@/types";
  *
  * Nguyên tắc: **mọi lỗi đều nuốt**. Bản web không có updater, cổng HĐĐT chưa
  * đăng nhập, hồ sơ chưa khai ngày bắt đầu… — mở app không bao giờ được bật toast
- * đỏ vì một việc chạy nền. Và auto sync chỉ *quét* (kéo danh sách hóa đơn về
- * cache): việc nhập kho tạo phiếu vẫn là thao tác tay, nên tuyệt đối không sinh
- * bút toán khi app khởi động.
+ * đỏ vì một việc chạy nền. Quét xong có thể tự TẠO PHIẾU NHẬP (cài đặt
+ * `auto_sync_import`, mặc định bật) nhưng chỉ với hóa đơn đã có dòng hàng; hóa
+ * đơn lỗi chi tiết vẫn nằm chờ để người dùng xử lý. Kết quả lần chạy được ghi
+ * lại (`auto_sync_last_*`) để màn Đồng bộ hiển thị.
  *
  * Riêng CẬP NHẬT thì mở popup (không phải toast): gặp bản mới là hiện ngay
  * hộp thoại có ghi chú phát hành + nút "Tải và cài", người dùng bấm một cái là
@@ -30,20 +31,43 @@ async function loadSettings(): Promise<AppSettings | null> {
   }
 }
 
-/** Quét cổng HĐĐT từ ngày bắt đầu dùng HĐĐT tới hôm nay. Lỗi thì hẹn lần sau. */
-async function syncPortal(): Promise<void> {
+/**
+ * Quét cổng HĐĐT từ ngày bắt đầu dùng HĐĐT tới hôm nay, rồi (nếu bật) tạo
+ * phiếu nhập cho hóa đơn đã có dòng hàng. Trả về tóm tắt để ghi "lần chạy gần
+ * nhất" ở màn Đồng bộ.
+ *
+ * Quét xong MỚI nhập, và mỗi việc gọi tuần tự từng request (không chạy song
+ * song) — cổng giới hạn tần suất, dồn request là bị khoá tài khoản.
+ */
+async function syncPortal(doImport: boolean): Promise<string> {
+  // Chưa đăng nhập cổng thì đừng gửi lệnh quét — không làm gì cả thay vì gọi
+  // rồi nhận lỗi 400 (vừa vô ích, vừa đỏ console).
+  const st = await api.hddtStatus().catch(() => null);
+  if (!st?.logged_in) return "Chưa đăng nhập cổng HĐĐT — bỏ qua";
+  const cfg = await api.getBusinessConfig();
+  const scan = await api.hddtSyncScan({
+    from: cfg.hddt_start_date || undefined,
+    to: toIsoDate(new Date()),
+  });
+  let text = `Quét ${scan.days_scanned} ngày · HĐ mới ${scan.invoices_new}`;
+  if (scan.details_failed > 0) text += ` · lỗi chi tiết ${scan.details_failed}`;
+  if (doImport) {
+    const imp = await api.hddtSyncImport({ ids: [] });
+    text += ` · nhập kho ${imp.imported}`;
+    if (imp.failed > 0) text += ` · lỗi ${imp.failed}`;
+  }
+  return text;
+}
+
+/** Ghi "lần chạy gần nhất" để màn Đồng bộ hiển thị; lỗi quyền/CSDL thì bỏ qua. */
+async function saveLastRun(at: string, result: string): Promise<void> {
   try {
-    // Chưa đăng nhập cổng thì đừng gửi lệnh quét — không làm gì cả thay vì gọi
-    // rồi nhận lỗi 400 (vừa vô ích, vừa đỏ console, vừa rình rập vô ích).
-    const st = await api.hddtStatus().catch(() => null);
-    if (!st?.logged_in) return;
-    const cfg = await api.getBusinessConfig();
-    await api.hddtSyncScan({
-      from: cfg.hddt_start_date || undefined,
-      to: toIsoDate(new Date()),
+    await api.saveAppSettings({
+      auto_sync_last_run_at: at,
+      auto_sync_last_result: result,
     });
   } catch {
-    /* chưa khai mốc bắt đầu / lỗi mạng → bỏ qua */
+    /* chỉ là thông tin hiển thị — không được làm hỏng việc chạy nền */
   }
 }
 
@@ -68,11 +92,32 @@ async function checkUpdate(): Promise<void> {
   }
 }
 
+/** Timer có thể reo khi lượt trước chưa xong (quét nhiều ngày rất lâu) → bỏ
+ *  lượt trùng, tránh dồn request và ghi đè kết quả đang chạy. */
+let running = false;
+
 async function run(settings?: AppSettings | null): Promise<void> {
-  const s = settings ?? (await loadSettings());
-  if (!s) return;
-  if (s.auto_check_update) await checkUpdate();
-  if (s.auto_sync_enabled) await syncPortal();
+  if (running) return;
+  running = true;
+  try {
+    const s = settings ?? (await loadSettings());
+    if (!s) return;
+    if (s.auto_check_update) await checkUpdate();
+    if (s.auto_sync_enabled) {
+      const at = new Date().toISOString();
+      let result: string;
+      try {
+        result = await syncPortal(s.auto_sync_import);
+      } catch (e) {
+        // Lỗi mạng/cổng chập chờn: không bật toast đỏ khi khởi động, nhưng ghi
+        // lại để màn Đồng bộ thấy "lần chạy gần nhất" — biết nó CÓ chạy.
+        result = `Lỗi: ${String(e).slice(0, 180)}`;
+      }
+      await saveLastRun(at, result);
+    }
+  } finally {
+    running = false;
+  }
 }
 
 /**

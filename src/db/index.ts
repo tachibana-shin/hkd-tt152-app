@@ -133,6 +133,9 @@ const SETTING_DEFAULTS: AppSettings = {
   tax_threshold_group4: 50_000_000_000, // Mốc Nhóm 4 (TNCN theo thu nhập 20%)
   auto_check_update: true, // Tự kiểm tra cập nhật khi mở app (bản web thì tự bỏ qua)
   auto_sync_enabled: true, // Tự quét cổng HĐĐT — mặc định BẬT (chưa đăng nhập thì lặng lẽ bỏ qua)
+  auto_sync_import: true, // Quét xong tự tạo phiếu nhập (hóa đơn đã có dòng hàng)
+  auto_sync_last_run_at: "", // Lần chạy nền gần nhất (ISO) — chỉ để hiển thị
+  auto_sync_last_result: "", // Tóm tắt kết quả lần chạy gần nhất
   auto_sync_interval_min: 15, // Khoảng thời gian tự gọi lại (phút)
 };
 
@@ -199,6 +202,10 @@ function normalizeAppSettings(raw: Record<string, string>): AppSettings {
     auto_check_update: raw.auto_check_update === "0" ? false : true,
     // Thiếu key = hồ sơ cũ chưa từng lưu → mặc định BẬT (chỉ "0" tường minh mới tắt).
     auto_sync_enabled: raw.auto_sync_enabled === "0" ? false : true,
+    // Thiếu key = bản cũ → mặc định BẬT (đúng nghĩa "nhập hóa đơn tự động").
+    auto_sync_import: raw.auto_sync_import === "0" ? false : true,
+    auto_sync_last_run_at: raw.auto_sync_last_run_at ?? "",
+    auto_sync_last_result: raw.auto_sync_last_result ?? "",
     auto_sync_interval_min: Math.min(
       1440,
       Math.max(1, num("auto_sync_interval_min", SETTING_DEFAULTS.auto_sync_interval_min)),

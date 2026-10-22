@@ -666,12 +666,23 @@ export interface AppSettings {
    */
   auto_check_update: boolean;
   /**
-   * Tự quét hóa đơn HĐĐT từ cổng khi mở app — chỉ kéo danh sách về cache,
-   * việc **nhập kho** vẫn thao tác tay. Mặc định TẮT vì đây là gọi cổng thật.
+   * Tự quét hóa đơn HĐĐT từ cổng khi mở app. Mặc định BẬT nhưng chưa đăng
+   * nhập cổng thì lặng lẽ bỏ qua; việc tạo phiếu nhập do `auto_sync_import`
+   * quyết định.
    */
   auto_sync_enabled: boolean;
   /** Khoảng thời gian tự gọi lại (phút), áp dụng cho cả 2 việc trên. */
   auto_sync_interval_min: number;
+  /**
+   * Tự TẠO PHIẾU NHẬP sau khi quét (chỉ khi `auto_sync_enabled`). Bật = đúng
+   * nghĩa "nhập hóa đơn tự động"; tắt = chỉ kéo về danh sách để xem trước.
+   * Chỉ nhập hóa đơn ĐÃ CÓ dòng hàng — hóa đơn lỗi chi tiết vẫn nằm chờ xử lý.
+   */
+  auto_sync_import: boolean;
+  /** Lần chạy nền gần nhất (ISO) — chỉ để hiển thị "nó có chạy không". */
+  auto_sync_last_run_at: string;
+  /** Tóm tắt kết quả lần chạy nền gần nhất (vd "Quét 3 ngày · nhập kho 2"). */
+  auto_sync_last_result: string;
 }
 
 // ─── Chấm công theo ngày (Cham Cong) ───

@@ -237,12 +237,12 @@ pub(crate) async fn scan(
     to: &str,
     kinds: &[InvoiceKind],
 ) -> Result<ScanSummary, String> {
-    // Hóa đơn lượt trước lỗi chi tiết (429, mạng chập chờn…) → thử lại ngay
-    // trong lượt quét này, không bắt người dùng phải bấm "Quét cổng" hai lần.
-    let mut sum = ScanSummary {
-        details_retried: retry_failed_details(pool).await?,
-        ..Default::default()
-    };
+    // LƯU Ý: việc thử lại hóa đơn lỗi chi tiết được làm Ở DƯỚI (ngay trước khi
+    // tải chi tiết), KHÔNG phải trước khi gọi danh sách. Nếu reset sớm mà lượt
+    // quét chết vì lỗi mạng, hóa đơn bị bỏ trạng thái 'manual' + xoá detail_error
+    // nhưng detail_json vẫn rỗng → hiện "Chờ nhập kho" và bấm Nhập kho sẽ nổ
+    // "Dữ liệu chi tiết hóa đơn hỏng: EOF while parsing…".
+    let mut sum = ScanSummary::default();
 
     let today = chrono::Local::now().date_naive();
     let start_date = resolve_start(pool, from).await?;
@@ -311,6 +311,12 @@ pub(crate) async fn scan(
             i = j + 1;
         }
     }
+
+    // Hóa đơn lượt trước lỗi chi tiết (429, mạng chập chờn…) → thử lại ngay
+    // trong lượt quét này, không bắt người dùng phải bấm "Quét cổng" hai lần.
+    // Đặt Ở ĐÂY (sau khi danh sách đã gọi xong): lượt quét chết vì mạng ở trên
+    // không được phép reset trạng thái hóa đơn.
+    sum.details_retried = retry_failed_details(pool).await?;
 
     // Lấy chi tiết cho các hóa đơn chưa có (đủ dòng hàng mới tạo được phiếu).
     let pending = pending_without_detail(pool).await?;
@@ -743,8 +749,23 @@ pub(crate) async fn import_invoice(
         });
     }
 
-    let detail: Value = serde_json::from_str(&inv.detail_json)
-        .map_err(|e| format!("Dữ liệu chi tiết hóa đơn hỏng: {e}"))?;
+    // Chưa tải được dòng hàng (lượt quét trước lỗi mạng giữa chừng) → báo câu
+    // người dùng hiểu được kèm ngày để quét lại. Tuyệt đối không để lộ lỗi serde
+    // "EOF while parsing a value at line 1 column 0".
+    if inv.detail_json.trim().is_empty() {
+        return Err(format!(
+            "Hóa đơn {} {} chưa tải được dòng hàng (ngày {}). Bấm \"Quét cổng\" hoặc \
+             \"Quét lại ngày này\" để tải lại chi tiết rồi nhập kho.",
+            inv.khhdon, inv.shdon, inv.posting_date
+        ));
+    }
+    let detail: Value = serde_json::from_str(&inv.detail_json).map_err(|e| {
+        format!(
+            "Dữ liệu chi tiết hóa đơn {} {} hỏng: {e}. Bấm \"Quét lại ngày này\" để \
+             tải lại chi tiết rồi nhập kho.",
+            inv.khhdon, inv.shdon
+        )
+    })?;
     let lines = detail
         .get("hdhhdvu")
         .and_then(Value::as_array)
@@ -1935,6 +1956,80 @@ mod tests {
         .unwrap();
         assert_eq!(row.status, "pending");
         assert_eq!(row.detail_error, "");
+    }
+
+    /// Lượt quét chết vì lỗi mạng KHÔNG được reset hóa đơn lỗi chi tiết về
+    /// "Chờ nhập kho": detail_json vẫn rỗng nên bấm Nhập kho sẽ nổ EOF parse.
+    #[tokio::test]
+    async fn scan_network_error_keeps_failed_details_intact() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        // Cắt kết nối mọi request → client hết lượt thử và trả lỗi.
+        *portal.transport_fail_first.lock().unwrap() = 99;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-net-fail", 1, "{}").await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice
+                SET status = 'manual', detail_error = 'Too Many Requests', detail_json = ''
+              WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = scan(
+            &pool,
+            &client,
+            "mock-token",
+            "2026-09-01",
+            "2026-09-24",
+            &[InvoiceKind::Regular],
+        )
+        .await
+        .expect_err("cổng đứt kết nối thì quét phải trả lỗi");
+        assert!(err.contains("Lỗi kết nối"), "lỗi sai: {err}");
+
+        let row = sqlx::query!(
+            "SELECT status, detail_error FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            row.status, "manual",
+            "lỗi mạng không được biến HĐ thành 'Chờ nhập kho'"
+        );
+        assert_eq!(
+            row.detail_error, "Too Many Requests",
+            "phải giữ lỗi cũ để lượt sau còn thử lại"
+        );
+    }
+
+    /// Hóa đơn chưa có dòng hàng: báo câu hướng dẫn quét lại, không lộ lỗi serde
+    /// "EOF while parsing a value at line 1 column 0" (ảnh lỗi issue #7).
+    #[tokio::test]
+    async fn import_without_detail_asks_to_rescan_instead_of_eof() {
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-empty-detail", 1, "{}").await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice SET detail_json = '' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = import_invoice(&pool, &load(&pool, id).await, "", "HKD", "", "")
+            .await
+            .expect_err("thiếu dòng hàng thì không được tạo phiếu");
+        assert!(
+            err.contains("chưa tải được dòng hàng"),
+            "lỗi phải hướng dẫn quét lại: {err}"
+        );
+        assert!(!err.contains("EOF"), "không được lộ lỗi serde: {err}");
     }
 
     /// Một lượt quét phải tự thử lại HĐ lỗi chi tiết của lượt trước (trước đây

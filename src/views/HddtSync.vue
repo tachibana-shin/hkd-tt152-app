@@ -8,18 +8,91 @@
  */
 import { api } from "@/db";
 import { useBusinessStore } from "@/stores/business";
+import { useSettingsStore } from "@/stores/settings";
 import { usePortalSession } from "@/composables/usePortalSession";
-import type { HddtSavedXml, HddtSyncPreview, HddtSyncRow } from "@/types";
+import { restartAutoTasks } from "@/composables/useAutoTasks";
+import type { AppSettings, HddtSavedXml, HddtSyncPreview, HddtSyncRow } from "@/types";
 import { downloadZip } from "@/utils/download";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const toast = useToast();
 const confirm = useConfirm();
 const business = useBusinessStore();
+const appSettings = useSettingsStore();
 
 // Phiên cổng: chỉ biết đã đăng nhập chưa + nút đăng nhập (captcha tay thuộc màn HĐĐT).
 const portal = usePortalSession();
 const { statusLoaded, loggingIn, loggedIn } = portal;
+
+// ─── Tự động nhập hóa đơn (chạy nền) ───
+// Cài đặt thật nằm ở bảng app_setting, dùng chung với màn Cài đặt và composable
+// useAutoTasks. Đặt ngay màn Đồng bộ để người dùng thấy được (issue #7: trước
+// đây chỉ nằm trong Cài đặt nên tưởng app không có tính năng này).
+const autoForm = reactive({
+  enabled: true,
+  importAfter: true,
+  intervalMin: 15,
+});
+const autoLastRunAt = ref("");
+const autoLastResult = ref("");
+const autoSaving = ref(false);
+
+function fillAutoForm(s: AppSettings | null) {
+  if (!s) return;
+  autoForm.enabled = s.auto_sync_enabled;
+  autoForm.importAfter = s.auto_sync_import;
+  autoForm.intervalMin = s.auto_sync_interval_min;
+  autoLastRunAt.value = s.auto_sync_last_run_at;
+  autoLastResult.value = s.auto_sync_last_result;
+}
+
+async function loadAutoSettings() {
+  try {
+    // force: việc chạy nền ghi auto_sync_last_* sau khi store đã cache.
+    await appSettings.load(true);
+    fillAutoForm(appSettings.settings);
+  } catch {
+    // Không đọc được cài đặt thì giữ mặc định — màn đồng bộ vẫn dùng được.
+  }
+}
+
+/** `auto_sync_last_run_at` là ISO có Z (new Date().toISOString()) → giờ máy. */
+function fmtAutoRun(iso: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+async function saveAutoSettings() {
+  if (autoSaving.value) return;
+  autoSaving.value = true;
+  try {
+    const interval = Math.min(1440, Math.max(1, Math.round(autoForm.intervalMin) || 15));
+    autoForm.intervalMin = interval;
+    await appSettings.save({
+      auto_sync_enabled: autoForm.enabled ? "1" : "0",
+      auto_sync_import: autoForm.importAfter ? "1" : "0",
+      auto_sync_interval_min: String(interval),
+    });
+    fillAutoForm(appSettings.settings);
+    // Đổi chu kỳ/bật tắt phải có hiệu lực ngay, không cần mở lại app.
+    await restartAutoTasks();
+    toast.add({
+      severity: "success",
+      summary: "Đã lưu cài đặt tự động nhập hóa đơn",
+      detail: autoForm.enabled
+        ? `Chạy khi mở app và lặp lại mỗi ${interval} phút.`
+        : "Đã tắt tự động — vẫn có thể bấm “Quét cổng” thủ công.",
+      life: 4000,
+    });
+  } catch (e) {
+    toastError("Không lưu được cài đặt tự động", e);
+  } finally {
+    autoSaving.value = false;
+  }
+}
 
 // ─── Hiển thị ───
 function toastError(summary: string, e: unknown) {
@@ -408,7 +481,7 @@ async function openInvoicePdf(row: HddtSyncRow) {
 // Mốc ngày chỉ đặt một lần lúc mount: quay lại màn không được xoá khoảng
 // ngày người dùng đang lọc.
 async function reload() {
-  await loadSyncPreview();
+  await Promise.all([loadSyncPreview(), loadAutoSettings()]);
 }
 
 void (async () => {
@@ -449,6 +522,81 @@ void (async () => {
         />
       </template>
     </Toolbar>
+
+    <!-- Cài đặt tự động ngay màn Đồng bộ (issue #7 mục 1): trước đây chỉ nằm
+         trong Cài đặt nên người dùng tưởng app không có nhập hóa đơn tự động. -->
+    <SectionCard title="Tự động nhập hóa đơn">
+      <template #icon>
+        <i class="pi pi-bolt text-primary-500" />
+      </template>
+      <p class="mb-3 text-xs text-gray-500">
+        Chạy khi mở app rồi lặp lại sau mỗi khoảng thời gian bên dưới. Quét xong có thể tự tạo phiếu
+        nhập cho hóa đơn đã có dòng hàng; hóa đơn lỗi chi tiết vẫn nằm chờ xử lý. Cần đã đăng nhập
+        cổng HĐĐT.
+      </p>
+      <div class="space-y-3">
+        <div class="flex items-center justify-between gap-4">
+          <label for="sync-auto-enabled" class="cursor-pointer">
+            <span class="font-medium">Tự động nhập hóa đơn</span>
+            <span class="block text-xs text-gray-500 mt-0.5">
+              Bật = mở app là quét cổng và (nếu bật bên dưới) tạo phiếu nhập; tắt = chỉ quét khi bấm
+              tay.
+            </span>
+          </label>
+          <ToggleSwitch input-id="sync-auto-enabled" v-model="autoForm.enabled" />
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <label for="sync-auto-import" class="cursor-pointer">
+            <span class="font-medium">Quét xong tự tạo phiếu nhập</span>
+            <span class="block text-xs text-gray-500 mt-0.5">
+              Chỉ nhập hóa đơn đã có dòng hàng; hóa đơn lỗi chi tiết vẫn nằm chờ xử lý. Tắt = chỉ
+              kéo danh sách về để xem trước.
+            </span>
+          </label>
+          <ToggleSwitch
+            input-id="sync-auto-import"
+            v-model="autoForm.importAfter"
+            :disabled="!autoForm.enabled"
+          />
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <label for="sync-auto-interval" class="cursor-pointer">
+            <span class="font-medium">Khoảng thời gian tự gọi lại</span>
+            <span class="block text-xs text-gray-500 mt-0.5">Từ 1 tới 1440 phút.</span>
+          </label>
+          <InputNumber
+            v-model="autoForm.intervalMin"
+            :min="1"
+            :max="1440"
+            :show-buttons="true"
+            :step="5"
+            suffix=" phút"
+            input-id="sync-auto-interval"
+            :disabled="!autoForm.enabled"
+            class="w-44"
+          />
+        </div>
+      </div>
+      <div
+        class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-surface-200 pt-3"
+      >
+        <p class="text-xs text-gray-500">
+          <i class="pi pi-clock mr-1" />
+          <template v-if="autoLastRunAt">
+            Lần chạy gần nhất: <b>{{ fmtAutoRun(autoLastRunAt) }}</b>
+            <template v-if="autoLastResult"> — {{ autoLastResult }}</template>
+          </template>
+          <template v-else>Chưa có lần chạy nền nào.</template>
+        </p>
+        <Button
+          label="Lưu cài đặt"
+          icon="pi pi-check"
+          size="small"
+          :loading="autoSaving"
+          @click="saveAutoSettings"
+        />
+      </div>
+    </SectionCard>
 
     <SectionCard>
       <p v-if="statusLoaded && !loggedIn" class="mb-3 text-sm text-orange-600">

@@ -945,6 +945,11 @@ pub(crate) async fn hddt_sync_scan(
     kinds: Option<String>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
+    // Mỗi lúc chỉ 1 lượt quét/nhập gọi cổng: timer chạy nền trùng thao tác tay sẽ
+    // dồn request và bị cổng giới hạn tần suất/khoá tài khoản.
+    let _bulk = crate::hddt::BULK_SYNC_LOCK.try_lock().map_err(|_| {
+        "Đang có lượt quét/nhập hóa đơn khác chạy — chờ xong rồi bấm lại.".to_string()
+    })?;
     let (client, token) = portal_client(&state).await?;
     let pool = state.pool.read().await;
     let summary = sync::scan(
@@ -1025,9 +1030,17 @@ pub(crate) async fn hddt_sync_import(
     credit_account: Option<String>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
+    // Mỗi lúc chỉ 1 lượt quét/nhập gọi cổng: timer chạy nền trùng thao tác tay sẽ
+    // dồn request và bị cổng giới hạn tần suất/khoá tài khoản.
+    let _bulk = crate::hddt::BULK_SYNC_LOCK.try_lock().map_err(|_| {
+        "Đang có lượt quét/nhập hóa đơn khác chạy — chờ xong rồi bấm lại.".to_string()
+    })?;
     let import_ids: Vec<i64> = ids.clone().unwrap_or_default();
+    // Lấy client cổng TRƯỚC khi giữ pool: `portal_client` đọc config bằng
+    // `pool.read()`, lồng read-lock trong lúc có writer xếp hàng là nguy cơ deadlock.
+    let portal = portal_client(&state).await.ok();
     let pool = state.pool.read().await;
-    let targets: Vec<CachedInvoice> = if let Some(list) = ids.filter(|l| !l.is_empty()) {
+    let mut targets: Vec<CachedInvoice> = if let Some(list) = ids.filter(|l| !l.is_empty()) {
         let mut out = Vec::new();
         for id in list {
             let row: Option<CachedInvoice> = sqlx::query_as!(
@@ -1061,8 +1074,81 @@ pub(crate) async fn hddt_sync_import(
         .map_err(|e| e.to_string())?
     };
 
+    // Hóa đơn chưa có dòng hàng (lượt quét trước đứt mạng giữa chừng) → tải chi
+    // tiết ngay tại đây để bấm "Nhập kho" là chạy được. Tải TUẦN TỰ từng hóa đơn
+    // (không chạy song song): cổng giới hạn tần suất, dồn request là bị khoá.
+    let mut detail_errors: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    if let Some((client, token)) = &portal {
+        for inv in targets.iter_mut() {
+            if !inv.detail_json.trim().is_empty() {
+                continue;
+            }
+            match client
+                .invoice_detail(
+                    token,
+                    &inv.nbmst,
+                    &inv.khmshdon.to_string(),
+                    &inv.khhdon,
+                    &inv.shdon,
+                    &inv.portal_id,
+                )
+                .await
+            {
+                Ok(detail) => {
+                    let line_count = detail
+                        .get("hdhhdvu")
+                        .and_then(Value::as_array)
+                        .map(|a| a.len())
+                        .unwrap_or(0) as i64;
+                    let detail_json = detail.to_string();
+                    sqlx::query!(
+                        "UPDATE hddt_purchase_invoice
+                            SET detail_json = ?, line_count = ?, detail_error = ''
+                          WHERE id = ?",
+                        detail_json,
+                        line_count,
+                        inv.id
+                    )
+                    .execute(&*pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    inv.detail_json = detail_json;
+                }
+                Err(msg) => {
+                    let skip = format!("Không lấy được chi tiết: {msg}");
+                    sqlx::query!(
+                        "UPDATE hddt_purchase_invoice
+                            SET status = 'manual', detail_error = ?, skip_reason = ?
+                          WHERE id = ?",
+                        msg,
+                        skip,
+                        inv.id
+                    )
+                    .execute(&*pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    detail_errors.insert(
+                        inv.portal_id.clone(),
+                        format!(
+                            "Hóa đơn {} {} chưa tải được dòng hàng: {msg}",
+                            inv.khhdon, inv.shdon
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     let mut results: Vec<serde_json::Value> = Vec::new();
     for inv in &targets {
+        if let Some(msg) = detail_errors.get(&inv.portal_id) {
+            results.push(serde_json::json!({
+                "portal_id": inv.portal_id, "ok": false, "voucher_no": "",
+                "products_created": 0, "message": msg,
+            }));
+            continue;
+        }
         if inv.status != "pending" {
             results.push(serde_json::json!({
                 "portal_id": inv.portal_id, "ok": false, "voucher_no": "",

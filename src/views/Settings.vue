@@ -27,6 +27,7 @@ const st = reactive({
   // Việc chạy nền khi mở app (xem composable useAutoTasks).
   auto_check_update: true,
   auto_sync_enabled: true,
+  auto_sync_import: true,
   auto_sync_interval_min: 15,
 });
 
@@ -87,6 +88,7 @@ async function load() {
     st.tax_group4 = s.tax_threshold_group4;
     st.auto_check_update = s.auto_check_update;
     st.auto_sync_enabled = s.auto_sync_enabled;
+    st.auto_sync_import = s.auto_sync_import;
     st.auto_sync_interval_min = s.auto_sync_interval_min;
   } finally {
     loading.value = false;
@@ -111,6 +113,7 @@ async function save() {
       tax_threshold_group4: String(taxThresholds.value.group4),
       auto_check_update: st.auto_check_update ? "1" : "0",
       auto_sync_enabled: st.auto_sync_enabled ? "1" : "0",
+      auto_sync_import: st.auto_sync_import ? "1" : "0",
       // Ép về 1–1440 phút: giá trị rác sẽ làm timer không bao giờ reo hoặc reo liên tục.
       auto_sync_interval_min: String(
         Math.min(1440, Math.max(1, Math.round(st.auto_sync_interval_min) || 15)),
@@ -553,8 +556,9 @@ useKeepAliveRefresh(reload);
             <i class="pi pi-sync" /> Tự động khi mở ứng dụng
           </h4>
           <p class="text-xs text-gray-500 mb-3">
-            Chạy ngay khi mở app rồi lặp lại sau mỗi khoảng thời gian bên dưới. Quét chỉ kéo danh
-            sách hóa đơn từ cổng về — việc nhập kho vẫn tự tay.
+            Chạy ngay khi mở app rồi lặp lại sau mỗi khoảng thời gian bên dưới. Quét xong có thể tự
+            tạo phiếu nhập (bật ở dưới); hóa đơn lỗi chi tiết vẫn nằm chờ xử lý. Cài nhanh các mục
+            này ngay trên màn Đồng bộ hóa đơn mua.
           </p>
           <div class="space-y-3">
             <div class="flex items-center justify-between gap-4">
@@ -574,6 +578,16 @@ useKeepAliveRefresh(reload);
                 </span>
               </label>
               <ToggleSwitch input-id="auto-sync-enabled" v-model="st.auto_sync_enabled" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <label for="auto-sync-import" class="cursor-pointer">
+                <span class="font-medium">Quét xong tự tạo phiếu nhập</span>
+                <span class="block text-xs text-gray-500 mt-0.5">
+                  Chỉ nhập hóa đơn đã có dòng hàng; hóa đơn lỗi chi tiết vẫn nằm chờ xử lý. Tắt =
+                  chỉ kéo danh sách về để xem trước.
+                </span>
+              </label>
+              <ToggleSwitch input-id="auto-sync-import" v-model="st.auto_sync_import" />
             </div>
             <div class="flex items-center justify-between gap-4">
               <label for="auto-sync-interval" class="cursor-pointer">

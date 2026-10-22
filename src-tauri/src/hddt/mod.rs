@@ -19,6 +19,13 @@ pub(crate) mod session;
 pub(crate) mod sync;
 pub(crate) mod xml;
 
+/// Khoá tuần tự cho các việc GỌI HÀNG LOẠT lên cổng (quét cổng, nhập kho có tải
+/// chi tiết): mỗi lúc chỉ 1 lượt chạy. Cổng khoá tài khoản/giới hạn tần suất khi
+/// thấy nhiều request dồn dập — timer chạy nền trùng với thao tác tay của người
+/// dùng là đúng tình huống đó. `try_lock` để lượt sau báo "đang chạy" thay vì
+/// xếp hàng chờ rồi bắn tiếp.
+pub(crate) static BULK_SYNC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub(crate) use client::{
     HddtClient, InvoiceDirection, InvoiceKind, InvoiceList, InvoiceQuery, LoginError, LoginSession,
     MAX_PAGE_SIZE,
