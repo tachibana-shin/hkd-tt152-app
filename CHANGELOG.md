@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.26.0...v0.26.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **e2e:** "Tên khác của sản phẩm" đo nhầm panel + số phiếu trùng khi retry ([b02b54e](https://github.com/tachibana-shin/hkd-tt152-app/commit/b02b54e22282f007b5cdef4daf165db3dba5a84e))
+
 # [0.26.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.25.0...v0.26.0) (2026-10-22)
 
 
