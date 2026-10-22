@@ -33,6 +33,19 @@ const sidebarButton = (page: Page, label: string) =>
 const ttxlySelect = (page: Page) => page.locator('label:text-is("Kết quả kiểm tra") + .p-select');
 
 /**
+ * Số phiếu RIÊNG cho mỗi lần chạy test.
+ *
+ * CI retry test khi lần đầu đỏ: số phiếu CỐ ĐỊNH sẽ đụng phiếu của lần trước
+ * (`save_inbound` trả 400 "Số phiếu nhập ... đã tồn tại") → mọi lần retry cũng
+ * đỏ. Hậu tố gồm mã lần chạy + số thứ tự trong lần chạy đó.
+ */
+let voucherSeq = 0;
+const uniqueVoucher = (prefix: string) => {
+  voucherSeq += 1;
+  return `${prefix}-${Date.now().toString(36)}${voucherSeq}`;
+};
+
+/**
  * Đưa trang về màn đăng nhập và CHỜ app thật sự render xong đó.
  *
  * Hai bẫy của test đầu tiên, đều do `isVisible()` kiểm tra TỨC THÌ:
@@ -491,10 +504,12 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await ensureLoggedIn(page);
 
   // Chuẩn bị 1 phiếu nhập + 1 phiếu xuất qua API để test không phụ thuộc thứ tự test khác.
+  const pn9001 = uniqueVoucher("PN9001");
+  const px9001 = uniqueVoucher("PX9001");
   const inbound = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-02-01",
-      voucher_no: "PN9001",
+      voucher_no: pn9001,
       description: "Phiếu nhập để test xem phiếu",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -515,7 +530,7 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   const outbound = await request.post("/api/save_outbound", {
     data: {
       posting_date: "2026-02-02",
-      voucher_no: "PX9001",
+      voucher_no: px9001,
       description: "Phiếu xuất để test xem phiếu",
       customer_code: "",
       unit_code: "HKD",
@@ -610,7 +625,7 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   // ── 2. Danh sách Nhập kho: bấm nút mắt ở cột thao tác ──
   await sidebarButton(page, "Nhập kho").click();
   await expect(page.locator("header h2")).toHaveText("Nhập kho");
-  const inRow = page.locator("tr", { has: page.getByText("PN9001", { exact: true }) }).first();
+  const inRow = page.locator("tr", { has: page.getByText(pn9001, { exact: true }) }).first();
   await inRow.getByRole("button", { name: "Xem phiếu", exact: true }).click();
   await expect(dlg.getByText("PHIẾU NHẬP KHO")).toBeVisible();
   const inLine = dlg.locator("tbody tr", { hasText: "Bottled water" });
@@ -623,7 +638,7 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   // ── 3. Danh sách Xuất kho: cùng dialog nhưng hiển thị PX ──
   await sidebarButton(page, "Xuất kho").click();
   await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
-  const outRow = page.locator("tr", { has: page.getByText("PX9001", { exact: true }) }).first();
+  const outRow = page.locator("tr", { has: page.getByText(px9001, { exact: true }) }).first();
   await outRow.getByRole("button", { name: "Xem phiếu", exact: true }).click();
   await expect(dlg.getByText("PHIẾU XUẤT KHO")).toBeVisible();
   await expect(dlg.getByText("02-VT")).toBeVisible();
@@ -632,7 +647,7 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   await expect(dlg.locator("tfoot")).toContainText("30.000 đ"); // 2 × 15.000
   // Nút In phiếu điều hướng tới màn in dùng chung (không phải dialog).
   await dlg.getByRole("button", { name: "In phiếu" }).click();
-  await expect(page).toHaveURL(/\/print\/PX9001$/);
+  await expect(page).toHaveURL(new RegExp(`/print/${px9001}$`));
   await expect(page.getByRole("heading", { name: "PHIẾU XUẤT KHO" })).toBeVisible();
 });
 
@@ -644,7 +659,7 @@ test("Liên kết HĐĐT: ngày hóa đơn đồng bộ theo ngày HĐĐT bên k
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-28",
-      voucher_no: "PN9400",
+      voucher_no: uniqueVoucher("PN9400"),
       description: "Nhập tồn cho test đồng bộ ngày HĐĐT",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -735,7 +750,7 @@ test("Ghi nhận HĐĐT: tự lập phiếu xuất để doanh thu vào sổ", a
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-25",
-      voucher_no: "PN9500",
+      voucher_no: uniqueVoucher("PN9500"),
       description: "Nhập tồn cho test tự lập phiếu xuất",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1005,10 +1020,11 @@ test("Nhap/Xuat kho: 1 phiếu = 1 dòng, có số loại mặt hàng và chiế
   expect(newProduct.ok(), `save_product: ${await newProduct.text()}`).toBe(true);
 
   // 1 phiếu nhập 3 dòng hàng (2 loại) có chiết khấu → bảng phải ra MỘT dòng.
+  const pnGom01 = uniqueVoucher("PN-GOM01");
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-27",
-      voucher_no: "PN-GOM01",
+      voucher_no: pnGom01,
       description: "Phiếu gom nhiều dòng có chiết khấu",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1033,10 +1049,10 @@ test("Nhap/Xuat kho: 1 phiếu = 1 dòng, có số loại mặt hàng và chiế
 
   await sidebarButton(page, "Nhập kho").click();
   await expect(page.locator("header h2")).toHaveText("Nhập kho");
-  const row = page.locator("tr", { has: page.getByText("PN-GOM01", { exact: true }) }).first();
+  const row = page.locator("tr", { has: page.getByText(pnGom01, { exact: true }) }).first();
   await expect(row, "phiếu 3 dòng hàng phải hiện đúng 1 dòng").toBeVisible();
   await expect(
-    page.locator("tr", { has: page.getByText("PN-GOM01", { exact: true }) }),
+    page.locator("tr", { has: page.getByText(pnGom01, { exact: true }) }),
     "không được lặp dòng theo từng mặt hàng",
   ).toHaveCount(1);
 
@@ -1057,10 +1073,11 @@ test("Nhap/Xuat kho: 1 phiếu = 1 dòng, có số loại mặt hàng và chiế
 test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", async ({ page, request }) => {
   await ensureLoggedIn(page);
 
+  const pn9800 = uniqueVoucher("PN9800");
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-20",
-      voucher_no: "PN9800",
+      voucher_no: pn9800,
       description: "Nhập tồn cho test tìm phiếu",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1156,8 +1173,8 @@ test("Nhap/Xuat kho: tìm phiếu theo từ khoá và lọc khoảng ngày", asy
   await page.getByRole("button", { name: "Xoá lọc" }).click();
   await sidebarButton(page, "Nhập kho").click();
   await expect(page.locator("header h2")).toHaveText("Nhập kho");
-  await page.getByPlaceholder("Số phiếu, mã hàng, khách, diễn giải…").fill("PN9800");
-  await expect(page.locator("tr", { hasText: "PN9800" }).first()).toBeVisible();
+  await page.getByPlaceholder("Số phiếu, mã hàng, khách, diễn giải…").fill(pn9800);
+  await expect(page.locator("tr", { hasText: pn9800 }).first()).toBeVisible();
 });
 
 test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ liệu", async ({ page }) => {
@@ -1224,7 +1241,7 @@ test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa c
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-20",
-      voucher_no: "PN9600",
+      voucher_no: uniqueVoucher("PN9600"),
       description: "Nhập tồn cho test cảnh báo chưa có PX",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1269,10 +1286,11 @@ test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa c
   );
   // Tồn bị dùng hết ở nơi khác (bán ngoài app) → ghi số HĐĐT sẽ bị chặn vì thiếu
   // kho; phải nhập lại tồn mới chốt được hóa đơn thật.
+  const px9600 = uniqueVoucher("PX9600");
   const out = await request.post("/api/save_outbound", {
     data: {
       posting_date: "2026-09-20",
-      voucher_no: "PX9600",
+      voucher_no: px9600,
       description: "Dùng hết tồn SPPX1",
       customer_code: "",
       unit_code: "HKD",
@@ -1320,7 +1338,7 @@ test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa c
   const restock = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-21",
-      voucher_no: "PN9601",
+      voucher_no: uniqueVoucher("PN9601"),
       description: "Nhập lại tồn cho test cảnh báo chưa có PX",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1344,7 +1362,7 @@ test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa c
   await dlg2.getByLabel("Số HĐĐT").fill("00009600");
   // Bỏ ô "Lập phiếu xuất" → app không sinh phiếu mới, để người dùng tự báo số PX.
   await dlg2.getByRole("checkbox", { name: /Lập phiếu xuất/ }).uncheck();
-  await dlg2.locator("#link-px-no").fill("PX9600");
+  await dlg2.locator("#link-px-no").fill(px9600);
   await dlg2.getByRole("button", { name: "Lưu" }).click();
   await expect(dlg2).toBeHidden();
   await expect(page.locator(".p-toast-message").last()).toContainText("Đã liên kết HĐĐT");
@@ -4113,10 +4131,13 @@ test("Tên khác của sản phẩm: tìm được ở danh mục và hóa đơn
     },
   });
   expect(prod.ok(), `save_product: ${await prod.text()}`).toBe(true);
+  // Số phiếu RIÊNG cho mỗi lần chạy: CI có retry — số cố định sẽ đụng phiếu
+  // của lần trước (save_inbound trả 400) và mọi lần retry cũng đỏ theo.
+  const stockNo = `PN-AL1-${Date.now() % 1_000_000}`;
   const stock = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-03",
-      voucher_no: "PN-AL1",
+      voucher_no: stockNo,
       description: "Nhập tồn cho test tên khác",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -4178,14 +4199,20 @@ test("Tên khác của sản phẩm: tìm được ở danh mục và hóa đơn
   await line.getByRole("combobox").first().click();
   // Regression: virtual scroller làm panel co đúng bằng cột Sản phẩm (tên hàng
   // bị cắt + thanh cuộn ngang). Panel phải rộng sàn 30rem dù ô chọn nằm trong cột hẹp.
-  const productPanel = page.locator(".p-select-overlay").last();
+  // Chỉ đúng overlay của ô SẢN PHẨM (class product-select-overlay) — `.last()`
+  // trên mọi overlay có thể trúng panel của ô KHÁCH HANG vừa mở trước đó
+  // (nó hẹp hơn, đo ra ~456px → assert đỏ oang trên CI).
+  const productPanel = page.locator(".p-select-overlay.product-select-overlay").last();
   await expect(productPanel).toBeVisible();
   const productPanelBox = await productPanel.boundingBox();
   expect(
     productPanelBox?.width ?? 0,
     "dropdown sản phẩm bị co theo cột — phải rộng tối thiểu 30rem",
   ).toBeGreaterThanOrEqual(460);
-  await page.locator('.p-select-overlay [role="searchbox"]').last().fill("mì flour");
+  await page
+    .locator('.p-select-overlay.product-select-overlay [role="searchbox"]')
+    .last()
+    .fill("mì flour");
   await page
     .getByRole("option", { name: /Mì flour/ })
     .first()
