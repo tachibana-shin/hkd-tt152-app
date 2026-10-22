@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.26.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.25.0...v0.26.0) (2026-10-22)
+
+
+### Features
+
+* **hddt,products:** password journal, quick-create in BOM tab, clean dev console ([e20b3a0](https://github.com/tachibana-shin/hkd-tt152-app/commit/e20b3a04309d0e8ecd1b74c3ad307db814f58b24))
+
 # [0.25.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.24.2...v0.25.0) (2026-10-21)
 
 
