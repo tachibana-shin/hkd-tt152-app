@@ -22,6 +22,24 @@ test.beforeAll(async ({ browser }) => {
 });
 
 /**
+ * Tự quét khi mở app chạy nền và giữ khóa quét cổng. Test nào thao tác tay
+ * (`hddt_sync_scan` / `hddt_sync_import`) phải tắt tạm, nếu không sẽ đỏ ngẫu
+ * nhiên vì "đang có lượt quét/nhập khác chạy" — tùy trang kịp chạy nền hay không.
+ * Giá trị cũ được trả lại ở afterEach kể cả khi test lỗi giữa chừng.
+ */
+let autoSyncToRestore: string | null = null;
+
+test.afterEach(async ({ request }) => {
+  if (autoSyncToRestore === null) return;
+  const value = autoSyncToRestore;
+  autoSyncToRestore = null;
+  const res = await request.post("/api/save_app_settings", {
+    data: { settings: { auto_sync_enabled: value } },
+  });
+  expect(res.ok(), `bật lại tự quét failed ${res.status()}`).toBe(true);
+});
+
+/**
  * Sidebar navigation button (scoped to <nav> to avoid matching same-named buttons inside pages).
  * Match on the label text exactly: the accessible name also contains the icon glyph, and
  * substring matching would make "HĐĐT" collide with "Đồng bộ HĐĐT".
@@ -2182,6 +2200,21 @@ async function loginPortal(api: APIRequestContext) {
   return body;
 }
 
+/** Tắt tự quét khi mở app cho test đang thao tác tay; afterEach bật lại. */
+async function pauseAutoSync(api: APIRequestContext) {
+  const login = await api.post("/api/login", { data: ADMIN });
+  expect(login.ok(), `login API failed ${login.status()}`).toBe(true);
+  const settings = (await (await api.post("/api/get_app_settings")).json()) as Record<
+    string,
+    string
+  >;
+  autoSyncToRestore = settings.auto_sync_enabled ?? "1";
+  const saved = await api.post("/api/save_app_settings", {
+    data: { settings: { auto_sync_enabled: "0" } },
+  });
+  expect(saved.ok(), `tắt tự quét failed ${saved.status()}`).toBe(true);
+}
+
 test("HĐĐT: app tự đăng nhập cổng lúc khởi động, không cần mở màn HĐĐT", async ({
   page,
   request,
@@ -2515,6 +2548,68 @@ test("Đồng bộ HĐ mua: cột File XML tải được file XML của hóa đ
   expect(zipPath, "trình duyệt phải lưu file về").toBeTruthy();
   const zipBytes = readFileSync(zipPath as string);
   expect([zipBytes[0], zipBytes[1]], "phải là ZIP thật").toEqual([0x50, 0x4b]);
+});
+
+test("Đồng bộ HĐ mua: Quét cổng có nhật ký realtime từng trang, chi tiết và XML", async ({
+  page,
+  request,
+}) => {
+  test.skip(LIVE_PORTAL, "Test UI luôn trỏ mock portal — bỏ qua khi chạy cổng thật");
+
+  // Tự động quét lúc mở app cũng chiếm khóa quét cổng. Tắt tạm cho riêng test
+  // này để bấm "Quét cổng" không bị "đang có lượt khác chạy" do chính trang vừa mở.
+  await pauseAutoSync(request);
+
+  try {
+    await ensureLoggedIn(page);
+    const login = await loginPortal(request);
+    test.skip(
+      login === null,
+      "Không lấy được phiên cổng HĐĐT (thiếu info.txt hoặc cổng bắt captcha) — bỏ qua",
+    );
+
+    await sidebarButton(page, "Đồng bộ HĐĐT").click();
+    await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
+
+    // Chỉ quét đúng ngày mock có hóa đơn: test nhanh mà vẫn đi qua đủ 3 chặng
+    // (danh sách → chi tiết từng hóa đơn → lưu XML).
+    for (const label of ["Từ ngày lập", "Đến ngày lập"]) {
+      const field = page.getByLabel(label);
+      await field.click();
+      await field.press("ControlOrMeta+a");
+      await field.pressSequentially("01/09/2026");
+      await field.press("Tab");
+    }
+    await expect(page.getByLabel("Từ ngày lập")).toHaveValue("01/09/2026");
+    await expect(page.getByLabel("Đến ngày lập")).toHaveValue("01/09/2026");
+
+    await page.getByTestId("hddt-scan").click();
+
+    // Hộp thoại phải hiện NGAY khi bấm, trước khi cổng trả lời — đó là mục đích
+    // của issue #7: quét lâu thì thấy nó đang kẹt ở đâu, không ngồi nhìn nút quay.
+    const dialog = page.getByTestId("export-progress");
+    await expect(dialog).toBeVisible();
+    const log = page.getByTestId("export-progress-log");
+    await expect(log).toContainText("Bắt đầu quét cổng HĐĐT…");
+
+    // Từng chặng đều ghi kèm thời gian. Dòng "đang làm" (step) đổi theo request
+    // đang chờ; nhật ký giữ lại kết quả từng trang/hóa đơn/file XML.
+    await expect(log).toContainText("Bắt đầu quét cổng HĐĐT:", { timeout: 15_000 });
+    await expect(log).toContainText("Danh sách HĐ điện tử 01/09/2026–01/09/2026", {
+      timeout: 20_000,
+    });
+    await expect(log).toContainText(/Chi tiết \d+\/\d+ C26MOC 0001: .+ — /, { timeout: 20_000 });
+    await expect(log).toContainText(/XML \d+\/\d+ C26MOC 0001: .+ — /, { timeout: 20_000 });
+    await expect(log).toContainText("✓ Hoàn tất", { timeout: 30_000 });
+
+    // Giữ hộp thoại sau khi xong để đọc dòng nào lag; chỉ đóng khi người dùng bấm.
+    await page.getByTestId("export-progress-close").click();
+    await expect(dialog).toBeHidden();
+  } finally {
+    // Dọn hóa đơn mock của ngày test để các test sau không nhập kho nhầm nó.
+    // Seed của các test khác nằm ngày 02/09 nên không bị đụng.
+    await request.post("/api/hddt_uncache_day", { data: { day: "2026-09-01" } });
+  }
 });
 
 test("Tra cứu HĐĐT: mỗi tab nhớ bộ lọc riêng và giữ state khi đổi menu (KeepAlive)", async ({
@@ -4090,6 +4185,8 @@ test("Xem PDF hóa đơn: mở từ tab Hóa đơn", async ({ page, request }) =
 });
 
 test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập", async ({ page, request }) => {
+  // Nhập kho tay ngay sau khi mở trang có thể tranh khóa với lượt tự quét nền.
+  await pauseAutoSync(request);
   await ensureLoggedIn(page);
   await sidebarButton(page, "Đồng bộ HĐĐT").click();
   await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");

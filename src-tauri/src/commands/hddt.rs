@@ -12,6 +12,7 @@
 // `hddt_status` / `hddt_send_simulated` used to be mocks; `hddt_status` now returns
 // the real connection state, `hddt_send_simulated` is kept as the local fallback.
 
+use crate::commands::progress::ProgressJob;
 use crate::hddt::sync::CachedInvoice;
 use crate::hddt::{
     days_left_until, generate_password, rfc3339_to_unix, sync, GlyphTemplateSolver, HddtClient,
@@ -935,7 +936,11 @@ fn parse_kinds(kinds: Option<String>) -> Vec<InvoiceKind> {
 
 /// Quét cổng theo khoảng ngày và cache hóa đơn mua kèm chi tiết dòng hàng.
 /// Mốc bắt đầu lấy từ `hddt_start_date` (khai trong popup cấu hình HKD);
-/// mốc cuối là hôm qua. Ngày đã quét được cache nên lần sau không gọi lại.
+/// mốc cuối là hôm nay. Ngày đã quét được cache nên lần sau không gọi lại.
+///
+/// `job_id` chỉ có khi người dùng bấm "Quét cổng": frontend sinh UUID rồi hỏi
+/// `get_job_progress` để hiện nhật ký realtime. Timer chạy nền gọi cùng lệnh
+/// mà không truyền `job_id` → không đụng tới hộp thoại của việc khác.
 #[tauri::command]
 pub(crate) async fn hddt_sync_scan(
     state: State<'_, AppState>,
@@ -943,8 +948,31 @@ pub(crate) async fn hddt_sync_scan(
     from: Option<String>,
     to: Option<String>,
     kinds: Option<String>,
+    job_id: Option<String>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
+    let job = job_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(|id| ProgressJob::begin(&id, "Quét cổng HĐĐT"));
+    let out = run_hddt_sync_scan(state, app, from, to, kinds, job.as_ref()).await;
+    if let Some(j) = &job {
+        j.finish(out.as_ref().err().cloned());
+    }
+    out
+}
+
+async fn run_hddt_sync_scan(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    from: Option<String>,
+    to: Option<String>,
+    kinds: Option<String>,
+    job: Option<&ProgressJob>,
+) -> Result<String, String> {
+    if let Some(j) = job {
+        j.step("Đang kiểm tra phiên đăng nhập cổng HĐĐT…");
+    }
     // Mỗi lúc chỉ 1 lượt quét/nhập gọi cổng: timer chạy nền trùng thao tác tay sẽ
     // dồn request và bị cổng giới hạn tần suất/khoá tài khoản.
     let _bulk = crate::hddt::BULK_SYNC_LOCK.try_lock().map_err(|_| {
@@ -952,18 +980,48 @@ pub(crate) async fn hddt_sync_scan(
     })?;
     let (client, token) = portal_client(&state).await?;
     let pool = state.pool.read().await;
-    let summary = sync::scan(
-        &pool,
-        &client,
-        &token,
-        from.as_deref().unwrap_or(""),
-        to.as_deref().unwrap_or(""),
-        &parse_kinds(kinds),
-    )
-    .await?;
+    let kinds = parse_kinds(kinds);
+    let summary = match job {
+        Some(j) => {
+            sync::scan_with_progress(
+                &pool,
+                &client,
+                &token,
+                from.as_deref().unwrap_or(""),
+                to.as_deref().unwrap_or(""),
+                &kinds,
+                Some(j),
+            )
+            .await?
+        }
+        // Chạy nền: không đụng ô tiến độ chung của hộp thoại đang mở.
+        None => {
+            sync::scan(
+                &pool,
+                &client,
+                &token,
+                from.as_deref().unwrap_or(""),
+                to.as_deref().unwrap_or(""),
+                &kinds,
+            )
+            .await?
+        }
+    };
     // Tự động lưu file XML cho hóa đơn mới (quy định lưu trữ HĐĐT). Lỗi từng
     // hóa đơn không làm hỏng lượt quét — cộng vào `xml` để UI báo.
-    let xml = crate::hddt::fill_missing_after_scan(&pool, &xml_dir(&app)?, &client, &token).await;
+    let xml = match job {
+        Some(j) => {
+            crate::hddt::fill_missing_after_scan_with_progress(
+                &pool,
+                &xml_dir(&app)?,
+                &client,
+                &token,
+                Some(j),
+            )
+            .await
+        }
+        None => crate::hddt::fill_missing_after_scan(&pool, &xml_dir(&app)?, &client, &token).await,
+    };
     drop(pool);
     audit(&state, "hddt_sync_scan", "hddt", "sync scan").await;
     let mut v = serde_json::to_value(&summary).unwrap_or_default();

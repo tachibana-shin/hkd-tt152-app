@@ -11,7 +11,8 @@ import { useBusinessStore } from "@/stores/business";
 import { useSettingsStore } from "@/stores/settings";
 import { usePortalSession } from "@/composables/usePortalSession";
 import { restartAutoTasks } from "@/composables/useAutoTasks";
-import type { AppSettings, HddtSavedXml, HddtSyncPreview, HddtSyncRow } from "@/types";
+import JobProgressDialog from "@/components/JobProgressDialog.vue";
+import type { AppSettings, HddtSavedXml, HddtSyncPreview, HddtSyncRow, JobProgress } from "@/types";
 import { downloadZip } from "@/utils/download";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
@@ -125,6 +126,68 @@ const syncSummary = ref<HddtSyncPreview["summary"] | null>(null);
 const syncScanning = ref(false);
 const syncImporting = ref(false);
 const syncScanMsg = ref("");
+
+// ─── Nhật ký realtime khi bấm "Quét cổng" ───
+// Quét rất lâu (nhiều ngày × 2 loại + từng chi tiết + từng file XML) nên backend
+// ghi từng bước vào ô tiến độ chung; frontend hỏi lại mỗi 300ms để biết hóa đơn
+// nào đang chờ cổng trả lời. Không dùng sự kiện Tauri vì bản web không nhận được.
+const scanProgress = ref<JobProgress | null>(null);
+const scanProgressOpen = ref(false);
+const scanProgressDismissed = ref(false);
+const scanPreLog = ref<string[]>([]);
+let scanProgressTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Mã việc riêng cho lượt quét này. Không xài `crypto.randomUUID` vì bản desktop
+ *  chạy ở scheme `tauri://` không phải context bảo mật nên bị chặn ở một số WebView. */
+const newScanJobId = () =>
+  `scan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+async function pollScanProgress(jobId: string) {
+  try {
+    const p = await api.getJobProgress(jobId);
+    if (p) scanProgress.value = p;
+  } catch {
+    // Không đọc được tiến độ thì vẫn chờ lệnh quét trả lời — không làm hỏng việc chính.
+  }
+}
+
+function stopScanProgress() {
+  if (scanProgressTimer) {
+    clearInterval(scanProgressTimer);
+    scanProgressTimer = null;
+  }
+}
+
+function startScanProgress(jobId: string) {
+  stopScanProgress();
+  scanProgress.value = {
+    id: jobId,
+    label: "Quét cổng HĐĐT",
+    step: "Đang gửi yêu cầu…",
+    done: 0,
+    total: 0,
+    finished: false,
+    error: null,
+    log: [],
+  };
+  scanProgressDismissed.value = false;
+  scanPreLog.value = [
+    "Bắt đầu quét cổng HĐĐT…",
+    "Mỗi trang danh sách, từng chi tiết hóa đơn và từng file XML đều ghi thời gian — dòng nào lâu sẽ thấy ngay.",
+  ];
+  scanProgressOpen.value = true;
+  void pollScanProgress(jobId);
+  scanProgressTimer = setInterval(() => void pollScanProgress(jobId), 300);
+}
+
+/** Đang chạy → "Chạy nền" (mở lại bằng nút Tiến độ); xong/lỗi → "Đóng". */
+function closeScanProgress() {
+  scanProgressOpen.value = false;
+  if (!syncScanning.value) scanProgressDismissed.value = true;
+}
+
+onBeforeUnmount(stopScanProgress);
+
 /** File XML đã lưu theo khóa hóa đơn — để bảng hiện "Đã lưu" + chọn ra ZIP. */
 const xmlSaved = ref<Record<string, HddtSavedXml>>({});
 const savingXml = ref<Set<string>>(new Set());
@@ -304,11 +367,14 @@ async function onSyncScan() {
   }
   syncScanning.value = true;
   syncScanMsg.value = "";
+  const jobId = newScanJobId();
+  startScanProgress(jobId);
   try {
     const s = await api.hddtSyncScan({
       from: syncIsoDate(syncFrom.value),
       to: syncIsoDate(syncTo.value),
       kinds: syncKindList.value,
+      jobId,
     });
     // Ngày đã có cache bị bỏ qua (không gọi lại cổng) — nói rõ để không tưởng quét thiếu.
     syncScanMsg.value =
@@ -326,6 +392,9 @@ async function onSyncScan() {
   } catch (e) {
     toastError("Lỗi quét cổng HĐĐT", e);
   } finally {
+    // Hỏi lần cuối để lấy đúng trạng thái "✓ Hoàn tất" / lỗi mà backend vừa ghi.
+    stopScanProgress();
+    await pollScanProgress(jobId);
     syncScanning.value = false;
   }
 }
@@ -615,12 +684,12 @@ void (async () => {
       </p>
       <div class="mb-3 flex flex-wrap items-end gap-3">
         <div>
-          <label class="mb-1 block text-xs text-gray-500">Từ ngày lập</label>
-          <DatePicker v-model="syncFrom" dateFormat="dd/mm/yy" class="w-40" />
+          <label for="sync-from" class="mb-1 block text-xs text-gray-500">Từ ngày lập</label>
+          <DatePicker v-model="syncFrom" inputId="sync-from" dateFormat="dd/mm/yy" class="w-40" />
         </div>
         <div>
-          <label class="mb-1 block text-xs text-gray-500">Đến ngày lập</label>
-          <DatePicker v-model="syncTo" dateFormat="dd/mm/yy" class="w-40" />
+          <label for="sync-to" class="mb-1 block text-xs text-gray-500">Đến ngày lập</label>
+          <DatePicker v-model="syncTo" inputId="sync-to" dateFormat="dd/mm/yy" class="w-40" />
         </div>
         <div class="flex items-center gap-3 pb-1">
           <label class="flex items-center gap-2 text-xs text-gray-600">
@@ -632,7 +701,24 @@ void (async () => {
             Máy tính tiền
           </label>
         </div>
-        <Button label="Quét cổng" icon="pi pi-sync" :loading="syncScanning" @click="onSyncScan" />
+        <Button
+          label="Quét cổng"
+          icon="pi pi-sync"
+          :loading="syncScanning"
+          data-testid="hddt-scan"
+          @click="onSyncScan"
+        />
+        <!-- Hiện khi người dùng bấm "Chạy nền" — mở lại nhật ký realtime, kể cả
+             khi lượt quét đã xong (chưa bấm "Đóng"). -->
+        <Button
+          v-if="scanProgress && !scanProgressDismissed && !scanProgressOpen"
+          label="Tiến độ"
+          icon="pi pi-hourglass"
+          severity="secondary"
+          outlined
+          data-testid="hddt-scan-progress-open"
+          @click="scanProgressOpen = true"
+        />
         <Button
           label="Xoá cache"
           icon="pi pi-trash"
@@ -820,6 +906,17 @@ void (async () => {
         </Column>
       </AppDataTable>
     </SectionCard>
+
+    <!-- Nhật ký realtime của lượt quét cổng: chỉ mở khi bấm tay (việc chạy nền
+         không có jobId), giữ lại sau khi xong để đọc dòng nào chậm/lỗi. -->
+    <JobProgressDialog
+      :visible="scanProgressOpen"
+      header="Quét cổng HĐĐT"
+      :job="scanProgress"
+      :pre-log="scanPreLog"
+      :running="syncScanning"
+      @update:visible="closeScanProgress"
+    />
 
     <VoucherViewDialog v-model:visible="viewVoucherVisible" :voucher-no="viewVoucherNo" />
 

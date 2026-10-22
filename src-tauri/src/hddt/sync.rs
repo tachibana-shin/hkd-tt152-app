@@ -9,11 +9,14 @@
 //   * Ngày đã quét thì cache trong `hddt_sync_day` (hóa đơn ngày đã qua không đổi).
 //   * Hôm nay vẫn quét nhưng không cache — hóa đơn trong ngày còn phát sinh.
 
+use std::time::Instant;
+
 use chrono::{Datelike, Duration, NaiveDate};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{FromRow, SqlitePool};
 
+use crate::commands::progress::ProgressJob;
 use crate::hddt::{HddtClient, InvoiceKind, InvoiceQuery};
 use crate::helpers::round2;
 use crate::models::InboundItemInput;
@@ -21,6 +24,34 @@ use crate::models::InboundItemInput;
 /// Ngày cổng chấp nhận trong 1 request (HTTP 400 nếu vượt: "Khoảng thời gian
 /// tìm kiếm không được lớn hơn 1 tháng").
 const MAX_WINDOW_DAYS: i64 = 30;
+
+/// Nhãn loại hóa đơn cho nhật ký quét cổng.
+fn kind_label(kind: InvoiceKind) -> &'static str {
+    match kind {
+        InvoiceKind::Regular => "HĐ điện tử",
+        InvoiceKind::CashRegister => "Máy tính tiền",
+    }
+}
+
+/// Thời gian một request đã chạy — để nhìn ra hóa đơn/trang nào lag.
+fn elapsed_label(started: Instant) -> String {
+    let ms = started.elapsed().as_millis();
+    if ms < 1_000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    }
+}
+
+/// Lỗi cổng có thể rất dài (HTML/JSON); nhật ký chỉ giữ phần đầu đủ đọc.
+fn brief_error(msg: &str) -> String {
+    let one_line = msg.replace('\n', " ");
+    let mut out: String = one_line.chars().take(180).collect();
+    if one_line.chars().count() > 180 {
+        out.push('…');
+    }
+    out
+}
 
 /// Nhóm ngành mặc định cho mặt hàng HÀNG HÓA tạo từ hóa đơn: "PPHH" — Phân phối,
 /// cung cấp hàng hóa (có sẵn từ migration khởi tạo). Hàng hóa mua vào từ hóa đơn
@@ -178,6 +209,7 @@ pub(crate) struct ScanSummary {
 
 /// Quét một cửa sổ ngày (đã gom ≤ 30 ngày) rồi ghi cache từng hóa đơn. Việc đánh
 /// dấu "ngày đã quét" do caller quyết định — hôm nay thì cố ý không đánh dấu.
+#[allow(clippy::too_many_arguments)] // đủ ngữ cảnh 1 request; gom struct chỉ để vừa lint
 async fn scan_window(
     pool: &SqlitePool,
     client: &HddtClient,
@@ -186,9 +218,17 @@ async fn scan_window(
     win_start: NaiveDate,
     win_end: NaiveDate,
     sum: &mut ScanSummary,
+    job: Option<&ProgressJob>,
 ) -> Result<(), String> {
+    let day_range = format!(
+        "{}–{}",
+        win_start.format("%d/%m/%Y"),
+        win_end.format("%d/%m/%Y")
+    );
     let mut state: Option<String> = None;
+    let mut page = 0usize;
     loop {
+        page += 1;
         let q = InvoiceQuery {
             direction: crate::hddt::InvoiceDirection::Purchase,
             kind,
@@ -201,7 +241,29 @@ async fn scan_window(
             ttxly: Some("-1".into()),
             ..Default::default()
         };
-        let list = client.query_invoices(token, &q).await?;
+        if let Some(j) = job {
+            j.step(format!(
+                "Đang lấy danh sách {} {} (trang {page})…",
+                kind_label(kind),
+                day_range
+            ));
+        }
+        let started = Instant::now();
+        let list = match client.query_invoices(token, &q).await {
+            Ok(v) => v,
+            Err(e) => {
+                if let Some(j) = job {
+                    j.log(format!(
+                        "✗ Danh sách {} {} trang {page} lỗi sau {}: {}",
+                        kind_label(kind),
+                        day_range,
+                        elapsed_label(started),
+                        brief_error(&e)
+                    ));
+                }
+                return Err(e);
+            }
+        };
         let rows = list.datas.len();
         for row in &list.datas {
             if upsert_invoice(pool, row, kind).await? {
@@ -209,6 +271,14 @@ async fn scan_window(
             } else {
                 sum.invoices_existing += 1;
             }
+        }
+        if let Some(j) = job {
+            j.log(format!(
+                "Danh sách {} {} trang {page}: {rows} HĐ — {}",
+                kind_label(kind),
+                day_range,
+                elapsed_label(started)
+            ));
         }
         state = list
             .state
@@ -237,6 +307,22 @@ pub(crate) async fn scan(
     to: &str,
     kinds: &[InvoiceKind],
 ) -> Result<ScanSummary, String> {
+    scan_with_progress(pool, client, token, from, to, kinds, None).await
+}
+
+/// Như [`scan`] nhưng ghi tiến độ/nhật ký vào hộp thoại của `job` (nếu có).
+///
+/// Việc chạy nền không có hộp thoại → `job = None`, không đụng tới ô tiến độ
+/// chung. Nhật ký ghi cả thời gian từng request để biết trang/hóa đơn nào lag.
+pub(crate) async fn scan_with_progress(
+    pool: &SqlitePool,
+    client: &HddtClient,
+    token: &str,
+    from: &str,
+    to: &str,
+    kinds: &[InvoiceKind],
+    job: Option<&ProgressJob>,
+) -> Result<ScanSummary, String> {
     // LƯU Ý: việc thử lại hóa đơn lỗi chi tiết được làm Ở DƯỚI (ngay trước khi
     // tải chi tiết), KHÔNG phải trước khi gọi danh sách. Nếu reset sớm mà lượt
     // quét chết vì lỗi mạng, hóa đơn bị bỏ trạng thái 'manual' + xoá detail_error
@@ -247,11 +333,24 @@ pub(crate) async fn scan(
     let today = chrono::Local::now().date_naive();
     let start_date = resolve_start(pool, from).await?;
     let end_date = resolve_end(to).await?;
+    if let Some(j) = job {
+        j.log(format!(
+            "Bắt đầu quét cổng HĐĐT: {} → {}",
+            start_date.format("%d/%m/%Y"),
+            end_date.format("%d/%m/%Y")
+        ));
+    }
     if start_date > end_date {
         // Mốc bắt đầu dùng HĐĐT được phép nằm TRONG TƯƠNG LAI (Cài đặt thông tin
         // HKD nhận bất kỳ ngày nào) — tới mốc đó mới có gì để quét, nên im lặng
         // trả về không ngày nào thay vì báo lỗi khoảng ngày.
         if start_date > today {
+            if let Some(j) = job {
+                j.log(format!(
+                    "Mốc bắt đầu {} ở tương lai — chưa có hóa đơn nào để quét",
+                    start_date.format("%d/%m/%Y")
+                ));
+            }
             return Ok(sum);
         }
         return Err(format!(
@@ -278,12 +377,32 @@ pub(crate) async fn scan(
             .filter(|d| !cached.contains(&d.format("%Y-%m-%d").to_string()))
             .collect();
         sum.days_cached += all_days.len() - missing.len();
+        if let Some(j) = job {
+            j.log(format!(
+                "{}: {} ngày cần quét · {} ngày đã có cache",
+                kind_label(*kind),
+                missing.len(),
+                all_days.len() - missing.len()
+            ));
+        }
 
         // Hôm nay: lấy để thấy hóa đơn vừa phát sinh, nhưng KHÔNG đánh dấu cache
         // để lượt quét sau vẫn lấy lại được.
         if end_date >= today {
-            scan_window(pool, client, token, *kind, today, today, &mut sum).await?;
+            if let Some(j) = job {
+                j.plan(1);
+                j.log(format!("Quét {} hôm nay (không cache)…", kind_label(*kind)));
+            }
+            let started = Instant::now();
+            scan_window(pool, client, token, *kind, today, today, &mut sum, job).await?;
             sum.days_today += 1;
+            if let Some(j) = job {
+                j.tick(format!(
+                    "Xong {} hôm nay — {}",
+                    kind_label(*kind),
+                    elapsed_label(started)
+                ));
+            }
         }
         if missing.is_empty() {
             continue;
@@ -304,10 +423,34 @@ pub(crate) async fn scan(
             }
             let win_end = missing[j];
             let days = (win_end - win_start).num_days() + 1;
-            scan_window(pool, client, token, *kind, win_start, win_end, &mut sum).await?;
+            if let Some(p) = job {
+                p.plan(1);
+                p.log(format!(
+                    "Quét {} {}–{} ({} ngày)…",
+                    kind_label(*kind),
+                    win_start.format("%d/%m/%Y"),
+                    win_end.format("%d/%m/%Y"),
+                    days
+                ));
+            }
+            let started = Instant::now();
+            scan_window(
+                pool, client, token, *kind, win_start, win_end, &mut sum, job,
+            )
+            .await?;
             // Đánh dấu ngày đã quét cho loại này (kể cả 0 hóa đơn).
             sum.days_scanned += days as usize;
             mark_days_scanned(pool, win_start, win_end, *kind).await?;
+            if let Some(p) = job {
+                p.tick(format!(
+                    "Xong {} {}–{} ({} ngày) — {}",
+                    kind_label(*kind),
+                    win_start.format("%d/%m/%Y"),
+                    win_end.format("%d/%m/%Y"),
+                    days,
+                    elapsed_label(started)
+                ));
+            }
             i = j + 1;
         }
     }
@@ -317,10 +460,28 @@ pub(crate) async fn scan(
     // Đặt Ở ĐÂY (sau khi danh sách đã gọi xong): lượt quét chết vì mạng ở trên
     // không được phép reset trạng thái hóa đơn.
     sum.details_retried = retry_failed_details(pool).await?;
+    if let Some(j) = job {
+        if sum.details_retried > 0 {
+            j.log(format!(
+                "Thử lại chi tiết {} hóa đơn lỗi từ lượt trước",
+                sum.details_retried
+            ));
+        }
+    }
 
     // Lấy chi tiết cho các hóa đơn chưa có (đủ dòng hàng mới tạo được phiếu).
     let pending = pending_without_detail(pool).await?;
-    for inv in pending {
+    let n = pending.len();
+    if let Some(j) = job {
+        j.plan(n);
+        if n == 0 {
+            j.log("Không có hóa đơn nào cần tải chi tiết");
+        } else {
+            j.log(format!("Cần tải chi tiết {n} hóa đơn"));
+        }
+    }
+    for (idx, inv) in pending.into_iter().enumerate() {
+        let inv_label = format!("{} {}", inv.khhdon, inv.shdon);
         if inv.khmshdon <= 0 {
             // Endpoint chi tiết bắt buộc khmshdon dạng số; thiếu thì không đoán.
             let msg = "Thiếu mã mẫu số (khmshdon) — cần quét lại từ cổng";
@@ -333,8 +494,23 @@ pub(crate) async fn scan(
             .await
             .map_err(|e| e.to_string())?;
             sum.details_failed += 1;
+            if let Some(j) = job {
+                j.tick(format!(
+                    "✗ Chi tiết {}/{} {inv_label}: thiếu mã mẫu số",
+                    idx + 1,
+                    n
+                ));
+            }
             continue;
         }
+        if let Some(j) = job {
+            j.step(format!(
+                "Đang tải chi tiết {}/{} — {inv_label}…",
+                idx + 1,
+                n
+            ));
+        }
+        let started = Instant::now();
         match client
             .invoice_detail(
                 token,
@@ -367,8 +543,17 @@ pub(crate) async fn scan(
                 .await
                 .map_err(|e| e.to_string())?;
                 sum.details_ok += 1;
+                if let Some(j) = job {
+                    j.tick(format!(
+                        "Chi tiết {}/{} {inv_label}: {lines} dòng — {}",
+                        idx + 1,
+                        n,
+                        elapsed_label(started)
+                    ));
+                }
             }
             Err(msg) => {
+                let note = brief_error(&msg);
                 sqlx::query!(
                     "UPDATE hddt_purchase_invoice SET detail_error = ? WHERE id = ?",
                     msg,
@@ -378,12 +563,26 @@ pub(crate) async fn scan(
                 .await
                 .map_err(|e| e.to_string())?;
                 sum.details_failed += 1;
+                if let Some(j) = job {
+                    j.tick(format!(
+                        "✗ Chi tiết {}/{} {inv_label}: {note} — {}",
+                        idx + 1,
+                        n,
+                        elapsed_label(started)
+                    ));
+                }
             }
         }
     }
 
     // Gán cờ cần người xử lý sau khi đã biết chi tiết.
     sum.need_manual = mark_manual_cases(pool).await?;
+    if let Some(j) = job {
+        j.log(format!(
+            "Quét xong: {} HĐ mới · {} chi tiết OK · {} lỗi · {} cần xử lý",
+            sum.invoices_new, sum.details_ok, sum.details_failed, sum.need_manual
+        ));
+    }
     Ok(sum)
 }
 

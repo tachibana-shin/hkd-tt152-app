@@ -59,6 +59,56 @@ pub(crate) fn begin(id: &str, label: &str) {
     });
 }
 
+/// Tay nắm của **một** việc cụ thể.
+///
+/// Việc chạy nền (tự quét cổng lúc mở app) không có hộp thoại tiến độ. Nếu nó
+/// gọi thẳng các hàm toàn cục thì log của nó có thể rơi vào hộp thoại đang mở
+/// của việc khác (vd xuất báo cáo kỳ thuế). Mọi thao tác qua tay nắm chỉ ghi
+/// khi `id` vẫn là việc hiện tại; việc không có hộp thoại truyền `None` và
+/// không đụng gì tới ô chung.
+#[derive(Clone)]
+pub(crate) struct ProgressJob {
+    id: String,
+}
+
+impl ProgressJob {
+    pub(crate) fn begin(id: &str, label: &str) -> Self {
+        begin(id, label);
+        Self { id: id.to_string() }
+    }
+
+    fn with_active(&self, f: impl FnOnce(&mut JobProgress)) {
+        with(|c| {
+            if let Some(j) = c.as_mut().filter(|j| j.id == self.id) {
+                f(j);
+            }
+        });
+    }
+
+    pub(crate) fn plan(&self, n: usize) {
+        self.with_active(|j| j.total += n);
+    }
+
+    pub(crate) fn step(&self, text: impl Into<String>) {
+        self.with_active(|j| j.step = text.into());
+    }
+
+    pub(crate) fn log(&self, line: impl Into<String>) {
+        self.with_active(|j| push(j, line.into()));
+    }
+
+    pub(crate) fn tick(&self, line: impl Into<String>) {
+        self.with_active(|j| {
+            j.done += 1;
+            push(j, line.into());
+        });
+    }
+
+    pub(crate) fn finish(&self, error: Option<String>) {
+        self.with_active(|j| finish_inner(j, error));
+    }
+}
+
 /// Cộng thêm số việc của chặng sắp chạy.
 ///
 /// Tiến độ = đã xong / tổng **đã biết**, mà tổng thì cộng dần theo từng chặng
@@ -125,14 +175,18 @@ pub(crate) fn advance_by(n: usize) {
 pub(crate) fn finish(error: Option<String>) {
     with(|c| {
         if let Some(j) = c.as_mut() {
-            j.finished = true;
-            match &error {
-                Some(e) => j.log.push(format!("✗ {e}")),
-                None => j.log.push(format!("✓ Hoàn tất — {} mục", j.done)),
-            }
-            j.error = error;
+            finish_inner(j, error);
         }
     });
+}
+
+fn finish_inner(j: &mut JobProgress, error: Option<String>) {
+    j.finished = true;
+    match &error {
+        Some(e) => j.log.push(format!("✗ {e}")),
+        None => j.log.push(format!("✓ Hoàn tất — {} mục", j.done)),
+    }
+    j.error = error;
 }
 
 /// Ảnh chụp để frontend đọc. Trả `None` nếu việc này đã bị thay bằng việc khác.
@@ -204,5 +258,15 @@ mod tests {
             "✗ hỏng",
             "lỗi phải nằm ở dòng cuối nhật ký để người dùng đọc thấy ngay"
         );
+
+        // Tay nắm của việc cũ không được ghi vào việc mới: việc chạy nền
+        // (không có hộp thoại) không được làm bẩn log của việc đang mở.
+        let old = ProgressJob::begin("job-c", "Việc nền");
+        let current = ProgressJob::begin("job-d", "Việc đang mở");
+        old.log("log của việc nền — không được xuất hiện");
+        current.log("dòng của việc đang mở");
+        let job = snapshot("job-d").expect("có việc");
+        assert_eq!(job.log, vec!["dòng của việc đang mở"]);
+        assert!(snapshot("job-c").is_none(), "việc cũ đã bị thay");
     }
 }

@@ -930,13 +930,16 @@ export const api = {
     return r as HddtInvoiceList;
   },
 
-  /** Đồng bộ HĐ nhập: quét cổng + cache theo ngày. `kinds` = "regular,cash-register". */
-  hddtSyncScan: async (args: { from?: string; to?: string; kinds?: string[] }) => {
+  /** Đồng bộ HĐ nhập: quét cổng + cache theo ngày. `kinds` = "regular,cash-register".
+   *  `jobId` chỉ có khi người dùng bấm tay — để hỏi nhật ký realtime; chạy nền
+   *  không truyền, tránh ghi nhầm vào hộp thoại của việc khác. */
+  hddtSyncScan: async (args: { from?: string; to?: string; kinds?: string[]; jobId?: string }) => {
     const r = JSON.parse(
       await call<string>("hddt_sync_scan", {
         from: args.from ?? null,
         to: args.to ?? null,
         kinds: (args.kinds ?? ["regular", "cash-register"]).join(","),
+        jobId: args.jobId ?? null,
       }),
     );
     return r as HddtSyncScanSummary;

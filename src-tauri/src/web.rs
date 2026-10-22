@@ -655,7 +655,8 @@ pub async fn api_invoke(
             body,
             from: Option<String>,
             to: Option<String>,
-            kinds: Option<String>
+            kinds: Option<String>,
+            job_id: Option<String>
         ),
         "hddt_uncache_day" => mx!(commands::hddt::hddt_uncache_day, body, day: String),
         "hddt_sync_preview" => mx!(

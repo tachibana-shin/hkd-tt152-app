@@ -24,9 +24,11 @@
 //!   * [`export_zip`] — nút "Tải ZIP XML" gộp nhiều hóa đơn để nộp/gửi.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use sqlx::SqlitePool;
 
+use crate::commands::progress::ProgressJob;
 use crate::hddt::{HddtClient, InvoiceDirection, InvoiceKind};
 
 /// Khóa danh tính 1 hóa đơn — đúng 4 tham số bắt buộc của endpoint export-xml
@@ -432,7 +434,19 @@ pub(crate) async fn fill_missing_after_scan(
     client: &HddtClient,
     token: &str,
 ) -> FillOutcome {
-    fill_missing(pool, dir, client, token).await
+    fill_missing(pool, dir, client, token, None).await
+}
+
+/// Như [`fill_missing_after_scan`] nhưng ghi từng file XML vào nhật ký của
+/// `job` — lượt quét cổng có hộp thoại tiến độ.
+pub(crate) async fn fill_missing_after_scan_with_progress(
+    pool: &SqlitePool,
+    dir: &Path,
+    client: &HddtClient,
+    token: &str,
+    job: Option<&ProgressJob>,
+) -> FillOutcome {
+    fill_missing(pool, dir, client, token, job).await
 }
 
 /// Tự động tải XML cho hóa đơn vừa nhập kho — chạy **sau** khi phiếu đã tạo
@@ -446,7 +460,7 @@ pub(crate) async fn fill_missing_before_import(
 ) -> FillOutcome {
     // Ids rỗng = nhập tất cả → không lọc (đúng ngữ nghĩa của lệnh import).
     if ids.is_empty() {
-        return fill_missing(pool, dir, client, token).await;
+        return fill_missing(pool, dir, client, token, None).await;
     }
     let mut out = FillOutcome::default();
     for id in ids {
@@ -473,19 +487,65 @@ async fn fill_missing(
     dir: &Path,
     client: &HddtClient,
     token: &str,
+    job: Option<&ProgressJob>,
 ) -> FillOutcome {
     let mut out = FillOutcome::default();
+    if let Some(j) = job {
+        j.log("Dò hóa đơn còn thiếu file XML…");
+    }
     let rows = match pending_rows(pool).await {
         Ok(r) => r,
         Err(e) => {
+            if let Some(j) = job {
+                j.log(format!("✗ Không lấy được danh sách XML cần tải: {e}"));
+            }
             out.fail(e);
             return out;
         }
     };
-    for row in rows {
-        run_one(pool, dir, client, token, &row, &mut out).await;
+    let n = rows.len();
+    if let Some(j) = job {
+        j.plan(n);
+        if n == 0 {
+            j.log("Không còn hóa đơn nào thiếu file XML");
+        } else {
+            j.log(format!("Cần lưu XML cho {n} hóa đơn"));
+        }
+    }
+    for (idx, row) in rows.iter().enumerate() {
+        let label = format!("{} {}", row.khhdon, row.shdon);
+        if let Some(j) = job {
+            // Dòng "đang làm" để biết file nào đang chờ cổng trả lời.
+            j.step(format!("Đang tải XML {}/{} — {label}…", idx + 1, n));
+        }
+        let started = Instant::now();
+        let result = run_one(pool, dir, client, token, row, &mut out).await;
+        if let Some(j) = job {
+            j.tick(format!(
+                "XML {}/{} {label}: {result} — {}",
+                idx + 1,
+                n,
+                elapsed_label(started)
+            ));
+        }
+    }
+    if let Some(j) = job {
+        j.log(format!(
+            "XML xong: tải {} file · bỏ qua {} · lỗi {}",
+            out.saved, out.skipped, out.failed
+        ));
     }
     out
+}
+
+/// Thời gian một file XML đã chạy — cùng định dạng với nhật ký quét danh sách.
+fn elapsed_label(started: Instant) -> String {
+    let ms = started.elapsed().as_millis();
+    if ms < 1_000 {
+        format!("{ms} ms")
+    } else {
+        format!("{:.1} s", ms as f64 / 1_000.0)
+    }
 }
 
 /// Tải XML cho **một** dòng, cập nhật tổng kết vào `out` và trả mô tả ngắn
