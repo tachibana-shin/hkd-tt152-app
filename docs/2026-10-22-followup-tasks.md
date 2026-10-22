@@ -4,7 +4,7 @@ Từ cuộc hội thoại: (1) nút tạo mới mặt hàng trong popup hint ở
 lưu mật khẩu ra bảng riêng + chặn thử lại mật khẩu đã sai để không khóa tài khoản; (3)
 console.warn ở dev mode. Làm dần, tick khi xong.
 
-## 1. Nút "Tạo nhanh mặt hàng" trong popup dropdown của tab Định mức vật tư (F4) — ⬜
+## 1. Nút "Tạo nhanh mặt hàng" trong popup dropdown của tab Định mức vật tư (F4) — ✅
 
 Hiện trạng: tab **Products.vue → Định mức vật tư** có 2 ô `ProductSelect` (Thành phẩm
 `bom-fg` w-72, Vật tư từng dòng) — chưa bật `allowCreate` nên gõ tên nhóm hàng mới không
@@ -22,7 +22,7 @@ Cách làm:
 Tham khảo: `ProductSelect` có sẵn dòng "Tạo nhanh" (`allowCreate` + `create` event,
 footer overlay); `LineItemsEditor` dùng đúng pattern này (`onQuickCreate` + `ProductDialog quick`).
 
-## 2. HĐĐT: nhật ký mật khẩu + chống khóa tài khoản — ⬜
+## 2. HĐĐT: nhật ký mật khẩu + chống khóa tài khoản — ✅
 
 Bối cảnh: mật khẩu HĐĐT hiện lưu 1 giá trị trong `app_setting` (`hddt_password`);
 đổi mật khẩu tự động thì ghi đè — nếu người dùng lỡ lưu sai mật khẩu (hoặc đổi xong
@@ -79,7 +79,7 @@ File đụng tới: `src-tauri/migrations/*`, `src-tauri/src/commands/hddt.rs`,
 `src-tauri/src/hddt/client.rs` (phân loại message), `src/views/Hddt.vue`,
 `src/db/index.ts`, e2e.
 
-## 3. Console.warn dưới dev mode — ⬜
+## 3. Console.warn dưới dev mode — ✅
 
 Gặp 2 loại trong log trình duyệt (e2e bắt được, dev mode hiện trên console):
 
