@@ -115,38 +115,42 @@ type PreviewLine = {
 
 const preview = computed<PreviewLine[]>(() => {
   const qty = form.quantity > 0 ? form.quantity : 0;
-  return catalog.boms
-    .filter((b) => b.product_code === form.product_code)
-    .map((b) => {
-      // Làm tròn 6 chữ số — nhân float hay dính nhiễu, đúng cách backend tính.
-      const need = Math.round(b.quantity * qty * 1e6) / 1e6;
-      const fifos = stockLots.value
-        .filter(
-          (l) => l.product_code === b.material_code && l.warehouse_code === form.warehouse_code,
-        )
-        .sort((a, c) => a.received_at.localeCompare(c.received_at) || a.id - c.id);
-      const onHand = fifos.reduce((s, l) => s + l.quantity, 0);
-      // Trừ FIFO đúng như backend khi lưu để giá thành ước tính không lệch.
-      let left = need;
-      let cost = 0;
-      for (const lot of fifos) {
-        if (left <= 0) break;
-        const take = Math.min(left, lot.quantity);
-        cost += take * lot.unit_cost;
-        left -= take;
-      }
-      return {
-        code: b.material_code,
-        name: b.material_name,
-        unit: b.material_unit,
-        perUnit: b.quantity,
-        need,
-        onHand,
-        shortage: Math.max(0, Math.round((need - onHand) * 1e6) / 1e6),
-        unitCost: need > 0 ? cost / need : 0,
-        cost,
-      };
-    });
+  return (
+    catalog.boms
+      // Dịch vụ không có tồn kho và backend cũng bỏ qua khi tự xuất NVL — không
+      // đưa vào bảng thiếu tồn/giá thành lô sản xuất.
+      .filter((b) => b.product_code === form.product_code && !b.material_is_service)
+      .map((b) => {
+        // Làm tròn 6 chữ số — nhân float hay dính nhiễu, đúng cách backend tính.
+        const need = Math.round(b.quantity * qty * 1e6) / 1e6;
+        const fifos = stockLots.value
+          .filter(
+            (l) => l.product_code === b.material_code && l.warehouse_code === form.warehouse_code,
+          )
+          .sort((a, c) => a.received_at.localeCompare(c.received_at) || a.id - c.id);
+        const onHand = fifos.reduce((s, l) => s + l.quantity, 0);
+        // Trừ FIFO đúng như backend khi lưu để giá thành ước tính không lệch.
+        let left = need;
+        let cost = 0;
+        for (const lot of fifos) {
+          if (left <= 0) break;
+          const take = Math.min(left, lot.quantity);
+          cost += take * lot.unit_cost;
+          left -= take;
+        }
+        return {
+          code: b.material_code,
+          name: b.material_name,
+          unit: b.material_unit,
+          perUnit: b.quantity,
+          need,
+          onHand,
+          shortage: Math.max(0, Math.round((need - onHand) * 1e6) / 1e6),
+          unitCost: need > 0 ? cost / need : 0,
+          cost,
+        };
+      })
+  );
 });
 
 const totalCost = computed(() => preview.value.reduce((s, l) => s + l.cost, 0));

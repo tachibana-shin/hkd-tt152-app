@@ -7,11 +7,14 @@
  */
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/stores/auth";
+import { useBusinessStore } from "@/stores/business";
 import { useCatalogStore } from "@/stores/catalog";
 import { useInvoiceStore } from "@/stores/invoice";
 import LineItemsEditor from "@/components/LineItemsEditor.vue";
 import ProductAliasDialog from "@/components/ProductAliasDialog.vue";
 import ProductionLotDialog from "@/components/ProductionLotDialog.vue";
+import { buildQuoteXlsx } from "@/utils/quoteExcel";
+import { downloadBlob } from "@/utils/download";
 import type { Invoice } from "@/types";
 import { fmtInt as fmt, parseIsoDate, toIsoDate } from "@/utils/format";
 
@@ -20,6 +23,7 @@ const props = defineProps<{ editInvoice?: Invoice | null }>();
 const emit = defineEmits<{ done: [] }>();
 
 const auth = useAuthStore();
+const business = useBusinessStore();
 const catalog = useCatalogStore();
 const invoiceStore = useInvoiceStore();
 const confirm = useConfirm();
@@ -28,6 +32,8 @@ const { invoices } = storeToRefs(invoiceStore);
 const toast = useToast();
 
 const saving = ref(false);
+/** Đang dựng file báo giá — khóa nút để không tải trùng. */
+const quoteExporting = ref(false);
 const editingId = ref<number | null>(null);
 const form = reactive({
   number: "",
@@ -266,6 +272,92 @@ watch(
   { immediate: true },
 );
 
+/**
+ * Xuất Excel báo giá từ đúng các dòng đang nhập trên form (kể cả sửa đổi chưa
+ * lưu): gói sửa chữa có nhân công + vật tư vẫn ra bảng giá gửi khách ngay.
+ * Đơn giá/chiết khấu/thành tiền lấy y như hóa đơn nháp, không đọc lại từ DB.
+ */
+async function exportQuote() {
+  if (quoteExporting.value) return;
+  const rows = form.items.filter((it) => it.product_code);
+  if (!rows.length) {
+    toast.add({
+      severity: "warn",
+      summary: "Chưa có mặt hàng",
+      detail: "Chọn ít nhất 1 hàng hóa/dịch vụ trước khi xuất báo giá.",
+    });
+    return;
+  }
+  if (!form.customer.trim()) {
+    toast.add({
+      severity: "warn",
+      summary: "Thiếu khách hàng",
+      detail: "Nhập khách hàng để báo giá đúng người nhận.",
+    });
+    return;
+  }
+
+  quoteExporting.value = true;
+  try {
+    // Thông tin hộ kinh doanh ở đầu báo giá — thiếu cũng vẫn xuất được phần bảng.
+    if (!business.config) {
+      try {
+        await business.load();
+      } catch {
+        // Bỏ qua: báo giá vẫn dùng được với các dòng hàng bên dưới.
+      }
+    }
+    const seller = business.config;
+    const blob = await buildQuoteXlsx({
+      quoteNumber: form.number,
+      quoteDate: form.date,
+      seller: seller
+        ? {
+            name: seller.name,
+            taxCode: seller.tax_code,
+            address: seller.location || seller.address,
+            phone: seller.phone,
+          }
+        : undefined,
+      customer: form.customer,
+      customerTaxCode: form.customer_tax_code,
+      lines: rows.map((it) => {
+        const product = catalog.productByCode(it.product_code);
+        return {
+          code: it.product_code,
+          name: it.line_name || product?.name || it.product_code,
+          unit: product?.unit ?? "",
+          quantity: it.quantity || 0,
+          price: it.unit_price || 0,
+          discount: it.discount ?? 0,
+        };
+      }),
+    });
+    const total = rows.reduce(
+      (sum, it) => sum + (it.quantity || 0) * (it.unit_price || 0) - (it.discount ?? 0),
+      0,
+    );
+    const date = toIsoDate(form.date).replace(/-/g, "");
+    const safeNo = (form.number || "nhap").replace(/[^\w.-]+/g, "-");
+    const saved = await downloadBlob(`bao-gia-${safeNo}-${date}.xlsx`, blob);
+    if (saved) {
+      toast.add({
+        severity: "success",
+        summary: "Đã xuất Excel báo giá",
+        detail: `${form.customer} — ${rows.length} dòng • Tổng ${fmt(total)} đ`,
+      });
+    }
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không xuất được Excel báo giá",
+      detail: String(e),
+    });
+  } finally {
+    quoteExporting.value = false;
+  }
+}
+
 async function save() {
   // Chốt bấm nhiều lần: lần gọi sau bỏ qua, nếu không sẽ lập ra nhiều hóa đơn
   // trùng số (cùng đọc một số tự sinh ở form).
@@ -427,6 +519,17 @@ async function persist(rows: typeof form.items) {
       @picked="onLinePicked"
     >
       <template #actions>
+        <Button
+          label="Xuất Excel báo giá"
+          icon="pi pi-file-excel"
+          size="small"
+          text
+          :loading="quoteExporting"
+          :disabled="!form.items.some((it) => it.product_code)"
+          data-testid="header-export-quote"
+          v-tooltip="'Xuất báo giá từ các dòng đang nhập — kể cả thay đổi chưa lưu'"
+          @click="exportQuote"
+        />
         <Button
           label="Thêm tên khác"
           icon="pi pi-tag"

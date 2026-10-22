@@ -81,8 +81,12 @@ export const useCatalogStore = defineStore("catalog", () => {
     return bomTask;
   }
 
-  /** Thành phẩm có định mức (hàng chế tạo)? false nếu chưa nạp hoặc không có. */
-  const hasBom = (productCode: string) => boms.value.some((b) => b.product_code === productCode);
+  /**
+   * Thành phẩm có định mức (hàng chế tạo)? false nếu chưa nạp hoặc chỉ có dòng
+   * dịch vụ — dịch vụ không có tồn kho nên không tạo lô sản xuất được.
+   */
+  const hasBom = (productCode: string) =>
+    boms.value.some((b) => b.product_code === productCode && !b.material_is_service);
 
   async function loadAll() {
     loading.value = true;

@@ -7,7 +7,9 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useSettingsStore } from "@/stores/settings";
 import ProductDialog from "@/components/ProductDialog.vue";
 import type { BomItem, Product } from "@/types";
-import { fmtInt as fmt, fmtVnd } from "@/utils/format";
+import { buildBomXlsx } from "@/utils/bomExcel";
+import { downloadBlob } from "@/utils/download";
+import { fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
 const catalog = useCatalogStore();
@@ -208,10 +210,12 @@ interface BomBlock {
   /** Mã thành phẩm lúc nạp từ DB — rỗng = bảng mới chưa từng lưu. */
   original_code: string;
   product_code: string;
-  rows: { material_code: string; quantity: number }[];
+  rows: { material_code: string; quantity: number; unit_price: number }[];
 }
 const bomBlocks = ref<BomBlock[]>([]);
 const bomSaving = ref(false);
+/** Khóa bảng đang xuất Excel (để chỉ xoay nút của đúng bảng đó). */
+const bomExporting = ref<number | null>(null);
 
 let bomBlockSeq = 0;
 /** Tạo bảng mới (khóa tăng dần theo object, khác nhau tuyệt đối). */
@@ -222,6 +226,29 @@ function makeBlock(originalCode: string, code: string, rows: BomBlock["rows"] = 
 /** Tên thành phẩm để báo lỗi dễ đọc (fallback về mã khi không có trong danh mục). */
 function fgName(code: string): string {
   return catalog.productByCode(code)?.name || code;
+}
+
+/** Dòng định mức thực sự có hàng (bỏ dòng trống tự mở để nhập tiếp). */
+function bomRows(blk: BomBlock) {
+  return blk.rows.filter((r) => r.material_code.trim());
+}
+
+/** Đơn giá đã khai trên dòng (VND) — sửa được, không phụ thuộc Giá bán danh mục. */
+function bomPrice(row: BomBlock["rows"][number]): number {
+  const price = Number(row.unit_price);
+  return Number.isFinite(price) && price >= 0 ? price : 0;
+}
+
+function bomLineTotal(row: BomBlock["rows"][number]): number {
+  return (Number(row.quantity) || 0) * bomPrice(row);
+}
+
+function bomBlockTotal(blk: BomBlock): number {
+  return bomRows(blk).reduce((sum, row) => sum + bomLineTotal(row), 0);
+}
+
+function bomIsService(code: string): boolean {
+  return catalog.productByCode(code)?.is_service === true;
 }
 
 /**
@@ -236,7 +263,11 @@ function groupBoms() {
   const rowsByCode = new Map<string, BomBlock["rows"]>();
   for (const b of boms.value) {
     const rows = rowsByCode.get(b.product_code) ?? [];
-    rows.push({ material_code: b.material_code, quantity: b.quantity });
+    rows.push({
+      material_code: b.material_code,
+      quantity: b.quantity,
+      unit_price: b.unit_price,
+    });
     rowsByCode.set(b.product_code, rows);
   }
 
@@ -325,10 +356,21 @@ function onBomQuickSaved(code: string) {
   bomQuickTarget.value = null;
   if (!t) return;
   if (t.row) {
-    t.row.material_code = code;
+    setBomMaterial(t.row, code);
   } else {
     setBlockFg(t.blk, code);
   }
+}
+
+/**
+ * Đổi vật tư/dịch vụ trên dòng → lấy Giá bán hiện tại làm đơn giá gợi ý.
+ * Người dùng sửa lại đơn giá ngay trên dòng nếu gói sửa chữa có giá thỏa thuận
+ * riêng; đổi mã hàng thì đơn giá cũ không còn ý nghĩa nên phải tính lại.
+ */
+function setBomMaterial(row: BomBlock["rows"][number], code: string) {
+  if (row.material_code === code) return;
+  row.material_code = code;
+  row.unit_price = catalog.productByCode(code)?.sale_price ?? 0;
 }
 
 /**
@@ -351,7 +393,8 @@ watch(
       // Bảng chưa chọn thành phẩm thì chưa khai vật tư (tránh nhập trước rồi lưu bị chặn).
       if (!blk.product_code) continue;
       const last = blk.rows[blk.rows.length - 1];
-      if (!last || last.material_code) blk.rows.push({ material_code: "", quantity: 1 });
+      if (!last || last.material_code)
+        blk.rows.push({ material_code: "", quantity: 1, unit_price: 0 });
     }
   },
   { immediate: true },
@@ -369,10 +412,7 @@ watch(
  */
 async function saveAllBoms() {
   const blocks = bomBlocks.value;
-  /** Dòng còn mã vật tư (dòng người dùng thêm dở trống được bỏ qua). */
-  const rowsOf = (b: BomBlock) => b.rows.filter((r) => r.material_code.trim());
-
-  const noFg = blocks.find((b) => !b.product_code && rowsOf(b).length > 0);
+  const noFg = blocks.find((b) => !b.product_code && bomRows(b).length > 0);
   if (noFg) {
     toast.add({
       severity: "warn",
@@ -393,7 +433,7 @@ async function saveAllBoms() {
     return;
   }
 
-  const bad = blocks.find((b) => rowsOf(b).some((r) => !r.quantity || r.quantity <= 0));
+  const bad = blocks.find((b) => bomRows(b).some((r) => !r.quantity || r.quantity <= 0));
   if (bad) {
     toast.add({
       severity: "warn",
@@ -403,7 +443,9 @@ async function saveAllBoms() {
     return;
   }
 
-  const targets = blocks.filter((b) => b.product_code && (rowsOf(b).length > 0 || b.original_code));
+  const targets = blocks.filter(
+    (b) => b.product_code && (bomRows(b).length > 0 || b.original_code),
+  );
   if (!targets.length) {
     toast.add({
       severity: "warn",
@@ -419,9 +461,10 @@ async function saveAllBoms() {
   const removed: string[] = [];
   try {
     for (const b of targets) {
-      const rows = rowsOf(b).map((r) => ({
+      const rows = bomRows(b).map((r) => ({
         material_code: r.material_code.trim(),
         quantity: r.quantity,
+        unit_price: bomPrice(r),
       }));
       try {
         // Ghi định mức của bảng này (dòng rỗng = xóa định mức của thành phẩm).
@@ -445,7 +488,7 @@ async function saveAllBoms() {
     boms.value = await api.getProductBoms();
     groupBoms();
     if (!failed) {
-      const lineCount = targets.reduce((n, b) => n + rowsOf(b).length, 0);
+      const lineCount = targets.reduce((n, b) => n + bomRows(b).length, 0);
       toast.add({
         severity: "success",
         summary: "Đã lưu định mức",
@@ -457,6 +500,50 @@ async function saveAllBoms() {
     }
   } finally {
     bomSaving.value = false;
+  }
+}
+
+/**
+ * Xuất Excel MỘT bảng định mức — đơn giá lấy theo đơn giá đã khai trên dòng,
+ * thành tiền = số lượng × đơn giá. Dùng để gửi khách/in kèm hợp đồng.
+ */
+async function exportBom(blk: BomBlock) {
+  const rows = bomRows(blk);
+  if (!blk.product_code || !rows.length) return;
+  bomExporting.value = blk.key;
+  try {
+    const blob = await buildBomXlsx({
+      productCode: blk.product_code,
+      productName: fgName(blk.product_code),
+      lines: rows.map((row) => {
+        const material = catalog.productByCode(row.material_code);
+        return {
+          code: row.material_code,
+          name: material?.name ?? row.material_code,
+          unit: material?.unit ?? "",
+          quantity: row.quantity || 0,
+          price: bomPrice(row),
+        };
+      }),
+    });
+    const date = toIsoDate(new Date()).replace(/-/g, "");
+    const safeCode = blk.product_code.replace(/[^\w.-]+/g, "-");
+    const saved = await downloadBlob(`dinh-muc-${safeCode}-${date}.xlsx`, blob);
+    if (saved) {
+      toast.add({
+        severity: "success",
+        summary: "Đã xuất Excel định mức",
+        detail: `${fgName(blk.product_code)} — ${rows.length} dòng`,
+      });
+    }
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không xuất được Excel định mức",
+      detail: String(e),
+    });
+  } finally {
+    bomExporting.value = null;
   }
 }
 
@@ -744,11 +831,16 @@ useKeepAliveRefresh(reload);
             <!-- ĐỊNH MỨC VẬT TƯ (F4) -->
             <TabPanel value="bom">
               <p class="mb-3 text-xs text-gray-500">
-                Khai <b>1 thành phẩm cần bao nhiêu vật tư</b> — mỗi thành phẩm 1 bảng, muốn khai
-                thêm SP khác thì bấm <b>Thêm định mức</b>. Khi lưu phiếu nhập kho loại
-                <b>Tự sản xuất / gia công</b> và bật ô "Tự xuất NVL theo định mức", app tự tính số
-                NVL = định mức × sản lượng, tự trừ tồn FIFO và tự sinh phiếu xuất NVL (Nợ 154 / Có
-                152) ngay trong lúc lưu phiếu nhập. Xóa hết dòng của một bảng rồi bấm
+                Khai <b>1 thành phẩm cần bao nhiêu vật tư hoặc dịch vụ</b> — mỗi thành phẩm 1 bảng,
+                muốn khai thêm SP khác thì bấm <b>Thêm định mức</b>. Dịch vụ (nhân công, gia công
+                ngoài…) khai được nhưng không trừ tồn kho. Đơn giá lấy mặc định theo Giá bán trong
+                danh mục và <b>sửa trực tiếp được trên từng dòng</b> — phù hợp gói sửa chữa có nhân
+                công, vật tư với giá thỏa thuận riêng. <b>Thành tiền</b> = SL × Đơn giá, tổng tiền
+                gói ở cuối bảng. Khi lưu phiếu nhập kho loại <b>Tự sản xuất / gia công</b> và bật ô
+                "Tự xuất NVL theo định mức", app tự tính số NVL = định mức × sản lượng, tự trừ tồn
+                FIFO và tự sinh phiếu xuất NVL (Nợ 154 / Có 152) ngay trong lúc lưu phiếu nhập; dòng
+                dịch vụ được bỏ qua. Bấm <b>Xuất Excel</b> ở từng bảng để tải bảng có đơn giá +
+                thành tiền làm hợp đồng. Xóa hết dòng của một bảng rồi bấm
                 <b>Lưu tất cả định mức</b> là xóa định mức của SP đó.
               </p>
 
@@ -813,6 +905,18 @@ useKeepAliveRefresh(reload);
                         @click="bomBlocks.splice(bi, 1)"
                       />
                     </div>
+                    <Button
+                      data-testid="bom-export"
+                      label="Xuất Excel"
+                      icon="pi pi-file-excel"
+                      severity="secondary"
+                      outlined
+                      size="small"
+                      :loading="bomExporting === blk.key"
+                      :disabled="!blk.product_code || !bomRows(blk).length"
+                      v-tooltip.top="'Xuất bảng định mức kèm đơn giá, thành tiền để làm hợp đồng'"
+                      @click="exportBom(blk)"
+                    />
                     <!-- Không có nút "Thêm dòng": chọn thành phẩm là tự mở dòng
                          trống, điền xong dòng cuối lại tự mở dòng kế (pre-input). -->
                   </div>
@@ -830,8 +934,8 @@ useKeepAliveRefresh(reload);
                           icon="pi pi-list-check"
                           :text="
                             blk.product_code
-                              ? 'Bảng này chưa có dòng vật tư nào — dòng trống sẽ tự mở lại khi cần.'
-                              : 'Chọn thành phẩm cho bảng này — dòng vật tư trống sẽ tự mở ra.'
+                              ? 'Bảng này chưa có dòng vật tư/dịch vụ nào — dòng trống sẽ tự mở lại khi cần.'
+                              : 'Chọn thành phẩm cho bảng này — dòng vật tư/dịch vụ trống sẽ tự mở ra.'
                           "
                         />
                       </template>
@@ -841,7 +945,7 @@ useKeepAliveRefresh(reload);
                             :model-value="blk.rows[index].material_code"
                             size="small"
                             :allow-create="auth.canStock"
-                            @update:model-value="blk.rows[index].material_code = $event"
+                            @update:model-value="setBomMaterial(blk.rows[index], $event)"
                             @create="onBomQuickCreate(blk, blk.rows[index], $event)"
                           />
                         </template>
@@ -856,6 +960,13 @@ useKeepAliveRefresh(reload);
                       <Column header="Tồn hiện tại" style="width: 130px">
                         <template #body="{ index }">
                           <span
+                            v-if="bomIsService(blk.rows[index].material_code)"
+                            class="text-xs text-gray-400"
+                          >
+                            Dịch vụ
+                          </span>
+                          <span
+                            v-else
                             :class="
                               materialOnhand(blk.rows[index].material_code) > 0
                                 ? 'text-gray-600'
@@ -879,6 +990,34 @@ useKeepAliveRefresh(reload);
                           />
                         </template>
                       </Column>
+                      <Column style="width: 150px">
+                        <template #header>
+                          <span class="block text-right">Đơn giá</span>
+                        </template>
+                        <template #body="{ index }">
+                          <InputNumber
+                            v-model="blk.rows[index].unit_price"
+                            :min="0"
+                            :max-fraction-digits="0"
+                            mode="currency"
+                            currency="VND"
+                            locale="vi-VN"
+                            size="small"
+                            class="w-full"
+                            :disabled="!auth.canStock"
+                          />
+                        </template>
+                      </Column>
+                      <Column style="width: 150px">
+                        <template #header>
+                          <span class="block text-right">Thành tiền</span>
+                        </template>
+                        <template #body="{ index }">
+                          <span class="block text-right font-medium tabular-nums text-gray-700">
+                            {{ fmtVnd(bomLineTotal(blk.rows[index])) }}
+                          </span>
+                        </template>
+                      </Column>
                       <Column v-if="auth.canStock" header="" style="width: 60px">
                         <template #body="{ index }">
                           <Button
@@ -892,6 +1031,16 @@ useKeepAliveRefresh(reload);
                         </template>
                       </Column>
                     </DataTable>
+                    <div
+                      v-if="bomRows(blk).length"
+                      class="mt-2 flex items-center justify-end gap-2 text-sm"
+                      data-testid="bom-total"
+                    >
+                      <span class="text-gray-500">Tổng tiền gói:</span>
+                      <span class="font-semibold tabular-nums text-gray-800">
+                        {{ fmtVnd(bomBlockTotal(blk)) }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>

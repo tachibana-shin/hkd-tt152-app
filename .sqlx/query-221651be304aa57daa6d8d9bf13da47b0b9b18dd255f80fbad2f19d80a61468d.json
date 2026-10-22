@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product SET sale_price = 20000 WHERE code = 'NVL1'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "221651be304aa57daa6d8d9bf13da47b0b9b18dd255f80fbad2f19d80a61468d"
+}

@@ -116,10 +116,12 @@ async fn issue_materials_by_bom(
         }
         let product_id = resolve_product(tx, &item.product_code).await?.id;
         let rows = sqlx::query!(
+            // Dịch vụ (nhân công…) vẫn nằm trong định mức để báo giá/hợp đồng
+            // nhưng KHÔNG có tồn kho → bỏ qua khi tự xuất NVL.
             "SELECT b.material_product_id, m.code, m.name, b.quantity
                FROM product_bom_item b
                JOIN product m ON m.id = b.material_product_id
-              WHERE b.product_id = ?",
+              WHERE b.product_id = ? AND m.is_service = 0",
             product_id
         )
         .fetch_all(&mut **tx)
@@ -4516,7 +4518,24 @@ mod tests {
     #[tokio::test]
     async fn pnk_san_xuat_tu_sinh_phieu_xuat_nvl_theo_dinh_muc() {
         let pool = test_pool().await;
-        seed_bom(&pool, 100.0).await;
+        let (tp, _nvl) = seed_bom(&pool, 100.0).await;
+
+        // Dịch vụ trong định mức (nhân công) không có tồn kho: vẫn lưu được
+        // nhưng khi tự xuất NVL phải bỏ qua, không làm hỏng phiếu nhập.
+        let svc = seed_product(&pool, "DV1", "Nhân công", 0.0).await;
+        sqlx::query!("UPDATE product SET is_service = 1 WHERE id = ?", svc)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query!(
+            "INSERT INTO product_bom_item (product_id, material_product_id, quantity)
+             VALUES (?, ?, 3.0)",
+            tp,
+            svc
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let r = save_inbound_core(
             &pool,
@@ -4563,6 +4582,23 @@ mod tests {
         assert_eq!(px.amount, 100_000.0); // 20 x 5.000 (giá vốn FIFO)
         assert_eq!(px.note, "Theo PNK-BOM");
         assert!(px.description.contains("PNK-BOM"), "{}", px.description);
+        // Chỉ vật tư thật sinh bút toán xuất kho; dòng dịch vụ bị bỏ qua.
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PX'"
+            )
+            .await,
+            1
+        );
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM journal_entry WHERE entry_type = 'PX' AND product_code = 'DV1'"
+            )
+            .await,
+            0
+        );
 
         // Tồn NVL: 100 → 80.
         assert_eq!(

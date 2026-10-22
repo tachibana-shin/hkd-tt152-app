@@ -110,6 +110,10 @@ pub(crate) struct BomRow {
     pub(crate) material_code: String,
     pub(crate) material_name: String,
     pub(crate) material_unit: String,
+    /// Đơn giá đã khai trên dòng định mức — dùng cho bảng và file Excel hợp đồng.
+    pub(crate) unit_price: f64,
+    /// Dịch vụ không theo dõi tồn kho, không tự xuất NVL khi sản xuất.
+    pub(crate) material_is_service: bool,
     pub(crate) quantity: f64,
 }
 
@@ -387,6 +391,10 @@ pub(crate) struct InboundItemInput {
 pub(crate) struct BomItemInput {
     pub(crate) material_code: String,
     pub(crate) quantity: f64,
+    /// Đơn giá khai cho dòng định mức. Bỏ trống = lấy Giá bán hiện tại của
+    /// vật tư/dịch vụ (giữ tương thích với các client cũ và lần lưu đầu tiên).
+    #[serde(default)]
+    pub(crate) unit_price: Option<f64>,
 }
 
 /// Một mặt hàng từ file Excel nhập kho (popup "Nhập hàng từ Excel"): chỉ tạo

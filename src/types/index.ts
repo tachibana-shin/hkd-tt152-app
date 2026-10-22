@@ -26,6 +26,10 @@ export interface BomItem {
   material_code: string;
   material_name: string;
   material_unit: string;
+  /** Đơn giá đã khai trên dòng định mức (VND) — dùng cho bảng và file hợp đồng. */
+  unit_price: number;
+  /** Dịch vụ không theo dõi tồn kho, không tự xuất NVL khi sản xuất. */
+  material_is_service: boolean;
   quantity: number;
 }
 

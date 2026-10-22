@@ -639,7 +639,8 @@ pub(crate) async fn get_product_boms(state: State<'_, AppState>) -> Result<Strin
         BomRow,
         "SELECT p.code AS product_code, p.name AS product_name,
                 m.code AS material_code, m.name AS material_name, m.unit AS material_unit,
-                b.quantity
+                m.is_service AS \"material_is_service: bool\",
+                b.quantity, b.unit_price
            FROM product_bom_item b
            JOIN product p ON p.id = b.product_id
            JOIN product m ON m.id = b.material_product_id
@@ -653,8 +654,9 @@ pub(crate) async fn get_product_boms(state: State<'_, AppState>) -> Result<Strin
 
 /// Lưu định mức vật tư của 1 sản phẩm — thay TOÀN BỘ dòng cũ (rỗng = xóa định mức).
 ///
-/// Validate: thành phẩm và NVL phải là hàng hóa (không phải dịch vụ), số lượng
-/// > 0, không tự tham (SP làm NVL của chính mình), không trùng NVL.
+/// Validate: thành phẩm phải là hàng hóa; NVL có thể là hàng hóa hoặc dịch vụ
+/// (nhân công, gia công ngoài…), số lượng > 0, không tự tham (SP làm NVL của
+/// chính mình), không trùng NVL.
 async fn save_product_bom_core(
     pool: &SqlitePool,
     product_code: &str,
@@ -677,7 +679,7 @@ async fn save_product_bom_core(
     }
 
     // Resolve + validate từng dòng trước khi ghi (báo hết lỗi cho người dùng).
-    let mut resolved: Vec<(i64, f64)> = Vec::new();
+    let mut resolved: Vec<(i64, f64, f64)> = Vec::new();
     for item in items {
         let material_code = item.material_code.trim().to_string();
         if material_code.is_empty() {
@@ -689,7 +691,7 @@ async fn save_product_bom_core(
             ));
         }
         let material = sqlx::query!(
-            "SELECT id as \"id!\", is_service as \"is_service: bool\" FROM product WHERE code = ?",
+            "SELECT id as \"id!\", sale_price FROM product WHERE code = ?",
             material_code
         )
         .fetch_optional(pool)
@@ -698,22 +700,24 @@ async fn save_product_bom_core(
         let Some(material) = material else {
             return Err(format!("Không tìm thấy vật tư '{material_code}'"));
         };
-        if material.is_service {
-            return Err(format!(
-                "'{material_code}' là dịch vụ — không theo dõi tồn kho nên không làm vật tư được"
-            ));
-        }
         if material.id == product.id {
             return Err(format!(
                 "Sản phẩm '{product_code}' không thể làm vật tư của chính nó"
             ));
         }
-        if resolved.iter().any(|(id, _)| *id == material.id) {
+        // Client cũ chỉ gửi số lượng → lấy Giá bán hiện tại làm đơn giá mặc định.
+        let unit_price = item.unit_price.unwrap_or(material.sale_price);
+        if !unit_price.is_finite() || unit_price < 0.0 {
+            return Err(format!(
+                "Đơn giá định mức của '{material_code}' phải lớn hơn hoặc bằng 0"
+            ));
+        }
+        if resolved.iter().any(|(id, _, _)| *id == material.id) {
             return Err(format!(
                 "Vật tư '{material_code}' bị lặp — mỗi vật tư chỉ 1 dòng định mức"
             ));
         }
-        resolved.push((material.id, item.quantity));
+        resolved.push((material.id, item.quantity, unit_price));
     }
 
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
@@ -724,13 +728,14 @@ async fn save_product_bom_core(
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
-    for (material_id, quantity) in &resolved {
+    for (material_id, quantity, unit_price) in &resolved {
         sqlx::query!(
-            "INSERT INTO product_bom_item (product_id, material_product_id, quantity)
-             VALUES (?, ?, ?)",
+            "INSERT INTO product_bom_item (product_id, material_product_id, quantity, unit_price)
+             VALUES (?, ?, ?, ?)",
             product.id,
             material_id,
-            quantity
+            quantity,
+            unit_price
         )
         .execute(&mut *tx)
         .await
@@ -1745,6 +1750,7 @@ mod tests {
         let rows = vec![BomItemInput {
             material_code: " NVL1 ".into(),
             quantity: 2.0,
+            unit_price: Some(12_500.0),
         }];
         assert_eq!(save_product_bom_core(&pool, "TP1", &rows).await.unwrap(), 1);
         assert_eq!(
@@ -1756,6 +1762,12 @@ mod tests {
             .await,
             1
         );
+        // Đơn giá khai tay được lưu nguyên, không phụ thuộc Giá bán danh mục.
+        let stored_price: f64 = sqlx::query_scalar("SELECT unit_price FROM product_bom_item")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored_price, 12_500.0);
 
         // Ghi thay toàn bộ: danh sách rỗng = xóa sạch định mức.
         assert_eq!(save_product_bom_core(&pool, "TP1", &[]).await.unwrap(), 0);
@@ -1769,11 +1781,65 @@ mod tests {
             0
         );
 
-        // Dịch vụ không khai định mức được.
+        // Client cũ bỏ trống đơn giá → lấy Giá bán hiện tại của vật tư.
+        sqlx::query!("UPDATE product SET sale_price = 20000 WHERE code = 'NVL1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let fallback_rows = vec![BomItemInput {
+            material_code: "NVL1".into(),
+            quantity: 1.0,
+            unit_price: None,
+        }];
+        assert_eq!(
+            save_product_bom_core(&pool, "TP1", &fallback_rows)
+                .await
+                .unwrap(),
+            1
+        );
+        let fallback_price: f64 = sqlx::query_scalar("SELECT unit_price FROM product_bom_item")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(fallback_price, 20_000.0);
+        assert_eq!(save_product_bom_core(&pool, "TP1", &[]).await.unwrap(), 0);
+
+        // Dịch vụ không khai định mức được (nó không phải thành phẩm sản xuất).
         let err = save_product_bom_core(&pool, "DV1", &rows)
             .await
             .unwrap_err();
         assert!(err.contains("dịch vụ"), "{err}");
+
+        // Nhưng dịch vụ LÀM VẬT TƯ thì được — nhân công/gia công ngoài vẫn nằm
+        // trong định mức để báo giá, hợp đồng. Đơn giá dịch vụ cũng khai riêng.
+        let service_rows = vec![BomItemInput {
+            material_code: "DV1".into(),
+            quantity: 2.0,
+            unit_price: Some(300_000.0),
+        }];
+        assert_eq!(
+            save_product_bom_core(&pool, "TP2", &service_rows)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            scalar_i64(
+                &pool,
+                "SELECT COUNT(*) FROM product_bom_item b
+                   JOIN product p ON p.id = b.product_id WHERE p.code = 'TP2'"
+            )
+            .await,
+            1
+        );
+        let service_price: f64 = sqlx::query_scalar("SELECT unit_price FROM product_bom_item")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(service_price, 300_000.0);
+        // Dọn dòng dịch vụ trước các phép thử lỗi bên dưới.
+        assert_eq!(save_product_bom_core(&pool, "TP2", &[]).await.unwrap(), 0);
+
         // Số lượng phải > 0.
         let err = save_product_bom_core(
             &pool,
@@ -1781,11 +1847,25 @@ mod tests {
             &[BomItemInput {
                 material_code: "NVL1".into(),
                 quantity: 0.0,
+                unit_price: None,
             }],
         )
         .await
         .unwrap_err();
         assert!(err.contains("lớn hơn 0"), "{err}");
+        // Đơn giá không được âm.
+        let err = save_product_bom_core(
+            &pool,
+            "TP2",
+            &[BomItemInput {
+                material_code: "NVL1".into(),
+                quantity: 1.0,
+                unit_price: Some(-1.0),
+            }],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("Đơn giá"), "{err}");
         // Không tự tham (SP làm NVL của chính nó).
         let err = save_product_bom_core(
             &pool,
@@ -1793,6 +1873,7 @@ mod tests {
             &[BomItemInput {
                 material_code: "TP2".into(),
                 quantity: 1.0,
+                unit_price: None,
             }],
         )
         .await
@@ -1806,28 +1887,18 @@ mod tests {
                 BomItemInput {
                     material_code: "NVL1".into(),
                     quantity: 1.0,
+                    unit_price: Some(10_000.0),
                 },
                 BomItemInput {
                     material_code: "NVL1".into(),
                     quantity: 2.0,
+                    unit_price: Some(20_000.0),
                 },
             ],
         )
         .await
         .unwrap_err();
         assert!(err.contains("lặp"), "{err}");
-        // Dịch vụ không làm được vật tư.
-        let err = save_product_bom_core(
-            &pool,
-            "TP2",
-            &[BomItemInput {
-                material_code: "DV1".into(),
-                quantity: 1.0,
-            }],
-        )
-        .await
-        .unwrap_err();
-        assert!(err.contains("dịch vụ"), "{err}");
         // Validate chạy TRƯỚC khi ghi → không để lại dòng nào dở dang.
         assert_eq!(
             scalar_i64(&pool, "SELECT COUNT(*) FROM product_bom_item").await,

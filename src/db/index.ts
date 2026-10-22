@@ -298,8 +298,10 @@ export const api = {
   /** Toàn bộ định mức vật tư của mọi sản phẩm (màn "Định mức" — F4). */
   getProductBoms: async () => parse<BomItem[]>(await call<string>("get_product_boms")),
   /** Lưu định mức vật tư của 1 sản phẩm — thay toàn bộ dòng cũ (rỗng = xóa). */
-  saveProductBom: (productCode: string, items: { material_code: string; quantity: number }[]) =>
-    call<string>("save_product_bom", { productCode, items }),
+  saveProductBom: (
+    productCode: string,
+    items: { material_code: string; quantity: number; unit_price: number }[],
+  ) => call<string>("save_product_bom", { productCode, items }),
   deleteProduct: (id: number) => call<string>("delete_product", { id }),
   deleteProducts: (ids: number[]) => call<string>("delete_products", { ids }),
   /**

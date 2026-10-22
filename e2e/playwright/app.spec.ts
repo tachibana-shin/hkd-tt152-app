@@ -1731,6 +1731,95 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
   );
 });
 
+test("Hóa đơn nháp: xuất Excel báo giá theo đúng dòng đang nhập (gồm dịch vụ)", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Dịch vụ (công sửa chữa) không cần tồn kho — đúng kiểu một gói sửa chữa.
+  const svc = await request.post("/api/save_product", {
+    data: {
+      code: "SP-BG-E2E",
+      name: "Dịch vụ báo giá E2E",
+      unit: "Lần",
+      salePrice: 123_000,
+      costPrice: 0,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: true,
+      industryCode: "DVXD-KNL",
+    },
+  });
+  expect(svc.ok(), `save_product SP-BG-E2E: ${await svc.text()}`).toBe(true);
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog").filter({ hasText: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+
+  const numberInput = dlg.getByRole("textbox").first();
+  await expect(numberInput).toHaveValue(/^HD\d+$/);
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Báo Giá E2E");
+  await custInput.press("Enter");
+
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  const productBox = page
+    .locator('.p-select-overlay.product-select-overlay [role="searchbox"]')
+    .last();
+  await expect(productBox).toBeVisible();
+  await productBox.fill("Dịch vụ báo giá E2E");
+  await page
+    .getByRole("option", { name: /Dịch vụ báo giá E2E/ })
+    .first()
+    .click();
+
+  // Sửa số lượng / đơn giá / chiết khấu NGAY trên form, chưa bấm Lưu hóa đơn.
+  await line.getByRole("spinbutton").nth(0).fill("2");
+  await line.getByRole("spinbutton").nth(1).fill("300000");
+  await line.getByRole("spinbutton").nth(2).fill("20000");
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    dlg.getByTestId("header-export-quote").click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^bao-gia-HD\d+-\d{8}\.xlsx$/);
+  const quotePath = await download.path();
+  expect(quotePath, "trình duyệt phải lưu file báo giá về").toBeTruthy();
+
+  const workbook = XLSX.read(readFileSync(quotePath as string), { type: "buffer" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const matrix = XLSX.utils.sheet_to_json<(string | number)[]>(sheet, {
+    header: 1,
+    defval: "",
+  });
+  const headerIdx = matrix.findIndex((r) => r[0] === "STT" && r[2] === "Tên hàng hóa / dịch vụ");
+  expect(headerIdx, "file báo giá phải có bảng mặt hàng").toBeGreaterThan(0);
+
+  const item = matrix.find((r) => r[1] === "SP-BG-E2E");
+  expect(item, "dòng dịch vụ phải có trong báo giá").toBeTruthy();
+  expect(item?.[2]).toBe("Dịch vụ báo giá E2E");
+  expect(item?.[3]).toBe("Lần");
+  expect(item?.[4]).toBe(2);
+  expect(item?.[5]).toBe(300_000);
+  expect(item?.[6]).toBe(20_000);
+  expect(item?.[7]).toBe(580_000);
+
+  const totalRow = matrix.find((r) => r[2] === "Tổng tiền thanh toán");
+  expect(totalRow?.[7], "tổng tiền gói phải trừ chiết khấu").toBe(580_000);
+  const text = matrix.flat().join(" ");
+  expect(text).toContain("Khách Báo Giá E2E");
+  expect(text).toContain("Số báo giá");
+
+  // Báo giá không lưu hóa đơn — đóng popup là xong.
+  await dlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(dlg).toBeHidden();
+});
+
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {
   await ensureLoggedIn(page);
   await sidebarButton(page, "Hóa đơn").click();
@@ -4634,18 +4723,23 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
   await ensureLoggedIn(page);
 
   /** Tạo hàng hóa qua API — phần thêm sản phẩm bằng UI đã có test riêng. */
-  const mk = async (code: string, name: string, unit: string) => {
+  const mk = async (
+    code: string,
+    name: string,
+    unit: string,
+    opts: { isService?: boolean; salePrice?: number } = {},
+  ) => {
     const r = await request.post("/api/save_product", {
       data: {
         code,
         name,
         unit,
-        salePrice: 10_000,
+        salePrice: opts.salePrice ?? 10_000,
         costPrice: 5_000,
         minStock: 0,
         vatRate: 1,
         importTaxRate: 0,
-        isService: false,
+        isService: opts.isService ?? false,
         industryCode: "PPHH",
       },
     });
@@ -4655,6 +4749,7 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
   await mk("SP-MFG2", "Thành phẩm MFG 2", "Cái");
   await mk("SP-MM1", "Vật tư MFG 1", "Kg");
   await mk("SP-MM2", "Vật tư MFG 2", "Cái");
+  await mk("SP-SVC1", "Dịch vụ MFG 1", "Lần", { isService: true, salePrice: 250_000 });
 
   // Các test trước cũng dùng chung 1 DB (vd tạo lô ở popup hóa đơn có khai định
   // mức) → dọn hết để màn vào đúng trạng thái "chưa có định mức nào".
@@ -4704,11 +4799,26 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
   // chọn thành phẩm là bảng tự mở dòng trống.
   const r1 = b1.locator('[data-testid="bom-table"] tbody tr').first();
   await choose(r1.getByRole("combobox"), "Vật tư MFG 1");
-  await r1.getByRole("spinbutton").fill("1.5");
+  await r1.getByRole("spinbutton").first().fill("1.5");
+  // Đơn giá mặc định theo Giá bán (10.000) nhưng sửa được — gói hợp đồng có
+  // thể thỏa thuận giá khác. Thành tiền/tổng phải theo đơn giá đã sửa.
+  await r1.getByRole("spinbutton").nth(1).fill("12000");
+
+  // Dịch vụ cũng phải khai được trong định mức (nhân công / gia công ngoài).
+  const bomRows = b1.locator('[data-testid="bom-table"] tbody tr');
+  await expect(bomRows).toHaveCount(2);
+  const r1Service = bomRows.nth(1);
+  await choose(r1Service.getByRole("combobox"), "Dịch vụ MFG 1");
+  await r1Service.getByRole("spinbutton").first().fill("2");
+  await r1Service.getByRole("spinbutton").nth(1).fill("300000");
+  // InputNumber chỉ ghi vào model khi rời ô (blur) — Tab để tổng cập nhật ngay.
+  await r1Service.getByRole("spinbutton").nth(1).press("Tab");
+  // Tổng gói cập nhật ngay theo đơn giá vừa sửa: 1,5 × 12.000 + 2 × 300.000.
+  await expect(b1.getByTestId("bom-total")).toContainText("618.000");
 
   const r2 = b2.locator('[data-testid="bom-table"] tbody tr').first();
   await choose(r2.getByRole("combobox"), "Vật tư MFG 2");
-  await r2.getByRole("spinbutton").fill("3");
+  await r2.getByRole("spinbutton").first().fill("3");
 
   await page.getByTestId("bom-save-all").click();
   await expect(page.locator(".p-toast-summary").last()).toContainText("Đã lưu định mức");
@@ -4719,6 +4829,7 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
       product_code: string;
       material_code: string;
       quantity: number;
+      unit_price: number;
     }>;
   }
 
@@ -4727,24 +4838,59 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
   expect(row1, "SP-MFG1 phải có định mức").toBeTruthy();
   expect(row1?.material_code).toBe("SP-MM1");
   expect(row1?.quantity).toBe(1.5);
+  expect(row1?.unit_price, "đơn giá khai tay phải được lưu").toBe(12_000);
+  const serviceRow = saved.find(
+    (r) => r.product_code === "SP-MFG1" && r.material_code === "SP-SVC1",
+  );
+  expect(serviceRow, "dịch vụ phải lưu được trong định mức").toBeTruthy();
+  expect(serviceRow?.quantity).toBe(2);
+  expect(serviceRow?.unit_price, "đơn giá dịch vụ phải được lưu").toBe(300_000);
   const row2 = saved.find((r) => r.product_code === "SP-MFG2");
   expect(row2, "SP-MFG2 phải có định mức").toBeTruthy();
   expect(row2?.material_code).toBe("SP-MM2");
   expect(row2?.quantity).toBe(3);
+  expect(row2?.unit_price, "đơn giá bỏ trống lấy theo Giá bán").toBe(10_000);
+
+  // Mỗi bảng có nút xuất Excel: file phải có đơn giá đã khai + thành tiền +
+  // dòng tổng cộng để làm hợp đồng.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    b1.getByRole("button", { name: "Xuất Excel" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^dinh-muc-SP-MFG1-\d{8}\.xlsx$/);
+  const xlsxPath = await download.path();
+  expect(xlsxPath, "trình duyệt phải lưu file Excel về").toBeTruthy();
+  const workbook = XLSX.read(readFileSync(xlsxPath as string), { type: "buffer" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const exported = XLSX.utils.sheet_to_json<Record<string, string | number>>(sheet, {
+    range: 4,
+    defval: "",
+  });
+  const exportedMaterial = exported.find((r) => r["Mã hàng"] === "SP-MM1");
+  expect(exportedMaterial?.["Đơn giá"]).toBe(12_000);
+  expect(exportedMaterial?.["Thành tiền"]).toBe(18_000);
+  const exportedService = exported.find((r) => r["Mã hàng"] === "SP-SVC1");
+  expect(exportedService?.["Đơn giá"]).toBe(300_000);
+  expect(exportedService?.["Thành tiền"]).toBe(600_000);
+  const exportedTotal = exported.find((r) => r["Tên vật tư / dịch vụ"] === "TỔNG CỘNG");
+  expect(exportedTotal?.["Thành tiền"]).toBe(618_000);
 
   // Rời tab rồi quay lại: 2 bảng vẫn được dựng lại từ DB đúng theo thành phẩm.
   // Không neo `^…$`: nhãn tab kèm ký tự icon phía trước (font PrimeIcons).
   await page.getByRole("tab", { name: /Danh mục sản phẩm/ }).click();
   await page.getByRole("tab", { name: /Định mức vật tư/ }).click();
   await expect(blocks).toHaveCount(2);
+  // Đơn giá đã lưu vẫn còn sau khi rời tab — không quay về Giá bán danh mục.
+  await expect(b1.getByTestId("bom-total")).toContainText("618.000");
 
-  // Xóa hết dòng của cả 2 bảng rồi Lưu tất cả = xóa cả 2 định mức.
+  // Xóa hết dòng của cả 2 bảng rồi Lưu tất cả = xóa cả 2 định mức. Bảng 1 có
+  // 2 dòng (vật tư + dịch vụ) nên phải xóa đủ số dòng đang có.
   for (const b of [b1, b2]) {
-    await b
-      .locator('[data-testid="bom-table"] tbody tr')
-      .first()
-      .getByRole("button", { name: "Xóa dòng vật tư" })
-      .click();
+    const rows = b.locator('[data-testid="bom-table"] tbody tr');
+    const count = await rows.count();
+    for (let i = 0; i < count; i++) {
+      await rows.first().getByRole("button", { name: "Xóa dòng vật tư" }).click();
+    }
   }
   await page.getByTestId("bom-save-all").click();
   await expect(page.locator(".p-toast-detail").last()).toContainText("Đã xóa định mức");
@@ -4888,7 +5034,7 @@ test("Định mức vật tư: PNK sản xuất bật tự xuất NVL thì sinh 
     .getByRole("option", { name: /Vật tư E2E/ })
     .first()
     .click();
-  await bomRow.getByRole("spinbutton").fill("2");
+  await bomRow.getByRole("spinbutton").first().fill("2");
   await page.getByTestId("bom-save-all").click();
   await expect(page.locator(".p-toast-summary").last()).toContainText("Đã lưu định mức");
 
