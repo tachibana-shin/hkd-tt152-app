@@ -12,14 +12,21 @@ import { ref, shallowRef } from "vue";
  */
 export function useLazyPage(
   load: (lazy: Record<string, unknown>) => Promise<void>,
-  options: { rows?: number; pageSizes?: number[] } = {},
+  options: {
+    rows?: number;
+    pageSizes?: number[];
+    /** Cột sắp xếp ban đầu (khớp field của DataTable). */
+    sortField?: string | null;
+    /** Chiều sắp xếp ban đầu: 1 = tăng, -1 = giảm. */
+    sortOrder?: 1 | -1 | null;
+  } = {},
 ) {
   const first = ref(0);
   const rowsPerPage = ref(options.rows ?? 50);
   const pageSizes = options.pageSizes ?? [20, 50, 100, 200];
   const keyword = ref("");
-  const sortField = ref<string | null>(null);
-  const sortOrder = ref<1 | -1 | null>(null);
+  const sortField = ref<string | null>(options.sortField ?? null);
+  const sortOrder = ref<1 | -1 | null>(options.sortOrder ?? null);
   /** Bộ lọc riêng của màn (ngày, trạng thái…) đi kèm vào lazyEvent. */
   const extra = shallowRef<Record<string, unknown>>({});
   /**
@@ -101,6 +108,8 @@ export function useLazyPage(
     first,
     rowsPerPage,
     pageSizes,
+    sortField,
+    sortOrder,
     onPage,
     onSort,
     onSearch,

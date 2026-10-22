@@ -1239,6 +1239,57 @@ test("Hóa đơn: báo số trùng để tự dọn, không tự sửa dữ li�
   await expect(page.locator("tr", { has: page.getByText(dupNo, { exact: true }) })).toHaveCount(1);
 });
 
+test("Hóa đơn: danh sách mặc định xếp Ngày HĐĐT giảm dần", async ({ page }) => {
+  await ensureLoggedIn(page);
+
+  // Ngày hóa đơn và Ngày HĐĐT cố tình lệch nhau: danh sách phải theo Ngày HĐĐT,
+  // không phải theo cột "Ngày". Ghi thẳng DB tạm của phiên E2E (app đang mở,
+  // WAL cho phép ghi song song) để không phụ thuộc dữ liệu các test trước.
+  const dataDir = readFileSync("/tmp/hkd-e2e-dir", "utf8").trim();
+  const dbPath = `${dataDir}/profiles/default/hkd.db`;
+  const customer = "Khách kiểm tra thứ tự Ngày HĐĐT";
+  execFileSync("sqlite3", [
+    dbPath,
+    `DELETE FROM invoice WHERE number LIKE 'HDSORT-%';
+     INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount,
+                          status, e_invoice_no, e_invoice_symbol, e_invoice_date)
+     VALUES
+       ('HDSORT-A', '2026-01-10', '${customer}', '', 1000, 0,
+        'official', 'SORT-A', '1C26TT152', '2026-03-10'),
+       ('HDSORT-B', '2026-03-10', '${customer}', '', 1000, 0,
+        'official', 'SORT-B', '1C26TT152', '2026-02-10'),
+       ('HDSORT-C', '2026-02-10', '${customer}', '', 1000, 0,
+        'official', 'SORT-C', '1C26TT152', '2026-04-10');`,
+  ]);
+
+  await page.reload();
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+
+  // Tìm đúng 3 dòng vừa seed để không phụ thuộc dữ liệu/test khác trong DB.
+  const search = page.getByPlaceholder("Tìm kiếm…").first();
+  await search.fill(customer);
+  await search.press("Enter");
+  const table = page.locator(".p-datatable").first();
+  const rows = table.locator("tbody tr");
+  await expect(rows).toHaveCount(3);
+
+  // Mặc định giảm dần theo Ngày HĐĐT (04-10 → 03-10 → 02-10), không theo
+  // ngày hóa đơn (02-10 → 01-10 → 03-10).
+  await expect(rows.nth(0)).toContainText("HDSORT-C");
+  await expect(rows.nth(1)).toContainText("HDSORT-A");
+  await expect(rows.nth(2)).toContainText("HDSORT-B");
+  const header = table.getByRole("columnheader", { name: "Ngày HĐĐT" });
+  await expect(header).toHaveAttribute("aria-sort", "descending");
+
+  // Cột bấm sắp xếp được; bấm lần nữa đổi sang tăng dần.
+  await header.click();
+  await expect(header).toHaveAttribute("aria-sort", "ascending");
+  await expect(rows.nth(0)).toContainText("HDSORT-B");
+  await expect(rows.nth(1)).toContainText("HDSORT-A");
+  await expect(rows.nth(2)).toContainText("HDSORT-C");
+});
+
 test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa có PX thì cảnh báo ⚠", async ({
   page,
   request,

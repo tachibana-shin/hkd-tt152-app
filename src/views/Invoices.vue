@@ -33,20 +33,24 @@ const toast = useToast();
 const invoices = ref<Invoice[]>([]);
 const loading = ref(false);
 const total = ref(0);
-const page = useLazyPage(async (lazy) => {
-  loading.value = true;
-  try {
-    const res = await api.getInvoicesPage(lazy, onlyDuplicates.value);
-    invoices.value = res.rows;
-    total.value = res.total;
-    // Soi tồn nền để tô màu dòng — không chặn bảng, lỗi thì mất màu thôi.
-    void loadShortages();
-  } catch (e) {
-    toast.add({ severity: "error", summary: "Lỗi tải hóa đơn", detail: String(e) });
-  } finally {
-    loading.value = false;
-  }
-});
+const page = useLazyPage(
+  async (lazy) => {
+    loading.value = true;
+    try {
+      const res = await api.getInvoicesPage(lazy, onlyDuplicates.value);
+      invoices.value = res.rows;
+      total.value = res.total;
+      // Soi tồn nền để tô màu dòng — không chặn bảng, lỗi thì mất màu thôi.
+      void loadShortages();
+    } catch (e) {
+      toast.add({ severity: "error", summary: "Lỗi tải hóa đơn", detail: String(e) });
+    } finally {
+      loading.value = false;
+    }
+  },
+  // Danh sách mặc định mới nhất theo "Ngày HĐĐT" (yêu cầu #7).
+  { sortField: "e_invoice_date", sortOrder: -1 },
+);
 
 // ─── Màu nền dòng: vàng = nháp, đỏ = thiếu tồn kho ───
 // Chỉ soi hóa đơn CHƯA ghi số và CHƯA có phiếu xuất — phiếu đã trừ kho lúc lập
@@ -429,6 +433,9 @@ useKeepAliveRefresh(reload);
           :first="page.first.value"
           :rows="page.rowsPerPage.value"
           :rows-per-page-options="page.pageSizes"
+          :sort-field="page.sortField.value"
+          :sort-order="page.sortOrder.value"
+          :default-sort-order="-1"
           data-key="id"
           sort-mode="single"
           removable-sort
@@ -482,7 +489,7 @@ useKeepAliveRefresh(reload);
           <Column header="Ký hiệu">
             <template #body="{ data }">{{ data.e_invoice_symbol || "—" }}</template>
           </Column>
-          <Column header="Ngày HĐĐT">
+          <Column field="e_invoice_date" header="Ngày HĐĐT" sortable>
             <template #body="{ data }">
               <span>{{ data.e_invoice_date || "—" }}</span>
               <!-- Ngày HĐĐT khác ngày phiếu xuất = doanh thu kê lệch kỳ với chứng từ -->

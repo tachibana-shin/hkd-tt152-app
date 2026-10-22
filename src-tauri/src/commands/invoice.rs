@@ -31,8 +31,21 @@ pub(crate) async fn get_invoices_page(
     lazy_event: String,
     only_duplicates: bool,
 ) -> Result<String, String> {
+    invoices_page_core(&*state.pool.read().await, &lazy_event, only_duplicates).await
+}
+
+/// Ngày dùng để sắp xếp danh sách hóa đơn: ưu tiên "Ngày HĐĐT"; hóa đơn chưa
+/// ghi ngày HĐĐT (nháp / dữ liệu cũ) lấy ngày hóa đơn để không bị dồn xuống cuối.
+const INVOICE_SORT_DATE: &str = "COALESCE(NULLIF(e_invoice_date, ''), date)";
+
+/// Tách khỏi lệnh Tauri để test được phần truy vấn/sắp xếp mà không cần State.
+async fn invoices_page_core(
+    pool: &SqlitePool,
+    lazy_event: &str,
+    only_duplicates: bool,
+) -> Result<String, String> {
     let ev: crate::commands::page::PageEvent =
-        serde_json::from_str(&lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
+        serde_json::from_str(lazy_event).map_err(|e| format!("lazy_event lỗi: {}", e))?;
     let page = ev.page();
     let (mut where_sql, params) = crate::commands::page::global_where(
         ev.global_keyword(),
@@ -45,15 +58,22 @@ pub(crate) async fn get_invoices_page(
             " AND number IN (SELECT number FROM invoice GROUP BY number HAVING COUNT(*) > 1)",
         );
     }
-    let order = crate::commands::page::order_by(
-        &[
-            ("id", "id"),
-            ("date", "date"),
-            ("number", "number"),
-            ("customer", "customer"),
-        ],
-        &ev,
-        "date DESC, id DESC",
+    // Mặc định mới nhất theo Ngày HĐĐT (yêu cầu #7); id giữ thứ tự ổn định khi
+    // nhiều hóa đơn cùng ngày để phân trang không nhảy dòng.
+    let fallback = format!("{INVOICE_SORT_DATE} DESC");
+    let order = format!(
+        "{}, id DESC",
+        crate::commands::page::order_by(
+            &[
+                ("id", "id"),
+                ("date", "date"),
+                ("number", "number"),
+                ("customer", "customer"),
+                ("e_invoice_date", INVOICE_SORT_DATE),
+            ],
+            &ev,
+            &fallback,
+        )
     );
     let sql = format!(
         "SELECT id, number, date, customer, customer_tax_code, total, vat_amount,
@@ -64,14 +84,8 @@ pub(crate) async fn get_invoices_page(
         where_sql, order
     );
     let count_sql = format!("SELECT COUNT(*) FROM invoice{where_sql}");
-    let (rows, total): (Vec<InvoiceRow>, i64) = crate::commands::page::fetch_page(
-        &*state.pool.read().await,
-        &sql,
-        &count_sql,
-        &params,
-        &page,
-    )
-    .await?;
+    let (rows, total): (Vec<InvoiceRow>, i64) =
+        crate::commands::page::fetch_page(pool, &sql, &count_sql, &params, &page).await?;
     Ok(
         serde_json::to_string(&crate::commands::audit::PageResult { rows, total })
             .unwrap_or_default(),
@@ -2245,6 +2259,61 @@ mod tests {
         let gaps = number_gaps(&[1, 1_000_000_000]);
         assert_eq!(gaps.len(), MAX_MISSING_NUMBERS);
         assert_eq!(gaps.first(), Some(&2));
+    }
+
+    #[tokio::test]
+    async fn danh_sach_hoa_don_mac_dinh_xep_ngay_hddt_giam_dan() {
+        let pool = test_pool().await;
+        // Ngày hóa đơn và Ngày HĐĐT cố tình lệch nhau để chắc chắn danh sách
+        // không còn xếp theo `date`; 2 dòng không có Ngày HĐĐT lấy ngày hóa đơn.
+        for (number, date, e_invoice_date) in [
+            ("HD-SORT-A", "2026-01-10", "2026-03-10"),
+            ("HD-SORT-B", "2026-03-10", "2026-02-10"),
+            ("HD-SORT-C", "2026-02-10", "2026-04-10"),
+            ("HD-SORT-D", "2026-02-20", ""),
+            ("HD-SORT-E", "2026-01-01", ""),
+        ] {
+            sqlx::query(
+                "INSERT INTO invoice (number, date, customer, status, e_invoice_date)
+                 VALUES (?, ?, 'Khách kiểm tra sắp xếp', 'official', ?)",
+            )
+            .bind(number)
+            .bind(date)
+            .bind(e_invoice_date)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        async fn numbers(lazy_event: &str, pool: &SqlitePool) -> Vec<String> {
+            let body = invoices_page_core(pool, lazy_event, false).await.unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+            parsed["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["customer"] == "Khách kiểm tra sắp xếp")
+                .map(|row| row["number"].as_str().unwrap().to_string())
+                .collect()
+        }
+
+        let expected = [
+            "HD-SORT-C",
+            "HD-SORT-A",
+            "HD-SORT-D",
+            "HD-SORT-B",
+            "HD-SORT-E",
+        ];
+        assert_eq!(numbers(r#"{"first":0,"rows":50}"#, &pool).await, expected);
+        // Bấm cột "Ngày HĐĐT" lần đầu cũng phải là giảm dần.
+        assert_eq!(
+            numbers(
+                r#"{"first":0,"rows":50,"sortField":"e_invoice_date","sortOrder":-1}"#,
+                &pool,
+            )
+            .await,
+            expected
+        );
     }
 
     /// Báo thiếu số hiệu: gom số nội bộ HD#### và số HĐĐT theo TỪNG ký hiệu —
