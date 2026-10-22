@@ -4204,16 +4204,18 @@ test("Tên khác của sản phẩm: tìm được ở danh mục và hóa đơn
   // (nó hẹp hơn, đo ra ~456px → assert đỏ oang trên CI).
   const productPanel = page.locator(".p-select-overlay.product-select-overlay").last();
   await expect(productPanel).toBeVisible();
-  // Rộng sàn 30rem — đo theo REM CỦA CHÍNH TRANG: font-size gốc khác nhau giữa
-  // máy (runner CI ~15.2px → 30rem = 456px), nên so với px cứng sẽ đỏ oang.
-  const remPx = await page.evaluate(() =>
-    parseFloat(getComputedStyle(document.documentElement).fontSize),
-  );
-  const productPanelBox = await productPanel.boundingBox();
+  // Rộng sàn 30rem, đo bằng offsetWidth (bề rộng LAYOUT):
+  // - boundingBox() dính transform của animation mở panel (PrimeVue zoom
+  //   scale(0.93)→1 trong 300ms): máy chậm đo giữa animation ra ~456px và đỏ oan.
+  // - So theo rem CỦA CHÍNH TRANG, không dùng px cứng, để đổi cỡ chữ gốc vẫn đúng.
+  const panel = await productPanel.evaluate((el) => ({
+    width: (el as HTMLElement).offsetWidth,
+    remPx: parseFloat(getComputedStyle(document.documentElement).fontSize),
+  }));
   expect(
-    productPanelBox?.width ?? 0,
+    panel.width,
     "dropdown sản phẩm bị co theo cột — phải rộng sàn 30rem",
-  ).toBeGreaterThanOrEqual(30 * remPx - 1);
+  ).toBeGreaterThanOrEqual(30 * panel.remPx - 1);
   await page
     .locator('.p-select-overlay.product-select-overlay [role="searchbox"]')
     .last()
