@@ -108,7 +108,7 @@ const json = (res: import("node:http").ServerResponse, status: number, body: unk
   res.end(text);
 };
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
   const path = url.pathname;
   console.log(`[mock-portal] ${req.method} ${path}${url.search}`);
@@ -117,6 +117,22 @@ const server = createServer((req, res) => {
     return json(res, 200, { key: "mock-captcha-key", content: CAPTCHA_SVG });
   }
   if (path === "/api/security-taxpayer/authenticate") {
+    // Trừ 1 mật khẩu "châm ngòi" riêng cho test nhật ký mật khẩu: cổng từ chối
+    // 401 + message tiếng Việt như live → app ghi dấu 'bad', lần thử sau bị chặn.
+    const raw = await new Promise<string>((done) => {
+      let acc = "";
+      req.on("data", (c: Buffer) => (acc += c));
+      req.on("end", () => done(acc));
+    });
+    try {
+      if (JSON.parse(raw).password === "mock-wrong") {
+        return json(res, 401, {
+          message: "Thông tin tài khoản hoặc mật khẩu không chính xác.",
+        });
+      }
+    } catch {
+      // Body không phải JSON — rơi xuống nhánh đúng (mock chấp nhận mọi mật khẩu).
+    }
     return json(res, 200, { token: TOKEN });
   }
   if (path === "/api/security-taxpayer/profile") {

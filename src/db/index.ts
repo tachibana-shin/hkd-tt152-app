@@ -90,6 +90,7 @@ import type {
   HddtConfig,
   HddtStatus,
   HddtLoginResult,
+  HddtPasswordJournalRow,
   HddtInvoiceList,
   HddtInvoiceFilter,
   HddtSyncScanSummary,
@@ -863,6 +864,14 @@ export const api = {
       }),
     ),
   hddtStatus: async () => parse<HddtStatus>(await call<string>("hddt_status")),
+  /** Nhật ký mật khẩu đã lưu/thử của tài khoản (fetch plaintext như hddtGetPassword). */
+  hddtPasswordJournal: async () =>
+    parse<HddtPasswordJournalRow[]>(await call<string>("hddt_password_journal")),
+  /** Bật một mật khẩu trong nhật ký làm mật khẩu active (cứu khi lỡ lưu sai). */
+  hddtUseJournalPassword: async (id: number) =>
+    parse<{ ok: boolean; status?: HddtStatus }>(
+      await call<string>("hddt_use_journal_password", { id }),
+    ),
   /** Đăng nhập (tự giải captcha); trả `need_manual=true` khi phải nhập tay. */
   hddtLogin: async () => parse<HddtLoginResult>(await call<string>("hddt_login")),
   /** Lấy captcha mới để người dùng nhập tay. */

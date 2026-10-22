@@ -168,15 +168,21 @@ const quickOption = computed<PickedOption | null>(() => {
 function onQuickClick(e?: MouseEvent) {
   const text = filterText.value.trim();
   if (!text) return;
-  // Footer không phải option nên PrimeVue không tự đóng dropdown — giả cặp
-  // phím Escape trên ô lọc của CHÍNH overlay này (nhiều Select cùng màn thì
-  // phải khoanh đúng vùng) để dropdown thu về như người dùng bấm Esc.
+  // Đóng overlay trực tiếp qua method hide() của Select (instance Options API):
+  // giả phím Escape lên ô lọc qua dispatchEvent không đủ hiệu lực trên
+  // WebKitGTK — popup còn lại sau khi dialog mở. Giữ thêm cặp phím Escape trên
+  // ô lọc của CHÍNH overlay này như phương án phụ (nhiều Select cùng màn thì
+  // phải khoanh đúng vùng).
   const overlay = (e?.currentTarget as HTMLElement | null)?.closest(".p-select-overlay");
   const box = overlay?.querySelector('[role="searchbox"]');
   if (box) box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  select.value?.hide?.();
   filterText.value = "";
   emit("create", text);
 }
+
+/** Instance Select (Options API) — dùng để đóng overlay khi bấm "Tạo nhanh". */
+const select = ref<{ hide?: (event?: unknown, focusAfterSelect?: boolean) => void } | null>(null);
 
 function onUpdate(v: PickedOption | null) {
   if (!v) {
@@ -219,6 +225,7 @@ if (props.onlyManufactured) void catalog.loadBoms();
   <!-- Lọc theo TÊN và MÃ: người dùng quen gõ SP001 — mặc định PrimeVue chỉ lọc
        theo optionLabel (tên) nên gõ mã ra dropdown trống. -->
   <Select
+    ref="select"
     :model-value="selected"
     :options="options"
     :virtual-scroller-options="{ itemSize: 38 }"

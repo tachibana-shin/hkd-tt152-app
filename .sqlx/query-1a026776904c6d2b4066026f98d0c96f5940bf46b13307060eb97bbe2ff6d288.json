@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_password_journal (username, password, state, marked_at)\n         VALUES (?, ?, ?, datetime('now'))\n         ON CONFLICT(username, password)\n         DO UPDATE SET state = excluded.state, marked_at = datetime('now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1a026776904c6d2b4066026f98d0c96f5940bf46b13307060eb97bbe2ff6d288"
+}

@@ -21,6 +21,7 @@ use crate::helpers::{audit, require_role};
 use crate::models::AppState;
 use base64::Engine;
 use serde_json::{json, Value};
+use sqlx::SqlitePool;
 use tauri::State;
 
 const KEY_USERNAME: &str = "hddt_username";
@@ -38,6 +39,17 @@ const AUTO_CHANGE_PASSWORD_DAYS: i64 = 7;
 struct SettingKV {
     key: String,
     value: String,
+}
+
+/// 1 dòng nhật ký mật khẩu cổng (`hddt_password_journal`).
+#[derive(sqlx::FromRow)]
+struct PasswordJournalRow {
+    id: i64,
+    password: String,
+    state: String,
+    note: String,
+    created_at: String,
+    marked_at: Option<String>,
 }
 
 #[derive(Default)]
@@ -109,6 +121,109 @@ async fn upsert(state: &State<'_, AppState>, key: &str, value: &str) -> Result<(
     Ok(())
 }
 
+// ─── Nhật ký mật khẩu cổng (migration 20261022001) — chống khóa tài khoản ───
+//
+// Yêu cầu 22/10/2026: mọi mật khẩu từng dùng/lưu phải có trong bảng riêng
+// (`hddt_password_journal`); khi cổng phản hồi "mật khẩu không đúng" thì đánh
+// dấu `bad` và KHÔNG tự thử lại mật khẩu đó nữa (cổng khóa tạm tài khoản do
+// nhập sai nhiều lần). Khi tài khoản đăng nhập thành công → reset các dấu
+// `bad` của tài khoản và ghi mật khẩu đang dùng thành `ok`.
+
+const JOURNAL_OK: &str = "ok";
+const JOURNAL_BAD: &str = "bad";
+
+/// Phản hồi của cổng coi là "mật khẩu không đúng": message có "mật khẩu" hoặc
+/// báo khóa tài khoản, và KHÔNG phải lỗi captcha ("Mã captcha không đúng.").
+fn is_wrong_password_message(err: &str) -> bool {
+    let m = err.to_lowercase();
+    if m.contains("captcha") {
+        return false;
+    }
+    m.contains("mật khẩu") || (m.contains("tài khoản") && m.contains("khóa"))
+}
+
+/// Ghi nhận mật khẩu vào nhật ký (idempotent — row có sẵn thì giữ nguyên state
+/// đã biết, chỉ bổ sung lần ghi đầu). Không bao giờ xóa dòng: mật khẩu cũ của
+/// người dùng không mất khi đổi mật khẩu.
+async fn journal_note(
+    pool: &SqlitePool,
+    username: &str,
+    password: &str,
+    note: &str,
+) -> Result<(), String> {
+    sqlx::query!(
+        "INSERT INTO hddt_password_journal (username, password, note)
+         VALUES (?, ?, ?)
+         ON CONFLICT(username, password) DO NOTHING",
+        username,
+        password,
+        note
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Ghi kết quả thử gần nhất của mật khẩu (ok/bad) — tạo dòng nếu chưa có.
+async fn journal_mark(
+    pool: &SqlitePool,
+    username: &str,
+    password: &str,
+    new_state: &str,
+) -> Result<(), String> {
+    sqlx::query!(
+        "INSERT INTO hddt_password_journal (username, password, state, marked_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(username, password)
+         DO UPDATE SET state = excluded.state, marked_at = datetime('now')",
+        username,
+        password,
+        new_state
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Đăng nhập *thành công* (auto lẫn manual) → theo quy ước: reset mọi dấu
+/// `bad` của TÀI KHOẠN (mật khẩu cũ được phép thử lại bằng tay) và ghi mật
+/// khẩu đang dùng thành `ok`.
+async fn journal_record_ok(
+    pool: &SqlitePool,
+    username: &str,
+    password: &str,
+) -> Result<(), String> {
+    journal_mark(pool, username, password, JOURNAL_OK).await?;
+    sqlx::query!(
+        "UPDATE hddt_password_journal
+            SET state = 'unknown', marked_at = NULL
+          WHERE username = ? AND state = 'bad'",
+        username
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Mật khẩu active đã bị cổng từ chối (state `bad`) → cấm tự thử lại.
+async fn journal_is_bad(pool: &SqlitePool, username: &str, password: &str) -> Result<bool, String> {
+    if username.is_empty() || password.is_empty() {
+        return Ok(false);
+    }
+    let state_str: Option<String> = sqlx::query_scalar!(
+        "SELECT state FROM hddt_password_journal WHERE username = ? AND password = ?",
+        username,
+        password
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(state_str.as_deref() == Some(JOURNAL_BAD))
+}
+
 /// Current connection state (never exposes the token or the password).
 async fn status_value(state: &State<'_, AppState>) -> Result<Value, String> {
     let cfg = read_config(state).await?;
@@ -121,6 +236,11 @@ async fn status_value(state: &State<'_, AppState>) -> Result<Value, String> {
             .map(|s| s.username.clone())
             .unwrap_or_default()
     };
+    // Mật khẩu active đang bị đánh dấu "cổng từ chối" — UI bật banner đỏ nhắc sửa.
+    let active_password_bad =
+        journal_is_bad(&*state.pool.read().await, &cfg.username, &cfg.password)
+            .await
+            .unwrap_or(false);
     Ok(json!({
         "configured": cfg.configured(),
         "username": username,
@@ -130,6 +250,7 @@ async fn status_value(state: &State<'_, AppState>) -> Result<Value, String> {
         "relogin_margin": RELOGIN_MARGIN_SECS,
         "user": sess.as_ref().and_then(|s| s.user.clone()),
         "auto_change_password": cfg.auto_change_password,
+        "active_password_bad": active_password_bad,
     }))
 }
 
@@ -162,6 +283,75 @@ pub(crate) async fn hddt_get_password(state: State<'_, AppState>) -> Result<Stri
     Ok(json!(cfg.password).to_string())
 }
 
+/// Danh sách mật khẩu từng lưu/thử của tài khoản hiện tại (nhân sự có quyền —
+/// trả plaintext như `hddt_get_password`, app local không mã hóa).
+#[tauri::command]
+pub(crate) async fn hddt_password_journal(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let cfg = read_config(&state).await?;
+    let rows: Vec<PasswordJournalRow> = sqlx::query_as!(
+        PasswordJournalRow,
+        "SELECT id as \"id!\", password, state, note, created_at, marked_at
+           FROM hddt_password_journal
+          WHERE username = ?
+          ORDER BY id DESC",
+        cfg.username
+    )
+    .fetch_all(&*state.pool.read().await)
+    .await
+    .map_err(|e| e.to_string())?;
+    // Nối `is_current` trước khi render: so sánh trong Rust thôi (mật khẩu
+    // không bao giờ xuất hiện 2 lần → the danh sách chắc chắn đúng).
+    let out: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "password": r.password,
+                "state": r.state,
+                "note": r.note,
+                "created_at": r.created_at,
+                "marked_at": r.marked_at,
+                "is_current": r.password == cfg.password,
+            })
+        })
+        .collect();
+    Ok(json!(out).to_string())
+}
+
+/// Chọn một mật khẩu trong nhật ký làm mật khẩu active ("Dùng" — cứu khi lỡ
+/// lưu sai mật khẩu; không phải gõ lại mật khẩu còn hiệu lực).
+#[tauri::command]
+pub(crate) async fn hddt_use_journal_password(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let cfg = read_config(&state).await?;
+    let password: Option<String> = sqlx::query_scalar!(
+        "SELECT password FROM hddt_password_journal WHERE id = ? AND username = ?",
+        id,
+        cfg.username
+    )
+    .fetch_optional(&*state.pool.read().await)
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(password) = password else {
+        return Err(
+            "Mật khẩu không có trong nhật ký của tài khoản này (có thể vừa đổi tên đăng nhập)."
+                .into(),
+        );
+    };
+    upsert(&state, KEY_PASSWORD, &password).await?;
+    *state.portal.lock().await = None; // credentials changed → token no longer trusted
+    audit(&state, "hddt_use_journal_password", "hddt", &cfg.username).await;
+    Ok(json!({
+        "ok": true,
+        "status": status_value(&state).await?,
+    })
+    .to_string())
+}
+
 /// Store the HDDT account. An empty `password` keeps the existing one; an empty
 /// `base_url` resets to the official portal. Any change clears the cached token.
 #[tauri::command]
@@ -179,6 +369,9 @@ pub(crate) async fn hddt_save_config(
     upsert(&state, KEY_USERNAME, &username).await?;
     if !password.is_empty() {
         upsert(&state, KEY_PASSWORD, &password).await?;
+        // Nhật ký: mật khẩu mới chưa thử → giữ state đã biết (ok/bad),
+        // lần đầu = 'unknown'. Mật khẩu cũ vẫn nguyên dòng trong bảng.
+        journal_note(&*state.pool.read().await, &username, &password, "lưu tay").await?;
     }
     upsert(&state, KEY_BASE_URL, base_url.trim()).await?;
     *state.portal.lock().await = None; // credentials changed → token no longer trusted
@@ -211,11 +404,24 @@ async fn do_full_login(state: &State<'_, AppState>) -> Result<Value, String> {
             "Chưa cấu hình tài khoản HĐĐT. Vui lòng nhập tên đăng nhập và mật khẩu.".into(),
         );
     }
+    // Mật khẩu active đã bị cổng từ chối → KHÔNG tự động thử lại. Cổng khóa tạm
+    // tài khoản nếu nhập sai liên tiếp; người dùng phải sửa mật khẩu trên màn
+    // HĐĐT trước (đúng màu banner đỏ).
+    if journal_is_bad(&*state.pool.read().await, &cfg.username, &cfg.password).await? {
+        return Ok(json!({
+            "ok": false,
+            "need_manual": false,
+            "blocked_password": true,
+            "reason": "Mật khẩu đang lưu đã bị cổng từ chối (sai). Vui lòng sửa mật khẩu trên màn HĐĐT — app không tự thử lại để tránh khóa tài khoản.",
+        }));
+    }
     let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
     match client.login_with_solver(&GlyphTemplateSolver, 3).await {
         Ok(login) => {
             let session = PortalSession::new(cfg.username.clone(), login.token, login.user);
             *state.portal.lock().await = Some(session);
+            // Thành công → ghi mật khẩu đang dùng `ok` + reset các dấu `bad` của tài khoản.
+            journal_record_ok(&*state.pool.read().await, &cfg.username, &cfg.password).await?;
             Ok(json!({
                 "ok": true,
                 "need_manual": false,
@@ -227,7 +433,19 @@ async fn do_full_login(state: &State<'_, AppState>) -> Result<Value, String> {
             "need_manual": true,
             "reason": "Không giải được captcha tự động sau 3 lần. Vui lòng nhập mã captcha thủ công.",
         })),
-        Err(LoginError::Other(e)) => Err(e),
+        Err(LoginError::Other(e)) => {
+            if is_wrong_password_message(&e) {
+                // Cổng rõ ràng phản hồi mật khẩu sai → đánh dấu, lần thử sau bị chặn.
+                journal_mark(
+                    &*state.pool.read().await,
+                    &cfg.username,
+                    &cfg.password,
+                    JOURNAL_BAD,
+                )
+                .await?;
+            }
+            Err(e)
+        }
     }
 }
 
@@ -262,6 +480,15 @@ async fn perform_change_password(state: &State<'_, AppState>) -> Result<String, 
         .change_password(&token, &cfg.password, &new_password)
         .await?;
     upsert(state, KEY_PASSWORD, &new_password).await?;
+    // Nhật ký: mật khẩu mới do app sinh ra (cổng đã xác nhận đổi) — note riêng
+    // để phân biệt với mật khẩu người dùng lưu tay; đăng nhập kế tiếp sẽ mark ok.
+    journal_note(
+        &*state.pool.read().await,
+        &cfg.username,
+        &new_password,
+        "tự đổi",
+    )
+    .await?;
     *state.portal.lock().await = None; // the portal invalidated the old token
     audit(state, "hddt_change_password", "hddt", "rotated").await;
     Ok(new_password)
@@ -360,10 +587,35 @@ pub(crate) async fn hddt_login_manual(
         return Err("Chưa cấu hình tài khoản HĐĐT.".into());
     }
     let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
-    let token = client.authenticate(&captcha_key, value).await?;
+    // Gate giống do_full_login: mật khẩu active bị đánh dấu "cổng từ chối"
+    // thì không bắn authenticate nữa — kể cả captcha người dùng vô đúng.
+    if journal_is_bad(&*state.pool.read().await, &cfg.username, &cfg.password).await? {
+        return Ok(json!({
+            "ok": false,
+            "need_manual": false,
+            "blocked_password": true,
+            "reason": "Mật khẩu đang lưu đã bị cổng từ chối (sai). Sửa mật khẩu ở ô trên rồi bấm Lưu tài khoản — app không tự thử lại để tránh khóa tài khoản.",
+        }).to_string());
+    }
+    let token = match client.authenticate(&captcha_key, value).await {
+        Ok(t) => t,
+        Err(e) => {
+            if is_wrong_password_message(&e) {
+                journal_mark(
+                    &*state.pool.read().await,
+                    &cfg.username,
+                    &cfg.password,
+                    JOURNAL_BAD,
+                )
+                .await?;
+            }
+            return Err(e);
+        }
+    };
     let user = client.profile(&token).await.ok();
     let session = PortalSession::new(cfg.username.clone(), token, user);
     *state.portal.lock().await = Some(session);
+    journal_record_ok(&*state.pool.read().await, &cfg.username, &cfg.password).await?;
     audit(&state, "hddt_login", "hddt", "manual").await;
     Ok(json!({
         "ok": true,
@@ -566,16 +818,39 @@ pub(crate) async fn hddt_sync_test_seed(
     let tgtthue = r2(tgtthue);
     let tgtttbso = r2(tgtcthue + tgtthue);
     let detail_json = detail.to_string();
+    // Số hóa đơn RIÊNG cho từng lần seed: guard "mỗi hóa đơn chỉ được nhập 1
+    // phiếu" (stock.rs) chặn nhập lại hóa đơn đã có trong phiếu nhập. Số phải
+    // suy ra từ CẢ cache lẫn phiếu nhập đã có — test trước có thể đã xoá cache
+    // nhưng phiếu nhập thì vẫn còn, nên chỉ nhìn cache sẽ bị trùng số.
+    let cached: Vec<String> =
+        sqlx::query_scalar!("SELECT shdon FROM hddt_purchase_invoice WHERE khhdon = 'C26E2E'")
+            .fetch_all(&*pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let imported: Vec<String> = sqlx::query_scalar!(
+        "SELECT invoice_no FROM inbound_voucher WHERE lower(trim(invoice_serial)) = 'c26e2e'"
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let max_no = cached
+        .iter()
+        .chain(imported.iter())
+        .filter_map(|s| s.trim().parse::<i64>().ok())
+        .max()
+        .unwrap_or(0);
+    let shdon = format!("{:03}", max_no + 1);
     sqlx::query!(
         "INSERT INTO hddt_purchase_invoice
             (portal_id, portal_kind, tdlap, posting_date, nbmst, nbten, nmmst,
              khmshdon, khhdon, shdon, hthdon, tchat, tgtcthue, tgtthue, ttcktmai,
              tgtttbso, status, line_count, raw_json, detail_json, created_at)
          VALUES (?, 'regular', '2026-09-01T17:00:00Z', '2026-09-02', '0106773786',
-                 'Cty TNHH ABC', '001170019085', 1, 'C26E2E', '001', 1, 1,
+                 'Cty TNHH ABC', '001170019085', 1, 'C26E2E', ?, 1, 1,
                  ?, ?, 0, ?, 'pending', ?, '{}', ?, datetime('now'))
          ON CONFLICT(portal_id) DO NOTHING",
         portal_id,
+        shdon,
         tgtcthue,
         tgtthue,
         tgtttbso,
@@ -1076,4 +1351,94 @@ pub(crate) async fn hddt_export_xml_zip(
     )
     .await;
     Ok(base64::engine::general_purpose::STANDARD.encode(&zip))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::*;
+
+    // ─── is_wrong_password_message (thuần) ───
+
+    #[test]
+    fn captcha_error_khong_coi_la_sai_mat_khau() {
+        assert!(!is_wrong_password_message("HĐĐT: Mã captcha không đúng."));
+        assert!(!is_wrong_password_message("Không lấy được captcha HĐĐT."));
+    }
+
+    #[test]
+    fn sai_mat_khau_va_khoa_tai_khoan_duoc_nhan_biet() {
+        assert!(is_wrong_password_message(
+            "HĐĐT: Thông tin tài khoản hoặc mật khẩu không chính xác."
+        ));
+        assert!(is_wrong_password_message(
+            "HĐĐT: Tài khoản đã tạm khóa do nhập sai thông tin."
+        ));
+    }
+
+    #[test]
+    fn loi_khac_khong_ghi_nhan() {
+        assert!(!is_wrong_password_message("Tài khoản không tồn tại."));
+        assert!(!is_wrong_password_message(
+            "Lỗi kết nối cổng HĐĐT: connection refused"
+        ));
+    }
+
+    // ─── Nhật ký mật khẩu (pool thật, migration đã chạy) ───
+
+    #[tokio::test]
+    async fn note_then_bad_then_reset_on_ok() {
+        let pool = test_pool().await;
+        journal_note(&pool, "1234567890-001", "pw1", "lưu tay")
+            .await
+            .expect("note");
+        // idempotent — ghi lại không đổi ghi chú/state.
+        journal_note(&pool, "1234567890-001", "pw1", "lưu tay lại")
+            .await
+            .expect("note lại");
+        assert!(!journal_is_bad(&pool, "1234567890-001", "pw1")
+            .await
+            .expect("is_bad"));
+
+        journal_mark(&pool, "1234567890-001", "pw1", JOURNAL_BAD)
+            .await
+            .expect("mark bad");
+        assert!(journal_is_bad(&pool, "1234567890-001", "pw1")
+            .await
+            .expect("is bad"));
+
+        // Mật khẩu khác của cùng tài khoản đăng nhập thành công (mark ok) →
+        // mọi dấu bad của TÀI KHOẠN đó được reset (quy ước "thành công thì reset").
+        journal_mark(&pool, "1234567890-001", "pw2", JOURNAL_BAD)
+            .await
+            .expect("mark bad pw2");
+        journal_record_ok(&pool, "1234567890-001", "pw2")
+            .await
+            .expect("record ok");
+        assert!(!journal_is_bad(&pool, "1234567890-001", "pw1")
+            .await
+            .expect("reset pw1"));
+        assert!(!journal_is_bad(&pool, "1234567890-001", "pw2")
+            .await
+            .expect("ok pw2"));
+
+        // ... nhưng dấu bad của TÀI KHOẠN KHÁC không bị lây (reset theo username).
+        journal_mark(&pool, "0987654321-001", "pw1", JOURNAL_BAD)
+            .await
+            .expect("mark bad TK khác");
+        assert!(journal_is_bad(&pool, "0987654321-001", "pw1")
+            .await
+            .expect("bad của TK khác"));
+    }
+
+    #[tokio::test]
+    async fn journal_is_bad_bo_qua_o_trong() {
+        let pool = test_pool().await;
+        assert!(!journal_is_bad(&pool, "", "pw")
+            .await
+            .expect("username rỗng"));
+        assert!(!journal_is_bad(&pool, "TK", "")
+            .await
+            .expect("password rỗng"));
+    }
 }

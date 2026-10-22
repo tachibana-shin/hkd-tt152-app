@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT invoice_no FROM inbound_voucher WHERE lower(trim(invoice_serial)) = 'c26e2e'",
+  "describe": {
+    "columns": [
+      {
+        "name": "invoice_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8ad7ea4aefa28a9683f1d3daf23ac12b4f01e4a8d7bee9ca37a490746ee27d1c"
+}

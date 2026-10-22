@@ -597,6 +597,10 @@ pub async fn api_invoke(
         // ── HĐĐT ──
         "hddt_get_config" => mx!(commands::hddt::hddt_get_config, body),
         "hddt_get_password" => mx!(commands::hddt::hddt_get_password, body),
+        "hddt_password_journal" => mx!(commands::hddt::hddt_password_journal, body),
+        "hddt_use_journal_password" => {
+            mx!(commands::hddt::hddt_use_journal_password, body, id: i64)
+        }
         "hddt_save_config" => mx!(
             commands::hddt::hddt_save_config,
             body,

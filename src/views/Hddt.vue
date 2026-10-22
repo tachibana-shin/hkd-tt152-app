@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { api } from "@/db";
+import type { HddtPasswordJournalRow } from "@/types";
 import { usePortalSession } from "@/composables/usePortalSession";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 
@@ -13,6 +14,11 @@ const { status, busy, lastError } = portal;
 const loading = ref(false);
 const saving = ref(false);
 
+// ─── Nhật ký mật khẩu (bảng riêng `hddt_password_journal`) ───
+// Ghi đủ mọi mật khẩu đã lưu/tự đổi + dấu kết quả thử gần nhất; bị cổng từ
+// chối thì app không tự thử lại mật khẩu đó (= không khóa tài khoản).
+const journal = ref<HddtPasswordJournalRow[]>([]);
+
 const cfg = reactive({ username: "", password: "", base_url: "" });
 const hasPassword = ref(false);
 const configured = ref(false);
@@ -24,6 +30,50 @@ const savedPassword = ref("");
 /** Tự đổi mật khẩu khi sắp hết hạn (mặc định tắt — khôi phục mật khẩu bị mất rất khó). */
 const autoChange = ref(false);
 const changeBusy = ref(false);
+
+const journalBusyId = ref<number | null>(null);
+/** Bật "hiện" một lần cho cả bảng (mật khẩu plaintext đã có sẵn qua API có phân quyền). */
+const showJournalPasswords = ref(false);
+
+async function loadJournal() {
+  try {
+    journal.value = await api.hddtPasswordJournal();
+  } catch {
+    journal.value = [];
+  }
+}
+
+/** "Dùng" mật khẩu từ nhật ký: đưa về active + refresh cấu hình + trạng thái. */
+async function useJournal(row: HddtPasswordJournalRow) {
+  journalBusyId.value = row.id;
+  try {
+    await api.hddtUseJournalPassword(row.id);
+    toast.add({
+      severity: "success",
+      summary: "Đã dùng mật khẩu trong nhật ký",
+      detail: "Bấm Đăng nhập lại để thử phiên mới.",
+      life: 3000,
+    });
+    await Promise.all([loadJournal(), loadConfig(), refreshStatus()]);
+  } catch (e) {
+    toastError("Không đổi được mật khẩu đang dùng", e);
+  } finally {
+    journalBusyId.value = null;
+  }
+}
+
+/** Thời điểm lưu row theo lịch "YYYY-MM-DD HH:MM:SS" của SQLite. */
+function fmtJournalTime(v: string) {
+  const d = new Date(v.includes("T") ? v : v.replace(" ", "T") + "Z");
+  return Number.isNaN(d.getTime()) ? v : d.toLocaleString("vi-VN");
+}
+
+/** Nhãn kết quả thử gần nhất của mật khẩu trong nhật ký. */
+const journalStateLabel = {
+  ok: "Đăng nhập OK",
+  bad: "Bị từ chối",
+  unknown: "Chưa thử",
+} as const;
 
 const tokenText = computed(() => {
   const s = status.value?.seconds_left ?? 0;
@@ -239,6 +289,7 @@ async function reload() {
   try {
     await loadConfig();
     await refreshStatus();
+    void loadJournal();
   } catch (e) {
     toastError("Không tải được cấu hình HĐĐT", e);
   } finally {
@@ -379,6 +430,73 @@ useKeepAliveRefresh(reload);
         </template>
       </Card>
 
+      <!-- Nhật ký mật khẩu: không mất mật khẩu còn hiệu lực + chặn thử lại mật khẩu sai -->
+      <Card v-if="configured">
+        <template #title>
+          <div class="flex w-full flex-wrap items-center justify-between gap-2">
+            <span>Nhật ký mật khẩu</span>
+            <Button
+              size="small"
+              text
+              severity="secondary"
+              :icon="showJournalPasswords ? 'pi pi-eye-slash' : 'pi pi-eye'"
+              :aria-label="showJournalPasswords ? 'Ẩn mật khẩu đã soi' : 'Soi mật khẩu'"
+              :title="showJournalPasswords ? 'Ẩn mật khẩu đã soi' : 'Soi mật khẩu'"
+              data-testid="hddt-journal-reveal"
+              @click="showJournalPasswords = !showJournalPasswords"
+            />
+          </div>
+        </template>
+        <template #content>
+          <p class="mb-3 text-xs text-gray-500">
+            Mọi mật khẩu đã lưu / tự đổi cho tài khoản này, không xoá bao giờ — lỡ lưu sai còn biết
+            mật khẩu nào còn hiệu lực. <b>Bị từ chối</b> = cổng trả lời mật khẩu không đúng: app
+            <b>không tự thử lại</b> mật khẩu đó (tránh khóa tài khoản do sai nhiều lần); đăng nhập
+            thành công nào của tài khoản sẽ xoá dấu này.
+          </p>
+          <DataTable :value="journal" size="small" striped data-testid="hddt-journal-table">
+            <Column header="Lưu lúc" style="width: 150px">
+              <template #body="{ data }">
+                <span class="text-xs text-gray-500">{{ fmtJournalTime(data.created_at) }}</span>
+              </template>
+            </Column>
+            <Column header="Mật khẩu">
+              <template #body="{ data }">
+                <code class="text-xs">{{ showJournalPasswords ? data.password : "••••••" }}</code>
+                <Tag v-if="data.is_current" severity="info" value="đang dùng" class="ml-2" />
+              </template>
+            </Column>
+            <Column header="Kết quả thử gần nhất" style="width: 170px">
+              <template #body="{ data }">
+                <Tag
+                  :severity="
+                    data.state === 'ok' ? 'success' : data.state === 'bad' ? 'danger' : 'secondary'
+                  "
+                  :value="journalStateLabel[data.state as keyof typeof journalStateLabel]"
+                />
+              </template>
+            </Column>
+            <Column style="width: 90px">
+              <template #body="{ data }">
+                <Button
+                  v-if="!data.is_current"
+                  label="Dùng"
+                  text
+                  severity="secondary"
+                  size="small"
+                  :loading="journalBusyId === data.id"
+                  data-testid="hddt-journal-use"
+                  @click="useJournal(data)"
+                />
+              </template>
+            </Column>
+            <template #empty>
+              <EmptyState text="Chưa ghi mật khẩu nào trong nhật ký." icon="pi pi-key" />
+            </template>
+          </DataTable>
+        </template>
+      </Card>
+
       <!-- Trạng thái kết nối -->
       <Card>
         <template #title>Trạng thái kết nối</template>
@@ -415,6 +533,16 @@ useKeepAliveRefresh(reload);
               cổng, nhập mật khẩu mới ở ô bên trên rồi bấm "Lưu tài khoản".
             </div>
 
+            <div
+              v-if="configured && !status?.logged_in && status?.active_password_bad"
+              class="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+              data-testid="hddt-password-blocked"
+            >
+              <i class="pi pi-ban mr-1" />
+              <b>Mật khẩu đang lưu đã bị cổng từ chối.</b> App chặn tự thử lại để không khóa tài
+              khoản do nhập sai nhiều lần. Sửa mật khẩu ở ô trên rồi bấm "Lưu tài khoản", hoặc chọn
+              mật khẩu còn hiệu lực trong Nhật ký mật khẩu bên dưới.
+            </div>
             <div class="grid grid-cols-1 gap-4 text-sm md:grid-cols-4">
               <div>
                 <div class="text-gray-500">Tài khoản</div>

@@ -168,6 +168,8 @@ pub fn run() {
             commands::catalog::next_employee_code,
             commands::hddt::hddt_get_config,
             commands::hddt::hddt_get_password,
+            commands::hddt::hddt_password_journal,
+            commands::hddt::hddt_use_journal_password,
             commands::hddt::hddt_save_config,
             commands::hddt::hddt_status,
             commands::hddt::hddt_send_simulated,

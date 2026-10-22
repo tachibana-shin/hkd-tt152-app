@@ -228,6 +228,12 @@ test("no JS/console errors while navigating several tabs", async ({ page }) => {
   page.on("pageerror", (e) => errors.push(`pageerror: ${String(e)}`));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(`console: ${m.text()}`);
+    // Cảnh báo Vue (slot không phải function, attr thừa trên component nhiều
+    // root…) — dev mode lộ ra nhiỗi loạn, production im lặng. Gộp vào lỗi để
+    // chặn tái phát.
+    if (m.type() === "warning" && m.text().includes("Vue warn")) {
+      errors.push(`vue warn: ${m.text()}`);
+    }
   });
 
   await ensureLoggedIn(page);
@@ -235,6 +241,9 @@ test("no JS/console errors while navigating several tabs", async ({ page }) => {
     ["Sản phẩm", "Danh mục sản phẩm"],
     ["Tài khoản", "Danh mục tài khoản"],
     ["Bảng lương", "Bảng lương"],
+    // Màn Kế toán HKD dựng TaxEntryForm — nơi từng cảnh báo "Extraneous
+    // non-props attributes" vì component có 2 root.
+    ["Kế toán HKD", "Kế toán HKD"],
     ["Cài đặt", "Cài đặt"],
     ["Tổng quan", "Tổng quan"],
   ];
@@ -566,6 +575,10 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
     imported.ok(),
     `hddt_sync_import failed ${imported.status()}: ${await imported.text()}`,
   ).toBe(true);
+  // Kết quả từng hóa đơn (lỗi cụ thể) — để khi assert bên dưới đỏ thì biết vì sao.
+  const importResult = (await imported.json()) as {
+    results?: Array<{ portal_id: string; ok: boolean; message: string; voucher_no: string }>;
+  };
 
   await sidebarButton(page, "Đồng bộ HĐĐT").click();
   await expect(page.locator("header h2")).toHaveText("Đồng bộ hóa đơn mua");
@@ -582,7 +595,7 @@ test("Xem phiếu: mở phiếu nhập kho từ Đồng bộ HĐĐT và từ dan
   const syncVoucher = String(
     preview.rows.find((r) => r.portal_id === "e2e-uuid-view")?.voucher_no ?? "",
   );
-  expect(syncVoucher).toMatch(/^PN\d+$/);
+  expect(syncVoucher, `import: ${JSON.stringify(importResult)}`).toMatch(/^PN\d+$/);
   await page.getByRole("button", { name: `Xem phiếu ${syncVoucher}` }).click();
   const dlg = page.getByRole("dialog");
   await expect(dlg.getByText("PHIẾU NHẬP KHO")).toBeVisible();
@@ -2124,6 +2137,74 @@ test("HĐĐT: lưu tài khoản qua UI không lỗi ảo, mắt soi mật khẩu
   await expect(page.getByText("Đã đăng nhập cổng HĐĐT")).toBeVisible();
   await expect(page.getByText("Không lưu được")).toHaveCount(0);
   await expect(page.getByText("No PrimeVue Toast provided")).toHaveCount(0);
+});
+
+test("HĐĐT: nhật ký mật khẩu chặn thử lại mật khẩu sai, thành công thì reset", async ({
+  page,
+  request,
+}) => {
+  test.skip(LIVE_PORTAL, "Mock-only: mock portal từ chối riêng password 'mock-wrong'");
+  await ensureLoggedIn(page);
+
+  // 1) Lưu mật khẩu SAI (mock portal từ chối đúng mật khẩu này).
+  const bad = await request.post("/api/hddt_save_config", {
+    data: { username: "0100000000", password: "mock-wrong", baseUrl: MOCK_PORTAL_URL },
+  });
+  expect(bad.ok(), `save_config wrong: ${await bad.text()}`).toBe(true);
+  const firstLogin = await request.post("/api/hddt_login", { data: {} });
+  expect(firstLogin.status()).toBe(400); // cổng từ chối → lỗi nghiệp vụ
+  expect(await firstLogin.text()).toContain("mật khẩu");
+
+  // 2) Nhật ký đã ghi nhận mật khẩu sai.
+  const journalRows = (await (
+    await request.post("/api/hddt_password_journal", { data: {} })
+  ).json()) as Array<{ password: string; state: string; is_current: boolean }>;
+  const wrong = journalRows.find((r) => r.password === "mock-wrong");
+  expect(wrong, "mật khẩu sai phải có trong nhật ký").toBeTruthy();
+  expect(wrong?.state).toBe("bad");
+  expect(wrong?.is_current).toBe(true);
+
+  // 3) Lần thử 2 KHÔNG gọi cổng nữa — trả ok:false + blocked_password.
+  const secondLogin = await request.post("/api/hddt_login", { data: {} });
+  expect(secondLogin.ok(), `login lan 2: ${await secondLogin.text()}`).toBe(true);
+  const secondBody = await secondLogin.json();
+  expect(secondBody.ok).toBe(false);
+  expect(secondBody.blocked_password).toBe(true);
+  const st = (await (await request.post("/api/hddt_status", { data: {} })).json()) as {
+    active_password_bad?: boolean;
+    logged_in: boolean;
+  };
+  expect(st.active_password_bad).toBe(true);
+  expect(st.logged_in).toBe(false);
+
+  // 4) UI: banner đỏ + bảng nhật ký "Bị từ chối"; mắt soi ra mật khẩu sai.
+  await openTab(page, "HĐĐT", "/hddt");
+  await expect(page.getByTestId("hddt-password-blocked")).toBeVisible();
+  const journalTable = page.getByTestId("hddt-journal-table");
+  await expect(journalTable).toBeVisible();
+  await expect(journalTable.getByText("Bị từ chối")).toBeVisible();
+  await page.getByTestId("hddt-journal-reveal").click();
+  await expect(journalTable.getByText("mock-wrong")).toBeVisible();
+
+  // 5) Sửa lại mật khẩu ĐÚNG qua UI (ô mật khẩu + Lưu) → đăng nhập lại thành công.
+  const pwInput = page.locator('input[placeholder="Đã lưu — để trống nếu không đổi"]');
+  await pwInput.fill("mock");
+  await page.getByRole("button", { name: "Lưu tài khoản" }).click();
+  await expect(page.getByText("Đã lưu tài khoản HĐĐT")).toBeVisible();
+  await expect(page.getByText("Đã đăng nhập cổng HĐĐT")).toBeVisible();
+  await expect(page.getByTestId("hddt-password-blocked")).toHaveCount(0);
+
+  // 6) Nhật ký: mật khẩu đúng = 'ok'; dấu 'bad' của TÀI KHOẠN được reset về
+  //    'unknown' (thành công → reset — đúng quy ước đề bài).
+  const after = (await (
+    await request.post("/api/hddt_password_journal", { data: {} })
+  ).json()) as Array<{ password: string; state: string; is_current: boolean }>;
+  const okRow = after.find((r) => r.password === "mock");
+  expect(okRow?.state).toBe("ok");
+  expect(okRow?.is_current).toBe(true);
+  const wrongRow = after.find((r) => r.password === "mock-wrong");
+  expect(wrongRow?.state).toBe("unknown");
+  expect(wrongRow?.is_current).toBe(false);
 });
 
 test("HĐĐT tra cứu hóa đơn: mặc định tab máy tính tiền và trả về hóa đơn", async ({
@@ -4625,6 +4706,52 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
 
   const left = await fetchBoms();
   expect(left.filter((r) => r.product_code.startsWith("SP-MFG"))).toHaveLength(0);
+});
+
+// ─── F4 — TẠO NHANH MẶT HÀNG NGAY TỪ POPUP CHỌN HÀNG Ở TAB ĐỊNH MỨC ───
+test("Định mức vật tư: tạo nhanh mặt hàng mới ngay từ popup chọn hàng", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Tên độc nhất giữa các lần chạy — danh mục còn dơ từ test trước.
+  const name = `SP Nhanh Mới ${Date.now() % 1_000_000}`;
+
+  await sidebarButton(page, "Sản phẩm").click();
+  await expect(page.locator("header h2")).toHaveText("Danh mục sản phẩm");
+  await page.getByRole("tab", { name: /Định mức vật tư/ }).click();
+  await page.getByTestId("bom-add").click();
+
+  // Gõ tên CHƯA có trong danh mục → footer popup hiện dòng "Tạo nhanh".
+  const fg = page.getByTestId("bom-fg");
+  await fg.locator(".p-select").click();
+  const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+  await expect(box).toBeVisible();
+  await box.fill(name);
+  await expect(page.getByTestId("product-quick-create")).toContainText(name);
+  await page.getByTestId("product-quick-create").click();
+
+  // Form rút gọn mở với tên đã gõ sẵn; lưu xong là hàng thật. ProductSelect tự
+  // đóng overlay qua method hide() của Select (giả phím Esc ở WebKitGTK không
+  // hiệu lực nên popup thường còn treo sau click).
+  const qDlg = page.getByRole("dialog", { name: "Tạo nhanh mặt hàng" });
+  await expect(qDlg).toBeVisible();
+  await expect(page.locator(".p-select-overlay")).toBeHidden();
+  await expect(qDlg.locator('label:text-is("Tên sản phẩm") + input')).toHaveValue(name);
+  await qDlg.getByRole("spinbutton").fill("42000");
+  await qDlg.getByRole("button", { name: "Lưu", exact: true }).click();
+  await expect(qDlg).toBeHidden();
+
+  // Ô thành phẩm nhận luôn mặt hàng vừa tạo — không phải gõ/chọn lại.
+  await expect(fg.locator(".p-select")).toContainText(name);
+
+  const products = (await (await request.post("/api/get_products", { data: {} })).json()) as Array<{
+    code: string;
+    name: string;
+  }>;
+  const made = products.find((p) => p.name === name);
+  expect(made, "hàng tạo nhanh phải nằm trong danh mục").toBeTruthy();
 });
 
 // ─── F4 — ĐỊNH MỨC VẬT TƯ: PNK sản xuất tự sinh phiếu xuất NVL (Nợ 154 / Có 152) ───

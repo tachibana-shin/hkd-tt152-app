@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO hddt_password_journal (username, password, note)\n         VALUES (?, ?, ?)\n         ON CONFLICT(username, password) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5dacc22ab5dd7ba5931618935cbb606bfae99d6c96c31dd461e0ad5f012b955f"
+}

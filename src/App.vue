@@ -103,7 +103,10 @@ async function bootstrap() {
 
   // Cổng HĐĐT: đăng nhập ngay khi app mở, không đợi vào màn HĐĐT. Solver captcha
   // không xong thì bật hộp thoại nhập tay; các màn chỉ cần đọc trạng thái.
-  await ensurePortalSession();
+  // CHỈ gọi khi đã đăng nhập app: `hddt_status` cần vai trò người dùng, gọi
+  // lúc còn ở màn đăng nhập thì cổng trả 400 (console đỏ) vô ích — mà lúc đó
+  // cũng chẳng đăng nhập được cổng (không có vai trò để kiểm tra).
+  if (auth.isLoggedIn) await ensurePortalSession();
 }
 
 /** Đảm bảo có phiên cổng HĐĐT (đăng nhập tự + mở popup khi cần nhập tay). */

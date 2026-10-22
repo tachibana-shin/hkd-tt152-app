@@ -973,6 +973,8 @@ export interface HddtStatus {
   user: unknown | null;
   /** Cài đặt `auto_change_password` hiện tại. */
   auto_change_password: boolean;
+  /** Mật khẩu active đang bị cổng đánh dấu từ chối (nhật ký mật khẩu). */
+  active_password_bad?: boolean;
 }
 
 /** Kết quả đăng nhập HĐĐT. `need_manual` = phải nhập captcha tay. */
@@ -981,10 +983,26 @@ export interface HddtLoginResult {
   need_manual: boolean;
   reason?: string;
   status?: HddtStatus;
+  /** Mật khẩu active bị đánh dấu "cổng từ chối" — app chặn tự thử lại. */
+  blocked_password?: boolean;
   /** Đã tự đổi mật khẩu thành công (mật khẩu mới đi kèm). */
   password_rotated?: boolean;
   /** Mật khẩu mới do hệ thống sinh — chỉ có khi `password_rotated` = true. */
   new_password?: string;
+}
+
+/** 1 dòng nhật ký mật khẩu HĐĐT (lưu mọi mật khẩu — tránh mất mật khẩu còn hiệu lực). */
+export interface HddtPasswordJournalRow {
+  id: number;
+  password: string;
+  /** unknown = chưa thử · ok = đăng nhập gần nhất thành công · bad = cổng từ chối. */
+  state: "unknown" | "ok" | "bad";
+  /** Do đâu có dòng: "lưu tay", "tự đổi"… */
+  note: string;
+  created_at: string;
+  marked_at: string | null;
+  /** Đang là mật khẩu active của tài khoản. */
+  is_current: boolean;
 }
 
 /** Trạng thái hóa đơn (`tthai`) — select "Trạng thái hóa đơn" của trang tra cứu. */

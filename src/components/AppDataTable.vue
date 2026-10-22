@@ -436,6 +436,16 @@ export default defineComponent({
     }
 
     // ─── Header: nút bộ lọc + ô tìm kiếm + header của màn hình ───
+    /**
+     * Đánh dấu slot truyền cho PrimeVue như slot đã biên dịch (cờ `_n` của
+     * Vue) — PrimeVue gọi slot trong `setup`, Vue cảnh báo "Slot invoked
+     * outside of the render function" nếu slot là hàm thường. Hàm giữ nguyên
+     * hành vi, chỉ bỏ cảnh báo ở dev mode.
+     */
+    function primeSlot<T extends (...args: never[]) => unknown>(fn: T): T {
+      return Object.assign(fn, { _n: true });
+    }
+
     function headerContent() {
       const screenHeader = slots.header ? slots.header() : [];
       if (!props.filterToggle) return screenHeader;
@@ -449,8 +459,10 @@ export default defineComponent({
           severity: filterRowVisible.value ? "primary" : "secondary",
           onClick: toggleFilterRow,
         }),
-        h(IconField, { style: { flex: "1 1 220px", maxWidth: "360px" } }, [
-          h(InputIcon, {}, [h("i", { class: "pi pi-search" })]),
+        h(IconField, { style: { flex: "1 1 220px", maxWidth: "360px" } }, () => [
+          // InputIcon nhét class trực tiếp (như trong template các màn) — children
+          // kiểu vnode-array làm Vue cảnh báo "Non-function … default slot".
+          h(InputIcon, { class: "pi pi-search" }),
           h(InputText, {
             size: "small",
             type: "search",
@@ -512,7 +524,11 @@ export default defineComponent({
             : {}),
         } as any,
         {
-          default: () => [
+          // Slot truyền cho PrimeVue phải được đánh dấu như slot ĐÃ BIÊN DỊCH
+          // (`_n`) — nếu không, Vue cảnh báo "Slot 'default' invoked outside
+          // of the render function" vì DataTable gọi slot ngay trong setup.
+          // Hàm giữ nguyên hành vi, chỉ bỏ cảnh báo dev.
+          default: primeSlot(() => [
             ...transformColumns(),
             ...(hasActionsSlot
               ? [
@@ -527,8 +543,10 @@ export default defineComponent({
                   ),
                 ]
               : []),
-          ],
-          header: headerContent,
+          ]),
+          // `headerContent()` có lúc trả về MỘT vnode — slot phải trả mảng
+          // (Vue bỏ bọc mảng cho slot đã đánh dấu `_n`).
+          header: primeSlot(() => [headerContent()]),
           ...Object.fromEntries(forwardedSlots.map((n) => [n, slots[n]])),
         },
       );

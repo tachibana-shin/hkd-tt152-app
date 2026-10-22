@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT password FROM hddt_password_journal WHERE id = ? AND username = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "password",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "223732b884a80f0130030d73535c99d1db615a5fb8222f944491bdbc4683a550"
+}

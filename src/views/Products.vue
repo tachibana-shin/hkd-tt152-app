@@ -303,6 +303,34 @@ function setBlockFg(blk: BomBlock, code: string) {
   blk.product_code = code;
 }
 
+// ─── TẠO NHANH MẶT HÀNG TỪ POPUP CHỌN MẶT HÀNG (F4) ───
+// ProductSelect bật allow-create: gõ tên chưa có trong danh mục → dòng "Tạo
+// nhanh" ở footer popup. Bấm là mở ProductDialog chế độ quick (giống bảng dòng
+// phiếu nhập) — lưu xong gán mã vào ĐÚNG ô đang đứng, không phải tìm lại bảng.
+// Giữ THAM CHIẾU object (`row`) thay vì vị trí: dòng có thể bị xóa/phân trang
+// trong lúc dialog đang mở, index sẽ không còn trỏ đúng dòng.
+const bomQuickDialog = ref(false);
+const bomQuickName = ref("");
+/** Ô đang đứng: bảng nào + dòng vật tư nào (null = ô Thành phẩm). */
+const bomQuickTarget = ref<{ blk: BomBlock; row: BomBlock["rows"][number] | null } | null>(null);
+
+function onBomQuickCreate(blk: BomBlock, row: BomBlock["rows"][number] | null, name: string) {
+  bomQuickName.value = name;
+  bomQuickTarget.value = { blk, row };
+  bomQuickDialog.value = true;
+}
+
+function onBomQuickSaved(code: string) {
+  const t = bomQuickTarget.value;
+  bomQuickTarget.value = null;
+  if (!t) return;
+  if (t.row) {
+    t.row.material_code = code;
+  } else {
+    setBlockFg(t.blk, code);
+  }
+}
+
 /**
  * Nhập liên tục (pre-input) — không cần nút "Thêm dòng".
  *
@@ -767,7 +795,9 @@ useKeepAliveRefresh(reload);
                           <ProductSelect
                             :model-value="blk.product_code"
                             size="small"
+                            :allow-create="auth.canStock"
                             @update:model-value="setBlockFg(blk, $event)"
+                            @create="onBomQuickCreate(blk, null, $event)"
                           />
                         </div>
                       </FormField>
@@ -810,7 +840,9 @@ useKeepAliveRefresh(reload);
                           <ProductSelect
                             :model-value="blk.rows[index].material_code"
                             size="small"
+                            :allow-create="auth.canStock"
                             @update:model-value="blk.rows[index].material_code = $event"
+                            @create="onBomQuickCreate(blk, blk.rows[index], $event)"
                           />
                         </template>
                       </Column>
@@ -875,6 +907,15 @@ useKeepAliveRefresh(reload);
       :product="editingProduct"
       :show-action="auth.canStock"
       @saved="onProductSaved"
+    />
+    <!-- Tạo nhanh từ popup chọn mặt hàng ở tab Định mức (F4) — tên đã gõ sẵn,
+         lưu xong gán mã vào đúng ô đang đứng (bomQuickTarget). -->
+    <ProductDialog
+      v-model:visible="bomQuickDialog"
+      quick
+      :preset-name="bomQuickName"
+      :show-action="auth.canStock"
+      @saved="onBomQuickSaved"
     />
   </div>
 </template>

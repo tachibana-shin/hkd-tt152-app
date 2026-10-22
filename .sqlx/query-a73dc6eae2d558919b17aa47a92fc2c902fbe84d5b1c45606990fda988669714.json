@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_password_journal\n            SET state = 'unknown', marked_at = NULL\n          WHERE username = ? AND state = 'bad'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a73dc6eae2d558919b17aa47a92fc2c902fbe84d5b1c45606990fda988669714"
+}

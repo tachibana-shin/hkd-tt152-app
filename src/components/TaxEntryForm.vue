@@ -383,56 +383,59 @@ void (async () => {
       sửa. Nhóm ngành của hồ sơ (VD "Sản xuất, chế biến, chế tạo", "Vận tải, kho bãi") được gộp vào
       6 dòng mẫu theo tỷ lệ tương ứng — <b>Lấy lại số từ sổ</b> sẽ bỏ các bản sửa tay của kỳ này.
     </p>
-  </SectionCard>
-
-  <!-- Bản in: ẩn trên màn hình, chỉ hiện khi body nhận class `print-tax-entry`. -->
-  <Teleport to="body">
-    <div class="tax-entry-print">
-      <!-- Tiêu đề = tên hộ (data hồ sơ) — dòng placeholder "Chọn địa điểm kinh
+    <!-- Bản in: ẩn trên màn hình, chỉ hiện khi body nhận class `print-tax-entry`.
+         Teleport đưa DOM ra <body> nên vị trí trong template không đổi gì hiển thị —
+         đặt trong SectionCard để component giữ đúng 1 root (attrs như data-testid
+         trên usage gắn được vào root, hết cảnh báo Vue). -->
+    <Teleport to="body">
+      <div class="tax-entry-print">
+        <!-- Tiêu đề = tên hộ (data hồ sơ) — dòng placeholder "Chọn địa điểm kinh
            doanh cần kê khai doanh thu" của portal chỉ đúng ở màn chọn, in ra
            tờ khai thì vô nghĩa. -->
-      <h1>{{ taxpayer || "HỘ KINH DOANH" }}</h1>
-      <p v-if="taxIdentity" class="tax-entry-print-id">{{ taxIdentity }}</p>
-      <p class="tax-entry-print-form">
-        Mẫu số 01/CNKD — Tờ khai thuế đối với hộ kinh doanh, cá nhân kinh doanh
-      </p>
-      <p>Kỳ kê khai: {{ periodLabel }}</p>
-      <p class="tax-entry-print-sec">
-        I. Hoạt động sản xuất, kinh doanh hàng hóa, cung cấp dịch vụ có địa điểm kinh doanh cố định
-      </p>
-      <p class="tax-entry-print-loc">
-        1. {{ locationCode || "—" }}<span v-if="taxpayer"> - {{ taxpayer }}</span>
-        <span v-if="!enabled"> — KHÔNG KÊ KHAI ĐỊA ĐIỂM NÀY</span>
-      </p>
-      <p v-if="!enabled" class="tax-entry-print-note">
-        Công tắc tắt: địa điểm {{ locationCode || "—" }} không tham gia kê khai doanh thu kỳ này.
-      </p>
-      <table v-else>
-        <thead>
-          <tr>
-            <th class="tax-entry-print-name">Nhóm ngành nghề</th>
-            <th>Doanh thu thuế giá trị gia tăng</th>
-            <th>Doanh thu thuế thu nhập cá nhân</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in rows" :key="r.order">
-            <td class="tax-entry-print-name">
-              <span class="whitespace-pre-line">{{ taxEntryGroupLabel(r) }}</span>
-            </td>
-            <td class="tax-entry-print-num">{{ num(r.revenueVat).toLocaleString("vi-VN") }}</td>
-            <td class="tax-entry-print-num">{{ num(r.revenuePit).toLocaleString("vi-VN") }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="unmapped.length" class="tax-entry-print-note">
-        Nhóm ngành của hồ sơ không có trong mẫu đã gộp vào "Hoạt động kinh doanh khác":
-        {{ unmapped.map((u) => `${u.name} (${u.code})`).join(", ") }}
-      </p>
-      <p class="tax-entry-print-sign">……, ngày …… tháng …… năm …………</p>
-      <p class="tax-entry-print-sign"><b>Người nộp thuế ký tên</b></p>
-    </div>
-  </Teleport>
+        <h1>{{ taxpayer || "HỘ KINH DOANH" }}</h1>
+        <p v-if="taxIdentity" class="tax-entry-print-id">{{ taxIdentity }}</p>
+        <p class="tax-entry-print-form">
+          Mẫu số 01/CNKD — Tờ khai thuế đối với hộ kinh doanh, cá nhân kinh doanh
+        </p>
+        <p>Kỳ kê khai: {{ periodLabel }}</p>
+        <p class="tax-entry-print-sec">
+          I. Hoạt động sản xuất, kinh doanh hàng hóa, cung cấp dịch vụ có địa điểm kinh doanh cố
+          định
+        </p>
+        <p class="tax-entry-print-loc">
+          1. {{ locationCode || "—" }}<span v-if="taxpayer"> - {{ taxpayer }}</span>
+          <span v-if="!enabled"> — KHÔNG KÊ KHAI ĐỊA ĐIỂM NÀY</span>
+        </p>
+        <p v-if="!enabled" class="tax-entry-print-note">
+          Công tắc tắt: địa điểm {{ locationCode || "—" }} không tham gia kê khai doanh thu kỳ này.
+        </p>
+        <table v-else>
+          <thead>
+            <tr>
+              <th class="tax-entry-print-name">Nhóm ngành nghề</th>
+              <th>Doanh thu thuế giá trị gia tăng</th>
+              <th>Doanh thu thuế thu nhập cá nhân</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rows" :key="r.order">
+              <td class="tax-entry-print-name">
+                <span class="whitespace-pre-line">{{ taxEntryGroupLabel(r) }}</span>
+              </td>
+              <td class="tax-entry-print-num">{{ num(r.revenueVat).toLocaleString("vi-VN") }}</td>
+              <td class="tax-entry-print-num">{{ num(r.revenuePit).toLocaleString("vi-VN") }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-if="unmapped.length" class="tax-entry-print-note">
+          Nhóm ngành của hồ sơ không có trong mẫu đã gộp vào "Hoạt động kinh doanh khác":
+          {{ unmapped.map((u) => `${u.name} (${u.code})`).join(", ") }}
+        </p>
+        <p class="tax-entry-print-sign">……, ngày …… tháng …… năm …………</p>
+        <p class="tax-entry-print-sign"><b>Người nộp thuế ký tên</b></p>
+      </div>
+    </Teleport>
+  </SectionCard>
 </template>
 
 <style scoped>
