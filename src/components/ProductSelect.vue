@@ -6,7 +6,9 @@
 //
 // DANH SÁCH LỚN: bật VirtualScroller (`virtualScrollerOptions`) — mặt hàng +
 // tên khác dễ lên hàng nghìn option, render đủ liền là khựng dấu; scroller chỉ
-// dựng các dòng đang thấy (itemSize 38px khớp độ cao một dòng option).
+// dựng các dòng đang thấy (itemSize 38px). Tên hàng dài được xuống tối đa 2
+// dòng trong đúng 38px: line-height 16px + padding dọc 2px (xem style.css) —
+// không đẩy thanh cuộn ngang, vẫn giữ chiều cao cố định cho VirtualScroller.
 //
 // F5 — tên khác (alias): mỗi sản phẩm đóng góp 1 option tên CHÍNH + 1 option cho
 // MỖI tên khác (cùng mã sản phẩm). Ô vẫn ghi mã hàng qua `modelValue`, nhưng
@@ -243,18 +245,31 @@ if (props.onlyManufactured) void catalog.loadBoms();
   >
     <template #option="slotProps">
       <div class="flex w-full items-center justify-between gap-3">
-        <span class="min-w-0 flex-1 truncate font-medium">{{ slotProps.option.name }}</span>
-        <span v-if="slotProps.option.isAlias" class="whitespace-nowrap text-xs text-gray-400">
+        <!-- Tên dài xuống tối đa 2 dòng (line-clamp) — không để panel rộng theo
+             nội dung rồi sinh thanh cuộn ngang. `break-words` xử lý cả tên không
+             có dấu cách (mã hàng/URL) để không tràn ra ngoài. -->
+        <div class="min-w-0 flex-1">
+          <span class="line-clamp-2 leading-4 font-medium break-words">
+            {{ slotProps.option.name }}
+          </span>
+        </div>
+        <span
+          v-if="slotProps.option.isAlias"
+          class="shrink-0 whitespace-nowrap text-xs text-gray-400"
+        >
           tên khác
         </span>
         <span
           v-if="onhandOf(slotProps.option.code) > 0"
-          class="whitespace-nowrap text-xs text-gray-500"
+          class="shrink-0 whitespace-nowrap text-xs text-gray-500"
         >
           {{ slotProps.option.unit || "—" }} · Còn
           {{ fmt(onhandOf(slotProps.option.code)) }}
         </span>
-        <span v-else-if="slotProps.option.unit" class="whitespace-nowrap text-xs text-gray-400">
+        <span
+          v-else-if="slotProps.option.unit"
+          class="shrink-0 whitespace-nowrap text-xs text-gray-400"
+        >
           {{ slotProps.option.unit }}
         </span>
       </div>
@@ -271,7 +286,7 @@ if (props.onlyManufactured) void catalog.loadBoms();
         @click="onQuickClick($event)"
       >
         <i class="pi pi-plus-circle" aria-hidden="true" />
-        <span class="min-w-0 flex-1 truncate">{{ quickOption.name }}</span>
+        <span class="min-w-0 flex-1 break-words">{{ quickOption.name }}</span>
       </div>
     </template>
     <!-- Dropdown rỗng / gõ không khớp: nói rõ vì sao (hàng phải có định mức). -->

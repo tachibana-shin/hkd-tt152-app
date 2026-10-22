@@ -4496,6 +4496,86 @@ test("Tên khác của sản phẩm: tìm được ở danh mục và hóa đơn
   expect(detail.items[0].line_name).toBe("Mì flour");
 });
 
+// ─── DROPDOWN SẢN PHẨM: TÊN DÀI XUỐNG DÒNG, KHÔNG CUỘN NGANG (#7) ───
+test("Dropdown sản phẩm: tên dài xuống dòng, không cuộn ngang", async ({ page, request }) => {
+  const code = `SP-LONG-${Date.now()}`;
+  const name =
+    "Nước giải khát tăng lực có ga hương vị tự nhiên đặc biệt dành cho mùa hè nắng nóng " +
+    "phiên bản giới hạn dung tích lớn gấp đôi thông thường";
+  // Đăng nhập + tạo hàng trước khi mở trang để catalog nạp kèm tên dài này.
+  const login = await request.post("/api/login", { data: ADMIN });
+  expect(login.ok(), await login.text()).toBe(true);
+  const created = await request.post("/api/save_product", {
+    data: {
+      code,
+      name,
+      unit: "Thùng",
+      salePrice: 150_000,
+      costPrice: 100_000,
+      minStock: 0,
+      vatRate: 8,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(created.ok(), `save_product: ${await created.text()}`).toBe(true);
+
+  await ensureLoggedIn(page);
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg.getByRole("textbox").first()).toHaveValue(/^HD\d+$/);
+
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  const panel = page.locator(".p-select-overlay.product-select-overlay").last();
+  const filter = panel.locator('[role="searchbox"]');
+  await expect(filter).toBeVisible();
+  await filter.fill(code);
+  const option = panel.getByRole("option").first();
+  await expect(option).toBeVisible();
+
+  const metrics = await option.evaluate((li) => {
+    const nameEl = li.querySelector(".line-clamp-2") as HTMLElement;
+    const scroller = li.closest(".p-virtualscroller") as HTMLElement;
+    const style = getComputedStyle(nameEl);
+    return {
+      panelClientWidth: (li.closest(".p-select-overlay") as HTMLElement).clientWidth,
+      panelScrollWidth: (li.closest(".p-select-overlay") as HTMLElement).scrollWidth,
+      scrollerClientWidth: scroller.clientWidth,
+      scrollerScrollWidth: scroller.scrollWidth,
+      nameWidth: nameEl.clientWidth,
+      nameScrollWidth: nameEl.scrollWidth,
+      nameHeight: nameEl.getBoundingClientRect().height,
+      lineHeight: parseFloat(style.lineHeight),
+      whiteSpace: style.whiteSpace,
+    };
+  });
+  expect(metrics.panelScrollWidth, "panel sản phẩm không được rộng hơn khung").toBeLessThanOrEqual(
+    metrics.panelClientWidth + 1,
+  );
+  expect(
+    metrics.scrollerScrollWidth,
+    "danh sách sản phẩm không được có thanh cuộn ngang",
+  ).toBeLessThanOrEqual(metrics.scrollerClientWidth + 1);
+  expect(metrics.nameScrollWidth, "tên hàng không được tràn ngang").toBeLessThanOrEqual(
+    metrics.nameWidth + 1,
+  );
+  expect(metrics.whiteSpace, "tên hàng phải được phép xuống dòng").toBe("normal");
+  expect(metrics.nameHeight, "tên dài phải chiếm ít nhất 2 dòng").toBeGreaterThan(
+    metrics.lineHeight * 1.5,
+  );
+
+  // Bấm option vẫn chọn đúng hàng sau khi đổi chiều cao dòng.
+  await option.click();
+  await expect(panel).toBeHidden();
+  await expect(line.getByRole("combobox").first()).toContainText(name.slice(0, 20));
+  await dlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(dlg).toBeHidden();
+});
+
 // ─── TẠO NHANH MẶT HÀNG + THÊM "TÊN KHÁC" NGAY TRÊN DÒNG CỦA POPUP HÓA ĐƠN ───
 test("Popup hóa đơn: gõ tên mới là tạo nhanh mặt hàng, thêm tên khác ngay trên dòng", async ({
   page,

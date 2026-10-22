@@ -79,6 +79,23 @@ input {
 .p-select-overlay.product-select-overlay {
   min-width: min(30rem, calc(100vw - 2rem)) !important;
 }
+/* Nội dung của VirtualScroller là position:absolute nên mặc định rộng theo
+   max-content của tên hàng — panel 30rem vẫn bị đẩy ra và sinh thanh cuộn
+   ngang. Ép nội dung đúng bề rộng panel để tên tự xuống dòng. */
+.p-select-overlay.product-select-overlay .p-virtualscroller-content {
+  width: 100%;
+}
+/* Option vẫn cao cố định 38px theo itemSize của VirtualScroller. Giảm padding
+   dọc còn 2px và dùng line-height 16px (class leading-4 trong ProductSelect) để
+   tối đa 2 dòng tên vừa đúng chiều cao: 2×16px + 2×2px = 36px. */
+.p-select-overlay.product-select-overlay .p-select-option {
+  padding-block: 0.125rem;
+  white-space: normal;
+}
+/* Không bao giờ cuộn ngang trong dropdown sản phẩm; tên dài đã xuống dòng. */
+.p-select-overlay.product-select-overlay .p-virtualscroller {
+  overflow-x: hidden;
+}
 
 /* ─── Dark mode ─── */
 /* Nền chung trang (view nào không tự set nền cũng không bị lóa trắng). */
