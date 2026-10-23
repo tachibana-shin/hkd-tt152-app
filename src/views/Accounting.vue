@@ -138,9 +138,42 @@ async function doBackfillCogs() {
 // ——— Tờ khai thuế theo kỳ (To Khai Thue) + tổng hợp thuế theo quy định 2026 ———
 const declRows = ref<TaxDeclarationRow[]>([]);
 const declLoading = ref(false);
-// Báo cáo nhanh hóa đơn ĐÃ XUẤT trong kỳ — nạp cùng tờ khai (cùng khoảng ngày).
+// Báo cáo nhanh hóa đơn ĐÃ PHÁT HÀNH trong kỳ — nạp cùng tờ khai (cùng khoảng ngày).
 const quickRows = ref<QuickSaleRow[]>([]);
 const quickTotal = computed(() => quickRows.value.reduce((s, r) => s + r.total, 0));
+/**
+ * Cột doanh thu theo nhóm ngành: chỉ dựng cột cho nhóm thật sự có phát sinh
+ * trong kỳ (mỗi hóa đơn có thể chỉ bán một vài nhóm), tránh 6 cột 0 vô nghĩa.
+ * Tên nhóm lấy từ `industry_group` để khớp danh mục người dùng đang dùng.
+ */
+const quickIndustryColumns = computed(() => {
+  const byCode = new Map<string, QuickSaleRow["industry_revenue"][number]>();
+  for (const row of quickRows.value) {
+    for (const item of row.industry_revenue) {
+      if (item.amount === 0 || byCode.has(item.industry_code)) continue;
+      byCode.set(item.industry_code, item);
+    }
+  }
+  return [...byCode.values()].sort(
+    (a, b) =>
+      a.industry_name.localeCompare(b.industry_name, "vi") ||
+      a.industry_code.localeCompare(b.industry_code),
+  );
+});
+/** Tổng doanh thu từng nhóm ngành trong cả báo cáo — dòng footer của bảng. */
+const quickIndustryTotals = computed(() => {
+  const totals = new Map<string, number>();
+  for (const row of quickRows.value) {
+    for (const item of row.industry_revenue) {
+      totals.set(item.industry_code, (totals.get(item.industry_code) ?? 0) + item.amount);
+    }
+  }
+  return totals;
+});
+/** Doanh thu một nhóm ngành của đúng hóa đơn đang xem. */
+function quickIndustryAmount(row: QuickSaleRow, industryCode: string): number {
+  return row.industry_revenue.find((r) => r.industry_code === industryCode)?.amount ?? 0;
+}
 /** Tag màu cho cột Loại: hàng hóa xanh, dịch vụ xanh dương, hỗn hợp vàng. */
 function kindSeverity(kind: string): "success" | "info" | "warn" {
   if (kind === "Dịch vụ") return "info";
@@ -1004,12 +1037,12 @@ useKeepAliveRefresh(reload);
       </AppDataTable>
     </SectionCard>
 
-    <!-- Báo cáo nhanh hóa đơn đã xuất — cùng khoảng ngày với tờ khai:
-         1 dòng = 1 hóa đơn (tên / loại hàng hóa-dịch vụ / tổng tiền). -->
+    <!-- Báo cáo nhanh hóa đơn đã phát hành — cùng khoảng ngày với tờ khai:
+         1 dòng = 1 hóa đơn (số HĐĐT / doanh thu từng nhóm ngành / loại / tổng). -->
     <SectionCard>
       <template #icon><i-mdi-file-document-outline class="text-emerald-500" /></template>
       <template #title>
-        <span>Báo cáo nhanh hóa đơn đã xuất</span>
+        <span>Báo cáo nhanh hóa đơn đã phát hành</span>
         <span class="text-xs font-normal text-gray-400">Cùng khoảng ngày với tờ khai</span>
       </template>
       <template #actions>
@@ -1028,6 +1061,28 @@ useKeepAliveRefresh(reload);
       </template>
       <AppDataTable :value="quickRows" :loading="declLoading" stripedRows>
         <Column header="Tên hóa đơn" field="label" />
+        <Column
+          v-for="g in quickIndustryColumns"
+          :key="g.industry_code || '__chua_phan_nhom__'"
+          align="right"
+          style="width: 150px"
+        >
+          <template #header>
+            <span class="block whitespace-normal leading-tight" :title="g.industry_name">
+              {{ g.industry_name }}
+            </span>
+          </template>
+          <template #body="{ data }">
+            {{
+              quickIndustryAmount(data, g.industry_code)
+                ? fmtVnd(quickIndustryAmount(data, g.industry_code))
+                : "—"
+            }}
+          </template>
+          <template #footer>
+            {{ quickRows.length ? fmtVnd(quickIndustryTotals.get(g.industry_code) ?? 0) : "" }}
+          </template>
+        </Column>
         <Column header="Loại" style="width: 130px">
           <template #body="{ data }">
             <Tag :value="data.kind" :severity="kindSeverity(data.kind)" />
@@ -1039,7 +1094,7 @@ useKeepAliveRefresh(reload);
         </Column>
         <template #empty
           ><EmptyState
-            text="Trong kỳ này chưa có hóa đơn nào được xuất (nháp và hóa đơn đã hủy không tính)."
+            text="Trong kỳ này chưa có hóa đơn nào được phát hành (nháp, hóa đơn chưa có số HĐĐT và hóa đơn đã hủy không tính)."
             icon="pi pi-file"
         /></template>
       </AppDataTable>

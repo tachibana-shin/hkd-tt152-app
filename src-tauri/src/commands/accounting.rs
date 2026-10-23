@@ -263,29 +263,42 @@ pub(crate) async fn set_tax_period_closed(
     Ok(json!({ "ok": true }).to_string())
 }
 
-/// Một dòng trong báo cáo nhanh hóa đơn ĐÃ XUẤT của kỳ (màn Tờ khai).
+/// Doanh thu của một nhóm ngành trong một hóa đơn đã phát hành.
+#[derive(serde::Serialize)]
+pub(crate) struct QuickSaleIndustryRevenue {
+    pub(crate) industry_code: String,
+    pub(crate) industry_name: String,
+    pub(crate) amount: f64,
+}
+
+/// Một dòng trong báo cáo nhanh hóa đơn ĐÃ PHÁT HÀNH của kỳ (màn Tờ khai).
 #[derive(serde::Serialize)]
 pub(crate) struct QuickSaleRow {
+    /// Số hóa đơn điện tử do cơ quan thuế cấp, **không phải** số nội bộ.
     pub(crate) number: String,
-    /// Tên hiển thị đúng mẫu chứng từ bán hàng: "Bán hàng theo hóa đơn HD0001".
+    /// Tên hiển thị đúng mẫu chứng từ bán hàng: "Bán hàng theo hóa đơn 00000001".
     pub(crate) label: String,
     pub(crate) date: String,
     pub(crate) customer: String,
     /// Hàng hóa / Dịch vụ / Hỗn hợp — gom từ nhóm dịch vụ của từng dòng hàng.
     pub(crate) kind: String,
     pub(crate) total: f64,
+    /// Doanh thu từng nhóm ngành của hóa đơn, lấy từ thành tiền sau chiết khấu
+    /// của các dòng hàng (`invoice_item.subtotal`) — cộng lại khớp `total`.
+    pub(crate) industry_revenue: Vec<QuickSaleIndustryRevenue>,
 }
 
-/// Báo cáo nhanh hóa đơn đã xuất trong khoảng ngày đang xem (quý tờ khai):
-/// 1 dòng = 1 hóa đơn — tên, loại (hàng hóa/dịch vụ) và tổng tiền. Nháp, đã
-/// bị thay thế hay đã hủy không tính là "đã xuất" nên bị loại.
+/// Báo cáo nhanh hóa đơn đã phát hành trong khoảng ngày đang xem (quý tờ khai):
+/// 1 dòng = 1 hóa đơn — số HĐĐT, loại (hàng hóa/dịch vụ), tổng tiền và doanh
+/// thu theo từng nhóm ngành. Chỉ lấy hóa đơn có số HĐĐT thật; nháp, hóa đơn
+/// chưa phát hành, đã bị thay thế hay đã hủy không vào báo cáo.
 pub(crate) async fn quick_sales_report_core(
     pool: &SqlitePool,
     from_date: &str,
     to_date: &str,
 ) -> Result<Vec<QuickSaleRow>, String> {
-    let rows = sqlx::query_as::<_, (String, String, String, f64, i64, i64)>(
-        r#"SELECT i.number, i.date, i.customer, i.total,
+    let rows = sqlx::query_as::<_, (i64, String, String, String, f64, i64, i64)>(
+        r#"SELECT i.id, TRIM(i.e_invoice_no), i.date, i.customer, i.total,
                   MAX(CASE WHEN p.is_service = 0 THEN 1 ELSE 0 END),
                   MAX(CASE WHEN p.is_service = 1 THEN 1 ELSE 0 END)
              FROM invoice i
@@ -293,6 +306,7 @@ pub(crate) async fn quick_sales_report_core(
              JOIN product p ON p.id = ii.product_id
             WHERE i.date >= ? AND i.date <= ?
               AND i.status IN ('exported', 'pasted', 'official', 'adjusted')
+              AND TRIM(i.e_invoice_no) <> ''
             GROUP BY i.id
             ORDER BY i.date, i.id"#,
     )
@@ -301,23 +315,76 @@ pub(crate) async fn quick_sales_report_core(
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
+
+    // Một truy vấn riêng cho doanh thu theo ngành: gom theo hóa đơn + mã ngành
+    // để không phải N+1 và vẫn giữ được tên nhóm ngành từ danh mục.
+    let industry_rows = sqlx::query_as::<_, (i64, String, String, f64)>(
+        r#"WITH sold AS (
+               SELECT ii.invoice_id, ii.subtotal,
+                      -- Dùng mã ngành đã chốt trên dòng hóa đơn; hóa đơn cũ chưa
+                      -- có cột này thì lấy theo danh mục mặt hàng hiện tại.
+                      COALESCE(
+                          NULLIF(TRIM(ii.industry_code), ''),
+                          NULLIF(TRIM(p.industry_code), ''),
+                          ''
+                      ) AS industry_code
+                 FROM invoice_item ii
+                 JOIN product p ON p.id = ii.product_id
+           )
+           SELECT s.invoice_id, s.industry_code,
+                  COALESCE(
+                      NULLIF(TRIM(ig.name), ''),
+                      NULLIF(s.industry_code, ''),
+                      'Chưa phân nhóm'
+                  ) AS industry_name,
+                  COALESCE(SUM(s.subtotal), 0.0) AS amount
+             FROM sold s
+             JOIN invoice i ON i.id = s.invoice_id
+             LEFT JOIN industry_group ig ON ig.code = s.industry_code
+            WHERE i.date >= ? AND i.date <= ?
+              AND i.status IN ('exported', 'pasted', 'official', 'adjusted')
+              AND TRIM(i.e_invoice_no) <> ''
+            GROUP BY s.invoice_id, s.industry_code, ig.name
+            ORDER BY s.invoice_id, s.industry_code"#,
+    )
+    .bind(from_date)
+    .bind(to_date)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut by_invoice: std::collections::HashMap<i64, Vec<QuickSaleIndustryRevenue>> =
+        std::collections::HashMap::new();
+    for (invoice_id, industry_code, industry_name, amount) in industry_rows {
+        by_invoice
+            .entry(invoice_id)
+            .or_default()
+            .push(QuickSaleIndustryRevenue {
+                industry_code,
+                industry_name,
+                amount,
+            });
+    }
+
     Ok(rows
         .into_iter()
-        .map(|(number, date, customer, total, has_goods, has_service)| {
-            let kind = match (has_goods > 0, has_service > 0) {
-                (true, true) => "Hỗn hợp",
-                (true, false) => "Hàng hóa",
-                _ => "Dịch vụ",
-            };
-            QuickSaleRow {
-                label: format!("Bán hàng theo hóa đơn {number}"),
-                number,
-                date,
-                customer,
-                kind: kind.to_string(),
-                total,
-            }
-        })
+        .map(
+            |(invoice_id, number, date, customer, total, has_goods, has_service)| {
+                let kind = match (has_goods > 0, has_service > 0) {
+                    (true, true) => "Hỗn hợp",
+                    (true, false) => "Hàng hóa",
+                    _ => "Dịch vụ",
+                };
+                QuickSaleRow {
+                    label: format!("Bán hàng theo hóa đơn {number}"),
+                    number,
+                    date,
+                    customer,
+                    kind: kind.to_string(),
+                    total,
+                    industry_revenue: by_invoice.remove(&invoice_id).unwrap_or_default(),
+                }
+            },
+        )
         .collect())
 }
 
@@ -3647,31 +3714,42 @@ mod tests {
         .expect("add journal row");
     }
 
-    /// Báo cáo nhanh kỳ: 1 dòng = 1 hóa đơn ĐÃ XUẤT trong kỳ — tên đúng mẫu
-    /// "Bán hàng theo hóa đơn {số}", phân loại hàng hóa / dịch vụ / hỗn hợp,
-    /// cộng đúng tổng. Nháp, đã thay thế và hóa đơn ngoài kỳ đều bị loại.
+    /// Báo cáo nhanh kỳ: 1 dòng = 1 hóa đơn ĐÃ PHÁT HÀNH trong kỳ — dùng số
+    /// HĐĐT, tên đúng mẫu "Bán hàng theo hóa đơn {số}", phân loại hàng hóa /
+    /// dịch vụ / hỗn hợp và tách doanh thu theo nhóm ngành. Hóa đơn chưa có số
+    /// HĐĐT, nháp, đã thay thế và hóa đơn ngoài kỳ đều bị loại.
     #[tokio::test]
-    async fn bao_cao_nhanh_hoa_don_da_xuat_theo_loai_trong_ky() {
+    async fn bao_cao_nhanh_hoa_don_da_phat_hanh_theo_nganh_trong_ky() {
         let pool = test_pool().await;
         let goods = seed_product(&pool, "QR-G", "Hàng báo cáo", 0.01).await;
         let service = seed_product(&pool, "QR-S", "Dịch vụ báo cáo", 0.01).await;
-        sqlx::query!("UPDATE product SET is_service = 1 WHERE id = ?", service)
+        sqlx::query("UPDATE product SET industry_code = 'PPHH' WHERE id = ?")
+            .bind(goods)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE product SET is_service = 1, industry_code = 'DVXD-KNL' WHERE id = ?")
+            .bind(service)
             .execute(&pool)
             .await
             .unwrap();
 
+        #[allow(clippy::too_many_arguments)]
         async fn add(
             pool: &SqlitePool,
             number: &str,
+            e_invoice_no: &str,
             date: &str,
             status: &str,
             items: &[(i64, f64)],
             total: f64,
         ) {
             sqlx::query!(
-                "INSERT INTO invoice (number, date, customer, customer_tax_code, total, status)
-                 VALUES (?, ?, 'Khách báo cáo', '', ?, ?)",
+                "INSERT INTO invoice
+                    (number, e_invoice_no, date, customer, customer_tax_code, total, status)
+                 VALUES (?, ?, ?, 'Khách báo cáo', '', ?, ?)",
                 number,
+                e_invoice_no,
                 date,
                 total,
                 status
@@ -3702,76 +3780,131 @@ mod tests {
             }
         }
 
-        // Trong kỳ 05: từng loại 1 hóa đơn + 1 hóa đơn hỗn hợp.
+        // Trong kỳ 05: đủ 3 trạng thái đã phát hành + 1 hóa đơn hỗn hợp.
         add(
             &pool,
             "HD0201",
+            "00000001",
             "2026-05-10",
-            "exported",
-            &[(goods, 50.0)],
-            100_000.0,
-        )
-        .await;
-        add(
-            &pool,
-            "HD0202",
-            "2026-05-15",
             "official",
-            &[(service, 10.0)],
+            &[(goods, 50.0)],
             50_000.0,
         )
         .await;
         add(
             &pool,
+            "HD0202",
+            "00000002",
+            "2026-05-15",
+            "pasted",
+            &[(service, 10.0)],
+            10_000.0,
+        )
+        .await;
+        add(
+            &pool,
             "HD0203",
+            "00000003",
             "2026-05-20",
             "adjusted",
             &[(goods, 100.0), (service, 20.0)],
-            150_000.0,
+            120_000.0,
         )
         .await;
-        // Loại khỏi báo cáo: nháp, đã thay thế, ngoài kỳ.
+        // Loại khỏi báo cáo: chưa có số HĐĐT, nháp, đã thay thế, ngoài kỳ.
+        add(
+            &pool,
+            "HD0207",
+            "",
+            "2026-05-12",
+            "exported",
+            &[(goods, 5.0)],
+            5_000.0,
+        )
+        .await;
         add(
             &pool,
             "HD0204",
+            "00000004",
             "2026-05-11",
             "draft",
             &[(goods, 7.0)],
-            70_000.0,
+            7_000.0,
         )
         .await;
         add(
             &pool,
             "HD0205",
+            "00000005",
             "2026-07-10",
-            "exported",
+            "official",
             &[(goods, 9.0)],
-            90_000.0,
+            9_000.0,
         )
         .await;
         add(
             &pool,
             "HD0206",
+            "00000006",
             "2026-05-12",
             "replaced",
             &[(goods, 3.0)],
-            30_000.0,
+            3_000.0,
+        )
+        .await;
+        add(
+            &pool,
+            "HD0208",
+            "",
+            "2026-05-13",
+            "official",
+            &[(goods, 4.0)],
+            4_000.0,
         )
         .await;
 
         let rows = quick_sales_report_core(&pool, "2026-05-01", "2026-05-31")
             .await
             .expect("báo cáo nhanh");
-        assert_eq!(rows.len(), 3, "chỉ hóa đơn đã xuất trong kỳ");
+        assert_eq!(rows.len(), 3, "chỉ hóa đơn có số HĐĐT trong kỳ");
         let by_no: std::collections::HashMap<&str, &QuickSaleRow> =
             rows.iter().map(|r| (r.number.as_str(), r)).collect();
-        let first = by_no["HD0201"];
-        assert_eq!(first.label, "Bán hàng theo hóa đơn HD0201");
+        let first = by_no["00000001"];
+        assert_eq!(first.label, "Bán hàng theo hóa đơn 00000001");
         assert_eq!(first.kind, "Hàng hóa");
-        assert_eq!(by_no["HD0202"].kind, "Dịch vụ");
-        assert_eq!(by_no["HD0203"].kind, "Hỗn hợp");
+        assert_eq!(by_no["00000002"].kind, "Dịch vụ");
+        assert_eq!(by_no["00000003"].kind, "Hỗn hợp");
+        assert!(
+            rows.iter().all(|r| !r.number.starts_with("HD")),
+            "báo cáo không được dùng số hóa đơn nội bộ"
+        );
+
+        // Doanh thu theo ngành lấy đúng thành tiền sau chiết khấu của từng dòng.
+        let goods_groups: std::collections::HashMap<&str, f64> = first
+            .industry_revenue
+            .iter()
+            .map(|r| (r.industry_code.as_str(), r.amount))
+            .collect();
+        assert_eq!(goods_groups.get("PPHH"), Some(&50_000.0));
+        assert_eq!(
+            first.industry_revenue[0].industry_name,
+            "Phân phối, cung cấp hàng hóa"
+        );
+        let mixed = by_no["00000003"];
+        let mixed_groups: std::collections::HashMap<&str, f64> = mixed
+            .industry_revenue
+            .iter()
+            .map(|r| (r.industry_code.as_str(), r.amount))
+            .collect();
+        assert_eq!(mixed_groups.get("PPHH"), Some(&100_000.0));
+        assert_eq!(mixed_groups.get("DVXD-KNL"), Some(&20_000.0));
+        assert_eq!(
+            mixed.industry_revenue.iter().map(|r| r.amount).sum::<f64>(),
+            mixed.total,
+            "cột ngành phải cộng khớp tổng tiền hóa đơn"
+        );
         let sum: f64 = rows.iter().map(|r| r.total).sum();
-        assert_eq!(sum, 300_000.0, "cộng đúng tổng 3 hóa đơn trong kỳ");
+        assert_eq!(sum, 180_000.0, "cộng đúng tổng 3 hóa đơn trong kỳ");
     }
 
     /// PC trả nhà cung cấp là **thanh toán phải trả** (Nợ 331), không phải chi phí:

@@ -732,17 +732,28 @@ export interface IndustryRevenue {
   revenue_down: number;
 }
 
-/** Một dòng trong báo cáo nhanh hóa đơn **đã xuất** của kỳ (màn Tờ khai):
- *  tên, loại hàng hóa/dịch vụ và tổng tiền — cùng khoảng ngày với tờ khai. */
+/** Doanh thu của một nhóm ngành trong một hóa đơn đã phát hành. */
+export interface QuickSaleIndustryRevenue {
+  industry_code: string;
+  industry_name: string;
+  amount: number;
+}
+
+/** Một dòng trong báo cáo nhanh hóa đơn **đã phát hành** của kỳ (màn Tờ khai):
+ *  số HĐĐT, loại hàng hóa/dịch vụ, tổng tiền và doanh thu theo nhóm ngành —
+ *  cùng khoảng ngày với tờ khai. */
 export interface QuickSaleRow {
+  /** Số hóa đơn điện tử do cơ quan thuế cấp, không phải số nội bộ. */
   number: string;
-  /** Tên hiển thị đúng mẫu chứng từ bán hàng: "Bán hàng theo hóa đơn HD0001". */
+  /** Tên hiển thị đúng mẫu chứng từ bán hàng: "Bán hàng theo hóa đơn 00000001". */
   label: string;
   date: string;
   customer: string;
   /** Hàng hóa | Dịch vụ | Hỗn hợp. */
   kind: string;
   total: number;
+  /** Doanh thu từng nhóm ngành, cộng lại khớp `total`. */
+  industry_revenue: QuickSaleIndustryRevenue[];
 }
 
 /** Một dãy số HĐĐT chính thức bị hổng giữa chừng trong một ký hiệu. */

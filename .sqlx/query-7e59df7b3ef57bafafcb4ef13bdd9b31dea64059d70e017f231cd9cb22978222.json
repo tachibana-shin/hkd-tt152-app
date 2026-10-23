@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO invoice\n                    (number, e_invoice_no, date, customer, customer_tax_code, total, status)\n                 VALUES (?, ?, ?, 'Khách báo cáo', '', ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "7e59df7b3ef57bafafcb4ef13bdd9b31dea64059d70e017f231cd9cb22978222"
+}

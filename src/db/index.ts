@@ -1176,9 +1176,10 @@ export const api = {
     call<string>("set_tax_period_closed", args),
 
   /**
-   * Báo cáo nhanh hóa đơn **đã xuất** trong khoảng ngày đang xem (quý tờ khai):
-   * 1 dòng = 1 hóa đơn — tên, loại (hàng hóa/dịch vụ/hỗn hợp), tổng tiền.
-   * Nháp / đã thay thế / đã hủy không vào báo cáo.
+   * Báo cáo nhanh hóa đơn **đã phát hành** trong khoảng ngày đang xem (quý
+   * tờ khai): 1 dòng = 1 hóa đơn — số HĐĐT, loại (hàng hóa/dịch vụ/hỗn hợp),
+   * tổng tiền và doanh thu theo nhóm ngành. Hóa đơn chưa có số HĐĐT / nháp /
+   * đã thay thế / đã hủy không vào báo cáo.
    */
   quickSalesReport: async (fromDate: string, toDate: string) =>
     parse<QuickSaleRow[]>(await call<string>("quick_sales_report", { fromDate, toDate })),
