@@ -111,6 +111,10 @@ type PreviewLine = {
   unitCost: number;
   /** Tiền NVL của dòng. */
   cost: number;
+  /** Đơn giá bán đã khai trên dòng định mức (VND). */
+  salePrice: number;
+  /** Thành tiền theo giá bán = SL cần × đơn giá bán. */
+  saleAmount: number;
 };
 
 const preview = computed<PreviewLine[]>(() => {
@@ -148,6 +152,8 @@ const preview = computed<PreviewLine[]>(() => {
           shortage: Math.max(0, Math.round((need - onHand) * 1e6) / 1e6),
           unitCost: need > 0 ? cost / need : 0,
           cost,
+          salePrice: b.unit_price,
+          saleAmount: Math.round(need * b.unit_price * 1e6) / 1e6,
         };
       })
   );
@@ -243,7 +249,7 @@ async function save() {
   <AppDialog
     v-model:visible="visible"
     header="Tạo lô sản xuất"
-    width="max-w-4xl"
+    width="max-w-5xl"
     action-label="Tạo lô"
     :saving="saving"
     :show-action="auth.canStock"
@@ -328,6 +334,12 @@ async function save() {
           <template #body="{ data }"
             ><b>{{ fmtVnd(data.cost) }}</b></template
           >
+        </Column>
+        <Column field="salePrice" header="Đơn giá bán" align="right">
+          <template #body="{ data }">{{ fmtVnd(data.salePrice) }}</template>
+        </Column>
+        <Column field="saleAmount" header="Thành tiền giá bán" align="right">
+          <template #body="{ data }">{{ fmtVnd(data.saleAmount) }}</template>
         </Column>
         <template #empty>
           <EmptyState

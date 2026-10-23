@@ -5747,9 +5747,12 @@ test("Lô sản xuất: xem NVL theo định mức rồi tạo lô tự xuất v
   });
   expect(mat.ok(), `save_product NVL-LSX1: ${await mat.text()}`).toBe(true);
 
-  // Định mức: 1 bàn = 3 cây nhôm.
+  // Định mức: 1 bàn = 3 cây nhôm, đơn giá bán khai riêng 120.000 đ (khác giá vốn).
   const bom = await request.post("/api/save_product_bom", {
-    data: { productCode: "SP-LSX1", items: [{ material_code: "NVL-LSX1", quantity: 3 }] },
+    data: {
+      productCode: "SP-LSX1",
+      items: [{ material_code: "NVL-LSX1", quantity: 3, unit_price: 120_000 }],
+    },
   });
   expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
 
@@ -5805,6 +5808,10 @@ test("Lô sản xuất: xem NVL theo định mức rồi tạo lô tự xuất v
   await expect(preview.getByText("40", { exact: true }), "tồn nhôm trước khi xuất").toBeVisible();
   // Giá thành = 15 cây × 100.000 đ.
   await expect(dlg.getByText(/Giá thành ước tính/)).toContainText("1.500.000 đ");
+  // Đơn giá bán lấy từ định mức và thành tiền giá bán = 15 × 120.000 đ.
+  await expect(preview.getByRole("columnheader", { name: "Đơn giá bán" })).toBeVisible();
+  await expect(preview.getByText("120.000 đ")).toBeVisible();
+  await expect(preview.getByText("1.800.000 đ")).toBeVisible();
 
   // ── 2) Lưu lô: nhập thành phẩm + tự xuất NVL trong 1 transaction ──
   await dlg.getByRole("button", { name: "Tạo lô" }).click();
