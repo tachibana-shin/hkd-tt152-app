@@ -67,6 +67,9 @@ pub(crate) struct MockPortal {
     pub rate_limit_first: Arc<Mutex<usize>>,
     /// Cắt kết nối `n` lần đầu không trả lời (test retry lỗi mạng).
     pub transport_fail_first: Arc<Mutex<usize>>,
+    /// Cắt kết nối mọi request có path chứa một trong các chuỗi này — mô phỏng
+    /// đúng một endpoint cổng chết (vd `sco-query`) trong khi endpoint khác sống.
+    pub fail_path_contains: Arc<Mutex<Vec<String>>>,
     /// Nội dung `hdhhdvu` trả về cho endpoint chi tiết.
     pub detail_lines: Arc<Mutex<String>>,
 }
@@ -81,6 +84,7 @@ impl MockPortal {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let rate_limit_first = Arc::new(Mutex::new(0));
         let transport_fail_first = Arc::new(Mutex::new(0));
+        let fail_path_contains = Arc::new(Mutex::new(Vec::new()));
         let detail_lines = Arc::new(Mutex::new(
             r#"[{"ten":"Hàng mẫu","dvtinh":"Cái","mhhdvu":"SP-MOCK","sluong":2.0,"dgia":100000.0,"stckhau":0.0,"tsuat":0.08}]"#
                 .to_string(),
@@ -90,6 +94,7 @@ impl MockPortal {
             requests: requests.clone(),
             rate_limit_first: rate_limit_first.clone(),
             transport_fail_first: transport_fail_first.clone(),
+            fail_path_contains: fail_path_contains.clone(),
             detail_lines: detail_lines.clone(),
         };
         tokio::spawn(async move {
@@ -100,9 +105,10 @@ impl MockPortal {
                 let reqs = requests.clone();
                 let rl = rate_limit_first.clone();
                 let net = transport_fail_first.clone();
+                let fail_paths = fail_path_contains.clone();
                 let lines = detail_lines.clone();
                 tokio::spawn(async move {
-                    let _ = handle(socket, reqs, rl, net, lines).await;
+                    let _ = handle(socket, reqs, rl, net, fail_paths, lines).await;
                 });
             }
         });
@@ -135,6 +141,7 @@ async fn handle(
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
     rate_limit_first: Arc<Mutex<usize>>,
     transport_fail_first: Arc<Mutex<usize>>,
+    fail_path_contains: Arc<Mutex<Vec<String>>>,
     detail_lines: Arc<Mutex<String>>,
 ) -> std::io::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -164,6 +171,23 @@ async fn handle(
         query: query.clone(),
         headers,
     });
+
+    // Chết riêng một endpoint (vd `sco-query`) → 503 ngay, không retry, để test
+    // quét một phần mà không phải chờ backoff mạng.
+    if fail_path_contains
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|p| path.contains(p))
+    {
+        return write_response(
+            &mut socket,
+            503,
+            "application/json;charset=UTF-8",
+            r#"{"message":"Service Unavailable"}"#,
+        )
+        .await;
+    }
 
     // Cắt kết nối N lần đầu (không trả response) → mô phỏng timeout/đứt mạng.
     let drop_conn = {

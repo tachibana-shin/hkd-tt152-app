@@ -43,6 +43,32 @@ pub(crate) const PATH_CHANGE_PASSWORD: &str = "/api/system-taxpayer/users/change
 /// Client clamp theo đúng giới hạn này để không gửi giá trị bị cổng từ chối.
 pub(crate) const MAX_PAGE_SIZE: u32 = 50;
 
+/// Trang tra cứu của cổng mặc định `size=15` cho cả hai tab. Riêng `sco-query`
+/// (hóa đơn máy tính tiền) chưa thấy cổng chấp nhận ổn định `size=50` — đúng
+/// trang tra cứu cũng chỉ xin 15 dòng/lần. Quét tab này dùng 15 để tránh backend
+/// treo, còn tab HĐ điện tử vẫn dùng 50 cho ít request hơn.
+pub(crate) const CASH_REGISTER_PAGE_SIZE: u32 = 15;
+
+/// Mô tả đầy đủ lỗi `reqwest` kèm chuỗi nguyên nhân gốc.
+///
+/// `Display` của reqwest chỉ in `error sending request for url (…)` — không nói
+/// timeout, TLS hay kết nối bị reset, nên người dùng chỉ thấy "lỗi kết nối" mà
+/// không biết vì sao. Đi hết `source()` để giữ lại nguyên nhân thật.
+fn describe_reqwest_error(e: &reqwest::Error) -> String {
+    use std::error::Error;
+    let mut out = e.to_string();
+    let mut src = e.source();
+    while let Some(cause) = src {
+        let text = cause.to_string();
+        if !text.is_empty() && !out.contains(&text) {
+            out.push_str(" — ");
+            out.push_str(&text);
+        }
+        src = cause.source();
+    }
+    out
+}
+
 /// Đọc body cổng thành `serde_json::Value`, **luôn decode UTF-8 từ byte thô**.
 ///
 /// `Response::json()` của reqwest đi qua `text()` → tôn trọng `charset` trong
@@ -130,18 +156,6 @@ impl InvoiceDirection {
             other => Err(format!("Chiều hóa đơn không hợp lệ: {other}")),
         }
     }
-
-    /// Nhãn tiếng Việt dùng cho header `Action` (portal `encodeURIComponent` nó).
-    fn action(self, kind: InvoiceKind) -> String {
-        let base = match self {
-            Self::Sold => "Tìm kiếm (hóa đơn bán ra)",
-            Self::Purchase => "Tìm kiếm (hóa đơn mua vào)",
-        };
-        match kind {
-            InvoiceKind::Regular => base.to_string(),
-            InvoiceKind::CashRegister => base.replace("hóa đơn ", "hóa đơn máy tính tiền "),
-        }
-    }
 }
 
 /// Tab nhỏ (loại hóa đơn) — quyết định tiền tố API, không phải filter.
@@ -192,21 +206,6 @@ impl InvoiceKind {
             "regular" | "" => Ok(Self::Regular),
             "cash-register" => Ok(Self::CashRegister),
             other => Err(format!("Loại hóa đơn không hợp lệ: {other}")),
-        }
-    }
-
-    /// Nhãn tiếng Việt cho header `Action` khi **xuất XML** (portal lưu vào
-    /// `localStorage.action` rồi đọc lại thành header — bắt từ bundle 10/2026).
-    fn export_action(self, direction: InvoiceDirection) -> String {
-        let base = match direction {
-            InvoiceDirection::Sold => "hóa đơn bán ra",
-            InvoiceDirection::Purchase => "hóa đơn mua vào",
-        };
-        match self {
-            InvoiceKind::Regular => format!("Xuất xml ({base})"),
-            InvoiceKind::CashRegister => {
-                format!("Xuất xml (hóa đơn máy tính tiền {base})")
-            }
         }
     }
 }
@@ -363,6 +362,16 @@ impl HddtClient {
         })
     }
 
+    /// Bản sao không thử lại khi cổng treo/giới hạn tần suất — dùng cho thao
+    /// tác tương tác (tra cứu danh sách, xem PDF). Quét/import hàng loạt vẫn
+    /// dùng client có retry để chịu được cổng chập chờn, còn nút bấm không được
+    /// quay 4×20 giây rồi mới báo lỗi.
+    pub(crate) fn fail_fast(mut self) -> Self {
+        self.retry_429_delays.clear();
+        self.retry_net_delays.clear();
+        self
+    }
+
     /// Client cho test offline: không giãn nhịp, retry 429 tức thì (xem
     /// `mock_portal`). Giữ nguyên mọi logic khác.
     #[cfg(test)]
@@ -398,8 +407,7 @@ impl HddtClient {
         token: &str,
         referer: &str,
     ) -> Result<reqwest::Response, String> {
-        self.get_throttled_with(url, token, referer, String::new())
-            .await
+        self.get_throttled_with(url, token, referer).await
     }
 
     /// Như [`Self::get_throttled`], thêm header `Action` (bắt buộc cho endpoint
@@ -415,7 +423,6 @@ impl HddtClient {
         url: reqwest::Url,
         token: &str,
         referer: &str,
-        action: String,
     ) -> Result<reqwest::Response, String> {
         let mut rate_attempt = 0;
         let mut net_attempt = 0;
@@ -423,11 +430,12 @@ impl HddtClient {
         loop {
             self.throttle().await;
             let mut h = anti_bot_headers();
-            if !action.is_empty() {
-                if let Ok(v) = HeaderValue::from_str(&action) {
-                    h.insert("Action", v);
-                }
-            }
+            // Luôn gửi `Action` rỗng: portal set header này từ
+            // `localStorage.action` (rỗng ở trang tra cứu). WAF của cổng phân
+            // biệt "không có header" với "header rỗng" (thiếu hẳn header làm
+            // request bị treo/timeout), còn nhãn tiếng Việt đã encode lại càng
+            // làm WAF treo các request `sco-query`.
+            h.insert("Action", HeaderValue::from_static(""));
             h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
             let sent = self
                 .http
@@ -443,8 +451,9 @@ impl HddtClient {
                 Err(e) => {
                     if net_attempt >= max_net {
                         return Err(format!(
-                            "Lỗi kết nối cổng HĐĐT (đã thử {} lần): {e}",
-                            max_net + 1
+                            "Lỗi kết nối cổng HĐĐT (đã thử {} lần): {}",
+                            max_net + 1,
+                            describe_reqwest_error(&e)
                         ));
                     }
                     let secs = self.retry_net_delays[net_attempt];
@@ -482,7 +491,7 @@ impl HddtClient {
             .get(url)
             .send()
             .await
-            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {}", describe_reqwest_error(&e)))?;
         let status = resp.status();
         if !status.is_success() {
             return Err(format!(
@@ -511,7 +520,7 @@ impl HddtClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {}", describe_reqwest_error(&e)))?;
         let status = resp.status();
         let v = read_json_body(resp).await?;
         if !status.is_success() {
@@ -534,7 +543,7 @@ impl HddtClient {
             .bearer_auth(token)
             .send()
             .await
-            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {}", describe_reqwest_error(&e)))?;
         let status = resp.status();
         let v = read_json_body(resp).await?;
         if !status.is_success() {
@@ -545,30 +554,28 @@ impl HddtClient {
 
     /// Chi tiết 1 hóa đơn (dòng hàng `hdhhdvu[]`) — dùng để tạo phiếu nhập kho.
     ///
-    /// Kiểm chứng live 24/09/2026: endpoint chi tiết **luôn** dùng tiền tố
-    /// `sco-query` cho cả hóa đơn thường lẫn máy tính tiền; gọi `query` trả
-    /// 403 "Không có quyền xem hóa đơn này".
+    /// Tiền tố endpoint phải khớp **loại hóa đơn** (kiểm chứng live 23/10/2026):
+    /// HĐ điện tử thường → `query`; HĐ máy tính tiền → `sco-query`. Gọi sai tiền
+    /// tố bị WAF treo request tới timeout. Không gửi `id`: cổng trả 500 "Không có
+    /// quyền xem hóa đơn này" khi có tham số này.
     ///
-    /// `GET {base}/api/sco-query/invoices/detail?nbmst&khmshdon&khhdon&shdon[&id]`
+    /// `GET {base}/api/{query|sco-query}/invoices/detail?nbmst&khmshdon&khhdon&shdon`
     pub(crate) async fn invoice_detail(
         &self,
         token: &str,
+        kind: InvoiceKind,
         nbmst: &str,
         khmshdon: &str,
         khhdon: &str,
         shdon: &str,
-        portal_id: &str,
     ) -> Result<serde_json::Value, String> {
-        let mut params: Vec<(&str, String)> = vec![
+        let params: Vec<(&str, String)> = vec![
             ("nbmst", nbmst.to_string()),
             ("khmshdon", khmshdon.to_string()),
             ("khhdon", khhdon.to_string()),
             ("shdon", shdon.to_string()),
         ];
-        if !portal_id.is_empty() {
-            params.push(("id", portal_id.to_string()));
-        }
-        let path = "/api/sco-query/invoices/detail";
+        let path = format!("/api/{}/invoices/detail", kind.prefix());
         let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
             .map_err(|e| format!("URL chi tiết hóa đơn không hợp lệ: {e}"))?;
         let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
@@ -611,10 +618,11 @@ impl HddtClient {
         }
         let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
             .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
-        let action = encode_uri_component(&q.direction.action(q.kind));
         let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
-        // `Action` phải set trước khi gửi; `get_throttled` dựng phần header còn lại.
-        let resp = self.get_throttled_with(url, token, &page, action).await?;
+        // Trang tra cứu của cổng không set `localStorage.action` trước khi tìm →
+        // `Action` rỗng. Gửi chuỗi hành động đã encode (cách cũ) làm WAF của
+        // cổng treo request `sco-query` tới timeout.
+        let resp = self.get_throttled_with(url, token, &page).await?;
         let status = resp.status();
         let v = read_json_body(resp).await?;
         if !status.is_success() {
@@ -632,7 +640,8 @@ impl HddtClient {
     /// frontend gọi `sendGetBlob(url, {nbmst,khhdon,shdon,khmshdon}, jwt)` rồi
     /// `exportFile("invoice", blob, "zip")` — tức response là **ZIP binary**
     /// (không phải JSON), nên client đọc byte thô chứ không qua `read_json_body`.
-    /// Header `Action` = nhãn xuất XML của đúng tab (xem [`InvoiceKind::export_action`]).
+    /// Header `Action` để rỗng — trang tra cứu không set `localStorage.action`
+    /// trước khi tải XML, và WAF của cổng treo request nếu gửi nhãn đã encode.
     ///
     /// Sides: tab "hóa đơn bán ra" kiểm `hsgoc` (hồ sơ gốc) trước khi gọi — nếu
     /// thiếu thì cổng không có gì để tải; tab "mua vào" gọi thẳng.
@@ -650,9 +659,10 @@ impl HddtClient {
         ];
         let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
             .map_err(|e| format!("URL xuất XML HĐĐT không hợp lệ: {e}"))?;
-        let action = encode_uri_component(&key.kind.export_action(key.direction));
         let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
-        let resp = self.get_throttled_with(url, token, &page, action).await?;
+        // Nút "Xuất xml" của trang tra cứu cũng không set `localStorage.action`
+        // → gửi `Action` rỗng, tránh WAF treo request.
+        let resp = self.get_throttled_with(url, token, &page).await?;
         let status = resp.status();
         let bytes = resp
             .bytes()
@@ -699,7 +709,7 @@ impl HddtClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {e}"))?;
+            .map_err(|e| format!("Lỗi kết nối cổng HĐĐT: {}", describe_reqwest_error(&e)))?;
         let status = resp.status();
         let bytes = resp.bytes().await.unwrap_or_default();
         // Xem read_json_body: decode UTF-8 từ byte thô, không theo charset khai báo.
@@ -752,21 +762,6 @@ impl HddtClient {
         }
         Err(LoginError::Captcha)
     }
-}
-
-/// `encodeURIComponent` (portal dùng để build header `Action`): mọi ký tự ngoài
-/// `A-Z a-z 0-9 - _ . ! ~ * ' ( )` đều percent-encode theo byte UTF-8.
-fn encode_uri_component(input: &str) -> String {
-    const UNRESERVED: &[u8] = b"-_.!~*'()";
-    let mut out = String::with_capacity(input.len());
-    for &b in input.as_bytes() {
-        if b.is_ascii_alphanumeric() || UNRESERVED.contains(&b) {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
 }
 
 /// Build chuỗi `search` cho trang tra cứu hóa đơn.
@@ -913,9 +908,10 @@ mod tests {
             r.headers.get("end-point").map(String::as_str),
             Some(ENDPOINT_LOOKUP)
         );
-        assert!(
-            r.headers.contains_key("action"),
-            "endpoint tra cứu cần header Action"
+        assert_eq!(
+            r.headers.get("action").map(String::as_str),
+            Some(""),
+            "trang tra cứu gửi Action rỗng — nhãn encode làm WAF treo request"
         );
         assert!(
             r.headers.contains_key("request-id"),
@@ -971,13 +967,27 @@ mod tests {
         let c = HddtClient::for_test(&portal.base);
 
         let err = c
-            .invoice_detail("mock-token", "0100000000", "C26THN", "C26MOCK", "0001", "")
+            .invoice_detail(
+                "mock-token",
+                InvoiceKind::Regular,
+                "0100000000",
+                "C26THN",
+                "C26MOCK",
+                "0001",
+            )
             .await
             .expect_err("khmshdon chữ phải bị từ chối");
         assert!(err.contains("NumberFormatException"), "lỗi sai: {err}");
 
         let ok = c
-            .invoice_detail("mock-token", "0100000000", "1", "C26MOCK", "0001", "")
+            .invoice_detail(
+                "mock-token",
+                InvoiceKind::Regular,
+                "0100000000",
+                "1",
+                "C26MOCK",
+                "0001",
+            )
             .await
             .expect("khmshdon số phải lấy được chi tiết");
         let lines = ok
@@ -985,6 +995,58 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("có dòng hàng");
         assert_eq!(lines.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn invoice_detail_uses_kind_prefix_and_omits_id() {
+        // Live 23/10/2026: HĐ thường chỉ trả chi tiết ở `query`; `sco-query`
+        // treo tới timeout. Ngược lại HĐ máy tính tiền dùng `sco-query`. Gửi
+        // thêm `id` bị cổng trả 500 "Không có quyền xem hóa đơn này".
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        let c = HddtClient::for_test(&portal.base);
+        c.invoice_detail(
+            "mock-token",
+            InvoiceKind::Regular,
+            "0100000000",
+            "1",
+            "C26MOCK",
+            "0001",
+        )
+        .await
+        .expect("chi tiết HĐ thường");
+        c.invoice_detail(
+            "mock-token",
+            InvoiceKind::CashRegister,
+            "0100000000",
+            "1",
+            "C26MOCK",
+            "0002",
+        )
+        .await
+        .expect("chi tiết HĐ máy tính tiền");
+
+        let reqs = portal.requests();
+        let regular = reqs
+            .iter()
+            .find(|r| r.param("shdon").as_deref() == Some("0001"))
+            .expect("request HĐ thường");
+        assert_eq!(regular.path, "/api/query/invoices/detail");
+        assert_eq!(
+            regular.headers.get("action").map(String::as_str),
+            Some(""),
+            "Action phải là header rỗng, không phải nhãn encode"
+        );
+        assert!(
+            regular.param("id").is_none(),
+            "detail không được gửi id: {}",
+            regular.query
+        );
+
+        let cash = reqs
+            .iter()
+            .find(|r| r.param("shdon").as_deref() == Some("0002"))
+            .expect("request HĐ máy tính tiền");
+        assert_eq!(cash.path, "/api/sco-query/invoices/detail");
     }
 
     #[tokio::test]
@@ -1092,7 +1154,14 @@ mod tests {
         );
         let c = HddtClient::for_test(&portal.base);
         let detail = c
-            .invoice_detail("mock-token", "0100000000", "1", "C26MOCK", "0001", "")
+            .invoice_detail(
+                "mock-token",
+                InvoiceKind::Regular,
+                "0100000000",
+                "1",
+                "C26MOCK",
+                "0001",
+            )
             .await
             .unwrap();
         let lines = detail.get("hdhhdvu").and_then(|v| v.as_array()).unwrap();
@@ -1142,6 +1211,35 @@ mod tests {
             .await
             .expect_err("hết lượt thử phải báo lỗi");
         assert!(err.contains("đã thử 4 lần"), "thông báo sai: {err}");
+    }
+
+    /// Tra cứu/xem PDF là thao tác tương tác: cổng treo thì báo lỗi sau 1 lần
+    /// thử, không quay nút 4×20 giây (lỗi "treo loading" ở issue #8 mục 3).
+    #[tokio::test]
+    async fn fail_fast_client_reports_network_error_after_one_attempt() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        *portal.transport_fail_first.lock().unwrap() = 99;
+        let c = HddtClient::for_test(&portal.base).fail_fast();
+
+        let err = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("cổng đứt kết nối phải báo lỗi");
+
+        assert!(err.contains("đã thử 1 lần"), "thông báo sai: {err}");
+        assert_eq!(
+            portal.count("/invoices/purchase"),
+            1,
+            "fail_fast không được gọi lại endpoint"
+        );
     }
 
     #[tokio::test]
@@ -1282,41 +1380,41 @@ mod tests {
     }
 
     #[test]
-    fn endpoints_and_actions_match_portal() {
+    fn endpoints_match_portal() {
         let cases = [
             (
                 InvoiceDirection::Sold,
                 InvoiceKind::Regular,
                 "/api/query/invoices/sold",
-                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20b%C3%A1n%20ra)",
             ),
             (
                 InvoiceDirection::Sold,
                 InvoiceKind::CashRegister,
                 "/api/sco-query/invoices/sold",
-                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20\
-                 ti%E1%BB%81n%20b%C3%A1n%20ra)",
             ),
             (
                 InvoiceDirection::Purchase,
                 InvoiceKind::Regular,
                 "/api/query/invoices/purchase",
-                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20mua%20v%C3%A0o)",
             ),
             (
                 InvoiceDirection::Purchase,
                 InvoiceKind::CashRegister,
                 "/api/sco-query/invoices/purchase",
-                "T%C3%ACm%20ki%E1%BA%BFm%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20\
-                 ti%E1%BB%81n%20mua%20v%C3%A0o)",
             ),
         ];
-        for (dir, kind, path, action) in cases {
+        for (dir, kind, path) in cases {
             assert_eq!(
                 format!("/api/{}/invoices/{}", kind.prefix(), dir.segment()),
                 path
             );
-            assert_eq!(encode_uri_component(&dir.action(kind)), action);
+            assert_eq!(
+                format!("/api/{}/invoices/detail", kind.prefix()),
+                match kind {
+                    InvoiceKind::Regular => "/api/query/invoices/detail",
+                    InvoiceKind::CashRegister => "/api/sco-query/invoices/detail",
+                }
+            );
         }
     }
 

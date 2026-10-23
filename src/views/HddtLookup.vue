@@ -303,25 +303,31 @@ const canPrevPage = computed(() => pageIdx.value > 0 && !searchLoading.value);
 const pdfVisible = ref(false);
 const pdfDetail = ref("");
 const pdfTitle = ref("");
-const pdfLoadingId = ref("");
+/** Khóa dòng đang tải PDF — không dùng `id` vì list có thể không trả `id`;
+ *  dùng đúng bộ khóa của endpoint detail để spinner không sáng nhầm mọi dòng. */
+const pdfLoadingKey = ref("");
+
+function pdfRowKey(row: HddtInvoiceRow) {
+  return [row.nbmst, row.khmshdon, row.khhdon, row.shdon].map((v) => String(v ?? "")).join("|");
+}
 
 async function openInvoicePdf(row: HddtInvoiceRow) {
-  if (pdfLoadingId.value) return;
-  pdfLoadingId.value = String(row.id ?? "");
+  if (pdfLoadingKey.value) return;
+  pdfLoadingKey.value = pdfRowKey(row);
   try {
     pdfDetail.value = await api.hddtInvoiceDetail({
       nbmst: String(row.nbmst ?? ""),
       khmshdon: Number(row.khmshdon ?? 0),
       khhdon: String(row.khhdon ?? ""),
       shdon: String(row.shdon ?? ""),
-      id: row.id === undefined || row.id === null ? undefined : String(row.id),
+      kind: searchKind.value,
     });
     pdfTitle.value = `Hóa đơn ${row.khhdon ?? ""} ${row.shdon ?? ""}`.trim();
     pdfVisible.value = true;
   } catch (e) {
     toastError("Không lấy được chi tiết hóa đơn", e);
   } finally {
-    pdfLoadingId.value = "";
+    pdfLoadingKey.value = "";
   }
 }
 
@@ -682,7 +688,7 @@ void (async () => {
                 class="!p-1 text-gray-500"
                 :aria-label="`Xem PDF hóa đơn ${data.khhdon ?? ''} ${data.shdon ?? ''}`"
                 v-tooltip="'Xem PDF hóa đơn'"
-                :loading="pdfLoadingId === String(data.id ?? '')"
+                :loading="pdfLoadingKey === pdfRowKey(data)"
                 @click="openInvoicePdf(data)"
               />
               <!-- Lưu file XML: hiện dấu tick khi đã có trong thư mục hồ sơ. -->

@@ -1189,6 +1189,8 @@ export interface HddtSyncScanSummary {
   details_retried: number;
   /** Đã quét hôm nay (luôn quét lại, không cache). */
   days_today: number;
+  /** Lỗi từng loại/khung ngày — các phần khác vẫn quét được (quét một phần). */
+  errors?: string[];
   /** File XML hóa đơn tự động lưu cùng lượt quét (best effort). */
   xml?: HddtXmlFill;
 }

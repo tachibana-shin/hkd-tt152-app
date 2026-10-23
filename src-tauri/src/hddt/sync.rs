@@ -167,6 +167,8 @@ fn int(v: &Value, key: &str) -> i64 {
 pub(crate) struct CachedInvoice {
     pub(crate) id: i64,
     pub(crate) portal_id: String,
+    /// `regular` | `cash-register` — chọn đúng tiền tố endpoint chi tiết.
+    pub(crate) portal_kind: String,
     pub(crate) posting_date: String,
     pub(crate) nbmst: String,
     pub(crate) nbten: String,
@@ -205,6 +207,10 @@ pub(crate) struct ScanSummary {
     pub(crate) details_retried: usize,
     /// Số lần đã quét hôm nay (luôn quét lại, không cache).
     pub(crate) days_today: usize,
+    /// Lỗi của từng loại/khung ngày. Lượt quét vẫn tiếp tục các phần khác —
+    /// một endpoint (thường là `sco-query` máy tính tiền) chết không được làm
+    /// mất toàn bộ hóa đơn điện tử đã lấy được.
+    pub(crate) errors: Vec<String>,
 }
 
 /// Quét một cửa sổ ngày (đã gom ≤ 30 ngày) rồi ghi cache từng hóa đơn. Việc đánh
@@ -232,8 +238,13 @@ async fn scan_window(
         let q = InvoiceQuery {
             direction: crate::hddt::InvoiceDirection::Purchase,
             kind,
-            // Cổng từ chối size > 50 (HTTP 500) → lấy tối đa 50/lần.
-            size: crate::hddt::MAX_PAGE_SIZE,
+            // HĐ điện tử: cổng từ chối size > 50 → lấy tối đa 50/lần cho ít
+            // request. Máy tính tiền (`sco-query`): dùng đúng 15 như trang tra
+            // cứu của cổng, tránh backend treo với trang lớn.
+            size: match kind {
+                InvoiceKind::Regular => crate::hddt::MAX_PAGE_SIZE,
+                InvoiceKind::CashRegister => crate::hddt::CASH_REGISTER_PAGE_SIZE,
+            },
             state: state.clone(),
             from: Some(iso_to_portal_day(&win_start.to_string())),
             to: Some(iso_to_portal_day(&win_end.to_string())),
@@ -388,23 +399,43 @@ pub(crate) async fn scan_with_progress(
 
         // Hôm nay: lấy để thấy hóa đơn vừa phát sinh, nhưng KHÔNG đánh dấu cache
         // để lượt quét sau vẫn lấy lại được.
+        let mut kind_failed = false;
         if end_date >= today {
             if let Some(j) = job {
                 j.plan(1);
                 j.log(format!("Quét {} hôm nay (không cache)…", kind_label(*kind)));
             }
             let started = Instant::now();
-            scan_window(pool, client, token, *kind, today, today, &mut sum, job).await?;
-            sum.days_today += 1;
-            if let Some(j) = job {
-                j.tick(format!(
-                    "Xong {} hôm nay — {}",
-                    kind_label(*kind),
-                    elapsed_label(started)
-                ));
+            match scan_window(pool, client, token, *kind, today, today, &mut sum, job).await {
+                Ok(()) => {
+                    sum.days_today += 1;
+                    if let Some(j) = job {
+                        j.tick(format!(
+                            "Xong {} hôm nay — {}",
+                            kind_label(*kind),
+                            elapsed_label(started)
+                        ));
+                    }
+                }
+                Err(e) => {
+                    // Cổng có thể chết riêng một endpoint (thường `sco-query`
+                    // máy tính tiền). Đừng thử lại endpoint đó cho từng khung
+                    // ngày — mỗi lần 4 lượt × 20 s sẽ treo cả buổi.
+                    let msg = format!(
+                        "{} hôm nay {}: {}",
+                        kind_label(*kind),
+                        today.format("%d/%m/%Y"),
+                        brief_error(&e)
+                    );
+                    if let Some(j) = job {
+                        j.log(format!("✗ {msg} — bỏ qua phần còn lại của loại này"));
+                    }
+                    sum.errors.push(msg);
+                    kind_failed = true;
+                }
             }
         }
-        if missing.is_empty() {
+        if kind_failed || missing.is_empty() {
             continue;
         }
 
@@ -434,25 +465,53 @@ pub(crate) async fn scan_with_progress(
                 ));
             }
             let started = Instant::now();
-            scan_window(
+            match scan_window(
                 pool, client, token, *kind, win_start, win_end, &mut sum, job,
             )
-            .await?;
-            // Đánh dấu ngày đã quét cho loại này (kể cả 0 hóa đơn).
-            sum.days_scanned += days as usize;
-            mark_days_scanned(pool, win_start, win_end, *kind).await?;
-            if let Some(p) = job {
-                p.tick(format!(
-                    "Xong {} {}–{} ({} ngày) — {}",
-                    kind_label(*kind),
-                    win_start.format("%d/%m/%Y"),
-                    win_end.format("%d/%m/%Y"),
-                    days,
-                    elapsed_label(started)
-                ));
+            .await
+            {
+                Ok(()) => {
+                    // Đánh dấu ngày đã quét cho loại này (kể cả 0 hóa đơn).
+                    sum.days_scanned += days as usize;
+                    mark_days_scanned(pool, win_start, win_end, *kind).await?;
+                    if let Some(p) = job {
+                        p.tick(format!(
+                            "Xong {} {}–{} ({} ngày) — {}",
+                            kind_label(*kind),
+                            win_start.format("%d/%m/%Y"),
+                            win_end.format("%d/%m/%Y"),
+                            days,
+                            elapsed_label(started)
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let msg = format!(
+                        "{} {}–{}: {}",
+                        kind_label(*kind),
+                        win_start.format("%d/%m/%Y"),
+                        win_end.format("%d/%m/%Y"),
+                        brief_error(&e)
+                    );
+                    if let Some(p) = job {
+                        p.log(format!("✗ {msg} — bỏ qua phần còn lại của loại này"));
+                    }
+                    sum.errors.push(msg);
+                    break;
+                }
             }
             i = j + 1;
         }
+    }
+
+    // Không lấy được bất kỳ danh sách nào (toàn bộ endpoint đều lỗi) → trả lỗi
+    // để UI báo đúng. Quan trọng: thoát TRƯỚC khi thử lại chi tiết, vì lượt quét
+    // chết vì mạng không được reset trạng thái lỗi chi tiết của lượt trước.
+    if sum.days_scanned == 0 && sum.days_today == 0 && !sum.errors.is_empty() {
+        return Err(format!(
+            "Không quét được cổng HĐĐT: {}",
+            sum.errors.join(" · ")
+        ));
     }
 
     // Hóa đơn lượt trước lỗi chi tiết (429, mạng chập chờn…) → thử lại ngay
@@ -514,11 +573,11 @@ pub(crate) async fn scan_with_progress(
         match client
             .invoice_detail(
                 token,
+                InvoiceKind::parse(&inv.portal_kind).unwrap_or_default(),
                 &inv.nbmst,
                 &inv.khmshdon.to_string(),
                 &inv.khhdon,
                 &inv.shdon,
-                &inv.portal_id,
             )
             .await
         {
@@ -712,7 +771,7 @@ async fn mark_days_scanned(
 async fn pending_without_detail(pool: &SqlitePool) -> Result<Vec<CachedInvoice>, String> {
     let rows: Vec<CachedInvoice> = sqlx::query_as!(
         CachedInvoice,
-        r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+        r#"SELECT id as "id!", portal_id, portal_kind, posting_date, nbmst, nbten,
                   khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
                   tgtcthue, tgtthue, tgtttbso
              FROM hddt_purchase_invoice
@@ -1574,7 +1633,7 @@ mod tests {
     async fn load(pool: &SqlitePool, id: i64) -> CachedInvoice {
         sqlx::query_as!(
             CachedInvoice,
-            r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+            r#"SELECT id as "id!", portal_id, portal_kind, posting_date, nbmst, nbten,
                       khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
                   tgtcthue, tgtthue, tgtttbso
                  FROM hddt_purchase_invoice WHERE id = ?"#,
@@ -2005,7 +2064,7 @@ mod tests {
         );
         let row: CachedInvoice = sqlx::query_as!(
             CachedInvoice,
-            r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+            r#"SELECT id as "id!", portal_id, portal_kind, posting_date, nbmst, nbten,
                       khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
                   tgtcthue, tgtthue, tgtttbso
                  FROM hddt_purchase_invoice LIMIT 1"#
@@ -2205,6 +2264,75 @@ mod tests {
             row.detail_error, "Too Many Requests",
             "phải giữ lỗi cũ để lượt sau còn thử lại"
         );
+    }
+
+    /// Trang tra cứu của cổng xin 15 dòng/lần; tab máy tính tiền (`sco-query`)
+    /// không được thử thách với `size=50` (đúng URL lỗi của issue #8).
+    #[tokio::test]
+    async fn scan_uses_portal_default_page_size_for_cash_register() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+
+        scan(
+            &pool,
+            &client,
+            "mock-token",
+            "2026-09-01",
+            "2026-09-24",
+            &[InvoiceKind::Regular, InvoiceKind::CashRegister],
+        )
+        .await
+        .expect("quét mock thất bại");
+
+        let reqs = portal.requests();
+        let regular = reqs
+            .iter()
+            .find(|r| r.path.contains("/query/invoices/purchase"))
+            .expect("phải gọi endpoint HĐ điện tử");
+        assert_eq!(regular.param("size").as_deref(), Some("50"));
+        let cash = reqs
+            .iter()
+            .find(|r| r.path.contains("/sco-query/invoices/purchase"))
+            .expect("phải gọi endpoint máy tính tiền");
+        assert_eq!(
+            cash.param("size").as_deref(),
+            Some("15"),
+            "sco-query phải dùng đúng size mặc định của cổng: {}",
+            cash.path
+        );
+    }
+
+    /// `sco-query` (máy tính tiền) chết nhưng `query` (HĐ điện tử) sống → vẫn
+    /// quét/nhập được HĐ thường, chỉ ghi cảnh báo cho phần lỗi (issue #8).
+    #[tokio::test]
+    async fn scan_keeps_regular_invoices_when_cash_register_endpoint_dies() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        *portal.fail_path_contains.lock().unwrap() = vec!["sco-query".into()];
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+
+        let sum = scan(
+            &pool,
+            &client,
+            "mock-token",
+            "2026-09-01",
+            "2026-09-24",
+            &[InvoiceKind::Regular, InvoiceKind::CashRegister],
+        )
+        .await
+        .expect("HĐ điện tử vẫn phải quét được khi sco-query chết");
+
+        assert!(
+            sum.errors.iter().any(|e| e.contains("Máy tính tiền")),
+            "phải ghi lỗi phần máy tính tiền: {:?}",
+            sum.errors
+        );
+        assert!(sum.days_scanned > 0, "phải quét xong phần HĐ thường");
+        assert!(sum.invoices_new > 0, "phải giữ HĐ thường đã lấy được");
+        assert!(sum.details_ok > 0, "phải lấy được dòng hàng HĐ thường");
     }
 
     /// Hóa đơn chưa có dòng hàng: báo câu hướng dẫn quét lại, không lộ lỗi serde

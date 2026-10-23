@@ -195,6 +195,125 @@ mod live_tests {
         );
     }
 
+    /// Kiểm chứng live luồng quét mua vào sau khi sửa header `Action` (23/10/2026):
+    /// list cả 2 loại HĐ mua vào rồi lấy chi tiết HĐ thường đúng tiền tố.
+    /// Run with: cd src-tauri && cargo test live_probe_purchase_scan -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "cần ../info.txt + portal live"]
+    async fn live_probe_purchase_scan() {
+        use crate::hddt::{InvoiceDirection, InvoiceKind, InvoiceQuery};
+
+        let Some((u, p)) = super::load_portal_creds() else {
+            eprintln!("⚠️ thiếu ../info.txt");
+            return;
+        };
+        let client = HddtClient::new(&u, &p, None).expect("client");
+        let login = client
+            .login_with_solver(&GlyphTemplateSolver, 3)
+            .await
+            .expect("login thất bại");
+        eprintln!("✅ login OK");
+
+        let to = chrono::Local::now();
+        let from = to - chrono::Duration::days(30);
+        let fmt = |d: chrono::DateTime<chrono::Local>| d.format("%d/%m/%Y").to_string();
+        let (from_s, to_s) = (fmt(from), fmt(to));
+
+        // Đúng thứ tự lượt quét thật: lấy danh sách cả 2 loại trước, rồi mới
+        // tải chi tiết/tải XML (một request nặng không được chen giữa 2 list).
+        let mut first_rows: Vec<(InvoiceKind, serde_json::Value)> = Vec::new();
+        for kind in [InvoiceKind::Regular, InvoiceKind::CashRegister] {
+            let started = std::time::Instant::now();
+            let list = client
+                .query_invoices(
+                    &login.token,
+                    &InvoiceQuery {
+                        direction: InvoiceDirection::Purchase,
+                        kind,
+                        // Máy tính tiền dùng đúng 15 như trang tra cứu.
+                        size: if kind == InvoiceKind::CashRegister {
+                            crate::hddt::CASH_REGISTER_PAGE_SIZE
+                        } else {
+                            5
+                        },
+                        from: Some(from_s.clone()),
+                        to: Some(to_s.clone()),
+                        ttxly: Some("-1".into()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap_or_else(|e| panic!("list {kind:?} thất bại: {e}"));
+            eprintln!(
+                "✅ list {kind:?}: total={} ({} ms)",
+                list.total,
+                started.elapsed().as_millis()
+            );
+            if let Some(row) = list.datas.first() {
+                first_rows.push((kind, row.clone()));
+            }
+        }
+
+        let g = |row: &serde_json::Value, k: &str| {
+            row.get(k)
+                .map(|v| match v {
+                    serde_json::Value::String(s) => s.trim().to_string(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default()
+        };
+
+        for (kind, row) in &first_rows {
+            let started = std::time::Instant::now();
+            let d = client
+                .invoice_detail(
+                    &login.token,
+                    *kind,
+                    &g(row, "nbmst"),
+                    &g(row, "khmshdon"),
+                    &g(row, "khhdon"),
+                    &g(row, "shdon"),
+                )
+                .await
+                .unwrap_or_else(|e| panic!("detail {kind:?} thất bại: {e}"));
+            eprintln!(
+                "✅ detail {kind:?} {} {}: {} dòng ({} ms)",
+                g(row, "khhdon"),
+                g(row, "shdon"),
+                d.get("hdhhdvu")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0),
+                started.elapsed().as_millis()
+            );
+        }
+
+        // Nút "Tải XML" cũng vừa đổi sang `Action` rỗng — kiểm tra luôn để
+        // không làm hỏng đường tải file. Để cuối vì request này nặng nhất.
+        if let Some((kind, row)) = first_rows.iter().find(|(k, _)| *k == InvoiceKind::Regular) {
+            let key = crate::hddt::xml::XmlInvoiceKey {
+                direction: InvoiceDirection::Purchase,
+                kind: *kind,
+                nbmst: g(row, "nbmst"),
+                khmshdon: g(row, "khmshdon").parse().unwrap_or(0),
+                khhdon: g(row, "khhdon"),
+                shdon: g(row, "shdon"),
+            };
+            let started = std::time::Instant::now();
+            match client.export_invoice_xml(&login.token, &key).await {
+                Ok(zip) => eprintln!(
+                    "✅ export-xml {} {}: {} bytes ({} ms)",
+                    key.khhdon,
+                    key.shdon,
+                    zip.len(),
+                    started.elapsed().as_millis()
+                ),
+                Err(e) => panic!("export-xml thất bại: {e}"),
+            }
+        }
+    }
+
     /// Probe giới hạn `size` của cổng: size=100 bị từ chối (HTTP 500), size=50
     /// chạy được. In ra message thô để kiểm tra encoding của cổng.
     /// Run with: cd src-tauri && cargo test live_probe_page_size -- --ignored --nocapture

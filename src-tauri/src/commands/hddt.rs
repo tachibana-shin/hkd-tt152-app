@@ -732,7 +732,9 @@ pub(crate) async fn hddt_list_invoices(
         .clone()
         .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
     let cfg = read_config(&state).await?;
-    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
+    // Tra cứu là thao tác tương tác: cổng treo thì báo lỗi sau 1 lần thử (20 s)
+    // thay vì quay nút 4 lần (~100 s) như quét hàng loạt.
+    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?.fail_fast();
     fn clean(v: Option<String>) -> Option<String> {
         v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
     }
@@ -1103,7 +1105,7 @@ pub(crate) async fn hddt_sync_import(
         for id in list {
             let row: Option<CachedInvoice> = sqlx::query_as!(
                 CachedInvoice,
-                r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+                r#"SELECT id as "id!", portal_id, portal_kind, posting_date, nbmst, nbten,
                           khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
                   tgtcthue, tgtthue, tgtttbso
                      FROM hddt_purchase_invoice WHERE id = ?"#,
@@ -1120,7 +1122,7 @@ pub(crate) async fn hddt_sync_import(
     } else {
         sqlx::query_as!(
             CachedInvoice,
-            r#"SELECT id as "id!", portal_id, posting_date, nbmst, nbten,
+            r#"SELECT id as "id!", portal_id, portal_kind, posting_date, nbmst, nbten,
                       khmshdon as "khmshdon!", khhdon, shdon, status, detail_json,
                   tgtcthue, tgtthue, tgtttbso
                  FROM hddt_purchase_invoice
@@ -1145,11 +1147,11 @@ pub(crate) async fn hddt_sync_import(
             match client
                 .invoice_detail(
                     token,
+                    crate::hddt::InvoiceKind::parse(&inv.portal_kind).unwrap_or_default(),
                     &inv.nbmst,
                     &inv.khmshdon.to_string(),
                     &inv.khhdon,
                     &inv.shdon,
-                    &inv.portal_id,
                 )
                 .await
             {
@@ -1360,12 +1362,18 @@ pub(crate) async fn hddt_invoice_detail(
     khmshdon: i64,
     khhdon: String,
     shdon: String,
-    id: Option<String>,
+    kind: Option<String>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     if khmshdon <= 0 {
         return Err("Thiếu mã mẫu số (khmshdon) — không lấy được chi tiết hóa đơn.".to_string());
     }
+    // Tab tra cứu biết rõ loại HĐ; thiếu thì suy từ ký hiệu (CG = máy tính tiền)
+    // để chọn đúng tiền tố `query` / `sco-query` của endpoint chi tiết.
+    let kind = match kind.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => crate::hddt::InvoiceKind::parse(s)?,
+        None => crate::hddt::InvoiceKind::from_symbol(&khhdon),
+    };
     let session = state
         .portal
         .lock()
@@ -1373,15 +1381,16 @@ pub(crate) async fn hddt_invoice_detail(
         .clone()
         .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
     let cfg = read_config(&state).await?;
-    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
+    // Xem PDF cũng là thao tác tương tác — fail fast, không retry 4 lần.
+    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?.fail_fast();
     let detail = client
         .invoice_detail(
             &session.token,
+            kind,
             &nbmst,
             &khmshdon.to_string(),
             &khhdon,
             &shdon,
-            id.as_deref().unwrap_or(""),
         )
         .await?;
     audit(

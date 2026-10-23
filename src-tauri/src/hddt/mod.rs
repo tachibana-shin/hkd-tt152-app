@@ -28,7 +28,7 @@ pub(crate) static BULK_SYNC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::c
 
 pub(crate) use client::{
     HddtClient, InvoiceDirection, InvoiceKind, InvoiceList, InvoiceQuery, LoginError, LoginSession,
-    MAX_PAGE_SIZE,
+    CASH_REGISTER_PAGE_SIZE, MAX_PAGE_SIZE,
 };
 pub(crate) use hddt_captcha::{classify_svg, Captcha, CaptchaSolver, GlyphTemplateSolver, CHARSET};
 pub(crate) use password::generate_password;

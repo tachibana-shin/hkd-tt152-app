@@ -384,7 +384,16 @@ async function onSyncScan() {
       (s.days_today > 0 ? " · hôm nay (không cache)" : "") +
       ` · hóa đơn mới ${s.invoices_new} · có dòng hàng ${s.details_ok} · lỗi ${s.details_failed}` +
       ` · cần xử lý ${s.need_manual}` +
+      (s.errors?.length ? ` · lỗi quét ${s.errors.length} phần` : "") +
       xmlFillText(s.xml);
+    if (s.errors?.length) {
+      toast.add({
+        severity: "warn",
+        summary: "Quét cổng xong một phần",
+        detail: s.errors.join("\n"),
+        life: 12000,
+      });
+    }
     // Không bật `retryFailed` ở đây: scan đã tự thử lại các HĐ lỗi chi tiết. Bật
     // ở đây sẽ xoá lỗi và biến HĐ chưa có dòng hàng thành "chờ nhập kho" → bấm
     // nhập kho sẽ báo "Hóa đơn không có dòng hàng".

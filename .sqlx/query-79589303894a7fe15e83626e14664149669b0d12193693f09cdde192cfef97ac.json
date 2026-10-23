@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!\", portal_id, posting_date, nbmst, nbten,\n                      khmshdon as \"khmshdon!\", khhdon, shdon, status, detail_json,\n                  tgtcthue, tgtthue, tgtttbso\n                 FROM hddt_purchase_invoice\n                WHERE status = 'pending' AND detail_json <> '' AND detail_error = ''\n                ORDER BY posting_date, khhdon, shdon",
+  "query": "SELECT id as \"id!\", portal_id, portal_kind, posting_date, nbmst, nbten,\n                          khmshdon as \"khmshdon!\", khhdon, shdon, status, detail_json,\n                  tgtcthue, tgtthue, tgtttbso\n                     FROM hddt_purchase_invoice WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -14,66 +14,72 @@
         "type_info": "Text"
       },
       {
-        "name": "posting_date",
+        "name": "portal_kind",
         "ordinal": 2,
         "type_info": "Text"
       },
       {
-        "name": "nbmst",
+        "name": "posting_date",
         "ordinal": 3,
         "type_info": "Text"
       },
       {
-        "name": "nbten",
+        "name": "nbmst",
         "ordinal": 4,
         "type_info": "Text"
       },
       {
-        "name": "khmshdon!",
+        "name": "nbten",
         "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "khmshdon!",
+        "ordinal": 6,
         "type_info": "Integer"
       },
       {
         "name": "khhdon",
-        "ordinal": 6,
-        "type_info": "Text"
-      },
-      {
-        "name": "shdon",
         "ordinal": 7,
         "type_info": "Text"
       },
       {
-        "name": "status",
+        "name": "shdon",
         "ordinal": 8,
         "type_info": "Text"
       },
       {
-        "name": "detail_json",
+        "name": "status",
         "ordinal": 9,
         "type_info": "Text"
       },
       {
-        "name": "tgtcthue",
+        "name": "detail_json",
         "ordinal": 10,
-        "type_info": "Float"
+        "type_info": "Text"
       },
       {
-        "name": "tgtthue",
+        "name": "tgtcthue",
         "ordinal": 11,
         "type_info": "Float"
       },
       {
-        "name": "tgtttbso",
+        "name": "tgtthue",
         "ordinal": 12,
+        "type_info": "Float"
+      },
+      {
+        "name": "tgtttbso",
+        "ordinal": 13,
         "type_info": "Float"
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
-      true,
+      false,
+      false,
       false,
       false,
       false,
@@ -88,5 +94,5 @@
       false
     ]
   },
-  "hash": "494c3d11aa0acd5a8567e038fb7a59f877eb8d63b0778610f83aab6e95f85786"
+  "hash": "79589303894a7fe15e83626e14664149669b0d12193693f09cdde192cfef97ac"
 }
