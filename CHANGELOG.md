@@ -1,5 +1,25 @@
 # Changelog
 
+# [0.27.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.26.1...v0.27.0) (2026-10-23)
+
+
+### Bug Fixes
+
+* **accounting,invoice:** sổ S1a/S2a gộp dòng và dùng số HĐĐT ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([a92eb76](https://github.com/tachibana-shin/hkd-tt152-app/commit/a92eb760c6acee0068f07cf844b74903bb332ba9))
+* **e2e:** đo panel bằng offsetWidth — hết đỏ oan lúc panel đang animation mở ([91faeaa](https://github.com/tachibana-shin/hkd-tt152-app/commit/91faeaa1722d7cfa4ec4699547031becf66df44f))
+* **e2e:** đo panel dropdown theo rem của trang, không theo px cứng ([bd83a83](https://github.com/tachibana-shin/hkd-tt152-app/commit/bd83a83af3618a98d4106fe97c6007285c3b9a2a))
+* **hddt:** lượt quét đầu chờ phiên cổng thay vì bỏ qua ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([cc84816](https://github.com/tachibana-shin/hkd-tt152-app/commit/cc8481648518c509d51d31ba9e0eef98c2563b22))
+* **hddt:** tự động nhập hóa đơn và sửa lỗi EOF chi tiết ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([e61e3e7](https://github.com/tachibana-shin/hkd-tt152-app/commit/e61e3e7987d0d819063a2ab91bd27e1f573b5a23))
+* **ui:** tên sản phẩm dài xuống dòng trong dropdown, bỏ cuộn ngang ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([121808b](https://github.com/tachibana-shin/hkd-tt152-app/commit/121808b00bdbf1a511c66c2a9501292f039f09ed))
+
+
+### Features
+
+* **accounting:** báo cáo nhanh hóa đơn theo số HĐĐT và nhóm ngành ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([7c65a15](https://github.com/tachibana-shin/hkd-tt152-app/commit/7c65a159b022fbfefc67a4dccaf09e3dfc5a48e9))
+* **dinh-muc:** cấu hình đơn giá và xuất Excel báo giá ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([3de8cd5](https://github.com/tachibana-shin/hkd-tt152-app/commit/3de8cd57d773d3ca7255d926138a3cd9cd436a52))
+* **hddt:** nhật ký realtime khi quét cổng ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([fb99dc7](https://github.com/tachibana-shin/hkd-tt152-app/commit/fb99dc7b4bc7bae4608477599acbaf890be6cec8))
+* **invoice:** sắp xếp danh sách theo Ngày HĐĐT giảm dần ([#7](https://github.com/tachibana-shin/hkd-tt152-app/issues/7)) ([90bf0d6](https://github.com/tachibana-shin/hkd-tt152-app/commit/90bf0d62bec14027c355a114d8a3e16b13696ab7))
+
 ## [0.26.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.26.0...v0.26.1) (2026-10-22)
 
 
