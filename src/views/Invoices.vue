@@ -96,6 +96,16 @@ function openEdit(inv: Invoice) {
   draftDialog.value = true;
 }
 
+/**
+ * Nháy đúp dòng nháp để mở sửa — chỉ khi bấm vào vùng dữ liệu, không phải nút
+ * thao tác (nút PDF/sửa/xoá… đã có hành vi riêng, nháy đúp không được chen vào).
+ */
+function onRowDblClick(e: { data?: Invoice; originalEvent?: MouseEvent }) {
+  const target = e.originalEvent?.target as HTMLElement | null;
+  if (target?.closest("button, a, input, textarea, select, [role='button']")) return;
+  if (e.data?.status === "draft") openEdit(e.data);
+}
+
 // ─── Xem trước PDF ngay trên tab Hóa đơn (nháp lẫn đã phát hành) ───
 const pdfVisible = ref(false);
 const pdfDetail = ref("");
@@ -448,6 +458,7 @@ useKeepAliveRefresh(reload);
           @page="page.onPage"
           @sort="page.onSort"
           @search="page.onSearch"
+          @row-dblclick="onRowDblClick"
         >
           <Column field="number" header="Số HĐ">
             <template #body="{ data }">

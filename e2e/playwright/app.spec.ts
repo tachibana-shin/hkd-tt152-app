@@ -2232,6 +2232,12 @@ test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async 
   await expect(row.getByText("30.000 đ", { exact: true })).toBeVisible();
   await expect(page.getByText("Khách Sửa Mới", { exact: true })).toBeVisible();
   await expect(page.getByText("Khách Sửa", { exact: true })).toHaveCount(0);
+
+  // Nháy đúp dòng nháp cũng mở đúng chế độ sửa (không cần bấm nút bút chì).
+  await row.dblclick();
+  await expect(dlg.getByText("Sửa hóa đơn nháp HD9200")).toBeVisible();
+  await dlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(dlg).toBeHidden();
 });
 
 test("Hóa đơn nháp: nút xoá dọn cả dòng hàng, hóa đơn đã xử lý thì không có nút xoá", async ({
