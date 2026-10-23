@@ -118,8 +118,10 @@ const emit = defineEmits<{
 const catalog = useCatalogStore();
 const toast = useToast();
 
-// Nút Excel từng dòng cần biết hàng nào có định mức → nạp nền một lần.
-if (props.showBomExport) void catalog.loadBoms();
+// Giá bán của "hàng định mức/gói" lấy từ tổng tiền định mức đã khai (xem
+// `onProductPick`) nên bảng bán hàng cũng cần bảng định mức; nút Excel từng
+// dòng cũng vậy. Nạp nền một lần — gọi trùng thì dùng chung request đang chạy.
+if (props.showBomExport || props.priceField === "sale_price") void catalog.loadBoms();
 
 // Phân trang phía client: đổ file Excel vào phiếu nhập có thể vài nghìn dòng —
 // bảng chỉ render 1 trang (50 dòng) thay vì hàng nghìn <tr> (mỗi dòng có ô chọn
@@ -306,13 +308,35 @@ function onProductPicked(it: LineItem, name: string) {
 /**
  * Tự điền giá / nhóm ngành / kho xuất cho dòng vừa chọn hàng.
  *
+ * Hàng có định mức (gói/thành phẩm chế tạo): đơn giá bán = **tổng tiền định mức**
+ * đã khai ở tab Định mức vật tư (Σ SL × đơn giá từng dòng), không lấy giá bán
+ * trên danh mục — gói thường để giá 0 và giá thật nằm ở các dòng vật tư/dịch vụ.
+ * Chỉ áp cho bảng bán hàng (`sale_price`); bảng nhập kho vẫn lấy giá vốn.
+ *
  * `notify = false` khi gán từ NGOÀI (popup khác ví dụ tạo lô xong) — màn cha
  * chỉ muốn soi thiếu tồn khi NGƯỜI DÙNG tự chọn, không gợi ý lô lần nữa.
  */
 function onProductPick(it: LineItem, notify = true) {
   const p = catalog.productByCode(it.product_code);
   if (!p) return;
-  it.unit_price = props.priceField === "sale_price" ? p.sale_price : p.cost_price;
+  const isSale = props.priceField === "sale_price";
+  const listPrice = isSale ? p.sale_price : p.cost_price;
+  const bomReady = isSale && catalog.hasBomDefined(it.product_code);
+  it.unit_price = bomReady ? catalog.bomTotal(it.product_code) : listPrice;
+  // Định mức có thể chưa nạp xong lúc chọn → nạp rồi điền bù, nhưng chỉ khi
+  // người dùng chưa sửa đơn giá vừa điền (không giẫm lên giá họ gõ tay).
+  if (isSale && !bomReady) {
+    const code = it.product_code;
+    void catalog
+      .loadBoms()
+      .then(() => {
+        if (it.product_code !== code || it.unit_price !== listPrice) return;
+        if (catalog.hasBomDefined(code)) it.unit_price = catalog.bomTotal(code);
+      })
+      .catch(() => {
+        /* Không có quyền / API lỗi → giữ giá danh mục. */
+      });
+  }
   // Tự điền nhóm ngành theo sản phẩm (cơ sở tỷ lệ thuế bán ra) — vẫn sửa tay được.
   if (p.industry_code) it.industry_code = p.industry_code;
   // Tự điền kho xuất theo kho mặc định của sản phẩm — nếu dòng chưa chọn kho.

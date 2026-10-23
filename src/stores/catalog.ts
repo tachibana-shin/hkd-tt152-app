@@ -88,6 +88,25 @@ export const useCatalogStore = defineStore("catalog", () => {
   const hasBom = (productCode: string) =>
     boms.value.some((b) => b.product_code === productCode && !b.material_is_service);
 
+  /**
+   * Có khai định mức chưa (kể cả "gói" chỉ gồm dịch vụ — nhân công, gia công).
+   *
+   * Khác `hasBom`: `hasBom` dùng cho gợi ý tạo lô sản xuất nên bỏ qua gói toàn
+   * dịch vụ (không có tồn kho để sản xuất); còn giá bán của gói vẫn lấy được từ
+   * tổng tiền định mức của mọi dòng, kể cả dòng dịch vụ.
+   */
+  const hasBomDefined = (productCode: string) =>
+    boms.value.some((b) => b.product_code === productCode);
+
+  /**
+   * Tổng tiền định mức của 1 thành phẩm = Σ (SL định mức × đơn giá đã khai),
+   * đúng bằng "Tổng tiền gói" ở tab Định mức vật tư. 0 khi chưa nạp/chưa khai.
+   */
+  const bomTotal = (productCode: string) =>
+    boms.value
+      .filter((b) => b.product_code === productCode)
+      .reduce((sum, b) => sum + (b.quantity || 0) * (b.unit_price || 0), 0);
+
   async function loadAll() {
     loading.value = true;
     try {
@@ -223,6 +242,8 @@ export const useCatalogStore = defineStore("catalog", () => {
     boms,
     loadBoms,
     hasBom,
+    hasBomDefined,
+    bomTotal,
     loadAll,
     loadIndustryGroups,
     loadProductsPage,

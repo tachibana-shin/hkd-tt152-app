@@ -2156,6 +2156,98 @@ test("Hóa đơn nháp: Excel flat tách hàng chế tạo và xuất định m�
   await expect(dlg).toBeHidden();
 });
 
+test("Hóa đơn nháp: hàng định mức tự điền đơn giá bằng tổng tiền định mức", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Gói cố ý để giá bán 0 trên danh mục — giá thật nằm ở các dòng định mức.
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-BOM-PRICE-E2E",
+      name: "Gói bảo dưỡng theo định mức",
+      unit: "Gói",
+      salePrice: 0,
+      costPrice: 0,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-BOM-PRICE-E2E: ${await fg.text()}`).toBe(true);
+  for (const [code, name, unit, price, isService, industryCode] of [
+    ["NVL-PRICE-A", "Vật tư A giá định mức", "Cái", 120_000, false, "PPHH"],
+    ["NVL-PRICE-B", "Vật tư B giá định mức", "Cái", 30_000, false, "PPHH"],
+    ["DV-PRICE-E2E", "Dịch vụ gói giá định mức", "Lần", 50_000, true, "DVXD-KNL"],
+  ] as const) {
+    const res = await request.post("/api/save_product", {
+      data: {
+        code,
+        name,
+        unit,
+        salePrice: price,
+        costPrice: 0,
+        minStock: 0,
+        vatRate: 1,
+        importTaxRate: 0,
+        isService,
+        industryCode,
+      },
+    });
+    expect(res.ok(), `save_product ${code}: ${await res.text()}`).toBe(true);
+  }
+
+  // 1 gói = 2 × 120.000 + 1 × 30.000 + 1 × 50.000 = 320.000 đ.
+  const bom = await request.post("/api/save_product_bom", {
+    data: {
+      productCode: "SP-BOM-PRICE-E2E",
+      items: [
+        { material_code: "NVL-PRICE-A", quantity: 2, unit_price: 120_000 },
+        { material_code: "NVL-PRICE-B", quantity: 1, unit_price: 30_000 },
+        { material_code: "DV-PRICE-E2E", quantity: 1, unit_price: 50_000 },
+      ],
+    },
+  });
+  expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog").filter({ hasText: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách BOM Price E2E");
+  await custInput.press("Enter");
+
+  const line = dlg.locator("tbody tr").first();
+  await line.getByRole("combobox").first().click();
+  const box = page.locator('.p-select-overlay.product-select-overlay [role="searchbox"]').last();
+  await expect(box).toBeVisible();
+  await box.fill("SP-BOM-PRICE-E2E");
+  await page
+    .getByRole("option", { name: /Gói bảo dưỡng theo định mức/ })
+    .first()
+    .click();
+
+  // Tồn 0 → app gợi ý tạo lô sản xuất; test chỉ kiểm đơn giá nên bỏ qua.
+  const shortagePrompt = page.getByRole("alertdialog", {
+    name: /Thiếu tồn kho — hàng chế tạo/,
+  });
+  await expect(shortagePrompt).toBeVisible();
+  await shortagePrompt.getByRole("button", { name: "Để sau" }).click();
+  await expect(shortagePrompt).toBeHidden();
+
+  // Đơn giá = tổng tiền định mức, không phải giá bán 0 của danh mục.
+  await expect(line.getByRole("spinbutton").nth(1)).toHaveValue(/320\.000/);
+
+  await dlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(dlg).toBeHidden();
+});
+
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {
   await ensureLoggedIn(page);
   await sidebarButton(page, "Hóa đơn").click();
