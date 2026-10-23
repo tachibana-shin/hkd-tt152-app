@@ -866,10 +866,8 @@ pub(crate) async fn hddt_sync_test_seed(
     Ok("ok".into())
 }
 
-/// Lấy token phiên cổng (đã bắt buộc đăng nhập) + config, dùng cho các lệnh sync.
-pub(crate) async fn portal_client(
-    state: &State<'_, AppState>,
-) -> Result<(HddtClient, String), String> {
+/// Token phiên cổng còn hạn — dùng chung cho client thường và client tương tác.
+async fn portal_token(state: &State<'_, AppState>) -> Result<String, String> {
     let session = state
         .portal
         .lock()
@@ -879,9 +877,28 @@ pub(crate) async fn portal_client(
     if session.seconds_left() <= 0 {
         return Err("Phiên cổng HĐĐT đã hết hạn — bấm Đăng nhập lại.".into());
     }
+    Ok(session.token)
+}
+
+/// Lấy token phiên cổng (đã bắt buộc đăng nhập) + config, dùng cho các lệnh sync.
+pub(crate) async fn portal_client(
+    state: &State<'_, AppState>,
+) -> Result<(HddtClient, String), String> {
+    let token = portal_token(state).await?;
     let cfg = read_config(state).await?;
     let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?;
-    Ok((client, session.token))
+    Ok((client, token))
+}
+
+/// Client timeout ngắn, không thử lại — cho thao tác người dùng đang chờ
+/// (Xem PDF/Nhập kho từng hóa đơn) để báo lỗi nhanh thay vì treo hàng chục giây.
+async fn portal_client_interactive(
+    state: &State<'_, AppState>,
+) -> Result<(HddtClient, String), String> {
+    let token = portal_token(state).await?;
+    let cfg = read_config(state).await?;
+    let client = HddtClient::interactive(&cfg.username, &cfg.password, cfg.base())?;
+    Ok((client, token))
 }
 
 /// Tự tìm XML còn thiếu cho **báo cáo kỳ thuế** — chạy trước khi giữ lock
@@ -1144,35 +1161,8 @@ pub(crate) async fn hddt_sync_import(
             if !inv.detail_json.trim().is_empty() {
                 continue;
             }
-            match client
-                .invoice_detail(
-                    token,
-                    crate::hddt::InvoiceKind::parse(&inv.portal_kind).unwrap_or_default(),
-                    &inv.nbmst,
-                    &inv.khmshdon.to_string(),
-                    &inv.khhdon,
-                    &inv.shdon,
-                )
-                .await
-            {
-                Ok(detail) => {
-                    let line_count = detail
-                        .get("hdhhdvu")
-                        .and_then(Value::as_array)
-                        .map(|a| a.len())
-                        .unwrap_or(0) as i64;
-                    let detail_json = detail.to_string();
-                    sqlx::query!(
-                        "UPDATE hddt_purchase_invoice
-                            SET detail_json = ?, line_count = ?, detail_error = ''
-                          WHERE id = ?",
-                        detail_json,
-                        line_count,
-                        inv.id
-                    )
-                    .execute(&*pool)
-                    .await
-                    .map_err(|e| e.to_string())?;
+            match inv.fetch_detail(&pool, client, token).await {
+                Ok(detail_json) => {
                     inv.detail_json = detail_json;
                 }
                 Err(msg) => {
@@ -1300,35 +1290,51 @@ pub(crate) async fn hddt_sync_clear_cache(state: State<'_, AppState>) -> Result<
 
 /// Lấy `detail_json` của hóa đơn trong màn Đồng bộ HĐĐT (chưa nhập kho nằm ở
 /// cache, đã nhập kho nằm ở bảng hóa đơn chính thức — cache bị xoá khi import).
+///
+/// Chưa có trong DB thì **tự tải riêng hóa đơn này** từ cổng rồi lưu cache —
+/// không bắt người dùng quét lại cả ngày chỉ để xem 1 PDF.
 #[tauri::command]
 pub(crate) async fn hddt_sync_invoice_detail(
     state: State<'_, AppState>,
     portal_id: String,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
+    let inv = {
+        let pool = state.pool.read().await;
+        if let Some(detail) = sqlx::query_scalar!(
+            "SELECT detail_json FROM hddt_purchase_invoice
+              WHERE portal_id = ? AND detail_json <> ''",
+            portal_id
+        )
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+        {
+            return Ok(detail);
+        }
+        if let Some(detail) = sqlx::query_scalar!(
+            "SELECT detail_json FROM hddt_imported_invoice
+              WHERE portal_id = ? AND detail_json <> ''",
+            portal_id
+        )
+        .fetch_optional(&*pool)
+        .await
+        .map_err(|e| e.to_string())?
+        {
+            return Ok(detail);
+        }
+        sync::cached_by_portal_id(&pool, &portal_id).await?
+    };
+    let Some(mut inv) = inv else {
+        return Err(
+            "Hóa đơn này không còn trong cache và chưa có chi tiết — hãy quét lại ngày của hóa đơn."
+                .into(),
+        );
+    };
+    // Không giữ pool trong lúc đọc config/gọi cổng: writer đang chờ sẽ bị chặn.
+    let (client, token) = portal_client_interactive(&state).await?;
     let pool = state.pool.read().await;
-    let cached = sqlx::query_scalar!(
-        "SELECT detail_json FROM hddt_purchase_invoice
-          WHERE portal_id = ? AND detail_json <> ''",
-        portal_id
-    )
-    .fetch_optional(&*pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    if let Some(detail) = cached {
-        return Ok(detail);
-    }
-    let imported = sqlx::query_scalar!(
-        "SELECT detail_json FROM hddt_imported_invoice
-          WHERE portal_id = ? AND detail_json <> ''",
-        portal_id
-    )
-    .fetch_optional(&*pool)
-    .await
-    .map_err(|e| e.to_string())?;
-    imported.ok_or_else(|| {
-        "Hóa đơn này chưa có chi tiết — hãy bấm \"Quét cổng\" để lấy chi tiết trước.".to_string()
-    })
+    inv.fetch_detail(&pool, &client, &token).await
 }
 
 /// Lấy `detail_json` của hóa đơn đã gắn với 1 phiếu nhập kho (dùng ở popup phiếu).

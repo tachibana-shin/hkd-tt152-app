@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT status, skip_reason, detail_error\n               FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "status",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "skip_reason",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "detail_error",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "497eedd33a4edb05b3d0a946d112f27bab05a92f430e28e00a9d70383c60afc6"
+}

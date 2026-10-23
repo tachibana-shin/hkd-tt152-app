@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE hddt_purchase_invoice\n                SET detail_json = '', line_count = 0, detail_error = '',\n                    skip_reason = 'Hóa đơn tthai=2 — không tự tạo phiếu nhập'\n              WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2fc22f5a540b19365f3e91540fe8019b9a3aebacb7f78ed4bad18d76988f7f90"
+}

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT detail_json, line_count, detail_error\n               FROM hddt_purchase_invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "detail_json",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "line_count",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "detail_error",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5c9895a97a147d490ca8cfde9c7991797159608891536d9c2912183d30fe40b9"
+}

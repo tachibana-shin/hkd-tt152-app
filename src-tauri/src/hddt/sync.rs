@@ -186,6 +186,73 @@ pub(crate) struct CachedInvoice {
     pub(crate) tgtttbso: f64,
 }
 
+impl CachedInvoice {
+    /// Tải chi tiết của **riêng** hóa đơn này từ cổng rồi ghi đè vào cache.
+    ///
+    /// Dùng cho thao tác từng hóa đơn (Xem PDF, Nhập kho) khi lượt quét trước
+    /// chưa lấy được dòng hàng: chỉ gọi đúng 1 request thay vì bắt người dùng
+    /// quét lại cả ngày. `khmshdon` phải là số — endpoint chi tiết của cổng trả
+    /// HTTP 500 nếu gửi ký hiệu hóa đơn.
+    pub(crate) async fn fetch_detail(
+        &mut self,
+        pool: &SqlitePool,
+        client: &HddtClient,
+        token: &str,
+    ) -> Result<String, String> {
+        if self.khmshdon <= 0 {
+            return Err(
+                "Thiếu mã mẫu số (khmshdon) — không tải được chi tiết, hãy quét lại hóa đơn từ cổng."
+                    .into(),
+            );
+        }
+        let detail = client
+            .invoice_detail(
+                token,
+                InvoiceKind::parse(&self.portal_kind).unwrap_or_default(),
+                &self.nbmst,
+                &self.khmshdon.to_string(),
+                &self.khhdon,
+                &self.shdon,
+            )
+            .await?;
+        let line_count = detail
+            .get("hdhhdvu")
+            .and_then(Value::as_array)
+            .map(|a| a.len())
+            .unwrap_or(0) as i64;
+        // Hóa đơn đang 'manual' chỉ vì lỗi chi tiết thì nay đã có dòng hàng →
+        // trả về 'pending' để nút Nhập kho dùng được. Hóa đơn manual vì lý do
+        // khác (tthai != 1) có detail_error rỗng nên giữ nguyên.
+        let reset = sqlx::query(
+            "UPDATE hddt_purchase_invoice
+                SET status = 'pending', skip_reason = ''
+              WHERE id = ? AND status = 'manual' AND detail_error <> ''",
+        )
+        .bind(self.id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected()
+            > 0;
+        if reset {
+            self.status = "pending".into();
+        }
+        let detail_json = detail.to_string();
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice
+                SET detail_json = ?, line_count = ?, detail_error = ''
+              WHERE id = ?",
+            detail_json,
+            line_count,
+            self.id
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(detail_json)
+    }
+}
+
 /// Tóm tắt 1 lần quét cổng.
 #[derive(Debug, Default, serde::Serialize)]
 pub(crate) struct ScanSummary {
@@ -765,6 +832,25 @@ async fn mark_days_scanned(
         d += Duration::days(1);
     }
     Ok(())
+}
+
+/// Đọc 1 hóa đơn cache theo `portal_id` — dùng cho thao tác từng hóa đơn
+/// (Xem PDF, Nhập kho) khi frontend chỉ có id của cổng.
+pub(crate) async fn cached_by_portal_id(
+    pool: &SqlitePool,
+    portal_id: &str,
+) -> Result<Option<CachedInvoice>, String> {
+    sqlx::query_as::<_, CachedInvoice>(
+        r#"SELECT id, portal_id, portal_kind, posting_date, nbmst, nbten,
+                  COALESCE(khmshdon, 0) AS khmshdon, khhdon, shdon, status, detail_json,
+                  tgtcthue, tgtthue, tgtttbso
+             FROM hddt_purchase_invoice
+            WHERE portal_id = ?"#,
+    )
+    .bind(portal_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Hóa đơn chờ xử lý mà chưa có chi tiết (và lần gọi trước không lỗi).
@@ -2357,6 +2443,161 @@ mod tests {
             "lỗi phải hướng dẫn quét lại: {err}"
         );
         assert!(!err.contains("EOF"), "không được lộ lỗi serde: {err}");
+    }
+
+    /// Issue #8 mục 2: bấm Xem PDF/Nhập kho khi cache thiếu chi tiết phải tải
+    /// đúng 1 hóa đơn từ cổng rồi lưu lại — không bắt quét lại cả ngày.
+    #[tokio::test]
+    async fn fetch_detail_gets_one_invoice_and_stores_it() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-on-demand", 1, "{}").await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice
+                SET detail_json = '', line_count = 0, detail_error = ''
+              WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut inv = load(&pool, id).await;
+        let detail_json = inv
+            .fetch_detail(&pool, &client, "mock-token")
+            .await
+            .expect("phải tải được chi tiết của đúng hóa đơn này");
+
+        let detail: Value = serde_json::from_str(&detail_json).unwrap();
+        assert_eq!(
+            detail["hdhhdvu"].as_array().map(Vec::len),
+            Some(1),
+            "mock trả 1 dòng hàng: {detail_json}"
+        );
+        let row = sqlx::query!(
+            "SELECT detail_json, line_count, detail_error
+               FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.detail_json, detail_json);
+        assert_eq!(row.line_count, 1);
+        assert_eq!(row.detail_error, "");
+        assert_eq!(
+            portal.count("/invoices/detail"),
+            1,
+            "chỉ gọi chi tiết 1 lần, không quét danh sách"
+        );
+    }
+
+    /// Hóa đơn từng bị đánh 'manual' vì lỗi chi tiết: tải lại thành công thì
+    /// phải trở về 'pending' để nút Nhập kho dùng được.
+    #[tokio::test]
+    async fn fetch_detail_returns_manual_detail_error_to_pending() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-on-demand-manual", 1, "{}").await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice
+                SET status = 'manual', skip_reason = 'Không lấy được chi tiết: lỗi mạng',
+                    detail_error = 'lỗi mạng', detail_json = '', line_count = 0
+              WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut inv = load(&pool, id).await;
+        inv.fetch_detail(&pool, &client, "mock-token")
+            .await
+            .expect("tải chi tiết");
+
+        let row = sqlx::query!(
+            "SELECT status, skip_reason, detail_error
+               FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "pending");
+        assert_eq!(row.skip_reason, "");
+        assert_eq!(row.detail_error, "");
+    }
+
+    /// Hóa đơn 'manual' vì lý do khác (tthai != 1) không được tự chuyển pending
+    /// chỉ vì tải được chi tiết.
+    #[tokio::test]
+    async fn fetch_detail_keeps_manual_invoice_for_other_reasons() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-on-demand-tthai", 0, "{}").await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice
+                SET detail_json = '', line_count = 0, detail_error = '',
+                    skip_reason = 'Hóa đơn tthai=2 — không tự tạo phiếu nhập'
+              WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut inv = load(&pool, id).await;
+        assert_eq!(inv.status, "manual");
+        inv.fetch_detail(&pool, &client, "mock-token")
+            .await
+            .expect("tải chi tiết");
+
+        let row = sqlx::query!(
+            "SELECT status, skip_reason FROM hddt_purchase_invoice WHERE id = ?",
+            id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "manual");
+        assert!(
+            row.skip_reason.contains("tthai"),
+            "giữ lý do cần xử lý: {}",
+            row.skip_reason
+        );
+    }
+
+    /// Thiếu mã mẫu số thì báo rõ, không gọi endpoint chi tiết (cổng trả 500).
+    #[tokio::test]
+    async fn fetch_detail_without_form_code_does_not_call_portal() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+        let id = seed_invoice(&pool, "uuid-on-demand-nokhmshdon", 1, "{}").await;
+        sqlx::query!(
+            "UPDATE hddt_purchase_invoice
+                SET detail_json = '', line_count = 0, detail_error = '', khmshdon = 0
+              WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut inv = load(&pool, id).await;
+        let err = inv
+            .fetch_detail(&pool, &client, "mock-token")
+            .await
+            .expect_err("thiếu khmshdon phải báo lỗi");
+        assert!(err.contains("mã mẫu số"), "lỗi sai: {err}");
+        assert_eq!(portal.count("/invoices/detail"), 0);
     }
 
     /// Một lượt quét phải tự thử lại HĐ lỗi chi tiết của lượt trước (trước đây

@@ -537,20 +537,41 @@ function openVoucher(no: string) {
 
 // ─── Xem PDF hóa đơn điện tử ───
 // Chi tiết đọc từ DB theo portal_id (đã cache khi quét, hoặc hóa đơn đã nhập
-// kho) nên không cần gọi cổng.
+// kho). Nếu lượt quét trước chưa lấy được dòng hàng, backend tự tải riêng hóa
+// đơn này từ cổng — không bắt quét lại cả ngày.
 const pdfVisible = ref(false);
 const pdfDetail = ref("");
 const pdfTitle = ref("");
+/** portal_id đang tải chi tiết — khóa nút để tránh bấm 2 lần. */
+const pdfLoadingKey = ref("");
 
 async function openInvoicePdf(row: HddtSyncRow) {
+  if (pdfLoadingKey.value) return;
+  pdfLoadingKey.value = row.portal_id;
+  const wasDetailError = row.status === "manual" && !!row.detail_error;
   try {
     pdfDetail.value = await api.hddtSyncInvoiceDetail(row.portal_id);
+    // Backend vừa tải chi tiết từ cổng → cập nhật ngay số dòng trên bảng.
+    try {
+      const lines = JSON.parse(pdfDetail.value)?.hdhhdvu;
+      if (Array.isArray(lines)) {
+        row.line_count = lines.length;
+        row.detail_error = "";
+        if (wasDetailError) {
+          row.status = "pending";
+          row.skip_reason = "";
+        }
+      }
+    } catch {
+      // JSON hỏng thì bảng giữ số dòng cũ; dialog PDF vẫn báo lỗi rõ ràng.
+    }
+    pdfTitle.value = `Hóa đơn ${row.khhdon} ${row.shdon}`;
+    pdfVisible.value = true;
   } catch (e) {
     toastError("Không lấy được chi tiết hóa đơn", e);
-    return;
+  } finally {
+    pdfLoadingKey.value = "";
   }
-  pdfTitle.value = `Hóa đơn ${row.khhdon} ${row.shdon}`;
-  pdfVisible.value = true;
 }
 
 // Mốc bắt đầu = hddt_start_date của hộ → phải nạp config trước rồi mới tính;
@@ -818,8 +839,10 @@ void (async () => {
                 text
                 size="small"
                 class="!p-1 text-gray-500"
+                :loading="pdfLoadingKey === data.portal_id"
+                :disabled="!!pdfLoadingKey && pdfLoadingKey !== data.portal_id"
                 :aria-label="`Xem PDF hóa đơn ${data.khhdon} ${data.shdon}`"
-                v-tooltip="'Xem PDF hóa đơn'"
+                v-tooltip="'Xem PDF hóa đơn (tự tải chi tiết nếu chưa có)'"
                 @click="openInvoicePdf(data)"
               />
             </span>
