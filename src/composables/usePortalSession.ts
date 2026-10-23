@@ -108,14 +108,31 @@ async function loginPortal() {
 }
 
 /**
+ * Lượt đăng nhập đang chạy. App, màn HĐĐT và timer quét nền có thể gọi
+ * `ensureSession` cùng lúc lúc mở app; nếu mỗi lời gọi tự trả "failed" khi thấy
+ * `loggingIn` thì lượt quét đầu tiên bị bỏ qua và phải chờ tới chu kỳ sau (mặc
+ * định 15 phút). Gộp chung một promise để mọi lời gọi cùng chờ kết quả, và
+ * captcha cũng chỉ được giải một lần.
+ */
+let ensurePromise: Promise<PortalEnsureResult> | null = null;
+
+/**
  * Đảm bảo có phiên đăng nhập — gọi lúc app khởi động và khi màn HĐĐT được mở
  * mà phiên đã mất. Không bắn toast (tránh phiền lúc khởi động); lỗi để
  * `lastError` và kết quả trả về cho gọi bà quyết định có bật hộp thoại.
  */
 async function ensureSession(): Promise<PortalEnsureResult> {
+  if (ensurePromise) return ensurePromise;
   if (loggingIn.value || manualStopped.value) {
     return loggedIn.value ? "logged_in" : "failed";
   }
+  ensurePromise = doEnsureSession().finally(() => {
+    ensurePromise = null;
+  });
+  return ensurePromise;
+}
+
+async function doEnsureSession(): Promise<PortalEnsureResult> {
   await loadPortalStatus();
   if (loggedIn.value) {
     lastError.value = "";

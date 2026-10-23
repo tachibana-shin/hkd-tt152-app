@@ -1,6 +1,7 @@
 import { api } from "@/db";
 import { toIsoDate } from "@/utils/format";
 import { useAppUpdater } from "./useAppUpdater";
+import { usePortalSession } from "./usePortalSession";
 import type { AppSettings } from "@/types";
 
 /**
@@ -40,10 +41,13 @@ async function loadSettings(): Promise<AppSettings | null> {
  * song) — cổng giới hạn tần suất, dồn request là bị khoá tài khoản.
  */
 async function syncPortal(doImport: boolean): Promise<string> {
-  // Chưa đăng nhập cổng thì đừng gửi lệnh quét — không làm gì cả thay vì gọi
-  // rồi nhận lỗi 400 (vừa vô ích, vừa đỏ console).
-  const st = await api.hddtStatus().catch(() => null);
-  if (!st?.logged_in) return "Chưa đăng nhập cổng HĐĐT — bỏ qua";
+  // Lúc mở app, việc chạy nền có thể bắt đầu TRƯỚC khi App đăng nhập xong cổng.
+  // Chỉ đọc `hddtStatus` rồi bỏ qua sẽ làm mất luôn lượt quét đầu tiên (chờ tới
+  // chu kỳ sau, mặc định 15 phút). `ensureSession` gộp chung lượt đăng nhập đang
+  // chạy nên ở đây chỉ cần chờ phiên; chưa đăng nhập được thì mới bỏ qua.
+  const portal = usePortalSession();
+  const ensured = await portal.ensureSession();
+  if (ensured !== "logged_in") return "Chưa đăng nhập cổng HĐĐT — bỏ qua";
   const cfg = await api.getBusinessConfig();
   const scan = await api.hddtSyncScan({
     from: cfg.hddt_start_date || undefined,
