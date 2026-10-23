@@ -15,7 +15,7 @@ import { useAuthStore } from "@/stores/auth";
 // PrimeVue không được auto-import trong dự án (resolver chỉ khai các component đã
 // dùng) — phải import tường minh, nếu không SelectButton không render.
 import SelectButton from "primevue/selectbutton";
-import type { Invoice, InvoiceQueueItem, MissingNumbersReport } from "@/types";
+import type { Invoice, InvoiceQueueItem, InvoiceStockScan, MissingNumbersReport } from "@/types";
 import { fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
@@ -35,7 +35,10 @@ const selectedId = ref<number | null>(null);
 // Các bộ đếm chạy trên dữ liệu đang hiển thị (trang hiện tại) — server đã lọc
 // theo từ khoá/trạng thái/ngày rồi, không còn lọc client.
 const blockedCount = computed(() => items.value.filter((i) => i.error_count > 0).length);
-const readyCount = computed(() => items.value.filter((i) => i.error_count === 0).length);
+// "Sẵn sàng chép" chỉ đếm dòng vừa qua kiểm tra vừa đủ tồn — đúng với màu tím.
+const readyCount = computed(
+  () => items.value.filter((i) => i.error_count === 0 && stockLevel(i) === "ok").length,
+);
 const copiedCount = computed(() => items.value.filter((i) => i.copied).length);
 
 const statusText: Record<string, string> = {
@@ -181,8 +184,9 @@ function searchNow() {
   void page.setKeyword(keyword.value);
 }
 
-// ─── Màu nền dòng: hàng chờ = còn chờ xuất (vàng), thiếu tồn = đỏ ───
-const shortages = ref<Record<string, string[]>>({});
+// ─── Màu nền dòng: tím = đủ điều kiện xuất, vàng = còn chờ xử lý,
+//     đỏ = thiếu thành phẩm, đỏ đậm = thiếu cả NVL để sản xuất bù ───
+const stockScans = ref<Record<string, InvoiceStockScan>>({});
 let shortageSeq = 0;
 async function loadShortages() {
   const seq = ++shortageSeq;
@@ -192,15 +196,37 @@ async function loadShortages() {
       .filter((i) => !(i.invoice.voucher_no ?? "").trim())
       .map((i) => i.invoice.id);
     const map = ids.length ? await api.invoiceShortageMap(ids) : {};
-    if (seq === shortageSeq) shortages.value = map;
+    if (seq === shortageSeq) stockScans.value = map;
   } catch {
-    if (seq === shortageSeq) shortages.value = {};
+    if (seq === shortageSeq) stockScans.value = {};
   }
 }
 
-/** Hàng chờ toàn hóa đơn chưa phát hành → nền vàng; thiếu hàng thì đỏ (ưu tiên). */
+/**
+ * Mức tồn của dòng: `unknown` khi chưa soi được (lỗi tải) — không tô tím để
+ * tránh báo "đủ điều kiện" sai. Có phiếu xuất = kho đã trừ → chắc chắn `ok`.
+ */
+function stockLevel(item: InvoiceQueueItem): InvoiceStockScan["level"] | "unknown" {
+  const scan = stockScans.value[item.invoice.id];
+  if (scan) return scan.level;
+  return (item.invoice.voucher_no ?? "").trim() ? "ok" : "unknown";
+}
+
+/** Câu giải thích vì sao dòng bị tô đỏ (rỗng khi không thiếu gì). */
+function stockLines(item: InvoiceQueueItem): string[] {
+  return stockScans.value[item.invoice.id]?.lines ?? [];
+}
+
+/**
+ * Hàng chờ toàn hóa đơn chưa phát hành. Ưu tiên từ nặng đến nhẹ:
+ * đỏ đậm (thiếu NVL) → đỏ (thiếu thành phẩm) → tím (đủ tồn + không lỗi kiểm
+ * tra) → vàng (còn lỗi/chưa soi được tồn).
+ */
 function queueRowClass(item: InvoiceQueueItem) {
-  if (shortages.value[item.invoice.id]?.length) return "hkd-row-short";
+  const level = stockLevel(item);
+  if (level === "material") return "hkd-row-short-deep";
+  if (level === "short") return "hkd-row-short";
+  if (level === "ok" && item.error_count === 0) return "hkd-row-ready";
   return "hkd-row-draft";
 }
 
@@ -473,6 +499,36 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 >
                   {{ c.message }}
                 </div>
+              </div>
+              <!-- Thiếu cả NVL định mức = đỏ đậm: không thể tự sản xuất bù. -->
+              <div
+                v-else-if="stockLevel(data) === 'material'"
+                class="text-xs font-semibold text-red-700"
+              >
+                <i class="pi pi-exclamation-triangle" /> Thiếu NVL — không đủ để sản xuất
+                <div
+                  v-for="line in stockLines(data)"
+                  :key="line"
+                  class="max-w-72 truncate font-normal"
+                  :title="line"
+                >
+                  {{ line }}
+                </div>
+              </div>
+              <!-- Thiếu thành phẩm nhưng NVL đủ → vẫn đỏ thường, có thể sản xuất bù. -->
+              <div v-else-if="stockLevel(data) === 'short'" class="text-xs text-red-600">
+                <i class="pi pi-box" /> Thiếu tồn kho
+                <div
+                  v-for="line in stockLines(data)"
+                  :key="line"
+                  class="max-w-72 truncate"
+                  :title="line"
+                >
+                  {{ line }}
+                </div>
+              </div>
+              <div v-else-if="stockLevel(data) === 'unknown'" class="text-xs text-amber-700">
+                <i class="pi pi-question-circle" /> Chưa soi được tồn kho
               </div>
               <span v-else class="text-xs text-emerald-700">
                 <i class="pi pi-check-circle" /> Sẵn sàng chép

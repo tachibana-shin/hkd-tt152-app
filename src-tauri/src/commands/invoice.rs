@@ -5,7 +5,7 @@ use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
 use sqlx::SqlitePool;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub(crate) async fn get_invoices(state: State<'_, AppState>) -> Result<String, String> {
@@ -1567,10 +1567,20 @@ pub(crate) async fn invoice_duplicate_numbers(
 }
 
 /// Soi tồn kho cho MỖI hóa đơn trong danh sách — màn Hóa đơn / Chờ xuất HĐĐT
-/// tô màu dòng: đỏ = thiếu hàng nên sẽ bị chặn lúc ghi số HĐĐT. Chỉ trả về
-/// hóa đơn THIẾU (đủ tồn thì im lặng), JSON `{ "<id>": ["SP001: cần 5, còn 2"] }`.
+/// tô màu dòng. Trả về **cả hóa đơn đủ tồn** (level `ok`) để màn hình biết chắc
+/// chắn dòng đó đã soi xong mà tô tím "đủ điều kiện xuất", không đoán qua việc
+/// vắng mặt trong map.
+///
+/// `level`:
+///   • `ok`       — đủ tồn thành phẩm, có thể phát hành/ghi số.
+///   • `short`    — thiếu thành phẩm nhưng (nếu là hàng chế tạo) NVL trong định
+///                  mức vẫn đủ để sản xuất bù → vẫn là đỏ thường.
+///   • `material` — thiếu thành phẩm **và** NVL cấu thành cũng không đủ → đỏ đậm,
+///                  không thể tự sản xuất bù.
+///
+/// JSON `{ "<id>": {"level": "...", "lines": ["SP001: cần 5, còn 2", …]} }`.
 /// Không gắn phiếu xuất thì mới kiểm — phiếu đã trừ kho rồi (cùng cửa kiểm với
-/// lúc ghi số). Lỗi riêng lẻ của 1 hóa đơn không làm hỏng cả bảng.
+/// lúc ghi số). Lỗi riêng lẻ của 1 hóa đơn không làm hỏng cả bảng (bỏ id đó).
 #[tauri::command]
 pub(crate) async fn invoice_shortage_map(
     state: State<'_, AppState>,
@@ -1587,16 +1597,14 @@ pub(crate) async fn invoice_shortage_map(
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let mut out = serde_json::Map::new();
     for id in ids {
-        let list = match invoice_stock_shortage(&mut tx, id).await {
-            Ok(list) => list,
+        let scan = match invoice_stock_scan(&mut tx, id, true).await {
+            Ok(scan) => scan,
             Err(_) => continue,
         };
-        if !list.is_empty() {
-            out.insert(
-                id.to_string(),
-                serde_json::Value::Array(list.into_iter().map(serde_json::Value::String).collect()),
-            );
-        }
+        out.insert(
+            id.to_string(),
+            json!({ "level": scan.level(), "lines": scan.lines }),
+        );
     }
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(serde_json::to_string(&serde_json::Value::Object(out)).unwrap_or_default())
@@ -1618,13 +1626,84 @@ fn same_period(a: &str, b: &str) -> bool {
     a.len() >= 7 && b.len() >= 7 && a[..7] == b[..7] // cùng tháng: yyyy-mm
 }
 
-/// Soi tồn kho của TỪNG dòng hóa đơn lúc sắp ghi số HĐĐT — thiếu ở ĐÚNG kho xuất
-/// trên dòng (rỗng → tổng mọi kho) thì trả về danh sách lỗi. Hàng dịch vụ không
-/// theo dõi tồn kho nên bỏ qua.
-async fn invoice_stock_shortage(
+/// Kết quả soi tồn 1 hóa đơn cho màn danh sách.
+///
+/// `lines` giữ nguyên câu báo thiếu thành phẩm cũ (dùng cho cả lúc ghi số HĐĐT);
+/// `material_short` bật khi có dòng hàng chế tạo mà NVL trong định mức cũng
+/// không đủ bù phần thiếu — màn danh sách tô đỏ đậm hơn để phân biệt với thiếu
+/// tồn thường (vẫn có thể sản xuất bù từ NVL sẵn có).
+#[derive(Default)]
+struct InvoiceStockScan {
+    lines: Vec<String>,
+    material_short: bool,
+}
+
+impl InvoiceStockScan {
+    /// Mức cảnh báo cho màu dòng: `ok` | `short` | `material`.
+    fn level(&self) -> &'static str {
+        if self.lines.is_empty() {
+            "ok"
+        } else if self.material_short {
+            "material"
+        } else {
+            "short"
+        }
+    }
+}
+
+/// NVL cần bù cho phần thành phẩm còn thiếu của 1 hóa đơn, đã gộp theo
+/// (NVL, kho) để không cộng dồn sai khi nhiều dòng cùng dùng 1 NVL.
+struct MaterialNeed {
+    /// Mã NVL — chỉ để in câu giải thích.
+    code: String,
+    /// Nhãn kho dùng trong câu giải thích ("kho đã chọn" / "tổng các kho").
+    where_str: &'static str,
+    /// Tổng số lượng NVL cần để sản xuất bù.
+    quantity: f64,
+    /// Mã các thành phẩm cần NVL này — in kèm để biết nó phục vụ dòng nào.
+    products: BTreeSet<String>,
+}
+
+/// Tồn khả dụng của 1 sản phẩm: `None` = tổng mọi kho (dòng hóa đơn không khai
+/// kho xuất), `Some(wh)` = đúng kho đã chọn.
+async fn stock_on_hand(
+    tx: &mut SqliteTransaction<'_>,
+    product_id: i64,
+    warehouse_id: Option<i64>,
+) -> Result<f64, String> {
+    match warehouse_id {
+        Some(wh_id) => sqlx::query_scalar!(
+            r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+               WHERE product_id = ? AND warehouse_id = ? AND depleted = 0"#,
+            product_id,
+            wh_id
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| e.to_string()),
+        None => sqlx::query_scalar!(
+            r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
+               WHERE product_id = ? AND depleted = 0"#,
+            product_id
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// Soi tồn kho của TỪNG dòng hóa đơn — thiếu ở ĐÚNG kho xuất trên dòng (rỗng →
+/// tổng mọi kho). Hàng dịch vụ không theo dõi tồn kho nên bỏ qua.
+///
+/// `with_materials = true` (màn danh sách): với hàng chế tạo, tính thêm phần
+/// **NVL cần để sản xuất bù** đúng số thành phẩm còn thiếu (định mức × phần
+/// thiếu), gộp mọi dòng cùng NVL/kho rồi so tồn. Đủ NVL → vẫn chỉ là `short`
+/// (đỏ thường); thiếu NVL → `material` (đỏ đậm).
+async fn invoice_stock_scan(
     tx: &mut SqliteTransaction<'_>,
     invoice_id: i64,
-) -> Result<Vec<String>, String> {
+    with_materials: bool,
+) -> Result<InvoiceStockScan, String> {
     let rows = sqlx::query!(
         r#"SELECT ii.product_id, p.code, p.is_service as "is_service!: bool",
                   ii.quantity, ii.warehouse_code
@@ -1637,45 +1716,90 @@ async fn invoice_stock_shortage(
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut shortage = Vec::new();
+    let mut scan = InvoiceStockScan::default();
+    // NVL cần bù cho phần thành phẩm thiếu — gộp theo (NVL, kho); khóa kho 0 =
+    // dòng hóa đơn không khai kho nên soi tổng mọi kho.
+    let mut material_needs: BTreeMap<(i64, i64), MaterialNeed> = BTreeMap::new();
+
     for row in rows {
         if row.is_service {
             continue;
         }
-        let where_str = if row.warehouse_code.trim().is_empty() {
-            "tổng các kho"
-        } else {
-            "kho đã chọn"
-        };
-        let available: f64 = if row.warehouse_code.trim().is_empty() {
-            sqlx::query_scalar!(
-                r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
-                   WHERE product_id = ? AND depleted = 0"#,
-                row.product_id
-            )
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| e.to_string())?
+        let (warehouse_id, where_str) = if row.warehouse_code.trim().is_empty() {
+            (None, "tổng các kho")
         } else {
             let wh_id = resolve_warehouse(tx, &row.warehouse_code, &row.code).await?;
-            sqlx::query_scalar!(
-                r#"SELECT COALESCE(SUM(quantity), 0.0) as "qty!: f64" FROM stock_lot
-                   WHERE product_id = ? AND warehouse_id = ? AND depleted = 0"#,
-                row.product_id,
-                wh_id
-            )
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| e.to_string())?
+            (Some(wh_id), "kho đã chọn")
         };
-        if row.quantity - available > 1e-9 {
-            shortage.push(format!(
-                "{}: cần {:.2}, tồn {} {:.2}",
-                row.code, row.quantity, where_str, available
+        let available = stock_on_hand(tx, row.product_id, warehouse_id).await?;
+        let deficit = row.quantity - available;
+        if deficit <= 1e-9 {
+            continue;
+        }
+        scan.lines.push(format!(
+            "{}: cần {:.2}, tồn {} {:.2}",
+            row.code, row.quantity, where_str, available
+        ));
+        if !with_materials {
+            continue;
+        }
+
+        // Định mức chỉ tính NVL thật: dịch vụ (nhân công…) không có tồn kho.
+        let bom = sqlx::query!(
+            r#"SELECT b.material_product_id, m.code, b.quantity
+                 FROM product_bom_item b
+                 JOIN product m ON m.id = b.material_product_id
+                WHERE b.product_id = ? AND m.is_service = 0"#,
+            row.product_id
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
+        for b in bom {
+            // Làm tròn 6 số như lúc tự xuất NVL — tránh nhiễu float cộng dồn.
+            let add = (b.quantity * deficit * 1e6).round() / 1e6;
+            if add <= 0.0 {
+                continue;
+            }
+            let entry = material_needs
+                .entry((b.material_product_id, warehouse_id.unwrap_or(0)))
+                .or_insert_with(|| MaterialNeed {
+                    code: b.code.clone(),
+                    where_str,
+                    quantity: 0.0,
+                    products: BTreeSet::new(),
+                });
+            entry.quantity += add;
+            entry.products.insert(row.code.clone());
+        }
+    }
+
+    // Soi từng NVL đã gộp — một NVL thiếu là cả hóa đơn không tự sản xuất bù được.
+    for ((material_id, wh_key), need) in material_needs {
+        let warehouse_id = (wh_key != 0).then_some(wh_key);
+        let available = stock_on_hand(tx, material_id, warehouse_id).await?;
+        if need.quantity - available > 1e-9 {
+            scan.material_short = true;
+            scan.lines.push(format!(
+                "NVL {} cho {}: cần {:.2}, tồn {} {:.2}",
+                need.code,
+                need.products.into_iter().collect::<Vec<_>>().join(", "),
+                need.quantity,
+                need.where_str,
+                available
             ));
         }
     }
-    Ok(shortage)
+    Ok(scan)
+}
+
+/// Danh sách lỗi thiếu tồn thành phẩm — dùng cho cửa chặn ghi số HĐĐT (không
+/// cần thông tin NVL: thiếu thành phẩm là đã chặn rồi).
+async fn invoice_stock_shortage(
+    tx: &mut SqliteTransaction<'_>,
+    invoice_id: i64,
+) -> Result<Vec<String>, String> {
+    Ok(invoice_stock_scan(tx, invoice_id, false).await?.lines)
 }
 
 /// Ghi nhận số HĐĐT cho hóa đơn nháp → trạng thái 'official'.
@@ -2516,6 +2640,98 @@ mod tests {
         link_hddt_core(&pool, id, "00000011", "1C26TT152", "2026-03-10")
             .await
             .expect("đủ tồn ở đúng kho thì ghi số được");
+    }
+
+    /// Màu dòng thông minh hơn (yêu cầu #8 mục 9): hàng chế tạo thiếu thành
+    /// phẩm nhưng đủ NVL → `short` (đỏ thường, sản xuất bù được); NVL cũng
+    /// thiếu → `material` (đỏ đậm); đủ thành phẩm → `ok` (tím, đủ điều kiện xuất).
+    #[tokio::test]
+    async fn soi_ton_hoa_don_che_tao_phan_biet_thieu_nvl_va_du_dieu_kien_xuat() {
+        let pool = test_pool().await;
+        let w = seed_warehouse(&pool, "W-BOM", "Kho BOM").await;
+        let tp = seed_product(&pool, "TP-BOM", "Thành phẩm BOM", 0.01).await;
+        let nvl = seed_product(&pool, "NVL-BOM", "NVL BOM", 0.01).await;
+        // 1 thành phẩm cần 2 NVL.
+        sqlx::query(
+            "INSERT INTO product_bom_item (product_id, material_product_id, quantity)
+             VALUES (?, ?, 2.0)",
+        )
+        .bind(tp)
+        .bind(nvl)
+        .execute(&pool)
+        .await
+        .unwrap();
+        add_stock_lot(&pool, nvl, w, 10.0, 1000.0, "2026-01-01").await;
+
+        // 2 dòng × 2 TP = 4 TP; NVL cần 8 ≤ 10 → chỉ thiếu thành phẩm.
+        save_invoice_core(
+            &pool,
+            "HD-BOM1",
+            "2026-03-10",
+            "Khách BOM",
+            "",
+            &[
+                line("TP-BOM", 2.0, 5000.0, 0.0, "W-BOM"),
+                line("TP-BOM", 2.0, 5000.0, 0.0, "W-BOM"),
+            ],
+        )
+        .await
+        .expect("nháp hàng chế tạo vẫn lưu được");
+        let id: i64 = sqlx::query_scalar("SELECT id FROM invoice WHERE number = ?")
+            .bind("HD-BOM1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let scan = invoice_stock_scan(&mut tx, id, true).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(scan.level(), "short", "đủ NVL thì chỉ đỏ thường");
+        assert!(scan.lines.iter().any(|l| l.contains("TP-BOM")));
+        assert!(
+            scan.lines.iter().all(|l| !l.contains("NVL-BOM")),
+            "chưa được báo thiếu NVL: {:?}",
+            scan.lines
+        );
+
+        // NVL chỉ còn 7 < 8 cần cho 4 TP → không thể tự sản xuất bù.
+        sqlx::query("UPDATE stock_lot SET quantity = 7.0 WHERE product_id = ?")
+            .bind(nvl)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let scan = invoice_stock_scan(&mut tx, id, true).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(scan.level(), "material", "thiếu NVL phải đỏ đậm");
+        assert!(
+            scan.lines.iter().any(|l| l.contains("NVL-BOM")),
+            "phải nêu rõ NVL thiếu: {:?}",
+            scan.lines
+        );
+
+        // Nhập đủ 5 thành phẩm → hóa đơn 5 TP đủ điều kiện xuất.
+        add_stock_lot(&pool, tp, w, 5.0, 1000.0, "2026-01-02").await;
+        save_invoice_core(
+            &pool,
+            "HD-BOM2",
+            "2026-03-11",
+            "Khách BOM",
+            "",
+            &[line("TP-BOM", 5.0, 5000.0, 0.0, "W-BOM")],
+        )
+        .await
+        .expect("nháp đủ tồn");
+        let id2: i64 = sqlx::query_scalar("SELECT id FROM invoice WHERE number = ?")
+            .bind("HD-BOM2")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let scan = invoice_stock_scan(&mut tx, id2, true).await.unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(scan.level(), "ok", "đủ thành phẩm phải là ok (nền tím)");
+        assert!(scan.lines.is_empty(), "{:?}", scan.lines);
     }
 
     #[tokio::test]

@@ -102,6 +102,7 @@ import type {
   InvoiceEvent,
   InvoiceExportPack,
   InvoiceQueueItem,
+  InvoiceStockScan,
   InvoiceLinkResult,
   InvoiceReplaceResult,
   InvoiceDuplicateNumber,
@@ -821,9 +822,12 @@ export const api = {
   /** Số hóa đơn bị trùng (sinh ra khi bấm Lập nhiều lần) — app không tự sửa. */
   invoiceDuplicateNumbers: async () =>
     parse<InvoiceDuplicateNumber[]>(await call<string>("invoice_duplicate_numbers", {})),
-  /** Soi tồn từng hóa đơn — map id → dòng thiếu (dòng bảng tô đỏ). */
+  /**
+   * Soi tồn từng hóa đơn — map id → mức cảnh báo + các dòng thiếu. Dòng bảng
+   * dùng để tô màu: đỏ thường = thiếu thành phẩm, đỏ đậm = thiếu cả NVL.
+   */
   invoiceShortageMap: async (ids: number[]) =>
-    parse<Record<string, string[]>>(await call<string>("invoice_shortage_map", { ids })),
+    parse<Record<string, InvoiceStockScan>>(await call<string>("invoice_shortage_map", { ids })),
   invoiceEvents: async (invoiceId: number) =>
     parse<InvoiceEvent[]>(await call<string>("invoice_events", { invoiceId })),
   invoiceSetStatus: (args: {

@@ -447,6 +447,20 @@ export interface InvoiceExportPack {
   edited_after_export: boolean;
 }
 
+/**
+ * Kết quả soi tồn của 1 hóa đơn (màn Hóa đơn / Chờ xuất HĐĐT).
+ *
+ * - `ok`: đủ tồn thành phẩm — đủ điều kiện xuất (nền tím).
+ * - `short`: thiếu thành phẩm, nhưng NVL định mức vẫn đủ để sản xuất bù (đỏ thường).
+ * - `material`: thiếu thành phẩm và NVL cũng không đủ — không thể tự sản xuất bù
+ *   (đỏ đậm hơn).
+ */
+export interface InvoiceStockScan {
+  level: "ok" | "short" | "material";
+  /** Câu giải thích từng dòng thiếu (thành phẩm và/hoặc NVL). */
+  lines: string[];
+}
+
 /** 1 dòng hàng chờ xuất: hóa đơn chưa phát hành + kết quả kiểm tra trước khi chép. */
 export interface InvoiceQueueItem {
   invoice: Invoice;

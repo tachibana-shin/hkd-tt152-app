@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT b.material_product_id, m.code, b.quantity\n                 FROM product_bom_item b\n                 JOIN product m ON m.id = b.material_product_id\n                WHERE b.product_id = ? AND m.is_service = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "material_product_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1c8de5426cc474e04052d40ccc286f8db0dffe50404be2cf27c16d48bdd6243e"
+}

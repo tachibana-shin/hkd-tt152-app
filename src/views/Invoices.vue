@@ -10,6 +10,7 @@ import type {
   InvoiceDuplicateNumber,
   InvoiceItem,
   InvoiceReplaceResult,
+  InvoiceStockScan,
 } from "@/types";
 import { api } from "@/db";
 import { fmtInt as fmt, fmtLocalDateTime, fmtVnd } from "@/utils/format";
@@ -52,10 +53,11 @@ const page = useLazyPage(
   { sortField: "e_invoice_date", sortOrder: -1 },
 );
 
-// ─── Màu nền dòng: vàng = nháp, đỏ = thiếu tồn kho ───
+// ─── Màu nền dòng: tím = đủ điều kiện xuất, vàng = còn chờ xử lý,
+//     đỏ = thiếu thành phẩm, đỏ đậm = thiếu cả NVL để sản xuất bù ───
 // Chỉ soi hóa đơn CHƯA ghi số và CHƯA có phiếu xuất — phiếu đã trừ kho lúc lập
 // nên không thể thiếu nữa (cùng cửa kiểm với lúc ghi số HĐĐT).
-const shortages = ref<Record<string, string[]>>({});
+const stockScans = ref<Record<string, InvoiceStockScan>>({});
 let shortageSeq = 0;
 async function loadShortages() {
   const seq = ++shortageSeq;
@@ -66,17 +68,35 @@ async function loadShortages() {
       )
       .map((i) => i.id);
     const map = ids.length ? await api.invoiceShortageMap(ids) : {};
-    if (seq === shortageSeq) shortages.value = map;
+    if (seq === shortageSeq) stockScans.value = map;
   } catch {
-    if (seq === shortageSeq) shortages.value = {};
+    if (seq === shortageSeq) stockScans.value = {};
   }
 }
 
-/** Class cho dòng: thiếu tồn ưu tiên đỏ, kế đến nháp = nền vàng. */
+/** Hóa đơn còn chờ phát hành — đối tượng được tô màu trạng thái. */
+function isPendingInvoice(inv: Invoice) {
+  return ["draft", "pasted", "exported"].includes(inv.status);
+}
+
+/**
+ * Class cho dòng, ưu tiên từ nặng đến nhẹ:
+ * đỏ đậm (thiếu NVL) → đỏ (thiếu thành phẩm) → tím (đủ điều kiện xuất) → vàng
+ * (chưa soi được tồn nên chưa biết có xuất được hay không).
+ */
 function invoiceRowClass(inv: Invoice) {
-  if (shortages.value[inv.id]?.length) return "hkd-row-short";
-  if (inv.status === "draft") return "hkd-row-draft";
-  return "";
+  if (!isPendingInvoice(inv)) return "";
+  const scan = stockScans.value[inv.id];
+  if (scan?.level === "material") return "hkd-row-short-deep";
+  if (scan?.level === "short") return "hkd-row-short";
+  // Có phiếu xuất = kho đã trừ lúc lập phiếu → chắc chắn đủ tồn, khỏi soi lại.
+  if (scan?.level === "ok" || (inv.voucher_no ?? "").trim()) return "hkd-row-ready";
+  return "hkd-row-draft";
+}
+
+/** Tooltip giải thích vì sao dòng bị tô đỏ (rỗng khi không thiếu gì). */
+function stockHint(inv: Invoice): string {
+  return stockScans.value[inv.id]?.lines.join(" · ") ?? "";
 }
 
 const draftDialog = ref(false);
@@ -483,6 +503,7 @@ useKeepAliveRefresh(reload);
                 <Tag
                   :value="statusText[data.status] ?? data.status"
                   :severity="statusBadge[data.status] ?? 'secondary'"
+                  :title="stockHint(data) || undefined"
                 />
                 <span
                   v-if="data.exported_at"

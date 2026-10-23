@@ -171,7 +171,13 @@ body {
 }
 
 /* ─── Màu nền dòng hóa đơn (Invoices + Chờ xuất HĐĐT) ───
-   Vàng = nháp/còn chờ xuất, đỏ = thiếu tồn kho nên sẽ bị chặn lúc ghi số HĐĐT.
+   Tím  = đủ điều kiện xuất: đủ tồn thành phẩm (kể cả tồn từ lô sản xuất) và
+          không còn lỗi kiểm tra trước khi chép/ghi số.
+   Vàng = còn chờ xử lý: chưa soi được tồn, hoặc còn lỗi kiểm tra khác.
+   Đỏ   = thiếu tồn thành phẩm (sẽ bị chặn lúc ghi số HĐĐT), nhưng NVL định mức
+          vẫn đủ để sản xuất bù.
+   Đỏ đậm = thiếu thành phẩm VÀ NVL cấu thành cũng không đủ — không thể tự sản
+          xuất bù, phải nhập thêm NVL.
    !important để thắng nền sọc (striped), hover và highlight chọn dòng của
    PrimeVue — màu trạng thái phải luôn nhìn thấy được. */
 .p-datatable tr.hkd-row-draft,
@@ -179,9 +185,20 @@ body {
   background-color: #fef3c7 !important;
 }
 
+.p-datatable tr.hkd-row-ready,
+.p-datatable tr.hkd-row-ready > td {
+  background-color: #ede9fe !important;
+}
+
 .p-datatable tr.hkd-row-short,
 .p-datatable tr.hkd-row-short > td {
   background-color: #fee2e2 !important;
+}
+
+/* Đậm hơn hẳn đỏ thiếu tồn thường để phân biệt "thiếu NVL, không sản xuất bù được". */
+.p-datatable tr.hkd-row-short-deep,
+.p-datatable tr.hkd-row-short-deep > td {
+  background-color: #fecaca !important;
 }
 
 /* ─── In tờ khai 01/CNKD (TaxEntryForm) ───
