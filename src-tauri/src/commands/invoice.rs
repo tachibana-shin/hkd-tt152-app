@@ -952,7 +952,7 @@ pub(crate) async fn update_invoice_lines_core(
     actor: &str,
 ) -> Result<serde_json::Value, String> {
     let inv = sqlx::query!(
-        r#"SELECT number, date, status, voucher_no, total, customer, customer_tax_code
+        r#"SELECT number, e_invoice_no, date, status, voucher_no, total, customer, customer_tax_code
              FROM invoice WHERE id = ?"#,
         id
     )
@@ -960,6 +960,13 @@ pub(crate) async fn update_invoice_lines_core(
     .await
     .map_err(|e| e.to_string())?
     .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    // Sổ phải chỉ tới số hóa đơn đã phát hành khi có; số nội bộ chỉ dùng cho
+    // hóa đơn chưa có số HĐĐT.
+    let display_number = if inv.e_invoice_no.trim().is_empty() {
+        inv.number.as_str()
+    } else {
+        inv.e_invoice_no.trim()
+    };
     match inv.status.as_str() {
         "exported" | "official" | "adjusted" => {}
         "draft" => {
@@ -1047,10 +1054,7 @@ pub(crate) async fn update_invoice_lines_core(
         .fetch_all(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-        let desc_rev = format!(
-            "Đảo doanh thu — sửa hóa đơn {} theo HĐ chính thức",
-            inv.number
-        );
+        let desc_rev = format!("Đảo doanh thu — sửa hóa đơn {display_number} theo HĐ chính thức");
         for row in &active {
             // Dòng tăng → đảo thành giảm; dòng GiamDT cũ → đảo ngược lại (tăng
             // lại) để hiệu lực đúng bằng 0, giữ nguyên sản phẩm / nhóm ngành /
@@ -1087,10 +1091,7 @@ pub(crate) async fn update_invoice_lines_core(
         }
 
         // ── 2) Ghi lại dòng doanh thu theo HĐ chính thức (giống bán thường).
-        let desc_new = format!(
-            "Ghi lại doanh thu theo HĐ chính thức — hóa đơn {}",
-            inv.number
-        );
+        let desc_new = format!("Ghi lại doanh thu theo HĐ chính thức — hóa đơn {display_number}");
         let mut new_qty: HashMap<(i64, i64), f64> = HashMap::new();
         let mut new_industry: HashMap<(i64, i64), String> = HashMap::new();
         for line in &prepared.lines {
@@ -1869,7 +1870,7 @@ pub(crate) async fn replace_invoice_core(
         return Err("Cần nhập lý do phải thay thế".into());
     }
     let inv = sqlx::query!(
-        r#"SELECT number, date, customer, customer_tax_code, status, voucher_no, total
+        r#"SELECT number, e_invoice_no, date, customer, customer_tax_code, status, voucher_no, total
              FROM invoice WHERE id = ?"#,
         invoice_id
     )
@@ -1915,7 +1916,12 @@ pub(crate) async fn replace_invoice_core(
             inv.number
         ));
     }
-    let description = format!("Đảo doanh thu — thay thế hóa đơn {}", inv.number);
+    let display_number = if inv.e_invoice_no.trim().is_empty() {
+        inv.number.as_str()
+    } else {
+        inv.e_invoice_no.trim()
+    };
+    let description = format!("Đảo doanh thu — thay thế hóa đơn {display_number}");
     // Mã khách trong danh mục: ưu tiên theo MST, không có thì theo tên — cùng
     // quy tắc với `create_outbound_from_invoice` để bút toán đảo gắn đúng.
     let mst = inv.customer_tax_code.trim().to_string();
@@ -2107,7 +2113,7 @@ pub(crate) async fn create_outbound_from_invoice(
     invoice_id: i64,
 ) -> Result<String, String> {
     let inv = sqlx::query!(
-        "SELECT number, date, customer, customer_tax_code, voucher_no, status
+        "SELECT number, e_invoice_no, date, customer, customer_tax_code, voucher_no, status
            FROM invoice WHERE id = ?",
         invoice_id
     )
@@ -2177,7 +2183,14 @@ pub(crate) async fn create_outbound_from_invoice(
         .collect();
 
     let voucher_no = next_px_no(pool).await?;
-    let description = format!("Bán hàng theo hóa đơn {}", inv.number);
+    // Sổ/phiếu phải chỉ tới số hóa đơn đã phát hành khi có; số nội bộ chỉ dùng
+    // cho hóa đơn chưa có số HĐĐT.
+    let display_number = if inv.e_invoice_no.trim().is_empty() {
+        inv.number.as_str()
+    } else {
+        inv.e_invoice_no.trim()
+    };
+    let description = format!("Bán hàng theo hóa đơn {display_number}");
     let empty_invoice = OutboundInvoiceInput {
         number: String::new(),
         e_invoice_no: String::new(),
@@ -3430,10 +3443,13 @@ mod tests {
                 .await
                 .unwrap();
         create_outbound_from_invoice(&pool, id).await.unwrap();
-        sqlx::query!("UPDATE invoice SET status = 'exported' WHERE id = ?", id)
-            .execute(&pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE invoice SET status = 'exported', e_invoice_no = '00000009' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         let v: String = sqlx::query_scalar!("SELECT voucher_no FROM invoice WHERE id = ?", id)
             .fetch_one(&pool)
             .await
@@ -3451,6 +3467,22 @@ mod tests {
         .unwrap();
         assert_eq!(res["ok"], true);
         assert_eq!(res["voucher_dt"].as_str().unwrap(), vdt);
+        // Sổ ghi chứng từ sửa theo số HĐĐT, không phải số hóa đơn nội bộ.
+        let descs: Vec<String> = sqlx::query_scalar(
+            r#"SELECT description FROM journal_entry
+                WHERE voucher_no = ? AND entry_type = 'PX' ORDER BY id"#,
+        )
+        .bind(&vdt)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!descs.is_empty());
+        assert!(
+            descs
+                .iter()
+                .all(|d| d.contains("00000009") && !d.contains("HD0101")),
+            "diễn giải phải dùng số HĐĐT: {descs:?}"
+        );
 
         let total: f64 = sqlx::query_scalar!("SELECT total FROM invoice WHERE id = ?", id)
             .fetch_one(&pool)

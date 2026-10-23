@@ -1290,6 +1290,103 @@ test("Hóa đơn: danh sách mặc định xếp Ngày HĐĐT giảm dần", asy
   await expect(rows.nth(2)).toContainText("HDSORT-C");
 });
 
+test("Báo cáo nhanh dùng số HĐĐT, cột ngành động; sổ S2a gộp dòng cùng phiếu", async ({ page }) => {
+  await ensureLoggedIn(page);
+
+  const now = new Date();
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate(),
+  ).padStart(2, "0")}`;
+  const dataDir = readFileSync("/tmp/hkd-e2e-dir", "utf8").trim();
+  const dbPath = `${dataDir}/profiles/default/hkd.db`;
+
+  // Dữ liệu cố định, dọn trước để test chạy lại sau khi fail giữa chừng không
+  // bị nhân đôi dòng. Ghi thẳng DB tạm (app đang mở, WAL cho phép ghi song song).
+  // Hóa đơn có 2 nhóm ngành; phiếu PX-E2E-RPT có 2 dòng PPHH + 1 dòng DVXD-KNL
+  // để chứng minh sổ gộp theo phiếu + ngành chứ không lặp từng dòng hàng.
+  execFileSync("sqlite3", [
+    dbPath,
+    `DELETE FROM journal_entry WHERE voucher_no = 'PX-E2E-RPT';
+     DELETE FROM invoice_item WHERE invoice_id IN
+       (SELECT id FROM invoice WHERE number = 'HDE2E-RPT');
+     DELETE FROM invoice WHERE number = 'HDE2E-RPT';
+     DELETE FROM product WHERE code IN ('E2E-RPT-G', 'E2E-RPT-S');
+
+     INSERT INTO product
+       (code, name, unit, sale_price, cost_price, min_stock, vat_rate, is_service, industry_code)
+     VALUES
+       ('E2E-RPT-G', 'Hàng báo cáo E2E', 'Cái', 500000, 0, 0, 0.01, 0, 'PPHH'),
+       ('E2E-RPT-S', 'Dịch vụ báo cáo E2E', 'Lần', 100000, 0, 0, 0.05, 1, 'DVXD-KNL');
+
+     INSERT INTO invoice
+       (number, date, customer, total, status, e_invoice_no, e_invoice_symbol,
+        e_invoice_date, voucher_no)
+     VALUES
+       ('HDE2E-RPT', '${iso}', 'Khách báo cáo E2E', 600000, 'official',
+        'E2E-0001', '1C26TT152', '${iso}', 'PX-E2E-RPT');
+
+     INSERT INTO invoice_item
+       (invoice_id, product_id, quantity, unit_price, subtotal, industry_code,
+        vat_rate, pit_rate)
+     SELECT (SELECT id FROM invoice WHERE number = 'HDE2E-RPT'),
+            (SELECT id FROM product WHERE code = 'E2E-RPT-G'),
+            1, 500000, 500000, 'PPHH', 0.01, 0.005
+     UNION ALL
+     SELECT (SELECT id FROM invoice WHERE number = 'HDE2E-RPT'),
+            (SELECT id FROM product WHERE code = 'E2E-RPT-S'),
+            1, 100000, 100000, 'DVXD-KNL', 0.05, 0.02;
+
+     INSERT INTO journal_entry
+       (posting_date, voucher_no, doc_date, entry_type, description, product_code,
+        quantity, unit_price, amount, debit_account, credit_account,
+        industry_code, vat_rate, pit_rate, unit_code)
+     VALUES
+       ('${iso}', 'PX-E2E-RPT', '${iso}', 'PX',
+        'Bán hàng theo hóa đơn HDE2E-RPT', 'E2E-RPT-G',
+        1, 300000, 300000, '131', '511', 'PPHH', 0.01, 0.005, 'HKD'),
+       ('${iso}', 'PX-E2E-RPT', '${iso}', 'PX',
+        'Bán hàng theo hóa đơn HDE2E-RPT', 'E2E-RPT-G',
+        1, 200000, 200000, '131', '511', 'PPHH', 0.01, 0.005, 'HKD'),
+       ('${iso}', 'PX-E2E-RPT', '${iso}', 'PX',
+        'Bán hàng theo hóa đơn HDE2E-RPT', 'E2E-RPT-S',
+        1, 100000, 100000, '131', '511', 'DVXD-KNL', 0.05, 0.02, 'HKD');`,
+  ]);
+
+  await page.reload();
+  await openTab(page, "Kế toán HKD", "/accounting");
+  await expect(page.locator("header h2")).toHaveText("Kế toán HKD");
+
+  // Báo cáo nhanh: tên hóa đơn lấy số HĐĐT, không lấy số nội bộ.
+  const reportRow = page.locator("tr", { hasText: "Bán hàng theo hóa đơn E2E-0001" });
+  await expect(reportRow).toBeVisible({ timeout: 15_000 });
+  await expect(reportRow).toContainText("500.000 đ");
+  await expect(reportRow).toContainText("100.000 đ");
+  await expect(reportRow).not.toContainText("HDE2E-RPT");
+  // Cột ngành dựng động từ đúng các nhóm có phát sinh trong kỳ.
+  await expect(
+    page.getByRole("columnheader", { name: /Phân phối, cung cấp hàng hóa/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: /Dịch vụ, xây dựng không bao thầu NVL/ }),
+  ).toBeVisible();
+
+  // Sổ S2a: 3 dòng hàng của cùng phiếu chỉ còn 2 dòng chi tiết (một dòng mỗi
+  // nhóm ngành), không lặp lại diễn giải; diễn giải hiện số HĐĐT.
+  await openTab(page, "Sổ kế toán", "/books");
+  await expect(page.locator("header h2")).toHaveText("Sổ kế toán");
+  await page.locator("#show-all-books").click();
+  await page.getByTestId("open-book-s2a").click();
+  await expect(page.getByRole("columnheader", { name: /A · Số hiệu/ }).first()).toBeVisible();
+
+  const bookRows = page.locator("tr", { hasText: "PX-E2E-RPT" });
+  await expect(bookRows).toHaveCount(2, { timeout: 15_000 });
+  await expect(bookRows.filter({ hasText: "Bán hàng theo hóa đơn E2E-0001" })).toHaveCount(2);
+  await expect(bookRows.filter({ hasText: "HDE2E-RPT" })).toHaveCount(0);
+  const bookText = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(bookText, "sổ phải cộng 2 dòng PPHH thành 500.000").toContain("500.000");
+  expect(bookText, "sổ phải giữ dòng DVXD-KNL 100.000").toContain("100.000");
+});
+
 test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa có PX thì cảnh báo ⚠", async ({
   page,
   request,

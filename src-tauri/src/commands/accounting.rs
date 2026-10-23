@@ -2668,14 +2668,33 @@ async fn build_tax_book(
         // ── S1a: hộ nhóm 1 — sổ doanh thu bán hàng hóa, dịch vụ ────────────
         "S1a" => {
             let sales = sales_rows(pool, &from, &to).await?;
-            let mut rows = Vec::new();
-            let mut total = 0.0;
+            // S1a là sổ doanh thu theo chứng từ, không tách nhóm ngành: một
+            // phiếu xuất có nhiều nhóm vẫn chỉ là MỘT dòng bán hàng. Gộp lại
+            // để không lặp số phiếu/diễn giải sau khi `sales_rows` tách ngành.
+            let mut grouped: Vec<(String, String, String, f64)> = Vec::new();
+            let mut index: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for s in &sales {
                 let amount = signed_amount(s.adjust_code.as_str(), s.amount);
+                if let Some(&i) = index.get(&s.voucher_no) {
+                    grouped[i].3 += amount;
+                } else {
+                    index.insert(s.voucher_no.clone(), grouped.len());
+                    grouped.push((
+                        s.voucher_no.clone(),
+                        s.posting_date.clone(),
+                        s.description.clone(),
+                        amount,
+                    ));
+                }
+            }
+            let mut rows = Vec::new();
+            let mut total = 0.0;
+            for (voucher_no, posting_date, description, amount) in grouped {
                 total += amount;
                 let mut r = BookRow::detail();
-                r.text("a", vn_date(&s.posting_date));
-                r.text("b", format!("{} — {}", s.voucher_no, s.description));
+                r.text("a", vn_date(&posting_date));
+                r.text("b", format!("{voucher_no} — {description}"));
                 r.money("1", amount);
                 rows.push(r);
             }
@@ -3024,16 +3043,41 @@ struct SalesRow {
 }
 
 async fn sales_rows(pool: &SqlitePool, from: &str, to: &str) -> Result<Vec<SalesRow>, String> {
+    // Gộp các dòng hàng của CÙNG một phiếu xuất + cùng nhóm ngành thành một
+    // dòng sổ. Trước đây mỗi dòng hàng là một dòng sổ nên hóa đơn nhiều mặt
+    // hàng hiện lặp lại cùng một diễn giải ("Bán hàng theo hóa đơn …") với
+    // nhiều số tiền — người dùng thấy như dòng bị nhân đôi.
+    //
+    // Diễn giải ưu tiên số HĐĐT đã phát hành: phiếu cũ đã ghi số nội bộ vào
+    // journal_entry, nhưng sổ phải đối chiếu với hóa đơn chính thức. Phiếu
+    // không gắn hóa đơn (bán hàng nhập tay) giữ nguyên diễn giải gốc.
     let rows = sqlx::query!(
         r#"SELECT je.voucher_no AS "voucher_no!", je.posting_date AS "posting_date!",
-                  je.description AS "description!", je.industry_code AS "industry_code!",
-                  je.adjust_code AS "adjust_code!", je.amount
+                  CASE
+                    WHEN i.e_invoice_no IS NOT NULL AND TRIM(i.e_invoice_no) <> ''
+                      THEN 'Bán hàng theo hóa đơn ' || TRIM(i.e_invoice_no)
+                    ELSE je.description
+                  END AS "description!",
+                  je.industry_code AS "industry_code!",
+                  je.adjust_code AS "adjust_code!",
+                  COALESCE(SUM(je.amount), 0.0) AS "amount!: f64"
              FROM journal_entry je
+             LEFT JOIN (
+                 -- Liên kết hóa đơn ↔ phiếu xuất là 1-1, nhưng gom về một
+                 -- dòng/phiếu để dữ liệu cũ có bản trùng không nhân đôi doanh
+                 -- thu khi cộng.
+                 SELECT voucher_no, MAX(TRIM(e_invoice_no)) AS e_invoice_no
+                   FROM invoice
+                  WHERE TRIM(voucher_no) <> '' AND TRIM(e_invoice_no) <> ''
+                  GROUP BY voucher_no
+             ) i ON i.voucher_no = je.voucher_no
             WHERE je.entry_type = 'PX'
               AND je.posting_date >= ? AND je.posting_date <= ?
               AND je.amount <> 0
               AND COALESCE(je.adjust_code, '') != 'XuatNVL'
-            ORDER BY je.posting_date, je.id"#,
+            GROUP BY je.voucher_no, je.posting_date, je.description,
+                     i.e_invoice_no, je.industry_code, je.adjust_code
+            ORDER BY je.posting_date, MIN(je.id)"#,
         from,
         to
     )
@@ -4796,6 +4840,129 @@ mod tests {
                 ("total", "", "Tổng số thuế TNCN phải nộp", 35_000.0),
             ],
         );
+    }
+
+    #[tokio::test]
+    async fn s2a_gop_dong_cung_phieu_va_dung_so_hddt_da_phat_hanh() {
+        let pool = test_pool().await;
+        ho_nhom_2_theo_doanh_thu(&pool).await;
+        seed_product(&pool, "P1", "Hàng 1", 0.01).await;
+        // Phiếu xuất cũ ghi số nội bộ vào journal_entry; sổ phải hiện số HĐĐT.
+        sqlx::query(
+            "INSERT INTO invoice
+                (number, e_invoice_no, date, customer, status, voucher_no)
+             VALUES ('HD0006', '00000006', '2026-07-05', 'Khách sổ', 'official', 'PX-DUP')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Ba dòng hàng cùng một phiếu: hai dòng PPHH phải gộp thành 1 dòng sổ,
+        // dòng DVXD-KL vẫn ở khối ngành riêng.
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-DUP",
+            "P1",
+            "PPHH",
+            1.0,
+            300_000.0,
+            300_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-DUP",
+            "P1",
+            "PPHH",
+            1.0,
+            200_000.0,
+            200_000.0,
+            0.01,
+            0.005,
+        )
+        .await;
+        add_journal_px(
+            &pool,
+            "2026-07-05",
+            "PX-DUP",
+            "P1",
+            "DVXD-KL",
+            1.0,
+            100_000.0,
+            100_000.0,
+            0.03,
+            0.015,
+        )
+        .await;
+
+        let sales = sales_rows(&pool, "2026-07-01", "2026-07-31")
+            .await
+            .expect("dòng bán hàng");
+        assert_eq!(sales.len(), 2, "cùng phiếu + cùng ngành phải gộp");
+        let pphh = sales
+            .iter()
+            .find(|s| s.industry_code == "PPHH")
+            .expect("dòng PPHH");
+        assert_eq!(pphh.amount, 500_000.0);
+        assert_eq!(
+            pphh.description, "Bán hàng theo hóa đơn 00000006",
+            "sổ phải dùng số HĐĐT thay vì số nội bộ"
+        );
+
+        let s2a = build_book(&pool, "S2a").await;
+        let s2a_details: Vec<_> = row_lines(&s2a)
+            .into_iter()
+            .filter(|(kind, voucher, _, _)| *kind == "detail" && *voucher == "PX-DUP")
+            .collect();
+        assert_eq!(s2a_details.len(), 2, "mỗi nhóm ngành một dòng chi tiết");
+        assert_eq!(
+            s2a_details
+                .iter()
+                .filter(|(_, _, desc, _)| *desc == "Bán hàng theo hóa đơn 00000006")
+                .count(),
+            2
+        );
+
+        // S1a không tách ngành: cùng phiếu chỉ còn đúng một dòng tổng 600.000.
+        let s1a = build_book(&pool, "S1a").await;
+        let s1a_details: Vec<_> = row_lines(&s1a)
+            .into_iter()
+            .filter(|(kind, _, _, _)| *kind == "detail")
+            .collect();
+        assert_eq!(s1a_details.len(), 1);
+        assert_eq!(s1a_details[0].3, 600_000.0);
+        // S1a không có cột C: số phiếu + diễn giải nằm chung cột B.
+        let s1a_detail = s1a["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == "detail")
+            .expect("dòng chi tiết S1a");
+        assert!(text_cell(s1a_detail, "b").contains("00000006"));
+
+        // Dữ liệu cũ có hai hóa đơn trỏ cùng một phiếu: gom theo phiếu để
+        // không nhân đôi doanh thu khi join.
+        sqlx::query(
+            "INSERT INTO invoice
+                (number, e_invoice_no, date, customer, status, voucher_no)
+             VALUES ('HD0007', '00000006', '2026-07-05', 'Khách sổ 2', 'official', 'PX-DUP')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let sales = sales_rows(&pool, "2026-07-01", "2026-07-31")
+            .await
+            .expect("dòng bán hàng sau khi có hóa đơn trùng phiếu");
+        assert_eq!(sales.len(), 2, "hóa đơn trùng phiếu không tạo thêm dòng");
+        let pphh = sales
+            .iter()
+            .find(|s| s.industry_code == "PPHH")
+            .expect("dòng PPHH");
+        assert_eq!(pphh.amount, 500_000.0, "không nhân đôi doanh thu");
     }
 
     #[tokio::test]
