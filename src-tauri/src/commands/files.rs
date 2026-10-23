@@ -19,3 +19,33 @@ pub(crate) fn save_file(path: String, contents: String) -> Result<(), String> {
         .map_err(|e| format!("Sai dữ liệu base64: {e}"))?;
     std::fs::write(&path, bytes).map_err(|e| format!("Không ghi được file {path}: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine as _;
+
+    /// Xuất lại cùng tên file phải ghi đè nội dung cũ, không báo lỗi.
+    #[test]
+    fn save_file_ghi_de_file_da_ton_tai() {
+        let dir = std::env::temp_dir().join(format!("hkd-save-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bao-gia.xlsx");
+        std::fs::write(&path, b"noi dung cu").unwrap();
+
+        save_file(
+            path.to_string_lossy().into_owned(),
+            base64::engine::general_purpose::STANDARD.encode(b"noi dung moi"),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"noi dung moi");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_file_tu_choi_base64_hong() {
+        let path = std::env::temp_dir().join("hkd-save-file-bad.xlsx");
+        assert!(save_file(path.to_string_lossy().into_owned(), "%%%".into()).is_err());
+    }
+}

@@ -8,12 +8,16 @@
  *    "nhấn xuất file không có gì xảy ra"). Thay bằng hộp thoại "Lưu file" GỐC của
  *    hệ điều hành (tauri-plugin-dialog) rồi ghi qua lệnh Rust `save_file`.
  *
+ *  Ghi xong thì mở thư mục chứa file và chọn sẵn file đó (reveal) để người dùng
+ *  thấy ngay — hộp thoại "Lưu file" đã hỏi đè khi trùng tên nên ghi là ghi đè.
+ *
  *  Trả `false` khi người dùng HỦY chọn chỗ lưu (chỉ bản desktop mới có) — caller
  *  không được toast "Đã tải" khi thấy `false`.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import { message, save } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 // Chạy trong app Tauri hay trong trình duyệt thường? Cùng cách với `db/index.ts`.
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -58,6 +62,36 @@ const EXT_LABEL: Record<string, string> = {
   csv: "Tệp CSV",
 };
 
+/** Thư mục xuất file lần trước — mở hộp thoại đúng chỗ cũ để dễ ghi đè. */
+const LAST_DIR_KEY = "hkd:last-export-dir";
+
+function lastExportDir(): string {
+  try {
+    return localStorage.getItem(LAST_DIR_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Nhớ thư mục của file vừa ghi (bỏ tên file), lỗi lưu cũng không chặn xuất. */
+function rememberExportDir(path: string) {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (cut <= 0) return;
+  try {
+    localStorage.setItem(LAST_DIR_KEY, path.slice(0, cut));
+  } catch {
+    // Hết quota / chế độ riêng tư — chỉ mất gợi ý thư mục, không ảnh hưởng file.
+  }
+}
+
+/** Gợi ý tên file trong đúng thư mục xuất lần trước (nếu có). */
+function defaultSavePath(filename: string): string {
+  const dir = lastExportDir();
+  if (!dir) return filename;
+  if (dir.endsWith("/") || dir.endsWith("\\")) return `${dir}${filename}`;
+  return `${dir}${dir.includes("\\") ? "\\" : "/"}${filename}`;
+}
+
 /**
  * Lưu 1 file về máy. Trả `false` nếu người dùng hủy chọn chỗ lưu.
  *
@@ -89,7 +123,7 @@ export async function downloadBinary(
 
   const ext = extensionOf(filename);
   const path = await save({
-    defaultPath: filename,
+    defaultPath: defaultSavePath(filename),
     filters: ext ? [{ name: EXT_LABEL[ext] ?? ext.toUpperCase(), extensions: [ext] }] : undefined,
   });
   if (!path) return false;
@@ -103,6 +137,10 @@ export async function downloadBinary(
     }).catch(() => undefined);
     return false;
   }
+  rememberExportDir(path);
+  // Mở thư mục chứa file + chọn sẵn file vừa ghi. Lỗi reveal (thiếu file
+  // manager, sandbox…) không được biến lần xuất thành công thành thất bại.
+  await revealItemInDir(path).catch(() => undefined);
   return true;
 }
 
