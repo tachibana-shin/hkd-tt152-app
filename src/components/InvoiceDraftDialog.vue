@@ -110,9 +110,41 @@ const lotSuggest = ref<{ code: string; quantity: number; warehouseCode: string }
 /** Đang có prompt gợi ý — đừng xếp hàng cảnh báo nếu chọn liên tiếp. */
 const prompting = ref(false);
 
-/** Mở tạo lô thủ công từ header (không kèm số liệu gợi ý từ dòng). */
-function openLot() {
+/** Mở tạo lô thủ công từ header — tự điền khi hóa đơn chỉ có 1 hàng chế tạo. */
+async function openLot() {
   lotSuggest.value = null;
+  // Định mức + tồn phải nạp xong mới biết hàng nào là hàng chế tạo; lỗi nạp
+  // thì vẫn mở form trống như cũ (gợi ý chỉ là bổ trợ).
+  if (auth.canStock) {
+    try {
+      await Promise.all([catalog.loadBoms(), catalog.loadOnhand()]);
+    } catch {
+      // bỏ qua — mở form để người dùng tự chọn
+    }
+    // Chỉ 1 mặt hàng chế tạo trên hóa đơn nháp → điền sẵn đúng hàng đó + tổng
+    // SL các dòng của nó để khỏi phải tìm lại; nhiều mặt hàng thì không đoán.
+    const codes = [
+      ...new Set(
+        form.items
+          .map((it) => it.product_code)
+          .filter(
+            (code) => code && !catalog.productByCode(code)?.is_service && catalog.hasBom(code),
+          ),
+      ),
+    ];
+    if (codes.length === 1) {
+      const code = codes[0]!;
+      const lines = form.items.filter((it) => it.product_code === code);
+      const quantity = lines.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0);
+      // Các dòng cùng 1 kho thì điền kho đó; khác kho thì để form tự chọn.
+      const wh = new Set(lines.map((it) => it.warehouse_code ?? ""));
+      lotSuggest.value = {
+        code,
+        quantity: quantity > 0 ? quantity : 1,
+        warehouseCode: wh.size === 1 ? [...wh][0]! : "",
+      };
+    }
+  }
   lotDialog.value = true;
 }
 

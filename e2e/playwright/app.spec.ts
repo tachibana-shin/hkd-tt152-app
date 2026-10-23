@@ -5156,6 +5156,17 @@ test("Popup hóa đơn: tạo nhanh lô sản xuất và thêm tên khác ở he
   const line = dlg.locator("tbody tr").first();
   await expect(line).toContainText("Bàn nhựa LSX PP");
 
+  // ── 1b) Hóa đơn chỉ có ĐÚNG 1 hàng chế tạo → popup tự điền sẵn hàng đó ──
+  await dlg.getByTestId("header-create-lot").click();
+  await expect(lotDlg).toBeVisible();
+  await expect(lotDlg.getByTestId("lot-fg")).toContainText("Bàn nhựa LSX PP");
+  await expect(
+    lotDlg.getByRole("spinbutton").first(),
+    "sản lượng điền sẵn = SL trên hóa đơn",
+  ).toHaveValue("1");
+  await lotDlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(lotDlg).toBeHidden();
+
   // ── 2) Nút "Thêm tên khác" ở header → gán tên cho hàng bất kỳ ──
   await dlg.getByTestId("header-add-alias").click();
   const aDlg = page.getByRole("dialog", { name: "Thêm tên khác" });
