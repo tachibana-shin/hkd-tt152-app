@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT p.code AS product_code, p.name AS product_name,\n                m.code AS material_code, m.name AS material_name, m.unit AS material_unit,\n                m.is_service AS \"material_is_service: bool\",\n                b.quantity, b.unit_price\n           FROM product_bom_item b\n           JOIN product p ON p.id = b.product_id\n           JOIN product m ON m.id = b.material_product_id\n          ORDER BY p.code, m.code",
+  "query": "SELECT p.code AS product_code, p.name AS product_name,\n                m.code AS material_code, m.name AS material_name, m.unit AS material_unit,\n                m.is_service AS \"material_is_service: bool\",\n                b.quantity, b.unit_price\n           FROM product_bom_item b\n           JOIN product p ON p.id = b.product_id\n           JOIN product m ON m.id = b.material_product_id\n           JOIN (\n                SELECT product_id, MAX(updated_at) AS updated_at, MAX(id) AS last_id\n                  FROM product_bom_item\n                 GROUP BY product_id\n           ) latest ON latest.product_id = b.product_id\n          ORDER BY latest.updated_at DESC, latest.last_id DESC, p.code, m.code",
   "describe": {
     "columns": [
       {
@@ -58,5 +58,5 @@
       false
     ]
   },
-  "hash": "6ce7c997275b6028c0a86a112543f2f5134a8ee5d10c34b9e20b7296f97207e1"
+  "hash": "2881ec72f4f78031e77bedf6497c059c0485efdc31f81dc7ade0a014a896e01d"
 }

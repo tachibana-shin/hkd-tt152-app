@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO product_bom_item\n                (product_id, material_product_id, quantity, unit_price, updated_at)\n             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "b2bc7e7682a9ba92389c85b8290c9f475882a7fc545cb65e338673d32079a4b8"
+}

@@ -252,7 +252,8 @@ function bomIsService(code: string): boolean {
 }
 
 /**
- * Dựng bảng từ định mức đã nạp — gộp mọi dòng theo thành phẩm, sắp theo mã.
+ * Dựng bảng từ định mức đã nạp — gộp mọi dòng theo thành phẩm, giữ thứ tự
+ * mới cập nhật trước do API trả về (`ORDER BY updated_at DESC`).
  *
  * Quan trọng: bảng đã có thì **giữ nguyên object**, chỉ thay dòng tại chỗ.
  * Slot của `Column` trong DataTable giữ closure tham chiếu `blk`; nếu thay object
@@ -261,7 +262,10 @@ function bomIsService(code: string): boolean {
  */
 function groupBoms() {
   const rowsByCode = new Map<string, BomBlock["rows"]>();
+  /** Thứ hạng theo thứ tự API: 0 = định mức mới cập nhật nhất. */
+  const orderByCode = new Map<string, number>();
   for (const b of boms.value) {
+    if (!orderByCode.has(b.product_code)) orderByCode.set(b.product_code, orderByCode.size);
     const rows = rowsByCode.get(b.product_code) ?? [];
     rows.push({
       material_code: b.material_code,
@@ -291,9 +295,12 @@ function groupBoms() {
 
   const created = [...rowsByCode].map(([code, rows]) => makeBlock(code, code, rows));
   bomBlocks.value = [...reused, ...created, ...pending].sort((a, b) => {
-    // Đã khai xếp trước bảng mới thêm dở, rồi mới so mã với nhau.
+    // Bảng thêm dở chưa chọn thành phẩm luôn nằm cuối.
     if (!a.product_code) return 1;
     if (!b.product_code) return -1;
+    const ai = orderByCode.get(a.product_code) ?? Number.MAX_SAFE_INTEGER;
+    const bi = orderByCode.get(b.product_code) ?? Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
     return a.product_code.localeCompare(b.product_code);
   });
 }

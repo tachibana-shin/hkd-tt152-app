@@ -631,11 +631,13 @@ pub(crate) async fn save_product_aliases(
 
 // ─── ĐỊNH MỨC VẬT TƯ (BOM) — F4 ───
 
-/// Toàn bộ định mức vật tư của mọi sản phẩm (màn "Định mức" của Danh mục SP).
-#[tauri::command]
-pub(crate) async fn get_product_boms(state: State<'_, AppState>) -> Result<String, String> {
-    require_role(&state, &["admin", "ketoan", "kho"]).await?;
-    let rows: Vec<BomRow> = sqlx::query_as!(
+/// Tải toàn bộ định mức vật tư, xếp bảng mới cập nhật/tạo lên trước.
+///
+/// Mỗi lần lưu, `save_product_bom_core` xóa rồi ghi lại toàn bộ dòng của một
+/// thành phẩm nên `MAX(updated_at)` của các dòng chính là lần lưu gần nhất.
+/// `MAX(id)` phá thế hòa khi nhiều bảng được lưu trong cùng một giây.
+async fn get_product_boms_core(pool: &SqlitePool) -> Result<Vec<BomRow>, String> {
+    sqlx::query_as!(
         BomRow,
         "SELECT p.code AS product_code, p.name AS product_name,
                 m.code AS material_code, m.name AS material_name, m.unit AS material_unit,
@@ -644,11 +646,26 @@ pub(crate) async fn get_product_boms(state: State<'_, AppState>) -> Result<Strin
            FROM product_bom_item b
            JOIN product p ON p.id = b.product_id
            JOIN product m ON m.id = b.material_product_id
-          ORDER BY p.code, m.code"
+           JOIN (
+                SELECT product_id, MAX(updated_at) AS updated_at, MAX(id) AS last_id
+                  FROM product_bom_item
+                 GROUP BY product_id
+           ) latest ON latest.product_id = b.product_id
+          ORDER BY latest.updated_at DESC, latest.last_id DESC, p.code, m.code"
     )
-    .fetch_all(&*state.pool.read().await)
+    .fetch_all(pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())
+}
+
+/// Toàn bộ định mức vật tư của mọi sản phẩm (màn "Định mức" của Danh mục SP).
+#[tauri::command]
+pub(crate) async fn get_product_boms(state: State<'_, AppState>) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let rows = {
+        let pool = state.pool.read().await;
+        get_product_boms_core(&pool).await?
+    };
     Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
@@ -730,8 +747,9 @@ async fn save_product_bom_core(
     .map_err(|e| e.to_string())?;
     for (material_id, quantity, unit_price) in &resolved {
         sqlx::query!(
-            "INSERT INTO product_bom_item (product_id, material_product_id, quantity, unit_price)
-             VALUES (?, ?, ?, ?)",
+            "INSERT INTO product_bom_item
+                (product_id, material_product_id, quantity, unit_price, updated_at)
+             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
             product.id,
             material_id,
             quantity,
@@ -1768,6 +1786,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stored_price, 12_500.0);
+        // Mốc cập nhật được ghi khi lưu — dùng để xếp màn "Định mức" mới nhất trước.
+        let stored_updated_at: String =
+            sqlx::query_scalar("SELECT updated_at FROM product_bom_item")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(!stored_updated_at.is_empty());
 
         // Ghi thay toàn bộ: danh sách rỗng = xóa sạch định mức.
         assert_eq!(save_product_bom_core(&pool, "TP1", &[]).await.unwrap(), 0);
@@ -1904,5 +1929,37 @@ mod tests {
             scalar_i64(&pool, "SELECT COUNT(*) FROM product_bom_item").await,
             0
         );
+    }
+
+    #[tokio::test]
+    async fn dinh_muc_vat_tu_sap_xep_theo_lan_cap_nhat_moi_nhat() {
+        let pool = test_pool().await;
+        let tp1 = seed_product(&pool, "TP-SORT1", "Thành phẩm 1", 0.01).await;
+        let tp2 = seed_product(&pool, "TP-SORT2", "Thành phẩm 2", 0.01).await;
+        let tp3 = seed_product(&pool, "TP-SORT3", "Thành phẩm 3", 0.01).await;
+        let nvl = seed_product(&pool, "NVL-SORT", "Vật tư", 0.01).await;
+
+        // Mốc thời gian khác nhau → API phải trả định mức mới nhất trước.
+        for (product_id, updated_at) in [
+            (tp1, "2026-10-20 08:00:00"),
+            (tp2, "2026-10-22 09:00:00"),
+            (tp3, "2026-10-21 10:00:00"),
+        ] {
+            sqlx::query!(
+                "INSERT INTO product_bom_item
+                    (product_id, material_product_id, quantity, updated_at)
+                 VALUES (?, ?, 1.0, ?)",
+                product_id,
+                nvl,
+                updated_at
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let rows = get_product_boms_core(&pool).await.unwrap();
+        let order: Vec<&str> = rows.iter().map(|r| r.product_code.as_str()).collect();
+        assert_eq!(order, ["TP-SORT2", "TP-SORT3", "TP-SORT1"]);
     }
 }

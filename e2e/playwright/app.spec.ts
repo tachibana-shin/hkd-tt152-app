@@ -5108,8 +5108,8 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
   await page.getByTestId("bom-add").click();
   const blocks = page.locator('[data-testid="bom-block"]');
   await expect(blocks).toHaveCount(2);
-  const b1 = blocks.first();
-  const b2 = blocks.nth(1);
+  let b1 = blocks.first();
+  let b2 = blocks.nth(1);
 
   await choose(b1.locator('[data-testid="bom-fg"] .p-select'), "Thành phẩm MFG 1");
 
@@ -5147,6 +5147,14 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
 
   await page.getByTestId("bom-save-all").click();
   await expect(page.locator(".p-toast-summary").last()).toContainText("Đã lưu định mức");
+
+  // Danh sách xếp định mức mới cập nhật trước → bảng lưu sau cùng (MFG 2) lên
+  // đầu. Tìm lại bảng theo thành phẩm thay vì neo vào vị trí cũ.
+  b1 = blocks.filter({ hasText: "Thành phẩm MFG 1" });
+  b2 = blocks.filter({ hasText: "Thành phẩm MFG 2" });
+  await expect(b1).toHaveCount(1);
+  await expect(b2).toHaveCount(1);
+  await expect(blocks.first()).toContainText("Thành phẩm MFG 2");
 
   /** Đọc nguyên danh sách định mức từ server. */
   async function fetchBoms() {
