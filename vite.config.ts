@@ -46,6 +46,7 @@ const PRIMEVUE_COMPONENTS = [
   "TabPanels",
   "Tabs",
   "Tag",
+  "Textarea",
   "Toast",
   "ToggleSwitch",
   "Toolbar",
@@ -96,6 +97,11 @@ export default defineConfig(() => ({
   optimizeDeps: {
     include: [
       "@primeuix/themes/aura",
+      // Plugin Tauri nằm sau các view .vue (download.ts) — thiếu ở đây thì lần
+      // chạy dev/E2E đầu tiên Vite phát hiện muộn, reload cả trang giữa test.
+      "@tauri-apps/api/core",
+      "@tauri-apps/plugin-dialog",
+      "@tauri-apps/plugin-opener",
       "primevue/config",
       "primevue/toastservice",
       "primevue/confirmationservice",
