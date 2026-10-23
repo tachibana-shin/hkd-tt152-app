@@ -330,6 +330,28 @@ impl HddtClient {
         password: &str,
         base_url: Option<&str>,
     ) -> Result<Self, String> {
+        Self::new_with_timeout(username, password, base_url, Duration::from_secs(20))
+    }
+
+    /// Client cho thao tác tương tác (tra cứu danh sách, xem PDF): timeout ngắn
+    /// và không thử lại, để nút bấm báo lỗi nhanh thay vì quay hàng chục giây.
+    pub(crate) fn interactive(
+        username: &str,
+        password: &str,
+        base_url: Option<&str>,
+    ) -> Result<Self, String> {
+        Ok(
+            Self::new_with_timeout(username, password, base_url, Duration::from_secs(10))?
+                .fail_fast(),
+        )
+    }
+
+    fn new_with_timeout(
+        username: &str,
+        password: &str,
+        base_url: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Self, String> {
         let base = base_url
             .unwrap_or(BASE_DEFAULT)
             .trim_end_matches('/')
@@ -346,7 +368,7 @@ impl HddtClient {
         let http = reqwest::Client::builder()
             .user_agent(UA)
             .cookie_provider(Arc::new(jar))
-            .timeout(Duration::from_secs(20))
+            .timeout(timeout)
             .default_headers(default_headers)
             .build()
             .map_err(|e| format!("Khởi tạo client HĐĐT: {e}"))?;

@@ -732,9 +732,9 @@ pub(crate) async fn hddt_list_invoices(
         .clone()
         .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
     let cfg = read_config(&state).await?;
-    // Tra cứu là thao tác tương tác: cổng treo thì báo lỗi sau 1 lần thử (20 s)
+    // Tra cứu là thao tác tương tác: cổng treo thì báo lỗi sau 1 lần thử (10 s)
     // thay vì quay nút 4 lần (~100 s) như quét hàng loạt.
-    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?.fail_fast();
+    let client = HddtClient::interactive(&cfg.username, &cfg.password, cfg.base())?;
     fn clean(v: Option<String>) -> Option<String> {
         v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
     }
@@ -1381,8 +1381,8 @@ pub(crate) async fn hddt_invoice_detail(
         .clone()
         .ok_or_else(|| "Chưa đăng nhập cổng HĐĐT — bấm Đăng nhập trước.".to_string())?;
     let cfg = read_config(&state).await?;
-    // Xem PDF cũng là thao tác tương tác — fail fast, không retry 4 lần.
-    let client = HddtClient::new(&cfg.username, &cfg.password, cfg.base())?.fail_fast();
+    // Xem PDF cũng là thao tác tương tác — timeout 10 s, không retry 4 lần.
+    let client = HddtClient::interactive(&cfg.username, &cfg.password, cfg.base())?;
     let detail = client
         .invoice_detail(
             &session.token,

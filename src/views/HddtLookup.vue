@@ -21,6 +21,29 @@ function toastError(summary: string, e: unknown) {
   toast.add({ severity: "error", summary, detail: String(e), life: 5000 });
 }
 
+/** Lỗi hạ tầng của cổng (500/No shards/timeout) — hay gặp ở tab máy tính tiền. */
+function isPortalInfrastructureError(e: unknown) {
+  return /HTTP 500|No shards available|Lỗi kết nối cổng HĐĐT|operation timed out|Service Unavailable/i.test(
+    String(e),
+  );
+}
+
+/** Tab máy tính tiền đang lỗi phía cổng → gợi ý chuyển tab thay vì lỗi kỹ thuật. */
+function toastPortalError(fallbackSummary: string, e: unknown) {
+  if (searchKind.value === "cash-register" && isPortalInfrastructureError(e)) {
+    toast.add({
+      severity: "warn",
+      summary: "Cổng HĐ máy tính tiền đang lỗi",
+      detail:
+        "Máy chủ tra cứu hóa đơn máy tính tiền của cổng đang lỗi hoặc quá tải. " +
+        "Thử lại sau, hoặc chuyển sang tab “Hóa đơn điện tử”.",
+      life: 12000,
+    });
+    return;
+  }
+  toastError(fallbackSummary, e);
+}
+
 // ─── Tra cứu hóa đơn (trang `/tra-cuu/tra-cuu-hoa-don` của cổng) ───
 // Cổng có 2 tầng chọn, mỗi tầng quyết định endpoint:
 //   Hóa đơn ra (bán ra)  × {HĐĐT thường → query,    máy tính tiền → sco-query}
@@ -210,7 +233,7 @@ async function runSearch(state: string | null) {
     })`;
     return res.state;
   } catch (e) {
-    toastError("Lỗi tra cứu hóa đơn", e);
+    toastPortalError("Lỗi tra cứu hóa đơn", e);
     return null;
   } finally {
     searchLoading.value = false;
@@ -325,7 +348,7 @@ async function openInvoicePdf(row: HddtInvoiceRow) {
     pdfTitle.value = `Hóa đơn ${row.khhdon ?? ""} ${row.shdon ?? ""}`.trim();
     pdfVisible.value = true;
   } catch (e) {
-    toastError("Không lấy được chi tiết hóa đơn", e);
+    toastPortalError("Không lấy được chi tiết hóa đơn", e);
   } finally {
     pdfLoadingKey.value = "";
   }
