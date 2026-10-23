@@ -78,6 +78,11 @@ const props = withDefaults(
     totalLabel?: string;
     /** Hiện nút "+ Thêm hàng hóa" (chưa có trong danh mục thì mở ProductDialog). */
     showAddProduct?: boolean;
+    /**
+     * Hiện nút Excel định mức cạnh hàng CHẾ TẠO (có định mức) — popup hóa đơn
+     * nháp dùng để xuất nhanh bảng vật tư của đúng dòng đang báo giá.
+     */
+    showBomExport?: boolean;
   }>(),
   {
     canEdit: true,
@@ -93,6 +98,7 @@ const props = withDefaults(
     compact: false,
     preInput: false,
     showAddProduct: false,
+    showBomExport: false,
     priceField: "cost_price",
     industryGroups: () => [],
     warehouses: () => [],
@@ -105,10 +111,15 @@ const emit = defineEmits<{
   (e: "remove", index: number): void;
   /** Người dùng vừa CHỌN hàng trên dòng (sau khi đã tự điền giá/kho). */
   (e: "picked", line: LineItem): void;
+  /** Xuất Excel định mức của hàng chế tạo đang đứng trên dòng. */
+  (e: "export-bom", line: LineItem): void;
 }>();
 
 const catalog = useCatalogStore();
 const toast = useToast();
+
+// Nút Excel từng dòng cần biết hàng nào có định mức → nạp nền một lần.
+if (props.showBomExport) void catalog.loadBoms();
 
 // Phân trang phía client: đổ file Excel vào phiếu nhập có thể vài nghìn dòng —
 // bảng chỉ render 1 trang (50 dòng) thay vì hàng nghìn <tr> (mỗi dòng có ô chọn
@@ -456,6 +467,22 @@ watch(
             aria-label="Thêm tên khác"
             v-tooltip="'Thêm tên khác cho mặt hàng này'"
             @click="openAlias(data)"
+          />
+          <!-- Hàng chế tạo: xuất bảng định mức ngay tại dòng đang báo giá. -->
+          <Button
+            v-if="
+              showBomExport && canEdit && data.product_code && catalog.hasBom(data.product_code)
+            "
+            icon="pi pi-file-excel"
+            severity="secondary"
+            text
+            rounded
+            size="small"
+            class="shrink-0"
+            data-testid="line-export-bom"
+            aria-label="Xuất Excel định mức"
+            v-tooltip="'Xuất Excel định mức của mặt hàng chế tạo này'"
+            @click="emit('export-bom', data)"
           />
         </div>
       </template>

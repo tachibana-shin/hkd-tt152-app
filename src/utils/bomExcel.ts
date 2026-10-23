@@ -23,6 +23,11 @@ export interface BomExcelData {
   productCode: string;
   productName: string;
   lines: BomExcelLine[];
+  /**
+   * Số lượng thành phẩm cần làm — nhân vào số lượng từng dòng vật tư.
+   * Bỏ trống = 1 (xuất đúng bảng định mức khai trong danh mục).
+   */
+  productQuantity?: number;
   /** Ngày xuất file; bỏ trống = hôm nay. */
   exportedAt?: Date;
 }
@@ -50,6 +55,10 @@ function dateText(d: Date): string {
 export async function buildBomXlsx(data: BomExcelData): Promise<Blob> {
   const wb = new Workbook();
   const ws = wb.addWorksheet("Định mức");
+  const productQuantity =
+    typeof data.productQuantity === "number" && Number.isFinite(data.productQuantity)
+      ? Math.max(0, data.productQuantity)
+      : 1;
 
   // Độ rộng đủ đọc trên A4 dọc; tên hàng rộng nhất để không phải kéo cột.
   ws.columns = [
@@ -68,7 +77,11 @@ export async function buildBomXlsx(data: BomExcelData): Promise<Blob> {
   title.getCell(1).font = { ...FONT, size: 16, bold: true };
   title.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
 
-  const subtitle = ws.addRow([`Thành phẩm: ${data.productCode} — ${data.productName}`]);
+  const subtitle = ws.addRow([
+    `Thành phẩm: ${data.productCode} — ${data.productName}${
+      productQuantity !== 1 ? ` · Số lượng: ${productQuantity}` : ""
+    }`,
+  ]);
   ws.mergeCells(subtitle.number, 1, subtitle.number, 7);
   subtitle.getCell(1).font = { ...FONT, bold: true };
   subtitle.getCell(1).alignment = { horizontal: "left", vertical: "middle" };
@@ -99,7 +112,7 @@ export async function buildBomXlsx(data: BomExcelData): Promise<Blob> {
 
   let total = 0;
   for (const [index, line] of data.lines.entries()) {
-    const quantity = Number.isFinite(line.quantity) ? line.quantity : 0;
+    const quantity = (Number.isFinite(line.quantity) ? line.quantity : 0) * productQuantity;
     const price = Number.isFinite(line.price) ? line.price : 0;
     const amount = quantity * price;
     total += amount;

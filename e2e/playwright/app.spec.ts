@@ -1986,6 +1986,176 @@ test("Hóa đơn nháp: xuất Excel báo giá theo đúng dòng đang nhập (g
   await expect(dlg).toBeHidden();
 });
 
+test("Hóa đơn nháp: Excel flat tách hàng chế tạo và xuất định mức từng dòng", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Thành phẩm có định mức + 2 vật tư + 1 dịch vụ thường (không định mức).
+  const fg = await request.post("/api/save_product", {
+    data: {
+      code: "SP-FLAT-E2E",
+      name: "Gói cửa flat E2E",
+      unit: "Bộ",
+      salePrice: 1_000_000,
+      costPrice: 0,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: false,
+      industryCode: "PPHH",
+    },
+  });
+  expect(fg.ok(), `save_product SP-FLAT-E2E: ${await fg.text()}`).toBe(true);
+  for (const [code, name, unit, costPrice] of [
+    ["NVL-FLAT-A", "Nhôm flat E2E", "Cây", 100_000],
+    ["NVL-FLAT-B", "Kính flat E2E", "Tấm", 50_000],
+  ] as const) {
+    const res = await request.post("/api/save_product", {
+      data: {
+        code,
+        name,
+        unit,
+        salePrice: 0,
+        costPrice,
+        minStock: 0,
+        vatRate: 1,
+        importTaxRate: 0,
+        isService: false,
+        industryCode: "PPHH",
+      },
+    });
+    expect(res.ok(), `save_product ${code}: ${await res.text()}`).toBe(true);
+  }
+  const svc = await request.post("/api/save_product", {
+    data: {
+      code: "DV-FLAT-E2E",
+      name: "Dịch vụ lắp đặt flat E2E",
+      unit: "Lần",
+      salePrice: 200_000,
+      costPrice: 0,
+      minStock: 0,
+      vatRate: 1,
+      importTaxRate: 0,
+      isService: true,
+      industryCode: "DVXD-KNL",
+    },
+  });
+  expect(svc.ok(), `save_product DV-FLAT-E2E: ${await svc.text()}`).toBe(true);
+
+  // 1 bộ cửa = 2 cây nhôm (100.000 đ/cây) + 1 tấm kính (50.000 đ/tấm).
+  const bom = await request.post("/api/save_product_bom", {
+    data: {
+      productCode: "SP-FLAT-E2E",
+      items: [
+        { material_code: "NVL-FLAT-A", quantity: 2, unit_price: 100_000 },
+        { material_code: "NVL-FLAT-B", quantity: 1, unit_price: 50_000 },
+      ],
+    },
+  });
+  expect(bom.ok(), `save_product_bom: ${await bom.text()}`).toBe(true);
+
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  await page.getByRole("button", { name: "Lập hóa đơn nháp" }).click();
+  const dlg = page.getByRole("dialog").filter({ hasText: "Lập hóa đơn bán hàng (nháp)" });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByRole("textbox").first()).toHaveValue(/^HD\d+$/);
+  const custInput = dlg.getByRole("combobox", { name: "Chọn hoặc nhập tên khách hàng" });
+  await custInput.fill("Khách Flat E2E");
+  await custInput.press("Enter");
+
+  const pickProduct = async (line: Locator, code: string, name: RegExp) => {
+    await line.getByRole("combobox").first().click();
+    const box = page.locator('.p-select-overlay.product-select-overlay [role="searchbox"]').last();
+    await expect(box).toBeVisible();
+    await box.fill(code);
+    await page.getByRole("option", { name }).first().click();
+  };
+
+  // Dòng 1: thành phẩm chế tạo, báo giá 3 bộ.
+  const line1 = dlg.locator("tbody tr").first();
+  await pickProduct(line1, "SP-FLAT-E2E", /Gói cửa flat E2E/);
+
+  // Tồn 0 → app gợi ý tạo lô sản xuất; test này chỉ xuất Excel nên bỏ qua.
+  const shortagePrompt = page.getByRole("alertdialog", {
+    name: /Thiếu tồn kho — hàng chế tạo/,
+  });
+  await expect(shortagePrompt).toBeVisible();
+  await shortagePrompt.getByRole("button", { name: "Để sau" }).click();
+  await expect(shortagePrompt).toBeHidden();
+
+  await line1.getByRole("spinbutton").nth(0).fill("3");
+  await line1.getByRole("spinbutton").nth(0).press("Tab");
+
+  // Nút Excel định mức chỉ hiện cạnh hàng chế tạo, và xuất theo SL đang báo giá.
+  const bomBtn = line1.getByTestId("line-export-bom");
+  await expect(bomBtn).toBeVisible();
+  const [bomDownload] = await Promise.all([page.waitForEvent("download"), bomBtn.click()]);
+  expect(bomDownload.suggestedFilename()).toMatch(/^dinh-muc-SP-FLAT-E2E-\d{8}\.xlsx$/);
+  const bomPath = await bomDownload.path();
+  expect(bomPath, "trình duyệt phải lưu file định mức về").toBeTruthy();
+  const bomWorkbook = XLSX.read(readFileSync(bomPath as string), { type: "buffer" });
+  const bomSheet = bomWorkbook.Sheets[bomWorkbook.SheetNames[0]];
+  const bomMatrix = XLSX.utils.sheet_to_json<(string | number)[]>(bomSheet, {
+    header: 1,
+    defval: "",
+  });
+  expect(bomMatrix.flat().join(" ")).toContain("Số lượng: 3");
+  const bomA = bomMatrix.find((r) => r[1] === "NVL-FLAT-A");
+  const bomB = bomMatrix.find((r) => r[1] === "NVL-FLAT-B");
+  expect(bomA?.[4], "2 cây/bộ × 3 bộ").toBe(6);
+  expect(bomA?.[6]).toBe(600_000);
+  expect(bomB?.[4], "1 tấm/bộ × 3 bộ").toBe(3);
+  expect(bomB?.[6]).toBe(150_000);
+  expect(bomMatrix.find((r) => r[2] === "TỔNG CỘNG")?.[6]).toBe(750_000);
+
+  // Dòng 2: dịch vụ thường — không có định mức nên không hiện nút Excel BOM.
+  const line2 = dlg.locator("tbody tr").nth(1);
+  await pickProduct(line2, "DV-FLAT-E2E", /Dịch vụ lắp đặt flat E2E/);
+  await expect(line2.getByTestId("line-export-bom")).toHaveCount(0);
+
+  // Báo giá flat: thay gói cửa bằng nhôm/kính, giữ nguyên dịch vụ.
+  const [flatDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    dlg.getByTestId("header-export-quote-flat").click(),
+  ]);
+  expect(flatDownload.suggestedFilename()).toMatch(/^bao-gia-flat-HD\d+-\d{8}\.xlsx$/);
+  const flatPath = await flatDownload.path();
+  expect(flatPath, "trình duyệt phải lưu file báo giá flat về").toBeTruthy();
+  const flatWorkbook = XLSX.read(readFileSync(flatPath as string), { type: "buffer" });
+  expect(flatWorkbook.SheetNames[0]).toBe("Báo giá flat");
+  const flatSheet = flatWorkbook.Sheets[flatWorkbook.SheetNames[0]];
+  const flatMatrix = XLSX.utils.sheet_to_json<(string | number)[]>(flatSheet, {
+    header: 1,
+    defval: "",
+  });
+  expect(
+    flatMatrix.findIndex((r) => r[0] === "STT" && r[2] === "Tên hàng hóa / dịch vụ"),
+  ).toBeGreaterThan(0);
+  expect(
+    flatMatrix.find((r) => r[1] === "SP-FLAT-E2E"),
+    "hàng chế tạo phải được tách, không còn dòng gói",
+  ).toBeUndefined();
+  const flatA = flatMatrix.find((r) => r[1] === "NVL-FLAT-A");
+  const flatB = flatMatrix.find((r) => r[1] === "NVL-FLAT-B");
+  const flatSvc = flatMatrix.find((r) => r[1] === "DV-FLAT-E2E");
+  expect(flatA?.[4]).toBe(6);
+  expect(flatA?.[5]).toBe(100_000);
+  expect(flatA?.[7]).toBe(600_000);
+  expect(flatB?.[4]).toBe(3);
+  expect(flatB?.[7]).toBe(150_000);
+  expect(flatSvc?.[2]).toBe("Dịch vụ lắp đặt flat E2E");
+  expect(flatSvc?.[4]).toBe(1);
+  expect(flatSvc?.[7]).toBe(200_000);
+  expect(flatMatrix.find((r) => r[2] === "Tổng tiền thanh toán")?.[7]).toBe(950_000);
+  expect(flatMatrix.flat().join(" ")).toContain("Khách Flat E2E");
+
+  await dlg.getByRole("button", { name: "Hủy" }).click();
+  await expect(dlg).toBeHidden();
+});
+
 test("Hóa đơn nháp: sửa được dòng hàng và thông tin chung", async ({ page, request }) => {
   await ensureLoggedIn(page);
   await sidebarButton(page, "Hóa đơn").click();

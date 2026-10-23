@@ -25,6 +25,8 @@ export interface QuoteExcelData {
   /** Số chứng từ đang lập trên form (dùng làm số báo giá tham chiếu). */
   quoteNumber?: string;
   quoteDate?: Date;
+  /** Báo giá flat: các dòng hàng chế tạo đã được tách thành vật tư/dịch vụ. */
+  flat?: boolean;
   seller?: {
     name?: string;
     taxCode?: string;
@@ -62,7 +64,7 @@ function num(n: number | undefined): number {
 
 export async function buildQuoteXlsx(data: QuoteExcelData): Promise<Blob> {
   const wb = new Workbook();
-  const ws = wb.addWorksheet("Báo giá");
+  const ws = wb.addWorksheet(data.flat ? "Báo giá flat" : "Báo giá");
   const lastCol = 8;
 
   // Độ rộng đủ đọc trên A4 dọc; tên hàng rộng nhất để không phải kéo cột.
@@ -113,7 +115,11 @@ export async function buildQuoteXlsx(data: QuoteExcelData): Promise<Blob> {
   if (sellerMeta) addMerged(sellerMeta);
   if (seller?.name?.trim() || seller?.address?.trim() || sellerMeta) ws.addRow([]);
 
-  const title = addMerged("BÁO GIÁ", { bold: true, size: 18, align: "center" });
+  const title = addMerged(data.flat ? "BÁO GIÁ CHI TIẾT" : "BÁO GIÁ", {
+    bold: true,
+    size: 18,
+    align: "center",
+  });
   title.height = 30;
 
   addMerged(`Kính gửi: ${data.customer?.trim() || "—"}`, { bold: true });

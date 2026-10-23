@@ -13,7 +13,9 @@ import { useInvoiceStore } from "@/stores/invoice";
 import LineItemsEditor from "@/components/LineItemsEditor.vue";
 import ProductAliasDialog from "@/components/ProductAliasDialog.vue";
 import ProductionLotDialog from "@/components/ProductionLotDialog.vue";
+import { buildBomXlsx } from "@/utils/bomExcel";
 import { buildQuoteXlsx } from "@/utils/quoteExcel";
+import { flattenQuoteLines, type FlatQuoteSourceLine } from "@/utils/quoteFlat";
 import { downloadBlob } from "@/utils/download";
 import type { Invoice } from "@/types";
 import { fmtInt as fmt, parseIsoDate, toIsoDate } from "@/utils/format";
@@ -34,6 +36,10 @@ const toast = useToast();
 const saving = ref(false);
 /** Đang dựng file báo giá — khóa nút để không tải trùng. */
 const quoteExporting = ref(false);
+/** Đang dựng báo giá flat (tách định mức) — khóa riêng nút flat. */
+const flatQuoteExporting = ref(false);
+/** Mã hàng đang xuất Excel định mức từ một dòng (null = không chạy). */
+const bomExporting = ref<string | null>(null);
 const editingId = ref<number | null>(null);
 const form = reactive({
   number: "",
@@ -211,6 +217,8 @@ watch(
     // ngành) — màn Chờ xuất HĐĐT không tự nạp như màn Hóa đơn nên popup tự
     // bảo đảm khi mở, không phụ thuộc màn cha đứng sau.
     void catalog.loadAll();
+    // Định mức cần cho nút Excel từng dòng + báo giá flat. Nạp nền, không chặn form.
+    void catalog.loadBoms();
     // Soi thiếu tồn phải theo số mới nhất — map chỉ nạp 1 lần ở nơi khác nên
     // ép tải lại mỗi lần mở (nhanh, không chặn render form).
     void catalog.loadOnhand(true);
@@ -272,13 +280,8 @@ watch(
   { immediate: true },
 );
 
-/**
- * Xuất Excel báo giá từ đúng các dòng đang nhập trên form (kể cả sửa đổi chưa
- * lưu): gói sửa chữa có nhân công + vật tư vẫn ra bảng giá gửi khách ngay.
- * Đơn giá/chiết khấu/thành tiền lấy y như hóa đơn nháp, không đọc lại từ DB.
- */
-async function exportQuote() {
-  if (quoteExporting.value) return;
+/** Dòng hàng hợp lệ để báo giá — báo lỗi ngay nếu thiếu hàng/khách. */
+function requireQuoteRows() {
   const rows = form.items.filter((it) => it.product_code);
   if (!rows.length) {
     toast.add({
@@ -286,7 +289,7 @@ async function exportQuote() {
       summary: "Chưa có mặt hàng",
       detail: "Chọn ít nhất 1 hàng hóa/dịch vụ trước khi xuất báo giá.",
     });
-    return;
+    return null;
   }
   if (!form.customer.trim()) {
     toast.add({
@@ -294,44 +297,71 @@ async function exportQuote() {
       summary: "Thiếu khách hàng",
       detail: "Nhập khách hàng để báo giá đúng người nhận.",
     });
-    return;
+    return null;
   }
+  return rows;
+}
+
+/** Thông tin hộ kinh doanh ở đầu báo giá — thiếu cũng vẫn xuất được phần bảng. */
+async function quoteSeller() {
+  if (!business.config) {
+    try {
+      await business.load();
+    } catch {
+      // Bỏ qua: báo giá vẫn dùng được với các dòng hàng bên dưới.
+    }
+  }
+  const seller = business.config;
+  return seller
+    ? {
+        name: seller.name,
+        taxCode: seller.tax_code,
+        address: seller.location || seller.address,
+        phone: seller.phone,
+      }
+    : undefined;
+}
+
+/** Dòng form → dòng Excel, giữ đúng tên hiển thị/đơn giá/chiết khấu đang nhập. */
+function quoteLine(it: (typeof form.items)[number]): FlatQuoteSourceLine {
+  const product = catalog.productByCode(it.product_code);
+  return {
+    product_code: it.product_code,
+    name: it.line_name || product?.name || it.product_code,
+    unit: product?.unit ?? "",
+    quantity: it.quantity || 0,
+    price: it.unit_price || 0,
+    discount: it.discount ?? 0,
+  };
+}
+
+/**
+ * Xuất Excel báo giá từ đúng các dòng đang nhập trên form (kể cả sửa đổi chưa
+ * lưu): gói sửa chữa có nhân công + vật tư vẫn ra bảng giá gửi khách ngay.
+ * Đơn giá/chiết khấu/thành tiền lấy y như hóa đơn nháp, không đọc lại từ DB.
+ */
+async function exportQuote() {
+  if (quoteExporting.value) return;
+  const rows = requireQuoteRows();
+  if (!rows) return;
 
   quoteExporting.value = true;
   try {
-    // Thông tin hộ kinh doanh ở đầu báo giá — thiếu cũng vẫn xuất được phần bảng.
-    if (!business.config) {
-      try {
-        await business.load();
-      } catch {
-        // Bỏ qua: báo giá vẫn dùng được với các dòng hàng bên dưới.
-      }
-    }
-    const seller = business.config;
+    const seller = await quoteSeller();
     const blob = await buildQuoteXlsx({
       quoteNumber: form.number,
       quoteDate: form.date,
-      seller: seller
-        ? {
-            name: seller.name,
-            taxCode: seller.tax_code,
-            address: seller.location || seller.address,
-            phone: seller.phone,
-          }
-        : undefined,
+      seller,
       customer: form.customer,
       customerTaxCode: form.customer_tax_code,
-      lines: rows.map((it) => {
-        const product = catalog.productByCode(it.product_code);
-        return {
-          code: it.product_code,
-          name: it.line_name || product?.name || it.product_code,
-          unit: product?.unit ?? "",
-          quantity: it.quantity || 0,
-          price: it.unit_price || 0,
-          discount: it.discount ?? 0,
-        };
-      }),
+      lines: rows.map(quoteLine).map((it) => ({
+        code: it.product_code,
+        name: it.name,
+        unit: it.unit,
+        quantity: it.quantity,
+        price: it.price,
+        discount: it.discount,
+      })),
     });
     const total = rows.reduce(
       (sum, it) => sum + (it.quantity || 0) * (it.unit_price || 0) - (it.discount ?? 0),
@@ -355,6 +385,125 @@ async function exportQuote() {
     });
   } finally {
     quoteExporting.value = false;
+  }
+}
+
+/**
+ * Báo giá flat: thay mỗi hàng chế tạo (có định mức) bằng các dòng vật tư/dịch
+ * vụ con, số lượng nhân theo số lượng thành phẩm đang báo giá. Hàng thường và
+ * dịch vụ không có định mức giữ nguyên.
+ */
+async function exportFlatQuote() {
+  if (flatQuoteExporting.value) return;
+  const rows = requireQuoteRows();
+  if (!rows) return;
+
+  flatQuoteExporting.value = true;
+  try {
+    // Định mức có thể vừa sửa ở tab khác → lấy bản mới nhất trước khi tách.
+    await catalog.loadBoms(true);
+    const lines = flattenQuoteLines(rows.map(quoteLine), catalog.boms);
+    if (!lines.length) {
+      toast.add({
+        severity: "warn",
+        summary: "Không có dòng nào để báo giá flat",
+        detail: "Các mặt hàng đang nhập chưa có định mức để tách.",
+      });
+      return;
+    }
+
+    const seller = await quoteSeller();
+    const blob = await buildQuoteXlsx({
+      quoteNumber: form.number,
+      quoteDate: form.date,
+      flat: true,
+      seller,
+      customer: form.customer,
+      customerTaxCode: form.customer_tax_code,
+      lines: lines.map((it) => ({
+        code: it.code,
+        name: it.name,
+        unit: it.unit,
+        quantity: it.quantity,
+        price: it.price,
+        discount: it.discount ?? 0,
+      })),
+    });
+    const total = lines.reduce(
+      (sum, it) => sum + (it.quantity || 0) * (it.price || 0) - (it.discount ?? 0),
+      0,
+    );
+    const date = toIsoDate(form.date).replace(/-/g, "");
+    const safeNo = (form.number || "nhap").replace(/[^\w.-]+/g, "-");
+    const saved = await downloadBlob(`bao-gia-flat-${safeNo}-${date}.xlsx`, blob);
+    if (saved) {
+      toast.add({
+        severity: "success",
+        summary: "Đã xuất Excel báo giá flat",
+        detail: `${form.customer} — ${lines.length} dòng • Tổng ${fmt(total)} đ`,
+      });
+    }
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không xuất được Excel báo giá flat",
+      detail: String(e),
+    });
+  } finally {
+    flatQuoteExporting.value = false;
+  }
+}
+
+/**
+ * Xuất Excel định mức của MỘT hàng chế tạo ngay trên dòng hóa đơn — cùng mẫu
+ * với nút "Xuất Excel" ở tab Định mức vật tư, nhưng nhân sẵn số lượng đang báo
+ * giá để gửi khách/đối chiếu nhanh.
+ */
+async function exportLineBom(it: { product_code: string; quantity: number; line_name?: string }) {
+  if (!it.product_code || bomExporting.value) return;
+  bomExporting.value = it.product_code;
+  try {
+    await catalog.loadBoms(true);
+    const rows = catalog.boms.filter((b) => b.product_code === it.product_code);
+    if (!rows.length) {
+      toast.add({
+        severity: "warn",
+        summary: "Hàng chưa có định mức",
+        detail: "Khai định mức ở Sản phẩm → tab Định mức vật tư trước khi xuất.",
+      });
+      return;
+    }
+    const product = catalog.productByCode(it.product_code);
+    const blob = await buildBomXlsx({
+      productCode: it.product_code,
+      productName: it.line_name || product?.name || it.product_code,
+      productQuantity: it.quantity || 0,
+      lines: rows.map((b) => ({
+        code: b.material_code,
+        name: b.material_name,
+        unit: b.material_unit,
+        quantity: b.quantity,
+        price: b.unit_price,
+      })),
+    });
+    const date = toIsoDate(form.date).replace(/-/g, "");
+    const safeCode = it.product_code.replace(/[^\w.-]+/g, "-");
+    const saved = await downloadBlob(`dinh-muc-${safeCode}-${date}.xlsx`, blob);
+    if (saved) {
+      toast.add({
+        severity: "success",
+        summary: "Đã xuất Excel định mức",
+        detail: `${it.line_name || product?.name || it.product_code} × ${it.quantity || 0} — ${rows.length} dòng`,
+      });
+    }
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không xuất được Excel định mức",
+      detail: String(e),
+    });
+  } finally {
+    bomExporting.value = null;
   }
 }
 
@@ -512,11 +661,13 @@ async function persist(rows: typeof form.items) {
       show-warehouse
       compact
       show-add-product
+      show-bom-export
       info="Nhập thẳng Thành tiền từng dòng (Đơn giá tự tính = Thành tiền ÷ SL, đổi SL được). Nhóm ngành tự lấy theo sản phẩm (đổi được trên dòng). Tiền CK trừ vào giá trị dòng (Thành tiền − CK). Hàng hóa phải có đủ tồn kho theo đúng kho xuất trên dòng; sản phẩm dịch vụ (nhân công...) không cần tồn kho."
       total-label="Tổng tiền:"
       @add="addRow"
       @remove="removeRow"
       @picked="onLinePicked"
+      @export-bom="exportLineBom"
     >
       <template #actions>
         <Button
@@ -529,6 +680,17 @@ async function persist(rows: typeof form.items) {
           data-testid="header-export-quote"
           v-tooltip="'Xuất báo giá từ các dòng đang nhập — kể cả thay đổi chưa lưu'"
           @click="exportQuote"
+        />
+        <Button
+          label="Excel flat"
+          icon="pi pi-sitemap"
+          size="small"
+          text
+          :loading="flatQuoteExporting"
+          :disabled="!form.items.some((it) => it.product_code)"
+          data-testid="header-export-quote-flat"
+          v-tooltip="'Báo giá flat: tách hàng chế tạo thành vật tư/dịch vụ theo định mức'"
+          @click="exportFlatQuote"
         />
         <Button
           label="Thêm tên khác"
