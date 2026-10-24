@@ -387,10 +387,16 @@ async function onSyncScan() {
       (s.errors?.length ? ` · lỗi quét ${s.errors.length} phần` : "") +
       xmlFillText(s.xml);
     if (s.errors?.length) {
+      // Lỗi chỉ ở tab máy tính tiền (`sco-query`) là chuyện phía cổng — HĐ điện
+      // tử vẫn quét được. Báo đúng bản chất thay vì đổ nguyên chuỗi kỹ thuật.
+      const cashOnly = s.errors.every((e) => e.startsWith("Máy tính tiền"));
       toast.add({
         severity: "warn",
-        summary: "Quét cổng xong một phần",
-        detail: s.errors.join("\n"),
+        summary: cashOnly ? "Cổng HĐ máy tính tiền đang lỗi" : "Quét cổng xong một phần",
+        detail: cashOnly
+          ? "Máy chủ tra cứu hóa đơn máy tính tiền của cổng đang lỗi hoặc quá tải — " +
+            "hóa đơn điện tử vẫn được quét bình thường. Thử lại sau."
+          : s.errors.join("\n"),
         life: 12000,
       });
     }
