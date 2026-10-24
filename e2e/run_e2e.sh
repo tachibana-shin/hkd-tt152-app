@@ -58,13 +58,13 @@ if [ ! -x "$APP" ]; then
   exit 2
 fi
 
-# 0) Vite dev server (the debug app loads the frontend from http://localhost:1420).
+# 0) Vite dev server (the debug app loads the frontend from http://127.0.0.1:1420).
 #    If a Vite is ALREADY running and reachable (your `bun run tauri dev`) we REUSE
 #    it — and must NOT kill the app that owns it further down, or Vite dies mid-test.
 REUSED_VITE=0
 if ss -ltn 2>/dev/null | grep -q ':1420'; then
   for _ in $(seq 1 20); do
-    if curl -sf -o /dev/null "http://localhost:1420/" 2>/dev/null; then
+    if curl -sf -o /dev/null "http://127.0.0.1:1420/" 2>/dev/null; then
       REUSED_VITE=1
       echo "[runner] reusing running Vite on :1420 (tauri dev app stays untouched)"
       break
@@ -79,11 +79,11 @@ if [ "$REUSED_VITE" != "1" ]; then
 fi
 # Wait until Vite actually serves (cold start still optimizes deps)
 for _ in $(seq 1 120); do
-  curl -sf -o /dev/null "http://localhost:1420/" 2>/dev/null && break
+  curl -sf -o /dev/null "http://127.0.0.1:1420/" 2>/dev/null && break
   sleep 0.5
 done
-if ! curl -sf -o /dev/null "http://localhost:1420/" 2>/dev/null; then
-  echo "[runner] ERROR: Vite unreachable on http://localhost:1420 (see $LOG/vite.log)"
+if ! curl -sf -o /dev/null "http://127.0.0.1:1420/" 2>/dev/null; then
+  echo "[runner] ERROR: Vite unreachable on http://127.0.0.1:1420 (see $LOG/vite.log)"
   cleanup
   exit 2
 fi

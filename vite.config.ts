@@ -117,7 +117,11 @@ export default defineConfig(() => ({
   server: {
     port: vitePort,
     strictPort: true,
-    host: host || false,
+    // Ghim IPv4 loopback thay vì để Vite tự nghe `localhost`: Node trên máy này
+    // phân giải `localhost` ra `::1` trước, còn WebKitGTK của Tauri lại nối
+    // `127.0.0.1` → cửa sổ app báo "Bad Gateway: /". `tauri.conf.json` cũng dùng
+    // đúng địa chỉ này để hai bên không lệch nhau. (TAURI_DEV_HOST cho mobile.)
+    host: host || "127.0.0.1",
     proxy: {
       "/api": { target: apiProxyTarget, changeOrigin: true },
     },

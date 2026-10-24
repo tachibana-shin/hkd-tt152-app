@@ -210,7 +210,7 @@ bun install
 # 2) Chạy chế độ phát triển (Vite + Tauri, tự mở cửa sổ app)
 bun run tauri dev
 
-# Hoặc chỉ chạy frontend (Vite dev server tại http://localhost:1420)
+# Hoặc chỉ chạy frontend (Vite dev server tại http://127.0.0.1:1420)
 bun run dev
 ```
 
@@ -235,7 +235,7 @@ App có sẵn một **web server local** (chỉ `127.0.0.1`) vừa serve fronten
 - **Cùng dữ liệu & phiên đăng nhập:** trình duyệt gọi đúng các command backend (REST
   `/api/<cmd>`) qua lớp transport chung `src/db/index.ts` — trong app dùng IPC, trong
   trình duyệt dùng `fetch`, tự chọn theo môi trường (`__TAURI_INTERNALS__`).
-- Ở **dev** cũng dùng được: `bun run tauri dev` (chạy app) rồi mở `http://localhost:1420`
+- Ở **dev** cũng dùng được: `bun run tauri dev` (chạy app) rồi mở `http://127.0.0.1:1420`
   (Vite proxy `/api` về cổng web server của app).
 - **Ngữ nghĩa HTTP:** `200` thành công; `400` lỗi nghiệp vụ/tham số; `401` sai tài khoản/mật khẩu
   khi đăng nhập; `404` lệnh không hỗ trợ; `500` chỉ còn dành cho lỗi thật sự của server.

@@ -138,4 +138,4 @@ Biến môi trường hữu ích:
   modal chặn các bước sau.
 
 > Lưu ý: `run_e2e.sh` chạy app với `GDK_BACKEND=x11` và yêu cầu Vite dev server
-> (port 1420) vì bản debug tải frontend từ đó.
+> (`http://127.0.0.1:1420`) vì bản debug tải frontend từ đó.

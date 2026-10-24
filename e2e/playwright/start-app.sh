@@ -37,4 +37,4 @@ export VITE_PORT=1421
 # Runs dev in this very process (exec) so Playwright manages its lifecycle.
 # Playwright waits for GET http://127.0.0.1:45821/api/health (the app's web server) to
 # return 200 before starting tests — both app and Vite are ready, no startup race.
-exec bun run tauri dev --config '{"build":{"devUrl":"http://localhost:1421"}}'
+exec bun run tauri dev --config '{"build":{"devUrl":"http://127.0.0.1:1421"}}'
