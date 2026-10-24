@@ -22,6 +22,17 @@ pub fn run() {
         // Cập nhật OTA: bản mới ký bằng minisign, app tải + cài + khởi động lại.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Khôi phục kích thước, vị trí và trạng thái maximize của cửa sổ như
+        // lần mở trước. Chỉ lưu 3 thứ này; không đụng tới ẩn/hiện, fullscreen…
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .setup(|app| {
             // Test/E2E: trỏ app vào thư mục dữ liệu riêng (cô lập, không đụng dữ liệu thật).
             // `commands::profile::app_data_dir` là NGUỒN DUY NHẤT đọc biến này — mọi lệnh

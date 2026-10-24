@@ -45,6 +45,9 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "4.6.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 tauri-plugin-updater = "2.13.0"
 tauri-plugin-process = "2.4.0"
+# Nhớ kích thước/vị trí cửa sổ giữa các lần mở app (người dùng không phải
+# kéo lại cửa sổ mỗi lần khởi động).
+tauri-plugin-window-state = "2"
 # Hai gói tách ra ./packages — cùng workspace nên chỉ cần khai đường dẫn.
 # Render PDF hóa đơn (htmltopdf + template tiếng Việt)…
 invoice-pdf = { path = "../packages/invoice-pdf" }
