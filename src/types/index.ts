@@ -184,6 +184,27 @@ export interface StockVoucherRow {
   /** Tổng thành tiền = giá trị SAU chiết khấu. */
   amount: number;
   note: string;
+  /** Hóa đơn đại diện (liên kết 1-1 qua `invoice.voucher_no`), null nếu chưa gắn. */
+  invoice_id?: number | null;
+  /** Số hóa đơn nội bộ — hiện khi hóa đơn chưa có số HĐĐT. */
+  invoice_number?: string;
+  /** Số HĐĐT đã phát hành (rỗng với hóa đơn nháp). */
+  invoice_e_invoice_no?: string;
+  /** Trạng thái hóa đơn đại diện (`draft` / `official` / …). */
+  invoice_status?: string;
+}
+
+/** Một hóa đơn có thể chọn để liên kết lại với phiếu xuất. */
+export interface InvoiceLinkCandidate {
+  id: number;
+  number: string;
+  e_invoice_no: string;
+  date: string;
+  customer: string;
+  total: number;
+  status: string;
+  /** Phiếu xuất đang gắn hóa đơn này (rỗng = chưa gắn). */
+  voucher_no: string;
 }
 
 /**

@@ -293,6 +293,19 @@ pub(crate) struct StockVoucherRow {
     /// Tổng thành tiền = giá trị SAU chiết khấu.
     pub(crate) amount: f64,
     pub(crate) note: String,
+    /// Hóa đơn đại diện cho phiếu xuất (liên kết 1-1 qua `invoice.voucher_no`).
+    /// Rỗng với phiếu nhập hoặc phiếu xuất chưa gắn hóa đơn.
+    #[sqlx(default)]
+    pub(crate) invoice_id: Option<i64>,
+    /// Số hóa đơn nội bộ (HD…) — hiện khi hóa đơn chưa có số HĐĐT.
+    #[sqlx(default)]
+    pub(crate) invoice_number: String,
+    /// Số hóa đơn điện tử đã phát hành (rỗng với hóa đơn nháp).
+    #[sqlx(default)]
+    pub(crate) invoice_e_invoice_no: String,
+    /// Trạng thái hóa đơn đại diện (`draft` / `official` / …) — để UI gắn nhãn.
+    #[sqlx(default)]
+    pub(crate) invoice_status: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

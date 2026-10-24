@@ -65,6 +65,7 @@ import type {
   LedgerRow,
   Invoice,
   InvoiceItem,
+  InvoiceLinkCandidate,
   InventoryCount,
   CountItemRow,
   Employee,
@@ -606,6 +607,19 @@ export const api = {
       }),
     ),
   getInvoices: async () => parse<Invoice[]>(await call<string>("get_invoices")),
+  /**
+   * Hóa đơn có thể liên kết lại với phiếu xuất (cùng kỳ thuế, trừ hóa đơn đã
+   * thay thế/hủy). Hóa đơn đang gắn chính phiếu đó được xếp lên đầu.
+   */
+  invoiceLinkCandidates: async (voucherNo: string, search = "") =>
+    parse<InvoiceLinkCandidate[]>(
+      await call<string>("invoice_link_candidates", { voucherNo, search }),
+    ),
+  /** Gắn lại hóa đơn đại diện cho phiếu xuất (gỡ liên kết cũ của phiếu). */
+  linkOutboundInvoice: async (voucherNo: string, invoiceId: number) =>
+    parse<{ voucher_no: string; invoice_id: number; display_number: string }>(
+      await call<string>("link_outbound_invoice", { voucherNo, invoiceId }),
+    ),
   deleteInvoice: (id: number) => call<string>("delete_invoice", { id }),
   updateInvoice: (args: {
     id: number;

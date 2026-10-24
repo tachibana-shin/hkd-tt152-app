@@ -2172,6 +2172,20 @@ fn voucher_where_parts(
             parts.push(WherePart::Bind(like.clone()));
             parts.push(WherePart::Text(" ESCAPE '\\'".to_string()));
         }
+        // Tìm được cả theo hóa đơn đại diện: gõ số HĐĐT / số hóa đơn nội bộ
+        // vẫn ra phiếu xuất đang trỏ tới hóa đơn đó.
+        parts.push(WherePart::Text(
+            " OR EXISTS (SELECT 1 FROM invoice i
+                          WHERE i.voucher_no = je.voucher_no
+                            AND (i.number LIKE "
+                .to_string(),
+        ));
+        parts.push(WherePart::Bind(like.clone()));
+        parts.push(WherePart::Text(
+            " ESCAPE '\\' OR i.e_invoice_no LIKE ".to_string(),
+        ));
+        parts.push(WherePart::Bind(like));
+        parts.push(WherePart::Text(" ESCAPE '\\'))".to_string()));
         parts.push(WherePart::Text(")".to_string()));
     }
     parts
@@ -2203,6 +2217,47 @@ const VOUCHER_INNER_SQL: &str = "SELECT je.posting_date, je.voucher_no, je.entry
            LEFT JOIN supplier s ON s.code = je.supplier_code
            LEFT JOIN customer c ON c.code = je.customer_code
           WHERE ";
+
+/// Gắn hóa đơn đại diện (nếu có) vào từng dòng phiếu xuất của trang hiện tại.
+///
+/// Liên kết nằm ở `invoice.voucher_no`; một phiếu đúng ra chỉ có 1 hóa đơn,
+/// nhưng dữ liệu cũ có thể có nhiều bản cùng trỏ một phiếu — lấy bản mới nhất
+/// (id lớn nhất) để hiển thị ổn định, việc dọn dứt điểm do thao tác "Liên kết
+/// lại" đảm nhiệm.
+async fn attach_invoice_links(
+    pool: &SqlitePool,
+    rows: &mut [StockVoucherRow],
+) -> Result<(), String> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT id, number, e_invoice_no, status, voucher_no FROM invoice
+          WHERE voucher_no IN (",
+    );
+    let mut sep = qb.separated(", ");
+    for row in rows.iter() {
+        sep.push_bind(row.voucher_no.clone());
+    }
+    sep.push_unseparated(") ORDER BY id DESC");
+    let links: Vec<(i64, String, String, String, String)> = qb
+        .build_query_as()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (id, number, e_invoice_no, status, voucher_no) in links {
+        if let Some(row) = rows
+            .iter_mut()
+            .find(|r| r.voucher_no == voucher_no && r.invoice_id.is_none())
+        {
+            row.invoice_id = Some(id);
+            row.invoice_number = number;
+            row.invoice_e_invoice_no = e_invoice_no;
+            row.invoice_status = status;
+        }
+    }
+    Ok(())
+}
 
 /// Thân truy vấn danh sách phiếu — tách riêng để unit test gọi trực tiếp.
 pub(crate) async fn stock_vouchers_core(
@@ -2240,11 +2295,12 @@ pub(crate) async fn stock_vouchers_core(
     qb.push_bind(limit);
     qb.push(" OFFSET ");
     qb.push_bind(offset);
-    let rows: Vec<StockVoucherRow> = qb
+    let mut rows: Vec<StockVoucherRow> = qb
         .build_query_as::<StockVoucherRow>()
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
+    attach_invoice_links(pool, &mut rows).await?;
 
     // Tổng số phiếu (COUNT DISTINCT theo cùng bộ lọc) để bảng đếm đúng số trang.
     let mut cq = sqlx::QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM (SELECT 1 FROM (");
@@ -3143,6 +3199,65 @@ mod tests {
             .expect("tìm từ khoá không khớp");
         assert_eq!(none_total, 0);
         assert!(none.is_empty());
+    }
+
+    /// Màn phiếu xuất ánh xạ ngược về HĐĐT qua `invoice.voucher_no`: dòng phiếu
+    /// có sẵn số hóa đơn/HĐĐT đại diện, và gõ số HĐĐT cũng tìm ra phiếu.
+    #[tokio::test]
+    async fn danh_sach_phieu_xuat_hien_hoa_don_dai_dien_va_tim_theo_so_hddt() {
+        let pool = test_pool().await;
+        let p = seed_product(&pool, "PX-LINK", "Hàng liên kết", 0.01).await;
+        let w = seed_warehouse(&pool, "W-LINK", "Kho liên kết").await;
+        add_stock_lot(&pool, p, w, 10.0, 1_000.0, "2026-01-01").await;
+        save_outbound_core(
+            &pool,
+            "2026-03-10",
+            "PX-LINK1",
+            "Bán hàng theo hóa đơn HD-LINK1",
+            "",
+            "HKD",
+            &[OutboundItemInput {
+                product_code: "PX-LINK".into(),
+                quantity: 1.0,
+                unit_price: 5_000.0,
+                discount: 0.0,
+                industry_code: "PPHH".into(),
+                warehouse_code: "W-LINK".into(),
+                line_name: String::new(),
+            }],
+            "",
+            false,
+            "sale",
+            "up",
+            &OutboundInvoiceInput {
+                number: "HD-LINK1".into(),
+                e_invoice_no: "0000123".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("lập phiếu xuất kèm hóa đơn");
+
+        let (rows, total) = stock_vouchers_core(&pool, "PX", "", "", "", 20, 0)
+            .await
+            .expect("danh sách phiếu xuất");
+        assert_eq!(total, 1);
+        let row = &rows[0];
+        assert!(row.invoice_id.is_some(), "phải ánh xạ được hóa đơn");
+        assert_eq!(row.invoice_number, "HD-LINK1");
+        assert_eq!(row.invoice_e_invoice_no, "0000123");
+        assert_eq!(row.invoice_status, "official");
+
+        let (by_hddt, _) = stock_vouchers_core(&pool, "PX", "", "", "0000123", 20, 0)
+            .await
+            .expect("tìm theo số HĐĐT");
+        assert_eq!(by_hddt.len(), 1);
+        assert_eq!(by_hddt[0].voucher_no, "PX-LINK1");
+        let (by_number, _) = stock_vouchers_core(&pool, "PX", "", "", "HD-LINK1", 20, 0)
+            .await
+            .expect("tìm theo số hóa đơn nội bộ");
+        assert_eq!(by_number.len(), 1);
+        assert_eq!(by_number[0].voucher_no, "PX-LINK1");
     }
 
     /// Danh sách lô sản xuất: chỉ lấy đầu phiếu loại `production`, mỗi lô 1 dòng

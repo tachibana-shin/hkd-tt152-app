@@ -151,6 +151,8 @@ pub fn run() {
             commands::invoice::update_invoice_lines,
             commands::invoice::invoice_missing_numbers,
             commands::invoice::create_invoice_outbound,
+            commands::invoice::invoice_link_candidates,
+            commands::invoice::link_outbound_invoice,
             commands::invoice::replace_invoice,
             commands::invoice::invoice_duplicate_numbers,
             commands::invoice::invoice_shortage_map,

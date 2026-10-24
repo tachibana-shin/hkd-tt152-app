@@ -4,7 +4,7 @@ use crate::helpers::*;
 use crate::models::*;
 use serde_json::json;
 use sqlx::sqlite::{SqlitePoolOptions, SqliteTransaction};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tauri::{AppHandle, Manager, State};
 #[tauri::command]
@@ -2346,6 +2346,216 @@ pub(crate) async fn create_outbound_from_invoice(
     .await
     .map_err(|e| e.to_string())?;
     Ok(voucher_no)
+}
+
+/// Một hóa đơn có thể chọn để liên kết với phiếu xuất (màn Phiếu xuất kho).
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct InvoiceLinkCandidate {
+    pub(crate) id: i64,
+    pub(crate) number: String,
+    pub(crate) e_invoice_no: String,
+    pub(crate) date: String,
+    pub(crate) customer: String,
+    pub(crate) total: f64,
+    pub(crate) status: String,
+    /// Phiếu xuất đang gắn hóa đơn này (rỗng = chưa gắn) — UI cảnh báo trước
+    /// khi người dùng chọn nhầm hóa đơn của phiếu khác.
+    pub(crate) voucher_no: String,
+}
+
+/// Hóa đơn có thể liên kết với 1 phiếu xuất.
+///
+/// Chỉ lấy hóa đơn cùng kỳ thuế với phiếu (kỳ của hóa đơn trên sổ phải khớp kỳ
+/// phiếu, nếu không doanh thu và tờ khai lệch nhau) — trừ hóa đơn đang gắn sẵn
+/// với chính phiếu đó để người dùng vẫn thấy liên kết hiện tại.
+#[tauri::command]
+pub(crate) async fn invoice_link_candidates(
+    state: State<'_, AppState>,
+    voucher_no: String,
+    search: String,
+) -> Result<String, String> {
+    let rows =
+        invoice_link_candidates_core(&*state.pool.read().await, &voucher_no, &search).await?;
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
+}
+
+/// Thân truy vấn danh sách hóa đơn có thể liên kết — tách riêng để test trực tiếp.
+pub(crate) async fn invoice_link_candidates_core(
+    pool: &SqlitePool,
+    voucher_no: &str,
+    search: &str,
+) -> Result<Vec<InvoiceLinkCandidate>, String> {
+    let voucher_no = voucher_no.trim();
+    let posting_date: Option<String> = sqlx::query_scalar!(
+        r#"SELECT MIN(posting_date) as "posting_date?" FROM journal_entry
+            WHERE entry_type = 'PX' AND voucher_no = ?"#,
+        voucher_no
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let posting_date =
+        posting_date.ok_or_else(|| format!("Không tìm thấy phiếu xuất {voucher_no}"))?;
+
+    let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+        "SELECT id, number, e_invoice_no, date, customer, total, status, voucher_no
+           FROM invoice
+          WHERE status NOT IN ('replaced', 'cancelled')
+            AND (substr(date, 1, 7) = substr(",
+    );
+    qb.push_bind(posting_date.clone());
+    qb.push(", 1, 7) OR voucher_no = ");
+    qb.push_bind(voucher_no.to_string());
+    qb.push(")");
+    let kw = search.trim();
+    if !kw.is_empty() {
+        // Khoá ký tự đại diện để gõ `%` cũng chỉ tìm đúng chữ đó.
+        let like = format!("%{}%", kw.replace('%', "\\%").replace('_', "\\_"));
+        qb.push(" AND (number LIKE ")
+            .push_bind(like.clone())
+            .push(" ESCAPE '\\' OR e_invoice_no LIKE ")
+            .push_bind(like.clone())
+            .push(" ESCAPE '\\' OR customer LIKE ")
+            .push_bind(like)
+            .push(" ESCAPE '\\')");
+    }
+    // Hóa đơn đang gắn phiếu này lên đầu, rồi tới hóa đơn tự do, cuối cùng là
+    // hóa đơn đã thuộc phiếu khác (UI vẫn hiện nhưng bấm liên kết sẽ bị chặn).
+    qb.push(" ORDER BY CASE WHEN voucher_no = ")
+        .push_bind(voucher_no.to_string())
+        .push(" THEN 0 WHEN voucher_no = '' THEN 1 ELSE 2 END, e_invoice_date DESC, id DESC LIMIT 100");
+    qb.build_query_as()
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Liên kết lại hóa đơn đại diện cho 1 phiếu xuất.
+///
+/// Phiếu xuất và hóa đơn liên kết 1-1 qua `invoice.voucher_no`. Khi phát hiện
+/// phiếu trỏ nhầm hóa đơn (hoặc hóa đơn nhập tay cần gắn vào phiếu có sẵn), hàm
+/// này gỡ liên kết cũ của phiếu rồi gắn hóa đơn được chọn — không đụng dòng
+/// hàng/doanh thu của phiếu, chỉ sửa con trỏ liên kết.
+pub(crate) async fn link_outbound_invoice_core(
+    pool: &SqlitePool,
+    voucher_no: &str,
+    invoice_id: i64,
+) -> Result<serde_json::Value, String> {
+    let voucher_no = voucher_no.trim();
+    if voucher_no.is_empty() {
+        return Err("Thiếu số phiếu xuất".into());
+    }
+    // Kiểm tra phiếu đích trước: số phiếu sai là lỗi rõ ràng hơn mọi xung đột
+    // của hóa đơn được chọn.
+    let posting_date: Option<String> = sqlx::query_scalar!(
+        r#"SELECT MIN(posting_date) as "posting_date?" FROM journal_entry
+            WHERE entry_type = 'PX' AND voucher_no = ?"#,
+        voucher_no
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let posting_date =
+        posting_date.ok_or_else(|| format!("Không tìm thấy phiếu xuất {voucher_no}"))?;
+
+    let inv = sqlx::query!(
+        "SELECT id, number, e_invoice_no, date, status, voucher_no
+           FROM invoice WHERE id = ?",
+        invoice_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    if matches!(inv.status.as_str(), "replaced" | "cancelled") {
+        return Err(format!(
+            "Hóa đơn {} đã bị thay thế/hủy — không liên kết được",
+            inv.number
+        ));
+    }
+    if !inv.voucher_no.trim().is_empty() && inv.voucher_no.trim() != voucher_no {
+        return Err(format!(
+            "Hóa đơn {} đang gắn phiếu xuất {} — gỡ liên kết ở phiếu đó trước",
+            inv.number, inv.voucher_no
+        ));
+    }
+    // Đổi liên kết sang hóa đơn khác kỳ sẽ làm doanh thu trên sổ rơi khác kỳ với
+    // hóa đơn — trường hợp đó phải lập phiếu điều chỉnh, không sửa con trỏ.
+    if !same_period(&posting_date, &inv.date) {
+        return Err(format!(
+            "Hóa đơn {} ngày {} thuộc kỳ khác phiếu {} ngày {} — không liên kết chéo kỳ",
+            inv.number, inv.date, voucher_no, posting_date
+        ));
+    }
+
+    let display_number = if inv.e_invoice_no.trim().is_empty() {
+        inv.number.clone()
+    } else {
+        inv.e_invoice_no.trim().to_string()
+    };
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    // Gỡ hóa đơn cũ đang đại diện cho phiếu (nếu có) — mỗi phiếu chỉ 1 hóa đơn.
+    sqlx::query!(
+        "UPDATE invoice SET voucher_no = '' WHERE voucher_no = ? AND id <> ?",
+        voucher_no,
+        invoice_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query!(
+        "UPDATE invoice SET voucher_no = ? WHERE id = ?",
+        voucher_no,
+        invoice_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    // Diễn giải do app tự sinh khi lập phiếu từ hóa đơn thì cập nhật theo hóa đơn
+    // mới; diễn giải người dùng tự nhập giữ nguyên.
+    let description = format!("Bán hàng theo hóa đơn {display_number}");
+    sqlx::query!(
+        r#"UPDATE journal_entry SET description = ?
+            WHERE entry_type = 'PX' AND voucher_no = ?
+              AND description LIKE 'Bán hàng theo hóa đơn %'"#,
+        description,
+        voucher_no
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "voucher_no": voucher_no,
+        "invoice_id": invoice_id,
+        "display_number": display_number,
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn link_outbound_invoice(
+    state: State<'_, AppState>,
+    voucher_no: String,
+    invoice_id: i64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let res =
+        link_outbound_invoice_core(&*state.pool.read().await, &voucher_no, invoice_id).await?;
+    audit(
+        &state,
+        "link_outbound_invoice",
+        "invoice",
+        &format!(
+            "{} → {} (id={})",
+            voucher_no.trim(),
+            res["display_number"].as_str().unwrap_or(""),
+            invoice_id
+        ),
+    )
+    .await;
+    Ok(res.to_string())
 }
 
 #[tauri::command]
@@ -4751,5 +4961,171 @@ mod tests {
             .map(|it| it["ten"].as_str().unwrap())
             .collect();
         assert_eq!(names, vec!["Mì flour", "Bột mì"]);
+    }
+
+    // ─── Liên kết lại HĐĐT đại diện cho phiếu xuất (#8 mục 12) ───
+
+    /// Lập 1 phiếu xuất kèm hóa đơn nháp — trả về id hóa đơn vừa tạo.
+    async fn seed_outbound_with_invoice(
+        pool: &SqlitePool,
+        voucher_no: &str,
+        date: &str,
+        invoice_no: &str,
+    ) -> i64 {
+        let p = seed_product(pool, "HD-LINK", "Hàng liên kết", 0.01).await;
+        let w = seed_warehouse(pool, "W-LINK", "Kho liên kết").await;
+        add_stock_lot(pool, p, w, 10.0, 1_000.0, "2026-01-01").await;
+        crate::commands::stock::save_outbound_core(
+            pool,
+            date,
+            voucher_no,
+            &format!("Bán hàng theo hóa đơn {invoice_no}"),
+            "",
+            "HKD",
+            &[OutboundItemInput {
+                product_code: "HD-LINK".into(),
+                quantity: 1.0,
+                unit_price: 5_000.0,
+                discount: 0.0,
+                industry_code: "PPHH".into(),
+                warehouse_code: "W-LINK".into(),
+                line_name: String::new(),
+            }],
+            "",
+            false,
+            "sale",
+            "up",
+            &OutboundInvoiceInput {
+                number: invoice_no.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("lập phiếu xuất kèm hóa đơn");
+        sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM invoice WHERE number = ?"#,
+            invoice_no
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// Gắn hóa đơn mới vào phiếu xuất: hóa đơn cũ của phiếu được gỡ, diễn giải
+    /// tự sinh đổi theo số HĐĐT mới, các phiếu khác không bị đụng.
+    #[tokio::test]
+    async fn lien_ket_lai_hoa_don_go_lien_ket_cu_va_cap_nhat_dien_giai() {
+        let pool = test_pool().await;
+        let old_id = seed_outbound_with_invoice(&pool, "PX-LK1", "2026-03-10", "HD-LK-CU").await;
+        let new_id: i64 = sqlx::query_scalar(
+            "INSERT INTO invoice (number, date, customer, status, e_invoice_no)
+             VALUES ('HD-LK-MOI', '2026-03-12', 'Khách mới', 'official', '00000999')
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let res = link_outbound_invoice_core(&pool, "PX-LK1", new_id)
+            .await
+            .expect("liên kết lại được");
+        assert_eq!(res["display_number"], "00000999");
+
+        let old_voucher: String =
+            sqlx::query_scalar!(r#"SELECT voucher_no FROM invoice WHERE id = ?"#, old_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(old_voucher, "", "hóa đơn cũ phải được gỡ khỏi phiếu");
+        let new_voucher: String =
+            sqlx::query_scalar!(r#"SELECT voucher_no FROM invoice WHERE id = ?"#, new_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(new_voucher, "PX-LK1");
+
+        let description: String = sqlx::query_scalar(
+            "SELECT MIN(description) FROM journal_entry
+              WHERE entry_type = 'PX' AND voucher_no = 'PX-LK1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(description, "Bán hàng theo hóa đơn 00000999");
+    }
+
+    /// Không cướp hóa đơn của phiếu khác, không liên kết chéo kỳ thuế, và
+    /// không liên kết vào phiếu không tồn tại.
+    #[tokio::test]
+    async fn lien_ket_lai_hoa_don_chan_xung_dot_va_lech_ky() {
+        let pool = test_pool().await;
+        seed_outbound_with_invoice(&pool, "PX-LK2", "2026-03-10", "HD-LK2").await;
+        let other: i64 = sqlx::query_scalar(
+            "INSERT INTO invoice (number, date, customer, status, voucher_no)
+             VALUES ('HD-LK-OTHER', '2026-03-11', 'Khách khác', 'draft', 'PX-KHAC')
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let err = link_outbound_invoice_core(&pool, "PX-LK2", other)
+            .await
+            .unwrap_err();
+        assert!(err.contains("đang gắn phiếu xuất PX-KHAC"), "{err}");
+
+        let far: i64 = sqlx::query_scalar(
+            "INSERT INTO invoice (number, date, customer, status)
+             VALUES ('HD-LK-APR', '2026-04-02', 'Khách tháng 4', 'draft')
+             RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let err = link_outbound_invoice_core(&pool, "PX-LK2", far)
+            .await
+            .unwrap_err();
+        assert!(err.contains("kỳ khác"), "{err}");
+
+        let err = link_outbound_invoice_core(&pool, "PX-KHONG-CO", other)
+            .await
+            .unwrap_err();
+        assert!(err.contains("Không tìm thấy phiếu xuất"), "{err}");
+    }
+
+    /// Danh sách ứng viên: đúng kỳ thuế, bỏ hóa đơn thay thế/hủy, hóa đơn đang
+    /// gắn chính phiếu lên đầu rồi tới hóa đơn tự do, cuối cùng là phiếu khác.
+    #[tokio::test]
+    async fn danh_sach_hoa_don_de_lien_ket_loc_ky_va_xep_hang() {
+        let pool = test_pool().await;
+        seed_outbound_with_invoice(&pool, "PX-LK3", "2026-03-10", "HD-LK3").await;
+        sqlx::query(
+            "INSERT INTO invoice (number, date, customer, status, voucher_no)
+             VALUES ('HD-FREE', '2026-03-15', 'Khách tự do', 'draft', ''),
+                    ('HD-OTHER', '2026-03-11', 'Khách phiếu khác', 'draft', 'PX-KHAC'),
+                    ('HD-APR', '2026-04-01', 'Khách tháng 4', 'draft', ''),
+                    ('HD-REPLACED', '2026-03-20', 'Khách thay thế', 'replaced', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = invoice_link_candidates_core(&pool, "PX-LK3", "")
+            .await
+            .unwrap();
+        let numbers: Vec<&str> = rows.iter().map(|r| r.number.as_str()).collect();
+        assert_eq!(numbers, vec!["HD-LK3", "HD-FREE", "HD-OTHER"]);
+
+        let found = invoice_link_candidates_core(&pool, "PX-LK3", "HD-FREE")
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].number, "HD-FREE");
+
+        // Tìm được cả theo tên khách hàng.
+        let by_customer = invoice_link_candidates_core(&pool, "PX-LK3", "tự do")
+            .await
+            .unwrap();
+        assert_eq!(by_customer.len(), 1);
+        assert_eq!(by_customer[0].number, "HD-FREE");
     }
 }

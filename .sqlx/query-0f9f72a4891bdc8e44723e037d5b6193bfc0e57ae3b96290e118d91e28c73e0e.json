@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE journal_entry SET description = ?\n            WHERE entry_type = 'PX' AND voucher_no = ?\n              AND description LIKE 'Bán hàng theo hóa đơn %'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "0f9f72a4891bdc8e44723e037d5b6193bfc0e57ae3b96290e118d91e28c73e0e"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MIN(posting_date) as \"posting_date?\" FROM journal_entry\n            WHERE entry_type = 'PX' AND voucher_no = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "posting_date?",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "1031f091edd5b40ec1d18704aa5a5230c47693fa7281dea6d7aa37ba3fdaf6ae"
+}

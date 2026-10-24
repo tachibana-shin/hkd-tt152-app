@@ -5,7 +5,7 @@ import { useCatalogStore } from "@/stores/catalog";
 import { useStockStore } from "@/stores/stock";
 import PartnerDialog from "@/components/PartnerDialog.vue";
 import { api } from "@/db";
-import type { StockVoucherRow } from "@/types";
+import type { InvoiceLinkCandidate, StockVoucherRow } from "@/types";
 import { fmtDec, fmtInt as fmt, fmtVnd, toIsoDate } from "@/utils/format";
 import { useKeepAliveRefresh } from "@/composables/useKeepAliveRefresh";
 import { useLazyPage } from "@/composables/useLazyPage";
@@ -116,6 +116,103 @@ const typeOptions = [
   { label: "Bán hàng", value: "sale" },
   { label: "Điều chỉnh hóa đơn bán", value: "adjust" },
 ];
+
+// ─── Hóa đơn đại diện của phiếu xuất (cột HĐĐT + liên kết lại) ───
+const invoiceStatusText: Record<string, string> = {
+  draft: "Nháp",
+  pasted: "Đã dán",
+  exported: "Chờ phát hành",
+  official: "Đã phát hành",
+  adjusted: "Đã bị sửa bên kia",
+  replaced: "Đã bị thay thế",
+  cancelled: "Đã hủy",
+};
+const invoiceStatusBadge: Record<string, "secondary" | "info" | "success" | "danger" | "warn"> = {
+  draft: "secondary",
+  pasted: "info",
+  exported: "info",
+  official: "success",
+  adjusted: "warn",
+  replaced: "secondary",
+  cancelled: "danger",
+};
+
+/** Số hiển thị của hóa đơn đại diện: số HĐĐT nếu đã phát hành, ngược lại số nội bộ. */
+function linkedInvoiceNo(row: StockVoucherRow): string {
+  return row.invoice_e_invoice_no || row.invoice_number || "";
+}
+
+const linkDialog = ref(false);
+const linkVoucher = ref<StockVoucherRow | null>(null);
+const linkCandidates = ref<InvoiceLinkCandidate[]>([]);
+const linkSelected = ref<InvoiceLinkCandidate | null>(null);
+const linkSearch = ref("");
+const linkLoading = ref(false);
+const linking = ref(false);
+let linkSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function loadLinkCandidates() {
+  const voucherNo = linkVoucher.value?.voucher_no;
+  if (!voucherNo) return;
+  linkLoading.value = true;
+  try {
+    linkCandidates.value = await api.invoiceLinkCandidates(voucherNo, linkSearch.value.trim());
+    // Giữ lựa chọn cũ nếu vẫn còn trong danh sách sau khi tìm lại.
+    linkSelected.value = linkCandidates.value.find((c) => c.id === linkSelected.value?.id) ?? null;
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không tải được hóa đơn", detail: String(e) });
+  } finally {
+    linkLoading.value = false;
+  }
+}
+
+function openLinkDialog(row: StockVoucherRow) {
+  linkVoucher.value = row;
+  linkSelected.value = null;
+  linkSearch.value = "";
+  linkCandidates.value = [];
+  linkDialog.value = true;
+  void loadLinkCandidates();
+}
+
+/** Gõ tìm kiếm → gọi server sau 300 ms, tránh bắn request mỗi phím. */
+function onLinkSearch() {
+  if (linkSearchTimer) clearTimeout(linkSearchTimer);
+  linkSearchTimer = setTimeout(() => {
+    linkSearchTimer = null;
+    void loadLinkCandidates();
+  }, 300);
+}
+
+async function saveLink() {
+  if (!linkVoucher.value || !linkSelected.value) {
+    toast.add({
+      severity: "warn",
+      summary: "Chưa chọn hóa đơn",
+      detail: "Chọn một hóa đơn trong danh sách rồi bấm Liên kết",
+    });
+    return;
+  }
+  linking.value = true;
+  try {
+    const res = await api.linkOutboundInvoice(linkVoucher.value.voucher_no, linkSelected.value.id);
+    toast.add({
+      severity: "success",
+      summary: "Đã liên kết hóa đơn",
+      detail: `Phiếu ${res.voucher_no} → hóa đơn ${res.display_number}`,
+    });
+    linkDialog.value = false;
+    await loadVouchers();
+  } catch (e) {
+    toast.add({ severity: "error", summary: "Không liên kết được", detail: String(e) });
+  } finally {
+    linking.value = false;
+  }
+}
+
+onBeforeUnmount(() => {
+  if (linkSearchTimer) clearTimeout(linkSearchTimer);
+});
 
 const adjustDirOptions = [
   { label: "Tăng (tăng doanh thu)", value: "up" },
@@ -329,7 +426,7 @@ useKeepAliveRefresh(reload);
           :global-filter-fields="['voucher_no', 'description', 'customer_name']"
           stripedRows
           actions-header="Thao tác"
-          actions-width="132"
+          actions-width="160"
           @page="page.onPage"
           @sort="page.onSort"
         >
@@ -347,6 +444,26 @@ useKeepAliveRefresh(reload);
           </Column>
           <Column field="posting_date" header="Ngày" sortable />
           <Column field="description" header="Diễn giải" />
+          <Column field="invoice_number" header="HĐĐT đại diện">
+            <template #body="{ data }">
+              <span v-if="data.invoice_id" class="inline-flex items-center gap-1.5">
+                <b :title="`Hóa đơn nội bộ ${data.invoice_number}`">
+                  {{ linkedInvoiceNo(data) }}
+                </b>
+                <Tag
+                  :value="invoiceStatusText[data.invoice_status ?? ''] ?? data.invoice_status"
+                  :severity="invoiceStatusBadge[data.invoice_status ?? ''] ?? 'secondary'"
+                  class="!px-1.5 !py-0.5 !text-[10px]"
+                  :title="
+                    data.invoice_e_invoice_no
+                      ? `Hóa đơn nội bộ ${data.invoice_number}`
+                      : 'Hóa đơn chưa có số HĐĐT'
+                  "
+                />
+              </span>
+              <span v-else class="text-gray-400">—</span>
+            </template>
+          </Column>
           <Column field="customer_name" header="Khách hàng" sortable>
             <template #body="{ data }">{{ data.customer_name || "—" }}</template>
           </Column>
@@ -392,6 +509,16 @@ useKeepAliveRefresh(reload);
                 :aria-label="`Lập phiếu điều chỉnh theo ${data.voucher_no}`"
                 v-tooltip="'Lập phiếu điều chỉnh (giảm hóa đơn bán) theo phiếu này'"
                 @click="adjustFromVoucher(data)"
+              />
+              <Button
+                v-if="auth.canAccounting"
+                icon="pi pi-link"
+                text
+                rounded
+                severity="secondary"
+                :aria-label="`Liên kết hóa đơn đại diện cho ${data.voucher_no}`"
+                v-tooltip="'Liên kết lại hóa đơn điện tử mà phiếu này đại diện'"
+                @click="openLinkDialog(data)"
               />
             </div>
           </template>
@@ -557,6 +684,106 @@ useKeepAliveRefresh(reload);
         @add="addRow"
         @remove="removeRow"
       />
+    </AppDialog>
+
+    <!-- Liên kết lại hóa đơn điện tử đại diện cho phiếu xuất -->
+    <AppDialog
+      v-model:visible="linkDialog"
+      header="Hóa đơn điện tử đại diện"
+      width="max-w-4xl"
+      action-label="Liên kết"
+      action-icon="pi pi-link"
+      :saving="linking"
+      :action-disabled="
+        !linkSelected ||
+        (!!linkSelected.voucher_no && linkSelected.voucher_no !== linkVoucher?.voucher_no)
+      "
+      :show-action="auth.canAccounting"
+      @action="saveLink"
+    >
+      <div class="space-y-3">
+        <div class="text-sm text-gray-600">
+          Phiếu xuất <b class="font-mono">{{ linkVoucher?.voucher_no }}</b>
+          <template v-if="linkVoucher?.invoice_id">
+            đang gắn hóa đơn <b>{{ linkedInvoiceNo(linkVoucher) }}</b> — chọn hóa đơn khác để thay
+            thế.
+          </template>
+          <template v-else>chưa gắn hóa đơn nào — chọn hóa đơn đại diện bên dưới.</template>
+        </div>
+        <InputText
+          v-model="linkSearch"
+          placeholder="Tìm số hóa đơn / số HĐĐT / khách hàng"
+          class="w-full"
+          @input="onLinkSearch"
+        />
+        <DataTable
+          v-model:selection="linkSelected"
+          :value="linkCandidates"
+          :loading="linkLoading"
+          selection-mode="single"
+          :meta-key-selection="false"
+          data-key="id"
+          scrollable
+          scroll-height="22rem"
+          class="text-sm"
+        >
+          <Column field="number" header="Số hóa đơn">
+            <template #body="{ data }">
+              <span class="font-mono">{{ data.number }}</span>
+            </template>
+          </Column>
+          <Column field="e_invoice_no" header="Số HĐĐT">
+            <template #body="{ data }">{{ data.e_invoice_no || "—" }}</template>
+          </Column>
+          <Column field="date" header="Ngày" />
+          <Column field="customer" header="Khách hàng">
+            <template #body="{ data }">{{ data.customer || "—" }}</template>
+          </Column>
+          <Column field="status" header="Trạng thái">
+            <template #body="{ data }">
+              <Tag
+                :value="invoiceStatusText[data.status] ?? data.status"
+                :severity="invoiceStatusBadge[data.status] ?? 'secondary'"
+                class="!px-1.5 !py-0.5 !text-[10px]"
+              />
+            </template>
+          </Column>
+          <Column field="voucher_no" header="Phiếu xuất">
+            <template #body="{ data }">
+              <Tag
+                v-if="data.voucher_no && data.voucher_no !== linkVoucher?.voucher_no"
+                :value="`Đang gắn ${data.voucher_no}`"
+                severity="warn"
+                class="!px-1.5 !py-0.5 !text-[10px]"
+              />
+              <Tag
+                v-else-if="data.voucher_no"
+                value="Phiếu này"
+                severity="success"
+                class="!px-1.5 !py-0.5 !text-[10px]"
+              />
+              <span v-else class="text-xs text-gray-400">Chưa gắn</span>
+            </template>
+          </Column>
+          <Column field="total" header="Thành tiền" align="right">
+            <template #body="{ data }">{{ fmtVnd(data.total) }}</template>
+          </Column>
+          <template #empty>
+            <EmptyState text="Không có hóa đơn cùng kỳ phù hợp để liên kết." icon="pi pi-file" />
+          </template>
+        </DataTable>
+        <div
+          v-if="linkSelected?.voucher_no && linkSelected.voucher_no !== linkVoucher?.voucher_no"
+          class="text-xs text-red-600"
+        >
+          Hóa đơn này đang gắn phiếu {{ linkSelected.voucher_no }} — cần gỡ liên kết ở phiếu đó
+          trước.
+        </div>
+        <div class="text-xs text-gray-500">
+          Chỉ hiện hóa đơn cùng kỳ thuế với phiếu. Liên kết lại chỉ đổi hóa đơn đại diện, không đụng
+          dòng hàng hay doanh thu đã ghi sổ.
+        </div>
+      </div>
     </AppDialog>
 
     <!-- Xem phiếu (chỉ đọc) — dùng chung cho cả PX/PN -->
