@@ -305,6 +305,17 @@ const RETRY_429_DELAYS: [u64; 3] = [3, 8, 20];
 /// vài giây là kết nối lại được.
 const RETRY_NET_DELAYS: [u64; 3] = [2, 5, 10];
 
+/// Timeout riêng cho danh sách hóa đơn máy tính tiền (`sco-query`).
+///
+/// Endpoint này trả lời bình thường dưới 1 giây, nhưng khi backend của cổng
+/// chết thì treo ~30 giây rồi mới trả 500. Chờ theo timeout mặc định (20 giây)
+/// × 4 lượt làm "Quét cổng" kẹt gần 2 phút trước khi bỏ qua — trong khi không
+/// có cách nào lấy được dữ liệu. 8 giây là quá đủ cho phản hồi khỏe.
+const CASH_REGISTER_LIST_TIMEOUT: Duration = Duration::from_secs(8);
+/// Số lần thử lại khi lỗi mạng cho danh sách máy tính tiền: 1 lần (tổng 2 lượt)
+/// để bắt kịp lần rớt mạng thoáng qua mà không kéo dài lượt quét.
+const CASH_REGISTER_NET_RETRIES: usize = 1;
+
 /// 3 anti-bot headers required for EVERY portal API call (copied from the
 /// portal's own axios interceptor — verified 09/2026: without `request-id` → 403
 /// "invalid behavior").
@@ -446,9 +457,26 @@ impl HddtClient {
         token: &str,
         referer: &str,
     ) -> Result<reqwest::Response, String> {
+        self.get_throttled_opts(url, token, referer, None, None)
+            .await
+    }
+
+    /// Như [`Self::get_throttled_with`] nhưng ghi đè được timeout của từng
+    /// request và số lần thử lại khi lỗi mạng (`None` = theo cấu hình client).
+    ///
+    /// Dùng cho endpoint `sco-query` hay treo phía cổng: chờ 20 giây × 4 lượt
+    /// chỉ làm lượt quét kẹt cả phút mà vẫn không có dữ liệu.
+    async fn get_throttled_opts(
+        &self,
+        url: reqwest::Url,
+        token: &str,
+        referer: &str,
+        timeout: Option<Duration>,
+        net_retries: Option<usize>,
+    ) -> Result<reqwest::Response, String> {
         let mut rate_attempt = 0;
         let mut net_attempt = 0;
-        let max_net = self.retry_net_delays.len();
+        let max_net = net_retries.unwrap_or(self.retry_net_delays.len());
         loop {
             self.throttle().await;
             let mut h = anti_bot_headers();
@@ -459,15 +487,17 @@ impl HddtClient {
             // làm WAF treo các request `sco-query`.
             h.insert("Action", HeaderValue::from_static(""));
             h.insert("End-Point", HeaderValue::from_static(ENDPOINT_LOOKUP));
-            let sent = self
+            let mut req = self
                 .http
                 .get(url.clone())
                 .headers(h)
                 .bearer_auth(token)
                 .header(reqwest::header::REFERER, referer.to_string())
-                .header(reqwest::header::ACCEPT, "application/json, text/plain, */*")
-                .send()
-                .await;
+                .header(reqwest::header::ACCEPT, "application/json, text/plain, */*");
+            if let Some(t) = timeout {
+                req = req.timeout(t);
+            }
+            let sent = req.send().await;
             let resp = match sent {
                 Ok(r) => r,
                 Err(e) => {
@@ -478,7 +508,7 @@ impl HddtClient {
                             describe_reqwest_error(&e)
                         ));
                     }
-                    let secs = self.retry_net_delays[net_attempt];
+                    let secs = self.retry_net_delays.get(net_attempt).copied().unwrap_or(0);
                     net_attempt += 1;
                     rate_attempt = 0;
                     if secs > 0 {
@@ -644,7 +674,22 @@ impl HddtClient {
         // Trang tra cứu của cổng không set `localStorage.action` trước khi tìm →
         // `Action` rỗng. Gửi chuỗi hành động đã encode (cách cũ) làm WAF của
         // cổng treo request `sco-query` tới timeout.
-        let resp = self.get_throttled_with(url, token, &page).await?;
+        let resp = match q.kind {
+            // Máy tính tiền: backend cổng hay treo ~30 giây rồi 500. Dùng
+            // timeout ngắn + ít lượt thử để "Quét cổng" bỏ qua nhanh thay vì
+            // kẹt gần 2 phút cho một endpoint đang chết.
+            InvoiceKind::CashRegister => {
+                self.get_throttled_opts(
+                    url,
+                    token,
+                    &page,
+                    Some(CASH_REGISTER_LIST_TIMEOUT),
+                    Some(CASH_REGISTER_NET_RETRIES),
+                )
+                .await?
+            }
+            _ => self.get_throttled_with(url, token, &page).await?,
+        };
         let status = resp.status();
         let v = read_json_body(resp).await?;
         if !status.is_success() {
@@ -1261,6 +1306,61 @@ mod tests {
             portal.count("/invoices/purchase"),
             1,
             "fail_fast không được gọi lại endpoint"
+        );
+    }
+
+    /// Danh sách máy tính tiền (`sco-query`) là endpoint hay treo phía cổng:
+    /// chỉ thử lại 1 lần (tổng 2 request) thay vì 4 như HĐ thường, để "Quét
+    /// cổng" bỏ qua nhanh thay vì kẹt gần 2 phút.
+    #[tokio::test]
+    async fn cash_register_list_retries_only_once() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        *portal.transport_fail_first.lock().unwrap() = 99;
+        let c = HddtClient::for_test(&portal.base);
+
+        let err = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::CashRegister,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("cổng đứt kết nối phải báo lỗi");
+
+        assert!(err.contains("đã thử 2 lần"), "thông báo sai: {err}");
+        assert_eq!(
+            portal.count("/api/sco-query/invoices/purchase"),
+            2,
+            "máy tính tiền chỉ được thử lại 1 lần"
+        );
+        assert_eq!(
+            portal.count("/api/query/invoices/purchase"),
+            0,
+            "không được gọi nhầm endpoint HĐ thường"
+        );
+
+        // HĐ thường vẫn giữ 4 lượt thử như cũ.
+        *portal.transport_fail_first.lock().unwrap() = 99;
+        let _ = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::Regular,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect_err("cổng đứt kết nối phải báo lỗi");
+        assert_eq!(
+            portal.count("/api/query/invoices/purchase"),
+            4,
+            "HĐ thường vẫn thử lại 3 lần"
         );
     }
 
