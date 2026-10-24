@@ -1025,6 +1025,7 @@ export const api = {
     khhdon: string;
     shdon: string;
     kind?: "regular" | "cash-register";
+    direction?: "sold" | "purchase";
   }) =>
     call<string>("hddt_invoice_detail", {
       nbmst: args.nbmst,
@@ -1032,6 +1033,7 @@ export const api = {
       khhdon: args.khhdon,
       shdon: args.shdon,
       kind: args.kind ?? "",
+      direction: args.direction ?? "",
     }),
 
   /** Chi tiết hóa đơn đã lưu trong DB theo `portal_id` (màn Đồng bộ HĐĐT). */

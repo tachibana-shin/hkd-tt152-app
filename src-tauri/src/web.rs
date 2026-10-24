@@ -680,7 +680,8 @@ pub async fn api_invoke(
             khmshdon: i64,
             khhdon: String,
             shdon: String,
-            kind: Option<String>
+            kind: Option<String>,
+            direction: Option<String>
         ),
         // Payload là `detail_json` (vài KB) — backend tự dựng HTML rồi render PDF.
         "render_invoice_pdf" => {

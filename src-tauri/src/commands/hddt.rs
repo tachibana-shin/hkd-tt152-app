@@ -1369,6 +1369,7 @@ pub(crate) async fn hddt_invoice_detail(
     khhdon: String,
     shdon: String,
     kind: Option<String>,
+    direction: Option<String>,
 ) -> Result<String, String> {
     require_role(&state, &["admin", "ketoan"]).await?;
     if khmshdon <= 0 {
@@ -1379,6 +1380,16 @@ pub(crate) async fn hddt_invoice_detail(
     let kind = match kind.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(s) => crate::hddt::InvoiceKind::parse(s)?,
         None => crate::hddt::InvoiceKind::from_symbol(&khhdon),
+    };
+    // Header `Action` của cổng phụ thuộc cả chiều (mua vào/bán ra) lẫn loại HĐ.
+    // Màn Đồng bộ chỉ có hóa đơn mua vào → mặc định `purchase` khi thiếu tham số.
+    let direction = match direction
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(s) => crate::hddt::InvoiceDirection::parse(s)?,
+        None => crate::hddt::InvoiceDirection::Purchase,
     };
     let session = state
         .portal
@@ -1392,6 +1403,7 @@ pub(crate) async fn hddt_invoice_detail(
     let detail = client
         .invoice_detail(
             &session.token,
+            direction,
             kind,
             &nbmst,
             &khmshdon.to_string(),

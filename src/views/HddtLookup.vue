@@ -344,6 +344,7 @@ async function openInvoicePdf(row: HddtInvoiceRow) {
       khhdon: String(row.khhdon ?? ""),
       shdon: String(row.shdon ?? ""),
       kind: searchKind.value,
+      direction: searchDirection.value,
     });
     pdfTitle.value = `Hóa đơn ${row.khhdon ?? ""} ${row.shdon ?? ""}`.trim();
     pdfVisible.value = true;

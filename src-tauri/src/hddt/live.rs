@@ -279,6 +279,7 @@ mod live_tests {
             let d = client
                 .invoice_detail(
                     &login.token,
+                    InvoiceDirection::Purchase,
                     *kind,
                     &g(row, "nbmst"),
                     &g(row, "khmshdon"),
@@ -321,6 +322,62 @@ mod live_tests {
                 ),
                 Err(e) => panic!("export-xml thất bại: {e}"),
             }
+        }
+    }
+
+    /// Kiểm chứng live tab máy tính tiền mua vào sau khi sửa `Action` (24/10/2026):
+    /// quét 7 ngày qua bằng đúng logic app (cửa sổ 7 ngày → fallback từng ngày).
+    /// Cổng có thể vẫn lỗi từng ngày; test in ra ngày lấy được và lỗi còn lại.
+    /// Run with: cd src-tauri && cargo test live_probe_cash_register_scan -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "cần ../info.txt + portal live"]
+    async fn live_probe_cash_register_scan() {
+        use crate::hddt::InvoiceKind;
+
+        let Some((u, p)) = super::load_portal_creds() else {
+            eprintln!("⚠️ thiếu ../info.txt");
+            return;
+        };
+        let client = HddtClient::new(&u, &p, None).expect("client");
+        let login = client
+            .login_with_solver(&GlyphTemplateSolver, 3)
+            .await
+            .expect("login thất bại");
+        eprintln!("✅ login OK");
+
+        let pool = crate::test_support::test_pool().await;
+        let to = chrono::Local::now().date_naive();
+        let from = to - chrono::Duration::days(6);
+        let started = std::time::Instant::now();
+        let result = crate::hddt::sync::scan(
+            &pool,
+            &client,
+            &login.token,
+            &from.to_string(),
+            &to.to_string(),
+            &[InvoiceKind::CashRegister],
+        )
+        .await;
+        match result {
+            Ok(sum) => {
+                eprintln!(
+                    "✅ scan cash {}–{}: {} ngày lấy được, {} lỗi ({} ms)",
+                    from.format("%d/%m/%Y"),
+                    to.format("%d/%m/%Y"),
+                    sum.days_scanned + sum.days_today,
+                    sum.errors.len(),
+                    started.elapsed().as_millis()
+                );
+                for e in &sum.errors {
+                    eprintln!("   ✗ {e}");
+                }
+            }
+            Err(e) => eprintln!(
+                "✗ scan cash {}–{}: {e} ({} ms)",
+                from.format("%d/%m/%Y"),
+                to.format("%d/%m/%Y"),
+                started.elapsed().as_millis()
+            ),
         }
     }
 

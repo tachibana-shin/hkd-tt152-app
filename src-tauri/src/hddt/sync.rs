@@ -17,13 +17,72 @@ use serde_json::Value;
 use sqlx::{FromRow, SqlitePool};
 
 use crate::commands::progress::ProgressJob;
-use crate::hddt::{HddtClient, InvoiceKind, InvoiceQuery};
+use crate::hddt::{HddtClient, InvoiceDirection, InvoiceKind, InvoiceQuery};
 use crate::helpers::round2;
 use crate::models::InboundItemInput;
 
 /// Ngày cổng chấp nhận trong 1 request (HTTP 400 nếu vượt: "Khoảng thời gian
 /// tìm kiếm không được lớn hơn 1 tháng").
 const MAX_WINDOW_DAYS: i64 = 30;
+
+/// Cửa sổ khởi đầu cho hóa đơn máy tính tiền (`sco-query`).
+///
+/// Backend của cổng hay treo 30–60 giây rồi 500/504 với khoảng ngày rộng, dù
+/// cùng khoảng đó chia nhỏ lại trả bình thường. 7 ngày là mức trang tra cứu
+/// thường dùng và đã kiểm chứng trả 200; nếu vẫn lỗi, `scan_window_resilient`
+/// thử lại từng ngày để cô lập ngày hỏng.
+const CASH_REGISTER_WINDOW_DAYS: i64 = 7;
+
+/// Trần thời gian cho một loại hóa đơn. Cổng HĐĐT có lúc treo/500 hàng loạt;
+/// không có trần thì một lượt quét có thể kẹt hàng chục phút vì chia nhỏ mãi.
+/// Hết trần thì dừng phần còn lại, giữ những ngày đã lấy được và báo lỗi để
+/// người dùng quét lại sau (ngày thành công đã được cache).
+const REGULAR_SCAN_BUDGET: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const CASH_REGISTER_SCAN_BUDGET: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+
+/// Số lỗi liên tiếp (ngày đơn lẻ) thì coi như cổng đang chết và dừng loại HĐ.
+/// HĐ điện tử chậm hơn (20 s × 4 lượt/lần) nên chịu ít lỗi hơn; máy tính tiền
+/// timeout ngắn (8 s × 2 lượt) nên thử được nhiều ngày hơn trước khi bỏ.
+const REGULAR_MAX_CONSECUTIVE_FAILURES: usize = 3;
+const CASH_REGISTER_MAX_CONSECUTIVE_FAILURES: usize = 4;
+
+/// Ngân sách của một loại HĐ trong lượt quét: hạn chót + số lỗi liên tiếp.
+struct ScanBudget {
+    deadline: Instant,
+    failures: usize,
+    max_failures: usize,
+}
+
+impl ScanBudget {
+    fn new(kind: InvoiceKind) -> Self {
+        let (budget, max_failures) = match kind {
+            InvoiceKind::Regular => (REGULAR_SCAN_BUDGET, REGULAR_MAX_CONSECUTIVE_FAILURES),
+            InvoiceKind::CashRegister => (
+                CASH_REGISTER_SCAN_BUDGET,
+                CASH_REGISTER_MAX_CONSECUTIVE_FAILURES,
+            ),
+        };
+        Self {
+            deadline: Instant::now() + budget,
+            failures: 0,
+            max_failures,
+        }
+    }
+
+    fn expired(&self) -> bool {
+        Instant::now() >= self.deadline
+    }
+
+    fn note_success(&mut self) {
+        self.failures = 0;
+    }
+
+    /// Ghi nhận một ngày lỗi; trả `true` khi đã vượt ngưỡng liên tiếp.
+    fn note_failure(&mut self) -> bool {
+        self.failures += 1;
+        self.failures >= self.max_failures
+    }
+}
 
 /// Nhãn loại hóa đơn cho nhật ký quét cổng.
 fn kind_label(kind: InvoiceKind) -> &'static str {
@@ -51,6 +110,22 @@ fn brief_error(msg: &str) -> String {
         out.push('…');
     }
     out
+}
+
+/// Lỗi danh sách có thể cứu bằng cách chia nhỏ khoảng ngày không?
+///
+/// Cổng trả 500/502/503/504 hoặc treo khi backend quá tải/xử lý một ngày xấu —
+/// chia đôi để cô lập ngày hỏng, các ngày còn lại vẫn lấy được. Lỗi 400 (khoảng
+/// ngày sai), 401/403 (hết phiên) hoặc đứt kết nối hẳn (client đã thử lại 3
+/// lần) thì chia nhỏ chỉ tốn thời gian → trả lỗi luôn.
+fn is_splittable_window_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("http 500")
+        || m.contains("http 502")
+        || m.contains("http 503")
+        || m.contains("http 504")
+        || m.contains("timeout")
+        || m.contains("timed out")
 }
 
 /// Nhóm ngành mặc định cho mặt hàng HÀNG HÓA tạo từ hóa đơn: "PPHH" — Phân phối,
@@ -208,6 +283,7 @@ impl CachedInvoice {
         let detail = client
             .invoice_detail(
                 token,
+                InvoiceDirection::Purchase,
                 InvoiceKind::parse(&self.portal_kind).unwrap_or_default(),
                 &self.nbmst,
                 &self.khmshdon.to_string(),
@@ -371,6 +447,160 @@ async fn scan_window(
     Ok(())
 }
 
+/// Quét một khung ngày, tự chia nhỏ khi cổng lỗi để cô lập ngày hỏng.
+///
+/// Trả về **số ngày đã lấy thành công**. Lỗi từng ngày được ghi vào
+/// `sum.errors` và không làm hỏng các ngày khác; `Err` chỉ dành cho lỗi không
+/// thể cứu bằng chia nhỏ (hết phiên, tham số sai) hoặc khi đã cạn ngân sách
+/// thời gian/số lỗi — caller nên bỏ phần còn lại của loại HĐ.
+///
+/// Máy tính tiền dùng fallback **từng ngày** thay vì chia đôi đệ quy: backend
+/// `sco-query` hay treo/500 cả một cửa sổ chỉ vì một ngày xấu, chia đôi đệ quy
+/// tạo hàng chục request lỗi và kẹt nhiều phút. HĐ điện tử vẫn chia đôi vì
+/// endpoint này ổn định, chia đôi tiết kiệm request khi chỉ một ngày lỗi.
+///
+/// `mark_cache`: ngày đã qua thì đánh dấu cache; hôm nay thì không (hóa đơn
+/// trong ngày còn phát sinh).
+#[allow(clippy::too_many_arguments)] // đủ ngữ cảnh 1 khung quét; gom struct chỉ để vừa lint
+async fn scan_window_resilient(
+    pool: &SqlitePool,
+    client: &HddtClient,
+    token: &str,
+    kind: InvoiceKind,
+    start: NaiveDate,
+    end: NaiveDate,
+    mark_cache: bool,
+    budget: &mut ScanBudget,
+    sum: &mut ScanSummary,
+    job: Option<&ProgressJob>,
+) -> Result<usize, String> {
+    if budget.expired() {
+        return Err(format!(
+            "Hết thời gian quét {} — còn ngày chưa lấy được, quét lại sau",
+            kind_label(kind)
+        ));
+    }
+    let days = (end - start).num_days() as usize + 1;
+    match scan_window(pool, client, token, kind, start, end, sum, job).await {
+        Ok(()) => {
+            budget.note_success();
+            if mark_cache {
+                mark_days_scanned(pool, start, end, kind).await?;
+            }
+            Ok(days)
+        }
+        Err(e) if start < end && is_splittable_window_error(&e) => {
+            if let Some(j) = job {
+                j.log(format!(
+                    "↻ {} {}–{} lỗi ({}) — {}",
+                    kind_label(kind),
+                    start.format("%d/%m/%Y"),
+                    end.format("%d/%m/%Y"),
+                    brief_error(&e),
+                    if kind == InvoiceKind::CashRegister {
+                        "thử từng ngày"
+                    } else {
+                        "chia đôi để thử lại"
+                    }
+                ));
+            }
+            if kind == InvoiceKind::CashRegister {
+                // Từng ngày: tối đa 7 request cho cửa sổ 7 ngày, không đệ quy
+                // sâu; ngày nào lấy được thì cache ngay.
+                let mut ok = 0;
+                let mut d = start;
+                while d <= end {
+                    if budget.expired() {
+                        return Err(format!(
+                            "Hết thời gian quét {} — còn ngày chưa lấy được, quét lại sau",
+                            kind_label(kind)
+                        ));
+                    }
+                    match scan_window(pool, client, token, kind, d, d, sum, job).await {
+                        Ok(()) => {
+                            budget.note_success();
+                            if mark_cache {
+                                mark_days_scanned(pool, d, d, kind).await?;
+                            }
+                            ok += 1;
+                        }
+                        Err(e) if is_splittable_window_error(&e) => {
+                            let msg = format!(
+                                "{} {}: {}",
+                                kind_label(kind),
+                                d.format("%d/%m/%Y"),
+                                brief_error(&e)
+                            );
+                            if let Some(j) = job {
+                                j.log(format!("✗ {msg}"));
+                            }
+                            sum.errors.push(msg);
+                            if budget.note_failure() {
+                                return Err(format!(
+                                    "{}: cổng lỗi liên tiếp {} ngày — dừng quét phần còn lại",
+                                    kind_label(kind),
+                                    budget.failures
+                                ));
+                            }
+                        }
+                        Err(e) => return Err(e),
+                    }
+                    d += Duration::days(1);
+                }
+                Ok(ok)
+            } else {
+                let mid = start + Duration::days((end - start).num_days() / 2);
+                let left = Box::pin(scan_window_resilient(
+                    pool, client, token, kind, start, mid, mark_cache, budget, sum, job,
+                ))
+                .await?;
+                let right = Box::pin(scan_window_resilient(
+                    pool,
+                    client,
+                    token,
+                    kind,
+                    mid + Duration::days(1),
+                    end,
+                    mark_cache,
+                    budget,
+                    sum,
+                    job,
+                ))
+                .await?;
+                Ok(left + right)
+            }
+        }
+        Err(e) => {
+            // Ngày đơn lẻ mà lỗi tạm thời (500/504/timeout): ghi nhận rồi đi
+            // tiếp, không kéo sập cả loại HĐ. Lỗi phiên/THAM SỐ thì trả lên để
+            // caller dừng hẳn — chia nhỏ hay thử ngày khác cũng vô ích.
+            if is_splittable_window_error(&e) {
+                let msg = format!(
+                    "{} {}–{}: {}",
+                    kind_label(kind),
+                    start.format("%d/%m/%Y"),
+                    end.format("%d/%m/%Y"),
+                    brief_error(&e)
+                );
+                if let Some(j) = job {
+                    j.log(format!("✗ {msg}"));
+                }
+                sum.errors.push(msg);
+                if budget.note_failure() {
+                    return Err(format!(
+                        "{}: cổng lỗi liên tiếp {} ngày — dừng quét phần còn lại",
+                        kind_label(kind),
+                        budget.failures
+                    ));
+                }
+                Ok(0)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 /// Quét cổng trong khoảng ngày và ghi cache.
 ///
 /// `from`/`to` = yyyy-mm-dd. Mốc thấp nhất lấy từ `hddt_start_date` (khai
@@ -467,17 +697,38 @@ pub(crate) async fn scan_with_progress(
         // Hôm nay: lấy để thấy hóa đơn vừa phát sinh, nhưng KHÔNG đánh dấu cache
         // để lượt quét sau vẫn lấy lại được.
         let mut kind_failed = false;
+        let mut fail_streak = 0usize;
+        let mut budget = ScanBudget::new(*kind);
         if end_date >= today {
-            if let Some(j) = job {
-                j.plan(1);
-                j.log(format!("Quét {} hôm nay (không cache)…", kind_label(*kind)));
+            if let Some(p) = job {
+                p.plan(1);
+                p.log(format!("Quét {} hôm nay (không cache)…", kind_label(*kind)));
             }
             let started = Instant::now();
-            match scan_window(pool, client, token, *kind, today, today, &mut sum, job).await {
-                Ok(()) => {
-                    sum.days_today += 1;
-                    if let Some(j) = job {
-                        j.tick(format!(
+            match scan_window_resilient(
+                pool,
+                client,
+                token,
+                *kind,
+                today,
+                today,
+                false,
+                &mut budget,
+                &mut sum,
+                job,
+            )
+            .await
+            {
+                Ok(0) => {
+                    // Lỗi tạm thời đã được ghi vào sum.errors; vẫn thử các ngày
+                    // còn thiếu vì có thể chỉ riêng hôm nay cổng kẹt.
+                    fail_streak += 1;
+                }
+                Ok(days) => {
+                    sum.days_today += days;
+                    fail_streak = 0;
+                    if let Some(p) = job {
+                        p.tick(format!(
                             "Xong {} hôm nay — {}",
                             kind_label(*kind),
                             elapsed_label(started)
@@ -485,17 +736,15 @@ pub(crate) async fn scan_with_progress(
                     }
                 }
                 Err(e) => {
-                    // Cổng có thể chết riêng một endpoint (thường `sco-query`
-                    // máy tính tiền). Đừng thử lại endpoint đó cho từng khung
-                    // ngày — mỗi lần 4 lượt × 20 s sẽ treo cả buổi.
+                    // Hết phiên/tham số sai: thử ngày nào cũng lỗi.
                     let msg = format!(
                         "{} hôm nay {}: {}",
                         kind_label(*kind),
                         today.format("%d/%m/%Y"),
                         brief_error(&e)
                     );
-                    if let Some(j) = job {
-                        j.log(format!("✗ {msg} — bỏ qua phần còn lại của loại này"));
+                    if let Some(p) = job {
+                        p.log(format!("✗ {msg} — bỏ qua phần còn lại của loại này"));
                     }
                     sum.errors.push(msg);
                     kind_failed = true;
@@ -506,20 +755,37 @@ pub(crate) async fn scan_with_progress(
             continue;
         }
 
-        // Gom ngày còn thiếu thành cửa sổ liên tiếp ≤ 30 ngày (cổng chặn > 1 tháng).
+        // Gom ngày còn thiếu thành cửa sổ liên tiếp. HĐ điện tử chịu được 30
+        // ngày/lần; máy tính tiền khởi đầu 7 ngày vì backend hay treo với
+        // khoảng rộng, rồi thử từng ngày nếu vẫn lỗi.
+        let max_window_days = match kind {
+            InvoiceKind::Regular => MAX_WINDOW_DAYS,
+            InvoiceKind::CashRegister => CASH_REGISTER_WINDOW_DAYS,
+        };
         let mut i = 0;
         while i < missing.len() {
-            let win_start = missing[i];
-            let mut j = i;
-            // Mở rộng cửa sổ chừng nên các ngày liên tiếp (cache rời rạc vẫn gộp
-            // được) và không vượt quá giới hạn cổng.
-            while j + 1 < missing.len()
-                && (missing[j + 1] - missing[j]).num_days() == 1
-                && (missing[j + 1] - win_start).num_days() < MAX_WINDOW_DAYS
-            {
-                j += 1;
+            if budget.expired() {
+                let msg = format!(
+                    "Hết thời gian quét {} — còn ngày chưa lấy được, quét lại sau",
+                    kind_label(*kind)
+                );
+                if let Some(p) = job {
+                    p.log(format!("✗ {msg}"));
+                }
+                sum.errors.push(msg);
+                break;
             }
-            let win_end = missing[j];
+            let win_start = missing[i];
+            let mut last = i;
+            // Mở rộng cửa sổ chừng nào các ngày còn liên tiếp (cache rời rạc
+            // vẫn gộp được) và không vượt quá giới hạn của loại HĐ.
+            while last + 1 < missing.len()
+                && (missing[last + 1] - missing[last]).num_days() == 1
+                && (missing[last + 1] - win_start).num_days() < max_window_days
+            {
+                last += 1;
+            }
+            let win_end = missing[last];
             let days = (win_end - win_start).num_days() + 1;
             if let Some(p) = job {
                 p.plan(1);
@@ -532,21 +798,55 @@ pub(crate) async fn scan_with_progress(
                 ));
             }
             let started = Instant::now();
-            match scan_window(
-                pool, client, token, *kind, win_start, win_end, &mut sum, job,
+            match scan_window_resilient(
+                pool,
+                client,
+                token,
+                *kind,
+                win_start,
+                win_end,
+                true,
+                &mut budget,
+                &mut sum,
+                job,
             )
             .await
             {
-                Ok(()) => {
-                    // Đánh dấu ngày đã quét cho loại này (kể cả 0 hóa đơn).
-                    sum.days_scanned += days as usize;
-                    mark_days_scanned(pool, win_start, win_end, *kind).await?;
+                Ok(0) => {
+                    fail_streak += 1;
                     if let Some(p) = job {
-                        p.tick(format!(
-                            "Xong {} {}–{} ({} ngày) — {}",
+                        p.log(format!(
+                            "✗ {} {}–{}: không lấy được ngày nào — {}",
                             kind_label(*kind),
                             win_start.format("%d/%m/%Y"),
                             win_end.format("%d/%m/%Y"),
+                            elapsed_label(started)
+                        ));
+                    }
+                    // Hai cửa sổ liên tiếp không lấy được ngày nào → cổng đang
+                    // chết, thử tiếp chỉ tốn thời gian.
+                    if fail_streak >= 2 {
+                        if let Some(p) = job {
+                            p.log(format!(
+                                "Cổng lỗi liên tiếp — bỏ qua phần còn lại của {}",
+                                kind_label(*kind)
+                            ));
+                        }
+                        break;
+                    }
+                }
+                Ok(scanned) => {
+                    fail_streak = 0;
+                    // `scan_window_resilient` đã đánh dấu cache cho từng ngày
+                    // thành công; chỉ cộng số ngày thực sự lấy được.
+                    sum.days_scanned += scanned;
+                    if let Some(p) = job {
+                        p.tick(format!(
+                            "Xong {} {}–{} ({}/{} ngày) — {}",
+                            kind_label(*kind),
+                            win_start.format("%d/%m/%Y"),
+                            win_end.format("%d/%m/%Y"),
+                            scanned,
                             days,
                             elapsed_label(started)
                         ));
@@ -567,7 +867,7 @@ pub(crate) async fn scan_with_progress(
                     break;
                 }
             }
-            i = j + 1;
+            i = last + 1;
         }
     }
 
@@ -640,6 +940,7 @@ pub(crate) async fn scan_with_progress(
         match client
             .invoice_detail(
                 token,
+                InvoiceDirection::Purchase,
                 InvoiceKind::parse(&inv.portal_kind).unwrap_or_default(),
                 &inv.nbmst,
                 &inv.khmshdon.to_string(),
@@ -2390,6 +2691,121 @@ mod tests {
         );
     }
 
+    /// Máy tính tiền phải quét theo cửa sổ ≤ 7 ngày — cổng hay treo 30–60 s
+    /// rồi 500/504 với khoảng rộng, dù chia nhỏ lại trả bình thường.
+    #[tokio::test]
+    async fn cash_register_scans_in_windows_of_at_most_seven_days() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+
+        scan(
+            &pool,
+            &client,
+            "mock-token",
+            "2026-09-01",
+            "2026-09-24",
+            &[InvoiceKind::CashRegister],
+        )
+        .await
+        .expect("quét mock thất bại");
+
+        let reqs = portal.requests();
+        let cash_lists: Vec<_> = reqs
+            .iter()
+            .filter(|r| r.path.contains("/sco-query/invoices/purchase"))
+            .collect();
+        assert!(
+            !cash_lists.is_empty(),
+            "phải có request danh sách máy tính tiền"
+        );
+        for r in cash_lists {
+            let search = r.param("search").expect("search");
+            let start = search
+                .split(';')
+                .find_map(|p| p.strip_prefix("tdlap=ge="))
+                .and_then(|s| NaiveDate::parse_from_str(&s[..10], "%d/%m/%Y").ok())
+                .expect("ngày bắt đầu");
+            let end = search
+                .split(';')
+                .find_map(|p| p.strip_prefix("tdlap=le="))
+                .and_then(|s| NaiveDate::parse_from_str(&s[..10], "%d/%m/%Y").ok())
+                .expect("ngày kết thúc");
+            let days = (end - start).num_days() + 1;
+            assert!(
+                days <= CASH_REGISTER_WINDOW_DAYS,
+                "cửa sổ máy tính tiền quá rộng ({days} ngày): {search}"
+            );
+        }
+    }
+
+    /// Một ngày trong cửa sổ máy tính tiền bị 503 → fallback từng ngày vẫn lấy
+    /// được các ngày còn lại và chỉ cache ngày thành công.
+    #[tokio::test]
+    async fn cash_register_falls_back_to_individual_days_when_one_day_is_bad() {
+        use crate::hddt::mock_portal::MockPortal;
+        let portal = MockPortal::start().await;
+        // Cửa sổ 01–07/09 và riêng ngày 07/09 đều chứa "07/09/2026" → cùng lỗi.
+        *portal.fail_search_contains.lock().unwrap() = vec!["07/09/2026".into()];
+        let client = HddtClient::for_test(&portal.base);
+        let pool = test_pool().await;
+
+        let sum = scan(
+            &pool,
+            &client,
+            "mock-token",
+            "2026-09-01",
+            "2026-09-07",
+            &[InvoiceKind::CashRegister],
+        )
+        .await
+        .expect("quét phần còn lại phải thành công");
+
+        assert_eq!(sum.days_scanned, 6, "01–06 phải lấy được");
+        assert!(
+            sum.errors.iter().any(|e| e.contains("07/09/2026")),
+            "phải báo lỗi ngày 07/09: {:?}",
+            sum.errors
+        );
+        let cached = cached_days(&pool, InvoiceKind::CashRegister)
+            .await
+            .expect("đọc cache");
+        for day in [
+            "2026-09-01",
+            "2026-09-02",
+            "2026-09-03",
+            "2026-09-04",
+            "2026-09-05",
+            "2026-09-06",
+        ] {
+            assert!(cached.contains(day), "ngày {day} phải được cache");
+        }
+        assert!(
+            !cached.contains("2026-09-07"),
+            "không được cache ngày chưa lấy được"
+        );
+    }
+
+    #[test]
+    fn window_error_classification_splits_only_5xx_and_timeouts() {
+        assert!(is_splittable_window_error(
+            "Lỗi lấy danh sách HĐĐT (HTTP 500): No shards available"
+        ));
+        assert!(is_splittable_window_error(
+            "Lỗi lấy danh sách HĐĐT (HTTP 504): Gateway Time-out"
+        ));
+        assert!(is_splittable_window_error(
+            "error sending request — operation timed out"
+        ));
+        assert!(!is_splittable_window_error(
+            "Lỗi lấy danh sách HĐĐT (HTTP 401): Unauthorized"
+        ));
+        assert!(!is_splittable_window_error(
+            "Lỗi kết nối cổng HĐĐT (đã thử 4 lần): error sending request — Connection refused"
+        ));
+    }
+
     /// `sco-query` (máy tính tiền) chết nhưng `query` (HĐ điện tử) sống → vẫn
     /// quét/nhập được HĐ thường, chỉ ghi cảnh báo cho phần lỗi (issue #8).
     #[tokio::test]
@@ -2419,6 +2835,10 @@ mod tests {
         assert!(sum.days_scanned > 0, "phải quét xong phần HĐ thường");
         assert!(sum.invoices_new > 0, "phải giữ HĐ thường đã lấy được");
         assert!(sum.details_ok > 0, "phải lấy được dòng hàng HĐ thường");
+        assert!(
+            portal.count("/sco-query/invoices/purchase") <= 6,
+            "cổng máy tính tiền chết phải dừng sau vài ngày, không thử hết 24 ngày"
+        );
     }
 
     /// Hóa đơn chưa có dòng hàng: báo câu hướng dẫn quét lại, không lộ lỗi serde

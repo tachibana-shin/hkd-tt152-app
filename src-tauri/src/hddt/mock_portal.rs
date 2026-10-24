@@ -70,6 +70,9 @@ pub(crate) struct MockPortal {
     /// Cắt kết nối mọi request có path chứa một trong các chuỗi này — mô phỏng
     /// đúng một endpoint cổng chết (vd `sco-query`) trong khi endpoint khác sống.
     pub fail_path_contains: Arc<Mutex<Vec<String>>>,
+    /// Trả 503 cho request danh sách có `search` chứa một trong các chuỗi này —
+    /// mô phỏng đúng một ngày/khoảng ngày bị backend `sco-query` làm hỏng.
+    pub fail_search_contains: Arc<Mutex<Vec<String>>>,
     /// Nội dung `hdhhdvu` trả về cho endpoint chi tiết.
     pub detail_lines: Arc<Mutex<String>>,
 }
@@ -85,6 +88,7 @@ impl MockPortal {
         let rate_limit_first = Arc::new(Mutex::new(0));
         let transport_fail_first = Arc::new(Mutex::new(0));
         let fail_path_contains = Arc::new(Mutex::new(Vec::new()));
+        let fail_search_contains = Arc::new(Mutex::new(Vec::new()));
         let detail_lines = Arc::new(Mutex::new(
             r#"[{"ten":"Hàng mẫu","dvtinh":"Cái","mhhdvu":"SP-MOCK","sluong":2.0,"dgia":100000.0,"stckhau":0.0,"tsuat":0.08}]"#
                 .to_string(),
@@ -95,6 +99,7 @@ impl MockPortal {
             rate_limit_first: rate_limit_first.clone(),
             transport_fail_first: transport_fail_first.clone(),
             fail_path_contains: fail_path_contains.clone(),
+            fail_search_contains: fail_search_contains.clone(),
             detail_lines: detail_lines.clone(),
         };
         tokio::spawn(async move {
@@ -106,9 +111,10 @@ impl MockPortal {
                 let rl = rate_limit_first.clone();
                 let net = transport_fail_first.clone();
                 let fail_paths = fail_path_contains.clone();
+                let fail_search = fail_search_contains.clone();
                 let lines = detail_lines.clone();
                 tokio::spawn(async move {
-                    let _ = handle(socket, reqs, rl, net, fail_paths, lines).await;
+                    let _ = handle(socket, reqs, rl, net, fail_paths, fail_search, lines).await;
                 });
             }
         });
@@ -142,6 +148,7 @@ async fn handle(
     rate_limit_first: Arc<Mutex<usize>>,
     transport_fail_first: Arc<Mutex<usize>>,
     fail_path_contains: Arc<Mutex<Vec<String>>>,
+    fail_search_contains: Arc<Mutex<Vec<String>>>,
     detail_lines: Arc<Mutex<String>>,
 ) -> std::io::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -179,6 +186,24 @@ async fn handle(
         .unwrap()
         .iter()
         .any(|p| path.contains(p))
+    {
+        return write_response(
+            &mut socket,
+            503,
+            "application/json;charset=UTF-8",
+            r#"{"message":"Service Unavailable"}"#,
+        )
+        .await;
+    }
+
+    // Chết đúng một khoảng ngày của endpoint danh sách → mô phỏng backend
+    // `sco-query` chỉ hỏng khi truy vấn chạm ngày xấu.
+    let search = last_query_param(&query, "search").unwrap_or_default();
+    if fail_search_contains
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|p| search.contains(p))
     {
         return write_response(
             &mut socket,
