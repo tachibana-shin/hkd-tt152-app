@@ -251,20 +251,37 @@ const PREVIEW_QR_URL: &str = "https://github.com/tachibana-shin";
 /// thuế nên giữ nguyên — bản xem trước phân rõ 2 nhánh:
 /// * nháp / đã chép (chưa có số hiệu của cổng): in **HÓA ĐƠN NHÁP**, mẫu số và
 ///   ký hiệu tạm ghi `000000` để không ai tưởng đây là hóa đơn thật;
-/// * đã phát hành: giữ nguyên khung in (ký hiệu lấy từ hồ sơ hộ), chỉ thêm QR.
-async fn invoice_preview_json(pool: &SqlitePool, id: i64) -> Result<String, String> {
+/// * đã phát hành: giữ nguyên khung in, ưu tiên số/ký hiệu/ngày HĐĐT đã ghi
+///   (ký hiệu lấy từ hồ sơ hộ khi chưa ghi), chỉ thêm QR.
+pub(crate) async fn invoice_preview_json(pool: &SqlitePool, id: i64) -> Result<String, String> {
     let mut data: serde_json::Value =
         serde_json::from_str(&invoice_draft_detail_json(pool, id).await?)
             .map_err(|e| e.to_string())?;
 
-    let status: String = sqlx::query_scalar!("SELECT status FROM invoice WHERE id = ?", id)
-        .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    if matches!(status.as_str(), "draft" | "exported") {
+    let invoice = sqlx::query!(
+        "SELECT status, e_invoice_no, e_invoice_symbol, e_invoice_date
+           FROM invoice WHERE id = ?",
+        id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if matches!(invoice.status.as_str(), "draft" | "exported") {
         data["tlhdon"] = json!("HÓA ĐƠN NHÁP");
         data["khmshdon"] = json!("000000");
         data["khhdon"] = json!("000000");
+    } else {
+        // Hóa đơn đã phát hành: số/ký hiệu/ngày trên PDF phải lấy từ HĐĐT thật
+        // (bản nội bộ chỉ dùng khi chưa ghi nhận số HĐĐT).
+        if !invoice.e_invoice_no.trim().is_empty() {
+            data["shdon"] = json!(invoice.e_invoice_no.trim());
+        }
+        if !invoice.e_invoice_symbol.trim().is_empty() {
+            data["khhdon"] = json!(invoice.e_invoice_symbol.trim());
+        }
+        if !invoice.e_invoice_date.trim().is_empty() {
+            data["nky"] = json!(invoice.e_invoice_date.trim());
+        }
     }
     data["qrcode"] = json!(PREVIEW_QR_URL);
     Ok(data.to_string())
@@ -3180,6 +3197,33 @@ mod tests {
                 "QR phải có ở cả 2 nhánh ({status})"
             );
         }
+    }
+
+    /// HĐ đã phát hành: PDF xem trước dùng đúng số/ký hiệu/ngày HĐĐT đã ghi,
+    /// không dùng số nội bộ (HD…) hay ký hiệu mặc định của hộ.
+    #[tokio::test]
+    async fn xem_truoc_pdf_da_phat_hanh_dung_thong_tin_hddt() {
+        let pool = test_pool().await;
+        let id = seed_draft(&pool, "HDHDDT").await;
+        sqlx::query(
+            "UPDATE invoice
+                SET status = 'official', e_invoice_no = '10',
+                    e_invoice_symbol = 'C26TST', e_invoice_date = '2026-03-11'
+              WHERE id = ?",
+        )
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("ghi nhận HĐĐT");
+
+        let raw = invoice_preview_json(&pool, id)
+            .await
+            .expect("xem trước được");
+        let data: serde_json::Value = serde_json::from_str(&raw).expect("JSON hợp lệ");
+        assert_eq!(data["shdon"], "10", "số HĐĐT thay số nội bộ");
+        assert_eq!(data["khhdon"], "C26TST", "ký hiệu HĐĐT thay ký hiệu hộ");
+        assert_eq!(data["nky"], "2026-03-11", "ngày HĐĐT");
+        assert!(data.get("tlhdon").is_none(), "không phải bản nháp");
     }
 
     /// Không thấy hóa đơn → báo lỗi rõ ràng, không im lặng trả JSON rỗng.

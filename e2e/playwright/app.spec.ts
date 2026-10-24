@@ -384,10 +384,12 @@ test("Đồng bộ HĐ mua: xem trước từ cache và nhập kho tạo phiếu
   await expect(page.getByLabel(/Quét xong tự tạo phiếu nhập/)).toBeVisible();
   await expect(page.getByLabel(/Khoảng thời gian tự gọi lại/)).toBeVisible();
 
-  // Cache rỗng ngay từ đầu → bảng không có dòng, nút nhập tất cả ẩn.
+  // Cache rỗng ngay từ đầu → bảng không có dòng; nút nhập tất cả vẫn hiện
+  // nhưng bị vô hiệu hoá (trước đây bị ẩn nên người dùng tưởng đã xoá).
   const table = page.locator(".p-datatable").last();
   await expect(table).toBeVisible();
-  await expect(page.getByText("Nhập tất cả", { exact: false })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Nhập tất cả" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Nhập tất cả" })).toBeDisabled();
 
   // Chèn 1 hóa đơn mua đã cache (giả lập kết quả quét cổng) rồi tải lại cache.
   const detail = {
@@ -4695,6 +4697,100 @@ test("Xem PDF hóa đơn: mở từ Đồng bộ HĐĐT và từ phiếu nhập"
   await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
   await expectValidPdf(page);
   await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await vDlg.getByRole("button", { name: "Đóng" }).click();
+  await expect(vDlg).toBeHidden();
+});
+
+test("Xem PDF hóa đơn: mở từ phiếu xuất kho đã liên kết HĐĐT", async ({ page, request }) => {
+  await ensureLoggedIn(page);
+
+  // Phiếu xuất + hóa đơn bán lập kèm, khai luôn số HĐĐT để hóa đơn ở trạng thái
+  // "official" — đúng dữ liệu thật sau khi người dùng liên kết HĐĐT.
+  const pn = uniqueVoucher("PN-PDFPX");
+  const px = uniqueVoucher("PX-PDF");
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-09-21",
+      voucher_no: pn,
+      description: "Nhập tồn cho test xem PDF từ phiếu xuất",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 5, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed: ${await stockIn.text()}`).toBe(true);
+  const outbound = await request.post("/api/save_outbound", {
+    data: {
+      posting_date: "2026-09-22",
+      voucher_no: px,
+      description: "Phiếu xuất có HĐĐT để test xem PDF",
+      customer_code: "",
+      unit_code: "HKD",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 2,
+          unit_price: 15000,
+          industry_code: "PPHH",
+          warehouse_code: "",
+        },
+      ],
+      note: "",
+      receive_now: false,
+      outbound_type: "sale",
+      adjust_dir: "down",
+      create_invoice: true,
+      invoice: {
+        number: `${px}-HD`,
+        eInvoiceNo: "9002",
+        eInvoiceSymbol: "C26PDF",
+        eInvoiceDate: "2026-09-23",
+      },
+    },
+  });
+  expect(outbound.ok(), `save_outbound failed ${outbound.status()}: ${await outbound.text()}`).toBe(
+    true,
+  );
+
+  // API dùng chung cho popup phiếu: phải trả hóa đơn bán đã phát hành (số/ký
+  // hiệu HĐĐT thật), không phải hóa đơn nháp hay phiếu nhập.
+  const detailRes = await request.post("/api/hddt_voucher_invoice_detail", {
+    data: { voucherNo: px },
+  });
+  expect(detailRes.ok(), `hddt_voucher_invoice_detail failed: ${await detailRes.text()}`).toBe(
+    true,
+  );
+  const detail = (await detailRes.json()) as { shdon: string; khhdon: string };
+  expect(detail.shdon).toBe("9002");
+  expect(detail.khhdon).toBe("C26PDF");
+
+  await sidebarButton(page, "Xuất kho").click();
+  await expect(page.locator("header h2")).toHaveText("Xuất kho / Bán hàng");
+  const row = page.locator("tr", { has: page.getByText(px, { exact: true }) }).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.getByRole("button", { name: "Xem phiếu", exact: true }).click();
+
+  // Popup phiếu xuất phải có khối HĐĐT (trước đây chỉ phiếu nhập mới có) và mở
+  // được PDF ngay từ đây.
+  const vDlg = page.getByRole("dialog").filter({ hasText: "PHIẾU XUẤT KHO" });
+  await expect(vDlg.getByText("Hóa đơn điện tử")).toBeVisible();
+  await vDlg.getByRole("button", { name: "Xem PDF" }).click();
+  await expect(invoiceFrame(page)).toBeVisible({ timeout: 30_000 });
+  await expectValidPdf(page);
+  // Popup PDF đặt tiêu đề theo phiếu (số HĐĐT đã được kiểm ở API phía trên).
+  await expect(invoiceFrame(page).getByText(`Hóa đơn của phiếu ${px}`)).toBeVisible();
+  await invoiceFrame(page).getByRole("button", { name: "Đóng" }).click();
+  await expect(invoiceFrame(page)).toBeHidden();
   await vDlg.getByRole("button", { name: "Đóng" }).click();
   await expect(vDlg).toBeHidden();
 });

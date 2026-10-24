@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id FROM invoice\n          WHERE voucher_no = ? AND e_invoice_no <> ''\n          ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a04a3eae0517c60c7e3893a84d9bd203c36de457015ee176f4335ddf51f688ac"
+}

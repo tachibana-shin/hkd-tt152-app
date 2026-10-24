@@ -1337,15 +1337,18 @@ pub(crate) async fn hddt_sync_invoice_detail(
     inv.fetch_detail(&pool, &client, &token).await
 }
 
-/// Lấy `detail_json` của hóa đơn đã gắn với 1 phiếu nhập kho (dùng ở popup phiếu).
-#[tauri::command]
-pub(crate) async fn hddt_voucher_invoice_detail(
-    state: State<'_, AppState>,
-    voucher_no: String,
+/// Lấy `detail_json` để xem PDF hóa đơn gắn với 1 phiếu kho.
+///
+/// * Phiếu nhập: hóa đơn mua đã import nằm ở `hddt_imported_invoice`, nối qua
+///   `inbound_voucher_id`.
+/// * Phiếu xuất: hóa đơn bán nối 1-1 qua `invoice.voucher_no`; chỉ nhận hóa đơn
+///   đã có số HĐĐT (bản nháp chưa phải hóa đơn điện tử). PDF dựng từ dữ liệu
+///   hóa đơn nội bộ — cùng nguồn với nút "Xem PDF" ở tab Hóa đơn.
+async fn voucher_invoice_detail_core(
+    pool: &SqlitePool,
+    voucher_no: &str,
 ) -> Result<String, String> {
-    require_role(&state, &["admin", "ketoan"]).await?;
-    let pool = state.pool.read().await;
-    let detail = sqlx::query_scalar!(
+    if let Some(detail) = sqlx::query_scalar!(
         "SELECT hi.detail_json
            FROM inbound_voucher iv
            JOIN hddt_imported_invoice hi ON hi.inbound_voucher_id = iv.id
@@ -1353,10 +1356,37 @@ pub(crate) async fn hddt_voucher_invoice_detail(
           LIMIT 1",
         voucher_no
     )
-    .fetch_optional(&*pool)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    {
+        return Ok(detail);
+    }
+
+    let invoice_id: Option<i64> = sqlx::query_scalar!(
+        "SELECT id FROM invoice
+          WHERE voucher_no = ? AND e_invoice_no <> ''
+          ORDER BY id DESC LIMIT 1",
+        voucher_no
+    )
+    .fetch_optional(pool)
     .await
     .map_err(|e| e.to_string())?;
-    detail.ok_or_else(|| format!("Phiếu {voucher_no} chưa gắn hóa đơn điện tử nào."))
+    match invoice_id {
+        Some(id) => crate::commands::invoice::invoice_preview_json(pool, id).await,
+        None => Err(format!("Phiếu {voucher_no} chưa gắn hóa đơn điện tử nào.")),
+    }
+}
+
+/// Lấy `detail_json` của hóa đơn đã gắn với 1 phiếu nhập/xuất kho (dùng ở popup phiếu).
+#[tauri::command]
+pub(crate) async fn hddt_voucher_invoice_detail(
+    state: State<'_, AppState>,
+    voucher_no: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    voucher_invoice_detail_core(&pool, voucher_no.trim()).await
 }
 
 /// Lấy chi tiết hóa đơn từ cổng HĐĐT cho màn Tra cứu HĐĐT (dòng list chưa có
@@ -1611,5 +1641,80 @@ mod tests {
         assert!(!journal_is_bad(&pool, "TK", "")
             .await
             .expect("password rỗng"));
+    }
+
+    // ─── PDF hóa đơn gắn với phiếu kho ───
+
+    /// Phiếu xuất nối 1-1 với hóa đơn bán qua `invoice.voucher_no`; hóa đơn đã
+    /// có số HĐĐT thì popup phiếu phải xem được PDF.
+    #[tokio::test]
+    async fn phieu_xuat_co_hoa_don_dien_tu_tra_ve_pdf() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO invoice
+                 (number, date, customer, status, e_invoice_no, e_invoice_date,
+                  voucher_no, total)
+             VALUES ('HD-PX', '2026-10-01', 'Khách xuất', 'official', '10',
+                     '2026-10-01', 'PXTEST', 1000)",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed hóa đơn bán");
+
+        let raw = voucher_invoice_detail_core(&pool, "PXTEST")
+            .await
+            .expect("phải trả detail_json");
+        let data: serde_json::Value = serde_json::from_str(&raw).expect("JSON hợp lệ");
+        assert_eq!(data["nmten"], "Khách xuất");
+        assert_eq!(data["shdon"], "10", "số HĐĐT, không phải số nội bộ");
+        assert_eq!(data["tgtttbso"], 1000.0);
+    }
+
+    /// Hóa đơn nháp (chưa có số HĐĐT) hoặc phiếu không nối hóa đơn → không có
+    /// nút xem PDF, backend trả lỗi rõ ràng.
+    #[tokio::test]
+    async fn phieu_xuat_chua_co_hoa_don_dien_tu_bao_loi() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO invoice (number, date, status, voucher_no)
+             VALUES ('HD-NHAP', '2026-10-01', 'draft', 'PXDRAFT')",
+        )
+        .execute(&pool)
+        .await
+        .expect("seed hóa đơn nháp");
+
+        for voucher_no in ["PXDRAFT", "PX-NONE"] {
+            let err = voucher_invoice_detail_core(&pool, voucher_no)
+                .await
+                .expect_err("không có HĐĐT phải lỗi");
+            assert!(err.contains("chưa gắn hóa đơn điện tử"), "{err}");
+        }
+    }
+
+    /// Phiếu nhập vẫn lấy đúng `detail_json` của hóa đơn mua đã import (đường cũ).
+    #[tokio::test]
+    async fn phieu_nhap_van_tra_detail_tu_hoa_don_mua() {
+        let pool = test_pool().await;
+        let voucher_id: i64 = sqlx::query_scalar(
+            "INSERT INTO inbound_voucher (voucher_no, posting_date)
+             VALUES ('PNTEST', '2026-10-01') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("seed phiếu nhập");
+        sqlx::query(
+            "INSERT INTO hddt_imported_invoice
+                 (portal_id, inbound_voucher_id, detail_json)
+             VALUES ('uuid-test', ?, '{\"shdon\":\"10\"}')",
+        )
+        .bind(voucher_id)
+        .execute(&pool)
+        .await
+        .expect("seed hóa đơn mua");
+
+        let detail = voucher_invoice_detail_core(&pool, "PNTEST")
+            .await
+            .expect("phải trả detail_json");
+        assert_eq!(detail, r#"{"shdon":"10"}"#);
     }
 }

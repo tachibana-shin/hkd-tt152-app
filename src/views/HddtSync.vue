@@ -794,11 +794,22 @@ void (async () => {
           v-tooltip="'Gộp file XML của các hóa đơn trong danh sách thành 1 file ZIP'"
           @click="exportXmlZip"
         />
+        <!-- Luôn hiện để người dùng biết nút tồn tại; chỉ bấm được khi có hóa đơn
+             đang chờ. Trước đây nút bị ẩn khi pending = 0 nên trông như đã xoá. -->
         <Button
-          v-if="syncSummary && syncSummary.pending > 0"
-          :label="`Nhập tất cả (${syncSummary.pending})`"
+          :label="
+            syncSummary && syncSummary.pending > 0
+              ? `Nhập tất cả (${syncSummary.pending})`
+              : 'Nhập tất cả'
+          "
           icon="pi pi-download"
           :loading="syncImporting"
+          :disabled="syncScanning || !syncSummary || syncSummary.pending === 0"
+          v-tooltip="
+            syncSummary && syncSummary.pending === 0
+              ? 'Không có hóa đơn nào chờ nhập kho'
+              : 'Tạo phiếu nhập kho cho tất cả hóa đơn đang chờ'
+          "
           @click="onSyncImport()"
         />
       </div>
