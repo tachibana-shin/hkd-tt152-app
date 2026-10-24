@@ -1,5 +1,33 @@
 # Changelog
 
+# [0.28.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.27.0...v0.28.0) (2026-10-24)
+
+
+### Bug Fixes
+
+* **bom:** xếp định mức vật tư theo lần cập nhật mới nhất ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([1d696ef](https://github.com/tachibana-shin/hkd-tt152-app/commit/1d696ef746ec218595a48e2e0eebde6f326323a1))
+* **dev:** ghim Vite và Tauri vào 127.0.0.1 để hết Bad Gateway ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([94edf48](https://github.com/tachibana-shin/hkd-tt152-app/commit/94edf489c7b208c21f854bf3a1c6a2f7c5b13d48))
+* **hddt:** báo gọn khi cổng lỗi riêng tab máy tính tiền ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([13fad1b](https://github.com/tachibana-shin/hkd-tt152-app/commit/13fad1b3f35e411ed4e59cc175839d99c0735be2))
+* **hddt:** bỏ qua nhanh endpoint máy tính tiền khi cổng treo ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([fac4358](https://github.com/tachibana-shin/hkd-tt152-app/commit/fac435896661be1215b49b1e27f60297d43d6906))
+* **hddt:** gửi đúng Action theo tab, quét máy tính tiền theo ngày ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([407b138](https://github.com/tachibana-shin/hkd-tt152-app/commit/407b138cf3c4e468dbf32072ec85dd9cb95aadf4))
+* **hddt:** quét cổng chịu lỗi từng phần và sửa tra cứu/xem PDF ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([de50771](https://github.com/tachibana-shin/hkd-tt152-app/commit/de507719c96ea61b1487aed9dc453311a34fdbb1))
+* **hddt:** tra cứu/PDF báo lỗi sau 10 giây và cảnh báo tab máy tính tiền ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([e02521b](https://github.com/tachibana-shin/hkd-tt152-app/commit/e02521bc5c1abe3311b905f3c883f58e26cab67a))
+* **hddt:** tự tải chi tiết khi xem PDF/nhập kho từng hóa đơn ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([8e4f643](https://github.com/tachibana-shin/hkd-tt152-app/commit/8e4f64398c25a66e70433756c98afc0901206b99))
+
+
+### Features
+
+* **desktop:** nhớ kích thước cửa sổ giữa các lần mở ([89ce091](https://github.com/tachibana-shin/hkd-tt152-app/commit/89ce091912823ad34c3fcbee95ddd8e018b0bc8b))
+* **export:** ghi đè file cũ và mở thư mục sau khi lưu ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([dec5c70](https://github.com/tachibana-shin/hkd-tt152-app/commit/dec5c703b8afd75f8423a24057ea99541cf5ea30))
+* **hddt:** xem PDF HĐĐT từ phiếu xuất, luôn hiện nút nhập tất cả ([b6a539f](https://github.com/tachibana-shin/hkd-tt152-app/commit/b6a539f461d17d96785fa01c3d34fc0b2f0bd419))
+* **invoice:** hàng định mức tự điền đơn giá theo tổng tiền định mức ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([8913341](https://github.com/tachibana-shin/hkd-tt152-app/commit/8913341c917f944cedbce2a1c2694531ce95c266))
+* **invoice:** nháy đúp dòng nháp để mở sửa ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([249aac8](https://github.com/tachibana-shin/hkd-tt152-app/commit/249aac8a1638dbd36f134cd1a230dcc900958b1a))
+* **invoice:** thêm báo giá Excel flat và xuất định mức từng dòng ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([4241dc4](https://github.com/tachibana-shin/hkd-tt152-app/commit/4241dc489285925328508755f40922f1fa524892))
+* **invoice:** tô màu dòng theo tồn thành phẩm và NVL định mức ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([23e990b](https://github.com/tachibana-shin/hkd-tt152-app/commit/23e990b8212a03f1d4a552822b063d5a2edebac4))
+* **invoice:** tự điền thành phẩm khi hóa đơn chỉ có một hàng chế tạo ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([8e1d4db](https://github.com/tachibana-shin/hkd-tt152-app/commit/8e1d4db7073947c8d2dc08a0aa2582e463ad09fe))
+* **outbound:** liên kết lại HĐĐT đại diện và hiện số HĐĐT trên phiếu xuất ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([c1e97e0](https://github.com/tachibana-shin/hkd-tt152-app/commit/c1e97e01855aa59d672daf0b00c4387701f73f9a))
+* **production:** thêm đơn giá bán và thành tiền giá bán vào tạo lô ([#8](https://github.com/tachibana-shin/hkd-tt152-app/issues/8)) ([b2f97f4](https://github.com/tachibana-shin/hkd-tt152-app/commit/b2f97f426274a506fefdf545f5214c86cdeaf4e0))
+
 # [0.27.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.26.1...v0.27.0) (2026-10-23)
 
 
