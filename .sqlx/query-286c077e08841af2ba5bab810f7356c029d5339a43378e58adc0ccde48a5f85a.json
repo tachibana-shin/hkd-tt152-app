@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, status, voucher_no, e_invoice_no FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "voucher_no",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "e_invoice_no",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "286c077e08841af2ba5bab810f7356c029d5339a43378e58adc0ccde48a5f85a"
+}

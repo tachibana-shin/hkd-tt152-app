@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE production_lot_component\n                SET unit_cost = ?, cost_amount = ROUND(quantity * ?, 2)\n              WHERE inbound_voucher_id = ? AND material_code = ? AND is_service = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0bf5e0e7d902ee7dd592ae7f2291c499a6b8aeb65496928aad43ac7cd7e0d1e7"
+}

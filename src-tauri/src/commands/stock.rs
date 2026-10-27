@@ -85,7 +85,12 @@ pub(crate) struct InboundExtra<'a> {
 //   1. tính NVL cần = định mức × SL thành phẩm (cộng dồn nếu lặp dòng);
 //   2. xuất FIFO NVL khỏi kho của phiếu nhập (rỗng → kho mặc định của NVL);
 //   3. ghi 1 phiếu xuất (entry_type = 'PX') Nợ 154 / Có 152 ngay trong CÙNG
-//      transaction với phiếu nhập — thiếu tồn thì CẢ HAI không lưu gì.
+//      transaction với phiếu nhập — thiếu tồn thì CẢ HAI không lưu gì;
+//   4. chụp snapshot định mức + đơn giá khai vào `production_lot_component`
+//      (kể cả dịch vụ) để sửa định mức sau này không làm đổi lô đã tạo.
+//
+// Giá trị nhập thành phẩm lấy theo đơn giá KHAI trên định mức (Σ định mức ×
+// đơn giá), không lấy giá vốn FIFO của NVL — FIFO chỉ dùng để ghi Có 152.
 //
 // Vì sao Nợ 154 (chi phí SXKD dở dang) / Có 152 (hàng hóa): xuất NVL cho sản
 // xuất là chuyển giá trị hàng hóa vào chi phí dở dang, KHÔNG phải doanh thu và
@@ -98,45 +103,174 @@ pub(crate) struct InboundExtra<'a> {
 //     ghi thêm 1 bút 632/152 → credit 152 lần thứ hai → sai tồn giá trị).
 // Sổ kho (`get_inventory_summary`, số đầu kỳ) và danh sách phiếu xuất vẫn TÍNH
 // (entry_type = 'PX') — đúng: tồn NVL thực tế đã giảm.
-async fn issue_materials_by_bom(
+/// Một dòng định mức đã chụp cho lô sản xuất: 1 NVL/dịch vụ của 1 dòng thành
+/// phẩm, kèm số lượng thực tế của lô và đơn giá khai tại thời điểm lưu.
+///
+/// Snapshot tách khỏi `product_bom_item` vì bảng định mức được sửa tự do —
+/// lô đã sản xuất phải giữ đúng thành phần/giá đã dùng, không đổi theo định
+/// mức hiện hành.
+#[derive(Debug, Clone)]
+struct ProductionBomLine {
+    /// Vị trí dòng thành phẩm trong `items` — tách được 2 dòng cùng mã hàng.
+    item_index: usize,
+    product_code: String,
+    product_name: String,
+    material_id: i64,
+    material_code: String,
+    material_name: String,
+    material_unit: String,
+    is_service: bool,
+    per_unit_qty: f64,
+    finished_qty: f64,
+    quantity: f64,
+    unit_price: f64,
+    amount: f64,
+    warehouse_code: String,
+}
+
+/// Đọc định mức hiện hành của mọi thành phẩm trong phiếu nhập sản xuất.
+///
+/// Dịch vụ (nhân công…) vẫn được chụp để đủ bảng thành phần và tính giá trị
+/// lô theo đơn giá khai, nhưng không tham gia trừ tồn kho.
+async fn load_production_bom_lines(
     tx: &mut SqliteTransaction<'_>,
-    posting_date: &str,
-    pn_voucher_no: &str,
-    warehouse_code: &str,
-    unit_code: &str,
-    cost_account: &str,
     items: &[InboundItemInput],
-) -> Result<String, String> {
-    // 1) Gom NVL cần cho từng mặt hàng của phiếu.
-    //    (id, mã, tên, số lượng cần) — thứ tự theo mã vật tư cho số liệu ổn định.
-    let mut needs: Vec<(i64, String, String, f64)> = Vec::new();
-    for item in items {
+    warehouse_code: &str,
+) -> Result<Vec<ProductionBomLine>, String> {
+    let mut out = Vec::new();
+    for (item_index, item) in items.iter().enumerate() {
         if !item.quantity.is_finite() || item.quantity <= 0.0 {
             continue;
         }
-        let product_id = resolve_product(tx, &item.product_code).await?.id;
+        let product = resolve_product(tx, &item.product_code).await?;
         let rows = sqlx::query!(
-            // Dịch vụ (nhân công…) vẫn nằm trong định mức để báo giá/hợp đồng
-            // nhưng KHÔNG có tồn kho → bỏ qua khi tự xuất NVL.
-            "SELECT b.material_product_id, m.code, m.name, b.quantity
-               FROM product_bom_item b
-               JOIN product m ON m.id = b.material_product_id
-              WHERE b.product_id = ? AND m.is_service = 0",
-            product_id
+            r#"SELECT m.id as "id!", m.code as "code!", m.name as "name!",
+                      m.unit as "unit!", m.is_service as "is_service: bool",
+                      b.quantity, b.unit_price
+                 FROM product_bom_item b
+                 JOIN product m ON m.id = b.material_product_id
+                WHERE b.product_id = ?
+                ORDER BY m.code"#,
+            product.id
         )
         .fetch_all(&mut **tx)
         .await
         .map_err(|e| e.to_string())?;
         for r in rows {
             // Làm tròn 6 chữ số thập phân — nhân float hay dính nhiễu (0.1×3).
-            let add = (r.quantity * item.quantity * 1e6).round() / 1e6;
-            match needs
-                .iter_mut()
-                .find(|(id, ..)| *id == r.material_product_id)
-            {
-                Some(n) => n.3 += add,
-                None => needs.push((r.material_product_id, r.code, r.name, add)),
+            let quantity = (r.quantity * item.quantity * 1e6).round() / 1e6;
+            if quantity <= 0.0 {
+                continue;
             }
+            out.push(ProductionBomLine {
+                item_index,
+                product_code: item.product_code.clone(),
+                product_name: product.name.clone(),
+                material_id: r.id,
+                material_code: r.code,
+                material_name: r.name,
+                material_unit: r.unit,
+                is_service: r.is_service,
+                per_unit_qty: r.quantity,
+                finished_qty: item.quantity,
+                quantity,
+                unit_price: r.unit_price,
+                amount: round2(quantity * r.unit_price),
+                warehouse_code: warehouse_code.to_string(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Ghi snapshot thành phần của lô vào DB (xoá bản cũ nếu phiếu được ghi đè).
+async fn snapshot_production_components(
+    tx: &mut SqliteTransaction<'_>,
+    inbound_id: i64,
+    lines: &[ProductionBomLine],
+) -> Result<(), String> {
+    sqlx::query!(
+        "DELETE FROM production_lot_component WHERE inbound_voucher_id = ?",
+        inbound_id
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    for l in lines {
+        sqlx::query!(
+            "INSERT INTO production_lot_component
+                (inbound_voucher_id, product_code, product_name, material_id,
+                 material_code, material_name, material_unit, is_service,
+                 per_unit_qty, finished_qty, quantity, unit_price, amount, warehouse_code)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            inbound_id,
+            l.product_code,
+            l.product_name,
+            l.material_id,
+            l.material_code,
+            l.material_name,
+            l.material_unit,
+            l.is_service,
+            l.per_unit_qty,
+            l.finished_qty,
+            l.quantity,
+            l.unit_price,
+            l.amount,
+            l.warehouse_code
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Đơn giá thành phẩm theo đơn giá KHAI trên từng dòng định mức của MỘT dòng
+/// phiếu: Σ thành tiền khai ÷ sản lượng dòng. Gồm cả dịch vụ (nhân công) vì
+/// đó cũng là một phần giá trị lô. Trả `None` khi chưa khai giá (tổng = 0) để
+/// caller giữ đơn giá người dùng nhập (tương thích dữ liệu cũ).
+fn declared_unit_price(
+    lines: &[ProductionBomLine],
+    item_index: usize,
+    quantity: f64,
+) -> Option<f64> {
+    if quantity <= 0.0 {
+        return None;
+    }
+    let total: f64 = lines
+        .iter()
+        .filter(|l| l.item_index == item_index)
+        .map(|l| l.amount)
+        .sum();
+    if total <= 0.0 {
+        return None;
+    }
+    Some(total / quantity)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn issue_materials_by_bom(
+    tx: &mut SqliteTransaction<'_>,
+    inbound_id: i64,
+    posting_date: &str,
+    pn_voucher_no: &str,
+    warehouse_code: &str,
+    unit_code: &str,
+    cost_account: &str,
+    lines: &[ProductionBomLine],
+) -> Result<String, String> {
+    // 1) Gom NVL cần cho từng mặt hàng của phiếu.
+    //    (id, mã, tên, số lượng cần) — thứ tự theo mã vật tư cho số liệu ổn định.
+    let mut needs: Vec<(i64, String, String, f64)> = Vec::new();
+    for line in lines.iter().filter(|l| !l.is_service) {
+        match needs.iter_mut().find(|(id, ..)| *id == line.material_id) {
+            Some(n) => n.3 = ((n.3 + line.quantity) * 1e6).round() / 1e6,
+            None => needs.push((
+                line.material_id,
+                line.material_code.clone(),
+                line.material_name.clone(),
+                line.quantity,
+            )),
         }
     }
     needs.retain(|n| n.3 > 0.0);
@@ -212,6 +346,7 @@ async fn issue_materials_by_bom(
             .await
             .map_err(|e| e.to_string())?;
         }
+        let avg_cost = cogs / need;
         insert_journal_entry(
             tx,
             posting_date,
@@ -222,7 +357,7 @@ async fn issue_materials_by_bom(
             "",
             "",
             *need,
-            cogs / need,
+            avg_cost,
             round2(cogs),
             cost_account,
             "152",
@@ -235,6 +370,20 @@ async fn issue_materials_by_bom(
             0.0,
         )
         .await?;
+        // Giá vốn FIFO thực tế của phần NVL đã xuất → lưu vào snapshot của lô
+        // để màn thành phần đối chiếu được giá khai và giá vốn.
+        sqlx::query!(
+            "UPDATE production_lot_component
+                SET unit_cost = ?, cost_amount = ROUND(quantity * ?, 2)
+              WHERE inbound_voucher_id = ? AND material_code = ? AND is_service = 0",
+            avg_cost,
+            avg_cost,
+            inbound_id,
+            code
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     Ok(px_no)
 }
@@ -461,6 +610,17 @@ pub(crate) async fn save_inbound_core_tx(
     .await
     .map_err(|e| e.to_string())?;
 
+    // Chụp định mức hiện hành NGAY khi lưu lô sản xuất. Bảng định mức được sửa
+    // tự do, nhưng thành phần của lô đã sản xuất phải giữ nguyên để đối chiếu.
+    // Phiếu được ghi đè (overwrite) thì xoá snapshot cũ trước khi chụp lại.
+    let production_lines = if inbound_type == "production" {
+        let lines = load_production_bom_lines(&mut *tx, items, warehouse_code).await?;
+        snapshot_production_components(&mut *tx, inbound_header_id, &lines).await?;
+        lines
+    } else {
+        Vec::new()
+    };
+
     // TK mặc định theo loại nhập (rỗng → mặc định):
     //   purchase  → Nợ 152 (hàng hóa) / Có 331 (phải trả người bán)
     //   production→ Nợ 155 (thành phẩm) / Có 154 (chi phí SXKD dở dang)
@@ -500,10 +660,19 @@ pub(crate) async fn save_inbound_core_tx(
         format!("Theo chứng từ: {} · {}", reference_no.trim(), note)
     };
 
-    for item in items {
+    for (item_index, item) in items.iter().enumerate() {
+        // Lô sản xuất được định giá theo đơn giá KHAI trên từng thành phần định
+        // mức (kể cả dịch vụ) — không phụ thuộc giá vốn FIFO của NVL. Chưa khai
+        // giá (tổng = 0) thì giữ đơn giá người dùng nhập như trước.
+        let unit_price = if inbound_type == "production" {
+            declared_unit_price(&production_lines, item_index, item.quantity)
+                .unwrap_or(item.unit_price)
+        } else {
+            item.unit_price
+        };
         // Giá trị nhập kho = Thành tiền − Tiền CK (chiết khấu thương mại).
         // VAT đầu vào tính trên giá sau chiết khấu (CK được trừ vào giá tính thuế).
-        let gross = round2(item.quantity * item.unit_price);
+        let gross = round2(item.quantity * unit_price);
         // Tiền CK không thể vượt quá thành tiền (tránh giá trị âm). Hóa đơn
         // điều chỉnh giảm có thể có gross âm — `clamp(0, gross)` sẽ panic.
         let discount = if gross >= 0.0 {
@@ -777,12 +946,13 @@ pub(crate) async fn save_inbound_core_tx(
     if auto_bom && inbound_type == "production" {
         material_voucher = issue_materials_by_bom(
             &mut *tx,
+            inbound_header_id,
             posting_date,
             voucher_no,
             warehouse_code,
             unit_code,
             credit,
-            items,
+            &production_lines,
         )
         .await?;
     }
@@ -2466,6 +2636,68 @@ pub(crate) async fn get_production_lots(
     )
     .await?;
     Ok(json!({ "rows": rows, "total": total }).to_string())
+}
+
+/// Một thành phần đã chụp của lô sản xuất (snapshot định mức tại lúc lưu).
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub(crate) struct ProductionLotComponentRow {
+    pub product_code: String,
+    pub product_name: String,
+    pub material_code: String,
+    pub material_name: String,
+    pub material_unit: String,
+    pub is_service: bool,
+    pub per_unit_qty: f64,
+    pub finished_qty: f64,
+    pub quantity: f64,
+    pub unit_price: f64,
+    pub amount: f64,
+    pub unit_cost: f64,
+    pub cost_amount: f64,
+    pub warehouse_code: String,
+}
+
+pub(crate) async fn production_lot_components_core(
+    pool: &SqlitePool,
+    voucher_no: &str,
+) -> Result<Vec<ProductionLotComponentRow>, String> {
+    sqlx::query_as!(
+        ProductionLotComponentRow,
+        r#"SELECT c.product_code as "product_code!", c.product_name as "product_name!",
+                  c.material_code as "material_code!", c.material_name as "material_name!",
+                  c.material_unit as "material_unit!",
+                  c.is_service as "is_service!: bool",
+                  c.per_unit_qty as "per_unit_qty!", c.finished_qty as "finished_qty!",
+                  c.quantity as "quantity!", c.unit_price as "unit_price!",
+                  c.amount as "amount!", c.unit_cost as "unit_cost!",
+                  c.cost_amount as "cost_amount!", c.warehouse_code as "warehouse_code!"
+             FROM production_lot_component c
+             JOIN inbound_voucher iv ON iv.id = c.inbound_voucher_id
+            WHERE iv.voucher_no = ?
+            ORDER BY c.product_code, c.is_service, c.material_code"#,
+        voucher_no
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Bảng thành phần của 1 lô sản xuất — snapshot tại thời điểm tạo lô, không
+/// đọc lại định mức hiện hành (định mức có thể đã bị sửa).
+#[tauri::command]
+pub(crate) async fn get_production_lot_components(
+    state: State<'_, AppState>,
+    voucher_no: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    if voucher_no.trim().is_empty() {
+        return Err("Thiếu số phiếu lô".into());
+    }
+    let rows = {
+        let pool = state.pool.read().await;
+        production_lot_components_core(&pool, voucher_no.trim()).await?
+    };
+    Ok(serde_json::to_string(&rows).unwrap_or_default())
 }
 
 /// Chi tiết 1 chứng từ theo số phiếu — phục vụ in PNK (mẫu 01-VT) / PXK (mẫu 02-VT).
@@ -4735,6 +4967,126 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(v["revenue_up"].as_f64().unwrap(), 0.0);
+
+        // Snapshot thành phần: chụp cả NVL lẫn dịch vụ, kèm giá vốn FIFO thật.
+        let comps = production_lot_components_core(&pool, "PNK-BOM")
+            .await
+            .unwrap();
+        assert_eq!(comps.len(), 2);
+        let nvl = comps.iter().find(|c| c.material_code == "NVL1").unwrap();
+        assert!(!nvl.is_service);
+        assert_eq!(nvl.per_unit_qty, 2.0);
+        assert_eq!(nvl.finished_qty, 10.0);
+        assert_eq!(nvl.quantity, 20.0);
+        assert_eq!(nvl.unit_cost, 5_000.0);
+        assert_eq!(nvl.cost_amount, 100_000.0);
+        let svc_row = comps.iter().find(|c| c.material_code == "DV1").unwrap();
+        assert!(svc_row.is_service);
+        assert_eq!(svc_row.quantity, 30.0);
+        assert_eq!(svc_row.unit_cost, 0.0);
+        assert_eq!(svc_row.cost_amount, 0.0);
+    }
+
+    /// Lô sản xuất định giá theo đơn giá KHAI trên định mức (kể cả dịch vụ),
+    /// không lấy giá vốn FIFO; và snapshot không đổi khi định mức bị sửa sau.
+    #[tokio::test]
+    async fn lo_san_xuat_dinh_gia_theo_don_gia_khai_va_giu_snapshot() {
+        let pool = test_pool().await;
+        let (tp, _nvl) = seed_bom(&pool, 100.0).await;
+        sqlx::query!(
+            "UPDATE product_bom_item SET unit_price = 6000 WHERE product_id = ?",
+            tp
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let svc = seed_product(&pool, "DV1", "Nhân công", 0.0).await;
+        sqlx::query!("UPDATE product SET is_service = 1 WHERE id = ?", svc)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query!(
+            "INSERT INTO product_bom_item (product_id, material_product_id, quantity, unit_price)
+             VALUES (?, ?, 3.0, 2000)",
+            tp,
+            svc
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Đơn giá nhập tay 8.000 bị thay bằng định mức: 2×6.000 + 3×2.000 = 18.000/SP.
+        let r = save_inbound_core(
+            &pool,
+            "2026-03-15",
+            "PNK-KHAI",
+            "Nhập thành phẩm theo giá khai",
+            "",
+            "W1",
+            "HKD",
+            &[inp("TP1", 10.0, 8_000.0)],
+            "",
+            "production",
+            "",
+            0.0,
+            "155",
+            "154",
+            false,
+            "",
+            true,
+        )
+        .await
+        .expect("nhập sản xuất theo giá khai");
+
+        assert_eq!(r.total, 180_000.0);
+        assert_eq!(
+            scalar_f64(
+                &pool,
+                "SELECT total FROM inbound_voucher WHERE voucher_no = 'PNK-KHAI'"
+            )
+            .await,
+            180_000.0
+        );
+        // Bút toán nhập thành phẩm cũng dùng đơn giá khai, không dùng 8.000.
+        let pn = sqlx::query!(
+            "SELECT unit_price, amount FROM journal_entry
+              WHERE voucher_no = 'PNK-KHAI' AND entry_type = 'PN'"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pn.unit_price, 18_000.0);
+        assert_eq!(pn.amount, 180_000.0);
+
+        let comps = production_lot_components_core(&pool, "PNK-KHAI")
+            .await
+            .unwrap();
+        let nvl = comps.iter().find(|c| c.material_code == "NVL1").unwrap();
+        assert_eq!(nvl.unit_price, 6_000.0);
+        assert_eq!(nvl.amount, 120_000.0);
+        assert_eq!(nvl.unit_cost, 5_000.0);
+        assert_eq!(nvl.cost_amount, 100_000.0);
+        let svc_row = comps.iter().find(|c| c.material_code == "DV1").unwrap();
+        assert!(svc_row.is_service);
+        assert_eq!(svc_row.unit_price, 2_000.0);
+        assert_eq!(svc_row.amount, 60_000.0);
+
+        // Sửa định mức sau khi lưu → snapshot của lô cũ phải giữ nguyên.
+        sqlx::query!(
+            "UPDATE product_bom_item SET quantity = 9.0, unit_price = 1.0 WHERE product_id = ?",
+            tp
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let again = production_lot_components_core(&pool, "PNK-KHAI")
+            .await
+            .unwrap();
+        let nvl_again = again.iter().find(|c| c.material_code == "NVL1").unwrap();
+        assert_eq!(nvl_again.per_unit_qty, 2.0);
+        assert_eq!(nvl_again.unit_price, 6_000.0);
+        assert_eq!(nvl_again.quantity, 20.0);
+        assert_eq!(nvl_again.amount, 120_000.0);
     }
 
     #[tokio::test]

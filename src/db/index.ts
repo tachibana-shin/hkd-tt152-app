@@ -61,6 +61,7 @@ import type {
   StockLot,
   JournalEntryRow,
   ProductionLotRow,
+  ProductionLotComponentRow,
   StockVoucherRow,
   LedgerRow,
   Invoice,
@@ -1302,6 +1303,15 @@ export const api = {
         fromDate,
         toDate,
       }),
+    ),
+
+  /**
+   * Snapshot thành phần của 1 lô sản xuất (định mức + đơn giá tại lúc tạo lô).
+   * Không đọc lại định mức hiện hành — xem `ProductionLotComponentRow`.
+   */
+  getProductionLotComponents: async (voucherNo: string) =>
+    parse<ProductionLotComponentRow[]>(
+      await call<string>("get_production_lot_components", { voucherNo }),
     ),
 
   // ─── ĐĂNG NHẬP / PHÂN QUYỀN ───

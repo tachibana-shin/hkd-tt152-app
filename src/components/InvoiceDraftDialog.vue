@@ -22,7 +22,7 @@ import { fmtInt as fmt, parseIsoDate, toIsoDate } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ editInvoice?: Invoice | null }>();
-const emit = defineEmits<{ done: [] }>();
+const emit = defineEmits<{ done: []; "lots-changed": [] }>();
 
 const auth = useAuthStore();
 const business = useBusinessStore();
@@ -59,8 +59,12 @@ const form = reactive({
 });
 
 const isEdit = computed(() => editingId.value !== null);
+/** Đã chép sang dịch vụ HĐĐT khác nhưng chưa phát hành — vẫn sửa được (issue #9). */
+const isExportedEdit = computed(() => props.editInvoice?.status === "exported");
 const header = computed(() =>
-  isEdit.value ? `Sửa hóa đơn nháp ${form.number}` : "Lập hóa đơn bán hàng (nháp)",
+  isEdit.value
+    ? `Sửa hóa đơn ${isExportedEdit.value ? "chờ phát hành" : "nháp"} ${form.number}`
+    : "Lập hóa đơn bán hàng (nháp)",
 );
 const actionLabel = computed(() => (isEdit.value ? "Lưu thay đổi" : "Lập hóa đơn"));
 
@@ -229,6 +233,9 @@ async function onLotDone(payload: { voucherNo: string; productCode: string }) {
     // Nạp lại lỗi vẫn gắn hàng được — popup thiếu tồn sẽ báo khi lưu.
     toast.add({ severity: "warn", summary: "Không làm mới được tồn kho", detail: String(e) });
   }
+  // Tồn đã đổi nên bảng bên ngoài phải soi lại, nếu không dòng vừa tạo lô vẫn
+  // đỏ "thiếu tồn kho" tới khi rời màn (issue #9).
+  emit("lots-changed");
   // Lô tạo từ gợi ý (hàng ĐANG đứng trên hóa đơn) → nạp tồn xong là dòng tự
   // hết cảnh báo; thêm dòng mới nữa sẽ trùng hàng trên cùng hóa đơn.
   if (form.items.some((it) => it.product_code === payload.productCode)) return;
@@ -575,9 +582,9 @@ async function save() {
     // tin điện tử) — nhưng phải hỏi trước; ghi số HĐĐT sau này vẫn bị chặn.
     confirm.require({
       header: "Tồn kho đang thiếu",
-      message: `${missing.join("; ")}. Vẫn lưu nháp? Hóa đơn nháp lưu được, nhưng đến lúc ghi số HĐĐT sẽ bị chặn nếu vẫn thiếu kho.`,
+      message: `${missing.join("; ")}. Vẫn lưu? Hóa đơn vẫn lưu được, nhưng đến lúc ghi số HĐĐT sẽ bị chặn nếu vẫn thiếu kho — mở form tạo lô sản xuất nếu hàng có định mức.`,
       icon: "pi pi-exclamation-triangle",
-      acceptLabel: "Vẫn lưu nháp",
+      acceptLabel: isExportedEdit.value ? "Vẫn lưu" : "Vẫn lưu nháp",
       rejectLabel: "Quay lại",
       accept: async () => {
         await persist(rows);

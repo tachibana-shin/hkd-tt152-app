@@ -1500,7 +1500,13 @@ test("Hóa đơn: ghi số HĐĐT thiếu tồn thì chặn, đủ tồn chưa c
   await dlg.getByLabel("Số HĐĐT").fill("00009600");
   await dlg.getByRole("button", { name: "Lưu" }).click();
   await expect(dlg, "thiếu tồn thì không ghi số được").toBeVisible();
-  await expect(page.locator(".p-toast-message").last()).toContainText("Không đủ tồn kho");
+  // Hộp thoại soi tồn ngay khi mở: liệt kê hàng thiếu tại chỗ (issue #9), nên
+  // không cần chờ backend trả lỗi mới biết.
+  const shortage = dlg.getByTestId("link-shortage");
+  await expect(shortage, "bảng thiếu tồn hiện ngay trong hộp thoại").toBeVisible();
+  await expect(shortage).toContainText("Hàng không còn tồn");
+  await expect(shortage).toContainText("thiếu 5");
+  await expect(page.locator(".p-toast-message").last()).toContainText("Còn thiếu tồn kho");
   await expect(row.getByText("⚠ chưa có")).toHaveCount(0);
   await expect(row.getByText("—", { exact: true }).first()).toBeVisible();
   await dlg.getByRole("button", { name: "Đóng" }).click();
@@ -5913,10 +5919,11 @@ test("Lô sản xuất: xem NVL theo định mức rồi tạo lô tự xuất v
   await expect(preview.getByText(/Nhôm LSX \(NVL-LSX1\)/)).toBeVisible();
   await expect(preview.getByText("15", { exact: true }), "SL cần = 3 × 5").toBeVisible();
   await expect(preview.getByText("40", { exact: true }), "tồn nhôm trước khi xuất").toBeVisible();
-  // Giá thành = 15 cây × 100.000 đ.
-  await expect(dlg.getByText(/Giá thành ước tính/)).toContainText("1.500.000 đ");
-  // Đơn giá bán lấy từ định mức và thành tiền giá bán = 15 × 120.000 đ.
-  await expect(preview.getByRole("columnheader", { name: "Đơn giá bán" })).toBeVisible();
+  // Giá trị lô theo đơn giá KHAI trên định mức = 15 × 120.000 đ; giá vốn FIFO
+  // của NVL chỉ hiện để đối chiếu = 15 × 100.000 đ.
+  await expect(dlg.getByText(/Giá trị nhập:/)).toContainText("1.800.000 đ");
+  await expect(dlg.getByText(/Giá vốn FIFO:/)).toContainText("1.500.000 đ");
+  await expect(preview.getByRole("columnheader", { name: "Đơn giá khai" })).toBeVisible();
   await expect(preview.getByText("120.000 đ")).toBeVisible();
   await expect(preview.getByText("1.800.000 đ")).toBeVisible();
 
@@ -5925,8 +5932,42 @@ test("Lô sản xuất: xem NVL theo định mức rồi tạo lô tự xuất v
   await expect(dlg).toBeHidden();
   await expect(page.locator(".p-toast-summary").last()).toContainText(/Đã tạo lô PN\d+/);
 
-  // Lô vào danh sách…
-  await expect(page.getByTestId("production-lots-table").getByText(/Bàn nhôm LSX/)).toBeVisible();
+  // Lô vào danh sách, "Giá trị nhập" = đơn giá khai 15 × 120.000 đ (không phải
+  // giá vốn FIFO 15 × 100.000 đ).
+  const lotRow = page
+    .getByTestId("production-lots-table")
+    .locator("tbody tr", { hasText: "Bàn nhôm LSX" });
+  await expect(lotRow).toBeVisible();
+  await expect(lotRow).toContainText("1.800.000 đ");
+
+  // Mở "Xem lô" → phiếu nhập hiện LUÔN bảng thành phần đã chụp của lô (vật tư,
+  // SL, đơn giá khai, thành tiền, tiền vốn FIFO), không phải mở hộp thoại khác.
+  await lotRow.getByRole("button", { name: "Xem lô sản xuất" }).click();
+  const lotDlg = page.getByRole("dialog");
+  await expect(lotDlg).toContainText("PHIẾU NHẬP KHO");
+  await expect(lotDlg).toContainText("Thành phần lô sản xuất");
+  const compRow = lotDlg.getByTestId("lot-components-table").locator("tbody tr").first();
+  await expect(compRow).toContainText("Nhôm LSX (NVL-LSX1)");
+  await expect(compRow).toContainText("15"); // SL cần = định mức 3 × sản lượng 5
+  await expect(compRow).toContainText("120.000 đ"); // đơn giá khai
+  await expect(compRow).toContainText("1.800.000 đ"); // thành tiền theo giá khai
+  await expect(compRow).toContainText("1.500.000 đ"); // tiền vốn FIFO
+  await lotDlg.getByRole("button", { name: "Đóng" }).click();
+
+  // Sửa định mức SAU khi tạo lô → snapshot của lô cũ không được đổi.
+  const bomEdit = await request.post("/api/save_product_bom", {
+    data: {
+      productCode: "SP-LSX1",
+      items: [{ material_code: "NVL-LSX1", quantity: 9, unit_price: 1 }],
+    },
+  });
+  expect(bomEdit.ok(), `save_product_bom sau lô: ${await bomEdit.text()}`).toBe(true);
+  await lotRow.getByRole("button", { name: "Xem lô sản xuất" }).click();
+  await expect(compRow).toContainText("Nhôm LSX (NVL-LSX1)");
+  await expect(compRow).toContainText("1.800.000 đ");
+  await expect(compRow).toContainText("120.000 đ");
+  await expect(compRow).not.toContainText("9");
+  await lotDlg.getByRole("button", { name: "Đóng" }).click();
 
   // …và vật tư đã tự trừ: 40 − 15 = 25.
   const inv = (await (

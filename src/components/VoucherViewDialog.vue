@@ -2,16 +2,20 @@
 /**
  * Xem 1 phiếu nhập kho / phiếu xuất kho (chỉ đọc).
  *
- * Dùng chung cho: danh sách Nhập kho, danh sách Xuất kho và màn Đồng bộ HĐĐT
- * (bấm vào số `PN…` trong cột "Phiếu nhập"). Dữ liệu lấy từ `get_voucher` — cùng
- * nguồn với màn in nên số tiền/đơn giá luôn khớp chứng từ gốc.
+ * Dùng chung cho: danh sách Nhập kho, danh sách Xuất kho, màn Đồng bộ HĐĐT
+ * (bấm vào số `PN…` trong cột "Phiếu nhập") và màn Lô sản xuất. Dữ liệu lấy từ
+ * `get_voucher` — cùng nguồn với màn in nên số tiền/đơn giá luôn khớp chứng từ.
+ *
+ * `with-components`: lô sản xuất hiện kèm bảng thành phần đã chụp (vật tư, SL,
+ * đơn giá khai, thành tiền, tiền vốn FIFO) ngay trong phiếu — không cần mở
+ * thêm hộp thoại khác.
  */
 import { api } from "@/db";
-import type { VoucherRow } from "@/types";
-import { fmtInt as fmt, fmtVnd as money } from "@/utils/format";
+import type { ProductionLotComponentRow, VoucherRow } from "@/types";
+import { fmtDec, fmtInt as fmt, fmtVnd as money } from "@/utils/format";
 
 const visible = defineModel<boolean>("visible", { default: false });
-const props = defineProps<{ voucherNo: string }>();
+const props = defineProps<{ voucherNo: string; withComponents?: boolean }>();
 
 const toast = useToast();
 const router = useRouter();
@@ -52,6 +56,17 @@ const netTotal = computed(() => grossTotal.value - discountTotal.value);
 /** Phiếu nào có dòng hàng mang % GTGT riêng (hóa đơn mua đa thuế suất) mới hiện cột. */
 const hasVatRows = computed(() => lines.value.some((r) => r.vat_rate > 0));
 
+// ─── Lô sản xuất: thành phần đã chụp lúc tạo (SL + đơn giá khai + vốn FIFO) ───
+const components = ref<ProductionLotComponentRow[]>([]);
+const componentsLoading = ref(false);
+const componentsError = ref("");
+const componentTotal = computed(() => components.value.reduce((s, r) => s + r.amount, 0));
+const componentCost = computed(() => components.value.reduce((s, r) => s + r.cost_amount, 0));
+const componentHasMultipleProducts = computed(
+  () => new Set(components.value.map((r) => r.product_code)).size > 1,
+);
+const componentHasService = computed(() => components.value.some((r) => r.is_service));
+
 /** "YYYY-MM-DD" → "dd/MM/yyyy" (ngày lập phiếu trong DB là ngày, không cần giờ). */
 const postingDate = computed(() => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(first.value?.posting_date ?? "");
@@ -73,6 +88,8 @@ watch(
     loading.value = true;
     errorMsg.value = "";
     rows.value = [];
+    components.value = [];
+    componentsError.value = "";
     invoiceDetail.value = "";
     try {
       rows.value = await api.getVoucher(no);
@@ -81,6 +98,16 @@ watch(
       toast.add({ severity: "error", summary: "Không xem được phiếu", detail: String(e) });
     } finally {
       loading.value = false;
+    }
+    if (props.withComponents) {
+      componentsLoading.value = true;
+      try {
+        components.value = await api.getProductionLotComponents(no);
+      } catch (e) {
+        componentsError.value = String(e);
+      } finally {
+        componentsLoading.value = false;
+      }
     }
     // Hỏi thêm hóa đơn đã gắn (phiếu nhập tay / phiếu xuất không có → lỗi và
     // ẩn nút, không báo toast vì đây chỉ là tính năng bổ sung).
@@ -98,7 +125,7 @@ watch(
   <AppDialog
     v-model:visible="visible"
     :header="`${title} · ${formNo}`"
-    width="max-w-4xl"
+    :width="withComponents ? 'max-w-6xl' : 'max-w-4xl'"
     cancel-label="Đóng"
     action-label="In phiếu"
     action-icon="pi pi-print"
@@ -213,6 +240,66 @@ watch(
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <!-- Lô sản xuất: bảng thành phần đã chụp — vật tư, SL, đơn giá khai, tiền
+           vốn FIFO — hiện ngay trong phiếu để khỏi mở thêm hộp thoại khác. -->
+      <div v-if="withComponents" class="space-y-2" data-testid="lot-components">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <span class="text-sm font-semibold">Thành phần lô sản xuất</span>
+          <span v-if="components.length" class="text-xs text-gray-500">
+            Giá trị nhập theo định mức:
+            <b class="text-emerald-700">{{ money(componentTotal) }}</b>
+            · Tiền vốn FIFO NVL: <b>{{ money(componentCost) }}</b>
+          </span>
+        </div>
+        <p v-if="componentsLoading" class="text-xs text-gray-500">
+          <i class="pi pi-spin pi-spinner mr-1" />Đang nạp thành phần…
+        </p>
+        <p v-else-if="componentsError" class="text-xs text-red-600">{{ componentsError }}</p>
+        <div v-else-if="components.length" class="overflow-x-auto rounded border border-gray-200">
+          <table class="w-full text-sm" data-testid="lot-components-table">
+            <thead class="bg-gray-50 text-xs text-gray-500">
+              <tr>
+                <th class="px-2 py-1 text-left">Vật tư / dịch vụ</th>
+                <th class="w-14 px-2 py-1 text-left">ĐVT</th>
+                <th v-if="componentHasMultipleProducts" class="px-2 py-1 text-left">Thành phẩm</th>
+                <th class="w-24 px-2 py-1 text-right">Định mức/SP</th>
+                <th class="w-24 px-2 py-1 text-right">SL cần</th>
+                <th class="w-28 px-2 py-1 text-right">Đơn giá khai</th>
+                <th class="w-32 px-2 py-1 text-right">Thành tiền</th>
+                <th class="w-32 px-2 py-1 text-right">Tiền vốn FIFO</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(r, i) in components" :key="i" class="border-t border-gray-100">
+                <td class="px-2 py-1">
+                  {{ r.material_name }} ({{ r.material_code }})
+                  <Tag v-if="r.is_service" value="Dịch vụ" severity="warn" class="ml-1" />
+                </td>
+                <td class="px-2 py-1">{{ r.material_unit }}</td>
+                <td v-if="componentHasMultipleProducts" class="px-2 py-1">
+                  {{ r.product_name }} ({{ r.product_code }})
+                </td>
+                <td class="px-2 py-1 text-right">{{ fmtDec(r.per_unit_qty) }}</td>
+                <td class="px-2 py-1 text-right">{{ fmtDec(r.quantity) }}</td>
+                <td class="px-2 py-1 text-right">{{ money(r.unit_price) }}</td>
+                <td class="px-2 py-1 text-right font-medium">{{ money(r.amount) }}</td>
+                <td class="px-2 py-1 text-right">
+                  <span v-if="r.is_service" class="text-gray-400">—</span>
+                  <span v-else>{{ money(r.cost_amount) }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="text-xs text-gray-500">
+          Lô này chưa có snapshot thành phần (tạo trước bản cập nhật).
+        </p>
+        <p v-if="componentHasService" class="text-xs text-gray-400">
+          Dòng “Dịch vụ” chỉ tính vào giá trị lô theo đơn giá khai — không có tồn kho nên không trừ
+          kho. NVL thật đã trừ FIFO khi lưu lô.
+        </p>
       </div>
 
       <div v-if="first.note" class="text-xs text-gray-500">Ghi chú: {{ first.note }}</div>

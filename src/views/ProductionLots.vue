@@ -3,11 +3,11 @@
  * Lô sản xuất — danh sách + tạo lô thành phẩm từ định mức vật tư.
  *
  * 1 lô = 1 phiếu nhập kho loại `production`: chọn thành phẩm + sản lượng, app
- * hiện trước NVL = định mức × sản lượng (kèm tồn kho của kho đang chọn) và giá
- * thành ước tính = Σ (NVL × giá vốn FIFO trong kho đó). Lưu gọi `save_inbound`
- * với `inbound_type: production` + `autoBom: true` → backend trừ tồn NVL và tự
- * sinh phiếu xuất NVL (Nợ 154 / Có 152) trong CÙNG transaction; thiếu tồn thì
- * cả lô không được lưu.
+ * hiện trước thành phần = định mức × sản lượng (kèm tồn kho của kho đang chọn).
+ * Giá trị nhập kho lấy theo đơn giá KHAI trên từng dòng định mức; lưu gọi
+ * `save_inbound` với `inbound_type: production` + `autoBom: true` → backend
+ * chụp snapshot thành phần, trừ tồn NVL và tự sinh phiếu xuất NVL (Nợ 154 /
+ * Có 152) trong CÙNG transaction; thiếu tồn thì cả lô không được lưu.
  *
  * Danh sách đọc đầu phiếu nhập loại `production` (lệnh `get_production_lots`)
  * — màn Nhập kho vẫn hiện đủ mọi phiếu nhập như trước. Form tạo lô nằm ở
@@ -52,7 +52,8 @@ function loadLots() {
   return page.setKeyword(f.search.trim());
 }
 
-// ─── Xem phiếu (chỉ đọc) — dùng chung VoucherViewDialog ───
+// ─── Xem phiếu (chỉ đọc) — dùng chung VoucherViewDialog, kèm bảng thành phần
+// đã chụp của lô (SL + đơn giá khai + tiền vốn FIFO) hiện ngay trong phiếu. ───
 const viewVoucherNo = ref("");
 const viewVoucherVisible = ref(false);
 
@@ -126,7 +127,7 @@ useKeepAliveRefresh(reload);
           :global-filter-fields="['voucher_no', 'products', 'description']"
           stripedRows
           actions-header="Thao tác"
-          actions-width="80"
+          actions-width="64"
           @page="page.onPage"
           @sort="page.onSort"
         >
@@ -137,7 +138,7 @@ useKeepAliveRefresh(reload);
                 link
                 class="!p-0 text-sm"
                 :aria-label="`Xem lô ${data.voucher_no}`"
-                v-tooltip="'Xem chi tiết dòng hàng của lô'"
+                v-tooltip="'Xem phiếu + thành phần, số lượng, giá tiền của lô'"
                 @click="openVoucher(data.voucher_no)"
               />
             </template>
@@ -164,7 +165,7 @@ useKeepAliveRefresh(reload);
                 text
                 rounded
                 aria-label="Xem lô sản xuất"
-                v-tooltip="'Xem chi tiết dòng hàng của lô'"
+                v-tooltip="'Xem phiếu + thành phần, số lượng, giá tiền của lô'"
                 @click="openVoucher(data.voucher_no)"
               />
             </div>
@@ -181,7 +182,11 @@ useKeepAliveRefresh(reload);
 
     <ProductionLotDialog v-model:visible="dialog" @done="onLotCreated" />
 
-    <!-- Xem lô (chỉ đọc) — dùng chung popup phiếu nhập / xuất -->
-    <VoucherViewDialog v-model:visible="viewVoucherVisible" :voucher-no="viewVoucherNo" />
+    <!-- Xem lô (chỉ đọc) — phiếu nhập + bảng thành phần đã chụp của lô -->
+    <VoucherViewDialog
+      v-model:visible="viewVoucherVisible"
+      :voucher-no="viewVoucherNo"
+      with-components
+    />
   </div>
 </template>

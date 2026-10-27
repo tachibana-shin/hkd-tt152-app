@@ -557,14 +557,21 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                   :disabled="data.error_count > 0"
                   @click="openExport(data.invoice)"
                 />
+                <!-- Đã chép nhưng chưa phát hành/chưa xuất kho → vẫn sửa dòng hàng
+                     được (gồm tạo nhanh lô sản xuất) — issue #9. -->
                 <Button
-                  v-if="data.invoice.status === 'draft'"
+                  v-if="
+                    data.invoice.status === 'draft' ||
+                    (data.invoice.status === 'exported' &&
+                      !(data.invoice.voucher_no ?? '').trim() &&
+                      !data.invoice.e_invoice_no)
+                  "
                   icon="pi pi-file-edit"
                   text
                   rounded
                   size="small"
-                  aria-label="Sửa hóa đơn nháp"
-                  v-tooltip="'Sửa hóa đơn nháp'"
+                  aria-label="Sửa hóa đơn"
+                  v-tooltip="'Sửa hóa đơn (dòng hàng + tạo nhanh lô sản xuất)'"
                   severity="secondary"
                   @click="openDraft(data.invoice)"
                 />
@@ -628,7 +635,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       :invoice="headerEditTarget"
       @done="load"
     />
-    <InvoiceDraftDialog v-model:visible="draftVisible" :edit-invoice="draftTarget" @done="load" />
+    <InvoiceDraftDialog
+      v-model:visible="draftVisible"
+      :edit-invoice="draftTarget"
+      @done="load"
+      @lots-changed="loadShortages"
+    />
     <InvoicePdfDialog v-model:visible="pdfVisible" :detail-json="pdfDetail" :title="pdfTitle" />
   </div>
 </template>

@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.product_code as \"product_code!\", c.product_name as \"product_name!\",\n                  c.material_code as \"material_code!\", c.material_name as \"material_name!\",\n                  c.material_unit as \"material_unit!\",\n                  c.is_service as \"is_service!: bool\",\n                  c.per_unit_qty as \"per_unit_qty!\", c.finished_qty as \"finished_qty!\",\n                  c.quantity as \"quantity!\", c.unit_price as \"unit_price!\",\n                  c.amount as \"amount!\", c.unit_cost as \"unit_cost!\",\n                  c.cost_amount as \"cost_amount!\", c.warehouse_code as \"warehouse_code!\"\n             FROM production_lot_component c\n             JOIN inbound_voucher iv ON iv.id = c.inbound_voucher_id\n            WHERE iv.voucher_no = ?\n            ORDER BY c.product_code, c.is_service, c.material_code",
+  "describe": {
+    "columns": [
+      {
+        "name": "product_code!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "product_name!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "material_code!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "material_name!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "material_unit!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_service!: bool",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "per_unit_qty!",
+        "ordinal": 6,
+        "type_info": "Float"
+      },
+      {
+        "name": "finished_qty!",
+        "ordinal": 7,
+        "type_info": "Float"
+      },
+      {
+        "name": "quantity!",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price!",
+        "ordinal": 9,
+        "type_info": "Float"
+      },
+      {
+        "name": "amount!",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_cost!",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "cost_amount!",
+        "ordinal": 12,
+        "type_info": "Float"
+      },
+      {
+        "name": "warehouse_code!",
+        "ordinal": 13,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3a26856febad41d0a03e0c3fd43039be015af694ebc194dd73ccfba0d861e913"
+}

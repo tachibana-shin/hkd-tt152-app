@@ -73,6 +73,9 @@ pub(crate) struct MockPortal {
     /// Trả 503 cho request danh sách có `search` chứa một trong các chuỗi này —
     /// mô phỏng đúng một ngày/khoảng ngày bị backend `sco-query` làm hỏng.
     pub fail_search_contains: Arc<Mutex<Vec<String>>>,
+    /// Từ chối captcha `n` lần đầu ở request danh sách máy tính tiền (có `ckey`)
+    /// → mô phỏng cổng báo "Mã captcha không đúng." để test lấy captcha mới.
+    pub captcha_reject_first: Arc<Mutex<usize>>,
     /// Nội dung `hdhhdvu` trả về cho endpoint chi tiết.
     pub detail_lines: Arc<Mutex<String>>,
 }
@@ -89,6 +92,7 @@ impl MockPortal {
         let transport_fail_first = Arc::new(Mutex::new(0));
         let fail_path_contains = Arc::new(Mutex::new(Vec::new()));
         let fail_search_contains = Arc::new(Mutex::new(Vec::new()));
+        let captcha_reject_first = Arc::new(Mutex::new(0));
         let detail_lines = Arc::new(Mutex::new(
             r#"[{"ten":"Hàng mẫu","dvtinh":"Cái","mhhdvu":"SP-MOCK","sluong":2.0,"dgia":100000.0,"stckhau":0.0,"tsuat":0.08}]"#
                 .to_string(),
@@ -100,6 +104,7 @@ impl MockPortal {
             transport_fail_first: transport_fail_first.clone(),
             fail_path_contains: fail_path_contains.clone(),
             fail_search_contains: fail_search_contains.clone(),
+            captcha_reject_first: captcha_reject_first.clone(),
             detail_lines: detail_lines.clone(),
         };
         tokio::spawn(async move {
@@ -112,9 +117,20 @@ impl MockPortal {
                 let net = transport_fail_first.clone();
                 let fail_paths = fail_path_contains.clone();
                 let fail_search = fail_search_contains.clone();
+                let reject_captcha = captcha_reject_first.clone();
                 let lines = detail_lines.clone();
                 tokio::spawn(async move {
-                    let _ = handle(socket, reqs, rl, net, fail_paths, fail_search, lines).await;
+                    let _ = handle(
+                        socket,
+                        reqs,
+                        rl,
+                        net,
+                        fail_paths,
+                        fail_search,
+                        reject_captcha,
+                        lines,
+                    )
+                    .await;
                 });
             }
         });
@@ -142,6 +158,7 @@ impl MockPortal {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle(
     mut socket: tokio::net::TcpStream,
     requests: Arc<Mutex<Vec<RecordedRequest>>>,
@@ -149,6 +166,7 @@ async fn handle(
     transport_fail_first: Arc<Mutex<usize>>,
     fail_path_contains: Arc<Mutex<Vec<String>>>,
     fail_search_contains: Arc<Mutex<Vec<String>>>,
+    captcha_reject_first: Arc<Mutex<usize>>,
     detail_lines: Arc<Mutex<String>>,
 ) -> std::io::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -215,7 +233,11 @@ async fn handle(
     }
 
     // Cắt kết nối N lần đầu (không trả response) → mô phỏng timeout/đứt mạng.
-    let drop_conn = {
+    // Bỏ qua `/api/captcha`: test retry nhắm vào endpoint danh sách, còn captcha
+    // là bước chuẩn bị (máy tính tiền) — cắt luôn sẽ làm test đo sai endpoint.
+    let drop_conn = if path == "/api/captcha" {
+        false
+    } else {
         let mut n = transport_fail_first.lock().unwrap();
         if *n > 0 {
             *n -= 1;
@@ -248,6 +270,28 @@ async fn handle(
         .await;
     }
 
+    // Cổng từ chối captcha máy tính tiền → client phải lấy ảnh mới rồi thử lại.
+    if last_query_param(&query, "ckey").is_some() {
+        let reject = {
+            let mut left = captcha_reject_first.lock().unwrap();
+            if *left > 0 {
+                *left -= 1;
+                true
+            } else {
+                false
+            }
+        };
+        if reject {
+            return write_response(
+                &mut socket,
+                500,
+                "application/json;charset=UTF-8",
+                r#"{"message":"Mã captcha không đúng."}"#,
+            )
+            .await;
+        }
+    }
+
     // `GET …/invoices/export-xml` trả ZIP binary (không phải JSON) — mock trả
     // đúng form để test lưu file XML hóa đơn offline. Entry `invoice.xml` đúng
     // tên cổng thật đặt (đối chiếu 04/10/2026 với 3 file tải live).
@@ -259,7 +303,9 @@ async fn handle(
     let body = match path.as_str() {
         "/api/captcha" => serde_json::json!({
             "key": "mock-captcha-key",
-            "content": r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40"></svg>"#,
+            // SVG thật của cổng: solver offline phải giải được để test luồng
+            // `sco-query` (bắt buộc captcha từ 10/2026) chạy offline.
+            "content": include_str!("testdata/captcha.svg"),
         }),
         "/api/security-taxpayer/authenticate" => serde_json::json!({ "token": "mock-token" }),
         "/api/security-taxpayer/profile" => serde_json::json!({

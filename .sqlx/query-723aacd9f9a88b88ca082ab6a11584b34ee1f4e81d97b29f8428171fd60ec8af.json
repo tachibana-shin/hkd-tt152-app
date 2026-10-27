@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO production_lot_component\n                (inbound_voucher_id, product_code, product_name, material_id,\n                 material_code, material_name, material_unit, is_service,\n                 per_unit_qty, finished_qty, quantity, unit_price, amount, warehouse_code)\n             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "723aacd9f9a88b88ca082ab6a11584b34ee1f4e81d97b29f8428171fd60ec8af"
+}

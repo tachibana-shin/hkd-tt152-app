@@ -617,10 +617,12 @@ async fn save_invoice_core(
     }))
 }
 
-/// Sửa hóa đơn NHÁP: thay toàn bộ dòng hàng và cập nhật thông tin chung.
+/// Sửa hóa đơn NHÁP hoặc đã chép sang bên kia nhưng CHƯA phát hành/chưa xuất
+/// kho: thay toàn bộ dòng hàng và cập nhật thông tin chung.
 ///
-/// Chỉ nháp được sửa — đã chép sang bên kia (`exported`) hoặc đã phát hành thì
-/// phải đi luồng hủy / điều chỉnh để giữ dấu vết đối chiếu.
+/// `exported` được sửa vì "đã chép" chỉ là bước chuyển dữ liệu sang dịch vụ
+/// HĐĐT khác, sổ sách chưa ghi gì (issue #9). Khi đã có số HĐĐT hoặc phiếu xuất
+/// thì phải đi luồng hủy / điều chỉnh để giữ dấu vết đối chiếu.
 async fn update_invoice_core(
     pool: &SqlitePool,
     id: i64,
@@ -630,15 +632,30 @@ async fn update_invoice_core(
     customer_tax_code: &str,
     items: &[InvoiceItemInput],
 ) -> Result<serde_json::Value, String> {
-    let inv = sqlx::query!("SELECT number, status FROM invoice WHERE id = ?", id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
-    if inv.status != "draft" {
+    let inv = sqlx::query!(
+        "SELECT number, status, voucher_no, e_invoice_no FROM invoice WHERE id = ?",
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+    if !matches!(inv.status.as_str(), "draft" | "exported") {
         return Err(format!(
-            "Chỉ sửa được hóa đơn nháp — {} đang ở trạng thái đã xử lý",
+            "Chỉ sửa được hóa đơn nháp/chờ phát hành — {} đang ở trạng thái đã xử lý",
             inv.number
+        ));
+    }
+    if inv.status == "exported" && !inv.e_invoice_no.trim().is_empty() {
+        return Err(format!(
+            "Hóa đơn {} đã có số HĐĐT — phải lập hóa đơn thay thế, không sửa dòng tại chỗ",
+            inv.number
+        ));
+    }
+    if inv.status == "exported" && !inv.voucher_no.trim().is_empty() {
+        return Err(format!(
+            "Hóa đơn {} đã xuất kho bằng phiếu {} — sửa dòng hàng sẽ lệch sổ/tồn; lập phiếu điều chỉnh thay vì sửa tại chỗ",
+            inv.number, inv.voucher_no
         ));
     }
     let number = number.trim();
@@ -1618,9 +1635,24 @@ pub(crate) async fn invoice_shortage_map(
             Ok(scan) => scan,
             Err(_) => continue,
         };
+        let level = scan.level();
+        let items: Vec<serde_json::Value> = scan
+            .shortages
+            .into_iter()
+            .map(|s| {
+                json!({
+                    "code": s.code,
+                    "name": s.name,
+                    "kind": s.kind,
+                    "required": s.required,
+                    "available": s.available,
+                    "warehouse_code": s.warehouse_code,
+                })
+            })
+            .collect();
         out.insert(
             id.to_string(),
-            json!({ "level": scan.level(), "lines": scan.lines }),
+            json!({ "level": level, "lines": scan.lines, "items": items }),
         );
     }
     tx.commit().await.map_err(|e| e.to_string())?;
@@ -1653,6 +1685,21 @@ fn same_period(a: &str, b: &str) -> bool {
 struct InvoiceStockScan {
     lines: Vec<String>,
     material_short: bool,
+    /// Dữ liệu có cấu trúc để popup "Ghi số" biết hàng nào thiếu, thiếu bao
+    /// nhiêu ở kho nào — đủ để mở form tạo lô sản xuất bù.
+    shortages: Vec<StockShortageItem>,
+}
+
+/// Một dòng thiếu tồn (thành phẩm hoặc NVL định mức) — `kind` cho UI biết chỉ
+/// thành phẩm mới tạo được lô sản xuất.
+struct StockShortageItem {
+    code: String,
+    name: String,
+    kind: &'static str,
+    required: f64,
+    available: f64,
+    /// Kho trên dòng hóa đơn; rỗng = soi tổng mọi kho.
+    warehouse_code: String,
 }
 
 impl InvoiceStockScan {
@@ -1673,8 +1720,11 @@ impl InvoiceStockScan {
 struct MaterialNeed {
     /// Mã NVL — chỉ để in câu giải thích.
     code: String,
+    name: String,
     /// Nhãn kho dùng trong câu giải thích ("kho đã chọn" / "tổng các kho").
     where_str: &'static str,
+    /// Mã kho trên dòng hóa đơn (rỗng = tổng mọi kho) — UI tạo lô nhập về đúng kho.
+    warehouse_code: String,
     /// Tổng số lượng NVL cần để sản xuất bù.
     quantity: f64,
     /// Mã các thành phẩm cần NVL này — in kèm để biết nó phục vụ dòng nào.
@@ -1722,7 +1772,7 @@ async fn invoice_stock_scan(
     with_materials: bool,
 ) -> Result<InvoiceStockScan, String> {
     let rows = sqlx::query!(
-        r#"SELECT ii.product_id, p.code, p.is_service as "is_service!: bool",
+        r#"SELECT ii.product_id, p.code, p.name, p.is_service as "is_service!: bool",
                   ii.quantity, ii.warehouse_code
              FROM invoice_item ii
              JOIN product p ON p.id = ii.product_id
@@ -1757,13 +1807,21 @@ async fn invoice_stock_scan(
             "{}: cần {:.2}, tồn {} {:.2}",
             row.code, row.quantity, where_str, available
         ));
+        scan.shortages.push(StockShortageItem {
+            code: row.code.clone(),
+            name: row.name.clone(),
+            kind: "product",
+            required: row.quantity,
+            available,
+            warehouse_code: row.warehouse_code.trim().to_string(),
+        });
         if !with_materials {
             continue;
         }
 
         // Định mức chỉ tính NVL thật: dịch vụ (nhân công…) không có tồn kho.
         let bom = sqlx::query!(
-            r#"SELECT b.material_product_id, m.code, b.quantity
+            r#"SELECT b.material_product_id, m.code, m.name, b.quantity
                  FROM product_bom_item b
                  JOIN product m ON m.id = b.material_product_id
                 WHERE b.product_id = ? AND m.is_service = 0"#,
@@ -1782,7 +1840,9 @@ async fn invoice_stock_scan(
                 .entry((b.material_product_id, warehouse_id.unwrap_or(0)))
                 .or_insert_with(|| MaterialNeed {
                     code: b.code.clone(),
+                    name: b.name.clone(),
                     where_str,
+                    warehouse_code: row.warehouse_code.trim().to_string(),
                     quantity: 0.0,
                     products: BTreeSet::new(),
                 });
@@ -1805,6 +1865,14 @@ async fn invoice_stock_scan(
                 need.where_str,
                 available
             ));
+            scan.shortages.push(StockShortageItem {
+                code: need.code,
+                name: need.name,
+                kind: "material",
+                required: need.quantity,
+                available,
+                warehouse_code: need.warehouse_code,
+            });
         }
     }
     Ok(scan)
@@ -3420,7 +3488,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn khong_sua_duoc_hoa_don_da_xuat_hoac_da_phat_hanh() {
+    async fn sua_duoc_hoa_don_exported_chua_phat_hanh_chua_xuat_kho() {
         let pool = test_pool().await;
         let p = seed_product(&pool, "HD-EDIT3", "Hàng chặn", 0.01).await;
         let w = seed_warehouse(&pool, "W1", "Kho 1").await;
@@ -3445,7 +3513,9 @@ mod tests {
             .await
             .unwrap();
 
-        let err = update_invoice_core(
+        // Đã chép sang dịch vụ HĐĐT khác nhưng chưa phát hành/chưa xuất kho →
+        // vẫn sửa được (issue #9), sổ sách chưa ghi gì.
+        update_invoice_core(
             &pool,
             id,
             "HDE3",
@@ -3455,8 +3525,76 @@ mod tests {
             &[line("HD-EDIT3", 9.0, 1000.0, 0.0, "W1")],
         )
         .await
+        .expect("exported chưa xử lý phải sửa được");
+        let qty: f64 =
+            sqlx::query_scalar!("SELECT quantity FROM invoice_item WHERE invoice_id = ?", id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(qty, 9.0);
+
+        // Đã xuất kho → sửa dòng sẽ lệch sổ/tồn, phải chặn.
+        sqlx::query!("UPDATE invoice SET voucher_no = 'PX001' WHERE id = ?", id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let err = update_invoice_core(
+            &pool,
+            id,
+            "HDE3",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT3", 2.0, 1000.0, 0.0, "W1")],
+        )
+        .await
         .unwrap_err();
-        assert!(err.contains("Chỉ sửa được hóa đơn nháp"), "{err}");
+        assert!(err.contains("đã xuất kho"), "{err}");
+
+        // Đã có số HĐĐT → phải đi luồng thay thế.
+        sqlx::query!(
+            "UPDATE invoice SET voucher_no = '', e_invoice_no = '0000123' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let err = update_invoice_core(
+            &pool,
+            id,
+            "HDE3",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT3", 2.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("đã có số HĐĐT"), "{err}");
+
+        // Đã phát hành chính thức → không sửa tại chỗ.
+        sqlx::query!(
+            "UPDATE invoice SET status = 'official', e_invoice_no = '0000123' WHERE id = ?",
+            id
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let err = update_invoice_core(
+            &pool,
+            id,
+            "HDE3",
+            "2026-03-10",
+            "Khách X",
+            "MST-X",
+            &[line("HD-EDIT3", 2.0, 1000.0, 0.0, "W1")],
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("Chỉ sửa được hóa đơn nháp/chờ phát hành"),
+            "{err}"
+        );
 
         // Dữ liệu phải còn nguyên sau khi bị chặn.
         let qty: f64 =
@@ -3464,7 +3602,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(qty, 1.0);
+        assert_eq!(qty, 9.0);
     }
 
     /// Sửa thông tin NGOÀI SỔ của hóa đơn đã xử lý cho khớp hóa đơn chính thức

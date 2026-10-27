@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT unit_price, amount FROM journal_entry\n              WHERE voucher_no = 'PNK-KHAI' AND entry_type = 'PN'",
+  "describe": {
+    "columns": [
+      {
+        "name": "unit_price",
+        "ordinal": 0,
+        "type_info": "Float"
+      },
+      {
+        "name": "amount",
+        "ordinal": 1,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "729d9e6dd306c305785e72523e4a6b298186c5cb0351143f3280d07bbc2c1988"
+}

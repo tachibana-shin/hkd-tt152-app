@@ -49,6 +49,18 @@ pub(crate) const MAX_PAGE_SIZE: u32 = 50;
 /// treo, còn tab HĐ điện tử vẫn dùng 50 cho ít request hơn.
 pub(crate) const CASH_REGISTER_PAGE_SIZE: u32 = 15;
 
+/// Số lần thử captcha cho danh sách máy tính tiền (`sco-query`). Mỗi lượt giải
+/// lại từ đầu: solver sai hiếm (measured 756/756) nhưng captcha hết hạn hoặc
+/// cổng đổi ảnh giữa chừng vẫn có thể xảy ra.
+const CASH_REGISTER_CAPTCHA_ATTEMPTS: usize = 3;
+
+/// Cổng báo lỗi captcha khi thiếu/sai `ckey`/`cvalue` — nhận diện để lấy ảnh
+/// mới thay vì trả lỗi ngay cho người dùng.
+fn is_captcha_error(message: &str) -> bool {
+    let m = message.to_lowercase();
+    m.contains("captcha") || m.contains("ckey") || m.contains("cvalue")
+}
+
 /// Mô tả đầy đủ lỗi `reqwest` kèm chuỗi nguyên nhân gốc.
 ///
 /// `Display` của reqwest chỉ in `error sending request for url (…)` — không nói
@@ -717,6 +729,12 @@ impl HddtClient {
     /// `Action` = tên hành động đã URL-encode, `End-Point` = `/tra-cuu/tra-cuu-hoa-don`,
     /// `Referer` = trang tra cứu, `Authorization: Bearer …`.
     /// Response: `{datas, state, total, time}`.
+    ///
+    /// Tab **máy tính tiền** (`sco-query`) bắt buộc kèm captcha dạng query
+    /// `ckey` + `cvalue` (đúng cách portal gọi: `onSubmit` tab 2 xin captcha
+    /// trước rồi mới tìm kiếm). Thiếu là cổng trả 500 "Required request
+    /// parameter 'ckey' … is not present" (issue #9). Captcha được lấy + giải
+    /// lại cho từng lượt; sai/không giải được thì thử lại với captcha mới.
     pub(crate) async fn query_invoices(
         &self,
         token: &str,
@@ -727,45 +745,92 @@ impl HddtClient {
             q.kind.prefix(),
             q.direction.segment()
         );
-        let mut params: Vec<(&str, String)> = vec![("sort", "tdlap:desc".to_string())];
-        params.push(("size", page_size_param(q.size)));
+        let mut base_params: Vec<(&str, String)> = vec![("sort", "tdlap:desc".to_string())];
+        base_params.push(("size", page_size_param(q.size)));
         if let Some(state) = q.state.as_deref().filter(|s| !s.is_empty()) {
-            params.push(("state", state.to_string()));
+            base_params.push(("state", state.to_string()));
         }
         let search = build_search_string(q);
         if !search.is_empty() {
-            params.push(("search", search));
+            base_params.push(("search", search));
         }
-        let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
-            .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
         let page = format!("{}{}", self.base, ENDPOINT_LOOKUP);
         // Mỗi tab có một nhãn `Action` riêng (bắt live 24/10/2026). Nhãn rỗng
         // làm `sco-query` treo tới timeout; nhãn đúng giúp cổng trả trong ~1 s.
         let action = q.direction.search_action(q.kind);
-        let resp = match q.kind {
-            // Máy tính tiền: backend cổng hay treo ~30 giây rồi 500. Dùng
-            // timeout ngắn + ít lượt thử để "Quét cổng" bỏ qua nhanh thay vì
-            // kẹt gần 2 phút cho một endpoint đang chết.
-            InvoiceKind::CashRegister => {
-                self.get_throttled_opts(
-                    url,
-                    token,
-                    &page,
-                    action,
-                    Some(CASH_REGISTER_LIST_TIMEOUT),
-                    Some(CASH_REGISTER_NET_RETRIES),
-                )
-                .await?
-            }
-            _ => self.get_throttled_with(url, token, &page, action).await?,
+        let attempts = if q.kind == InvoiceKind::CashRegister {
+            CASH_REGISTER_CAPTCHA_ATTEMPTS
+        } else {
+            1
         };
-        let status = resp.status();
-        let v = read_json_body(resp).await?;
-        if !status.is_success() {
+        let mut last_captcha_error: Option<String> = None;
+
+        for _ in 0..attempts {
+            let mut params = base_params.clone();
+            if q.kind == InvoiceKind::CashRegister {
+                match self.solve_captcha().await {
+                    Ok((key, value)) => {
+                        params.push(("ckey", key));
+                        params.push(("cvalue", value));
+                    }
+                    Err(e) => {
+                        last_captcha_error = Some(e);
+                        continue;
+                    }
+                }
+            }
+            let url = reqwest::Url::parse_with_params(&format!("{}{}", self.base, path), &params)
+                .map_err(|e| format!("URL danh sách HĐĐT không hợp lệ: {e}"))?;
+            let resp = match q.kind {
+                // Máy tính tiền: backend cổng hay treo ~30 giây rồi 500. Dùng
+                // timeout ngắn + ít lượt thử để "Quét cổng" bỏ qua nhanh thay vì
+                // kẹt gần 2 phút cho một endpoint đang chết.
+                InvoiceKind::CashRegister => {
+                    self.get_throttled_opts(
+                        url,
+                        token,
+                        &page,
+                        action,
+                        Some(CASH_REGISTER_LIST_TIMEOUT),
+                        Some(CASH_REGISTER_NET_RETRIES),
+                    )
+                    .await?
+                }
+                _ => self.get_throttled_with(url, token, &page, action).await?,
+            };
+            let status = resp.status();
+            let v = read_json_body(resp).await?;
+            if status.is_success() {
+                return serde_json::from_value(v)
+                    .map_err(|e| format!("Dữ liệu danh sách HĐĐT sai định dạng: {e}"));
+            }
             let msg = portal_message(&v, "không rõ nguyên nhân");
+            if q.kind == InvoiceKind::CashRegister && is_captcha_error(&msg) {
+                last_captcha_error = Some(format!(
+                    "Cổng HĐĐT từ chối captcha máy tính tiền (HTTP {status}): {msg}"
+                ));
+                continue;
+            }
             return Err(format!("Lỗi lấy danh sách HĐĐT (HTTP {status}): {msg}"));
         }
-        serde_json::from_value(v).map_err(|e| format!("Dữ liệu danh sách HĐĐT sai định dạng: {e}"))
+
+        Err(last_captcha_error.unwrap_or_else(|| {
+            format!("Không lấy được danh sách HĐĐT máy tính tiền sau {attempts} lần giải captcha.")
+        }))
+    }
+
+    /// Lấy captcha mới và giải offline → `(ckey, cvalue)` để gắn vào query.
+    async fn solve_captcha(&self) -> Result<(String, String), String> {
+        use crate::hddt::{CaptchaSolver, GlyphTemplateSolver};
+        let cap = self.fetch_captcha().await?;
+        let answer = GlyphTemplateSolver
+            .solve(&cap)
+            .map_err(|e| format!("Không giải được captcha HĐĐT: {e}"))?;
+        let answer = answer.trim();
+        if answer.is_empty() {
+            return Err("Captcha HĐĐT rỗng — thử lại.".into());
+        }
+        Ok((cap.key, answer.to_string()))
     }
 
     /// Tải hồ sơ XML của **1** hóa đơn dưới dạng file ZIP.
@@ -1122,13 +1187,56 @@ mod tests {
         )
         .await
         .expect("tra cứu mock thất bại");
-        let req = &portal.requests()[0];
-        assert_eq!(req.path, "/api/sco-query/invoices/sold");
+        let reqs = portal.requests();
+        assert_eq!(reqs[0].path, "/api/captcha", "phải xin captcha trước");
+        let req = reqs
+            .iter()
+            .find(|r| r.path == "/api/sco-query/invoices/sold")
+            .expect("request danh sách máy tính tiền");
         assert_eq!(
             req.headers.get("action").map(String::as_str),
             Some(action::SEARCH_SOLD_CASH),
             "Action phải là nhãn máy tính tiền bán ra đã encode"
         );
+        // Thiếu 2 tham số này cổng trả 500 "Required request parameter 'ckey'
+        // … is not present" (issue #9).
+        assert_eq!(req.param("ckey").as_deref(), Some("mock-captcha-key"));
+        assert!(
+            req.param("cvalue")
+                .as_deref()
+                .is_some_and(|v| !v.trim().is_empty()),
+            "phải gửi mã captcha đã giải: {}",
+            req.query
+        );
+    }
+
+    /// Captcha bị cổng từ chối (hết hạn/giải sai) → lấy ảnh mới và thử lại,
+    /// không bắt người dùng bấm lại "Quét cổng".
+    #[tokio::test]
+    async fn cash_register_retries_with_fresh_captcha_when_rejected() {
+        let portal = crate::hddt::mock_portal::MockPortal::start().await;
+        *portal.captcha_reject_first.lock().unwrap() = 1;
+        let c = HddtClient::for_test(&portal.base);
+
+        let list = c
+            .query_invoices(
+                "mock-token",
+                &InvoiceQuery {
+                    direction: InvoiceDirection::Purchase,
+                    kind: InvoiceKind::CashRegister,
+                    size: 15,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("phải thử lại với captcha mới");
+        assert_eq!(list.total, 1);
+        assert_eq!(
+            portal.count("/api/captcha"),
+            2,
+            "lượt đầu bị từ chối nên phải xin captcha lần 2"
+        );
+        assert_eq!(portal.count("/api/sco-query/invoices/purchase"), 2);
     }
 
     #[tokio::test]

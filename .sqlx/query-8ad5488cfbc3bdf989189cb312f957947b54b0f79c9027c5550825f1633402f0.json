@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT m.id as \"id!\", m.code as \"code!\", m.name as \"name!\",\n                      m.unit as \"unit!\", m.is_service as \"is_service: bool\",\n                      b.quantity, b.unit_price\n                 FROM product_bom_item b\n                 JOIN product m ON m.id = b.material_product_id\n                WHERE b.product_id = ?\n                ORDER BY m.code",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "code!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "is_service: bool",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "quantity",
+        "ordinal": 5,
+        "type_info": "Float"
+      },
+      {
+        "name": "unit_price",
+        "ordinal": 6,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8ad5488cfbc3bdf989189cb312f957947b54b0f79c9027c5550825f1633402f0"
+}

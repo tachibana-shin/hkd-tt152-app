@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT b.material_product_id, m.code, m.name, b.quantity\n               FROM product_bom_item b\n               JOIN product m ON m.id = b.material_product_id\n              WHERE b.product_id = ? AND m.is_service = 0",
+  "query": "SELECT b.material_product_id, m.code, m.name, b.quantity\n                 FROM product_bom_item b\n                 JOIN product m ON m.id = b.material_product_id\n                WHERE b.product_id = ? AND m.is_service = 0",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "e72a0fe549bf91b199eb7a77e65b65a9c3c28e522326875cbd8419d079f6a7c0"
+  "hash": "f28f8542edfab4ca0b0ddf61379e874bdee376e2d5fcec3c857f51c502afc233"
 }

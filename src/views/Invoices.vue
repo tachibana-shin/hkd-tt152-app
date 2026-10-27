@@ -123,7 +123,16 @@ function openEdit(inv: Invoice) {
 function onRowDblClick(e: { data?: Invoice; originalEvent?: MouseEvent }) {
   const target = e.originalEvent?.target as HTMLElement | null;
   if (target?.closest("button, a, input, textarea, select, [role='button']")) return;
-  if (e.data?.status === "draft") openEdit(e.data);
+  if (e.data && canEditLines(e.data)) openEdit(e.data);
+}
+
+/**
+ * Còn sửa dòng hàng được: nháp, hoặc đã chép nhưng chưa phát hành/chưa xuất
+ * kho (sổ sách chưa ghi gì — issue #9).
+ */
+function canEditLines(inv: Invoice) {
+  if (inv.status === "draft") return true;
+  return inv.status === "exported" && !(inv.voucher_no ?? "").trim() && !inv.e_invoice_no;
 }
 
 // ─── Xem trước PDF ngay trên tab Hóa đơn (nháp lẫn đã phát hành) ───
@@ -635,13 +644,13 @@ useKeepAliveRefresh(reload);
                   @click="makeOutbound(data)"
                 />
                 <Button
-                  v-if="data.status === 'draft'"
+                  v-if="canEditLines(data)"
                   icon="pi pi-file-edit"
                   text
                   rounded
                   size="small"
                   aria-label="Sửa hóa đơn nháp"
-                  v-tooltip="'Sửa hóa đơn nháp'"
+                  v-tooltip="'Sửa hóa đơn (dòng hàng + tạo nhanh lô sản xuất)'"
                   severity="secondary"
                   @click="openEdit(data)"
                 />
@@ -677,6 +686,7 @@ useKeepAliveRefresh(reload);
       v-model:visible="draftDialog"
       :edit-invoice="editingInvoice"
       @done="reload"
+      @lots-changed="loadShortages"
     />
 
     <!-- Dialog chi tiết hóa đơn -->

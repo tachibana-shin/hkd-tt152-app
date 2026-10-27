@@ -161,8 +161,40 @@ export interface ProductionLotRow {
   /** Số LOẠI thành phẩm của lô. */
   item_count: number;
   total_qty: number;
-  /** Giá trị nhập kho = giá thành ước tính (đ). */
+  /** Giá trị nhập kho theo đơn giá khai trên định mức (đ). */
   amount: number;
+  warehouse_code: string;
+}
+
+/**
+ * 1 thành phần đã chụp của lô sản xuất (snapshot định mức tại lúc lưu).
+ *
+ * Đọc từ `production_lot_component`, không đọc lại `product_bom_item` — định
+ * mức hiện hành có thể đã bị sửa, còn lô đã sản xuất phải giữ đúng thành phần
+ * và đơn giá đã dùng.
+ */
+export interface ProductionLotComponentRow {
+  product_code: string;
+  product_name: string;
+  material_code: string;
+  material_name: string;
+  material_unit: string;
+  /** Dịch vụ (nhân công…) — có giá trị nhưng không trừ tồn kho. */
+  is_service: boolean;
+  /** Định mức cho 1 đơn vị thành phẩm. */
+  per_unit_qty: number;
+  /** Sản lượng thành phẩm của dòng lô. */
+  finished_qty: number;
+  /** Số lượng thành phần cần cho cả lô = per_unit_qty × finished_qty. */
+  quantity: number;
+  /** Đơn giá khai trên định mức lúc tạo lô. */
+  unit_price: number;
+  /** Thành tiền theo đơn giá khai. */
+  amount: number;
+  /** Giá vốn FIFO bình quân của phần NVL đã xuất (0 với dịch vụ). */
+  unit_cost: number;
+  /** Thành tiền theo giá vốn FIFO. */
+  cost_amount: number;
   warehouse_code: string;
 }
 
@@ -480,6 +512,20 @@ export interface InvoiceStockScan {
   level: "ok" | "short" | "material";
   /** Câu giải thích từng dòng thiếu (thành phẩm và/hoặc NVL). */
   lines: string[];
+  /** Dữ liệu có cấu trúc — popup "Ghi số" dùng để mở nhanh form tạo lô. */
+  items?: InvoiceStockShortage[];
+}
+
+/** Một dòng thiếu tồn: thành phẩm (`product`) hoặc NVL định mức (`material`). */
+export interface InvoiceStockShortage {
+  code: string;
+  name: string;
+  kind: "product" | "material";
+  /** SL hóa đơn cần (thành phẩm) hoặc SL NVL cần để sản xuất bù. */
+  required: number;
+  available: number;
+  /** Kho trên dòng hóa đơn; rỗng = soi tổng mọi kho. */
+  warehouse_code: string;
 }
 
 /** 1 dòng hàng chờ xuất: hóa đơn chưa phát hành + kết quả kiểm tra trước khi chép. */
