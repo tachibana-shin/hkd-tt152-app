@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.28.0...v0.28.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* xử lý các lỗi của issue [#9](https://github.com/tachibana-shin/hkd-tt152-app/issues/9) (HĐĐT, lô sản xuất, hóa đơn) ([2109c2b](https://github.com/tachibana-shin/hkd-tt152-app/commit/2109c2bb7aa1562900e6e834c4a9d659bc2597aa))
+
 # [0.28.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.27.0...v0.28.0) (2026-10-24)
 
 
