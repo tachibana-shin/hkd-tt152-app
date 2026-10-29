@@ -512,6 +512,11 @@ pub async fn api_invoke(
             body,
             voucher_no: String
         ),
+        "fix_production_lot_components" => mx!(
+            commands::stock::fix_production_lot_components,
+            body,
+            voucher_no: String
+        ),
 
         // ── Thu / chi ──
         "save_cash_entry" => mx!(commands::cash::save_cash_entry, body, input: CashEntryInput),

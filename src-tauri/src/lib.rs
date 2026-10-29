@@ -242,6 +242,7 @@ pub fn run() {
             commands::stock::get_stock_vouchers_page,
             commands::stock::get_production_lots,
             commands::stock::get_production_lot_components,
+            commands::stock::fix_production_lot_components,
             commands::stock::get_voucher,
             commands::stock::get_stock_lots,
         ])

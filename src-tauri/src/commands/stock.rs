@@ -2682,8 +2682,70 @@ pub(crate) async fn production_lot_components_core(
     .map_err(|e| e.to_string())
 }
 
-/// Bảng thành phần của 1 lô sản xuất — snapshot tại thời điểm tạo lô, không
-/// đọc lại định mức hiện hành (định mức có thể đã bị sửa).
+/// Backfill snapshot thành phần cho các lô sản xuất cũ (tạo trước khi có
+/// snapshot) — chỉ chạy khi lô chưa có bản ghi `production_lot_component`.
+/// Dùng định mức hiện hành (best-effort) vì định mức cũ có thể đã thay đổi.
+pub(crate) async fn fix_production_lot_components_core(
+    pool: &SqlitePool,
+    voucher_no: &str,
+) -> Result<usize, String> {
+    let vn = voucher_no.trim();
+    if vn.is_empty() { return Err("Thiếu số phiếu lô".into()); }
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM inbound_voucher WHERE voucher_no = ?1 AND inbound_type = 'production'")
+        .bind(vn)
+        .fetch_optional(pool).await.map_err(|e| e.to_string())?;
+    let Some(inbound_id) = id else { return Err("Không tìm thấy lô sản xuất".into()); };
+
+    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM production_lot_component WHERE inbound_voucher_id = ?1")
+        .bind(inbound_id)
+        .fetch_one(pool).await.map_err(|e| e.to_string())?;
+    if existing > 0 { return Ok(0); }
+
+    // Lấy danh sách thành phẩm của lô từ journal_entry (PN).
+    let entries: Vec<(String, f64, f64)> = sqlx::query_as(
+        r#"SELECT product_code, SUM(quantity) as q, unit_price
+             FROM journal_entry
+            WHERE inbound_voucher_id = ? AND entry_type = 'PN' AND product_code <> ''
+            GROUP BY product_code, unit_price"#,
+    )
+    .bind(inbound_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if entries.is_empty() { return Err("Lô không có thành phẩm".into()); }
+
+    let items: Vec<InboundItemInput> = entries.into_iter().map(|(code, qty, price)| InboundItemInput {
+        product_code: code,
+        quantity: qty,
+        unit_price: price,
+        discount: 0.0,
+        vat_rate: None,
+        vat_amount: None,
+    }).collect();
+
+    // warehouse_code của lô
+    let wh: String = sqlx::query_scalar("SELECT warehouse_code FROM inbound_voucher WHERE id = ?1")
+        .bind(inbound_id)
+        .fetch_one(pool).await.map_err(|e| e.to_string())?;
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let lines = load_production_bom_lines(&mut tx, &items, &wh).await?;
+    if lines.is_empty() { tx.rollback().await.ok(); return Err("Không có định mức cho thành phẩm".into()); }
+    snapshot_production_components(&mut tx, inbound_id, &lines).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(lines.len())
+}
+
+#[tauri::command]
+pub(crate) async fn fix_production_lot_components(
+    state: State<'_, AppState>,
+    voucher_no: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let n = fix_production_lot_components_core(&pool, voucher_no.trim()).await?;
+    Ok(json!({"fixed": n}).to_string())
+}
 #[tauri::command]
 pub(crate) async fn get_production_lot_components(
     state: State<'_, AppState>,
