@@ -536,7 +536,7 @@ useKeepAliveRefresh(reload);
           ? 'Tạo phiếu điều chỉnh hóa đơn bán'
           : 'Tạo phiếu xuất kho / Bán hàng'
       "
-      width="max-w-4xl"
+      width="max-w-5xl"
       action-label="Lưu phiếu"
       :saving="saving"
       :show-action="auth.canStock"

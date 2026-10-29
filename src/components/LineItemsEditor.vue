@@ -379,6 +379,68 @@ function addRowAndPage() {
 
 const total = computed(() => props.items.reduce((s, it) => s + lineNet(it), 0));
 
+/** Bề rộng cột cố định của bảng gọn / nhập liên tục (px). */
+interface CompactWidths {
+  product: number;
+  unit: number;
+  qty: number;
+  price: number;
+  industry: number;
+  warehouse: number;
+  vat: number;
+  discount: number;
+  amount: number;
+  action: number;
+}
+
+/**
+ * Bề rộng cột cho 2 chế độ gọn / nhập liên tục.
+ *
+ * `table-layout: fixed` lấy width từ hàng header: cột không khai width chỉ nhận
+ * phần còn lại. Khi tổng width các cột cố định ≥ bề rộng popup, phần còn lại
+ * = 0 → ô Sản phẩm teo mất (bug popup sửa phiếu nhập). Vì vậy cột Sản phẩm
+ * phải có width THẬT, và bảng đặt `min-width` bằng tổng các cột: popup hẹp hơn
+ * thì cuộn ngang, không bóp cột.
+ */
+const compactWidths = computed<CompactWidths | null>(() => {
+  if (!props.compact && !props.preInput) return null;
+  return {
+    product: props.compact ? 230 : 260,
+    unit: 88,
+    qty: props.compact ? 72 : 80,
+    price: props.compact ? 110 : 140,
+    industry: props.compact ? 140 : 160,
+    warehouse: props.compact ? 150 : 160,
+    vat: 96,
+    discount: 120,
+    amount: 130,
+    action: 48,
+  };
+});
+
+/** Style width + min-width cho 1 cột — chỉ ở chế độ gọn. */
+function colStyle(key: keyof CompactWidths): string | undefined {
+  const w = compactWidths.value;
+  return w ? `width: ${w[key]}px; min-width: ${w[key]}px` : undefined;
+}
+
+/**
+ * Sàn bề rộng bảng = tổng các cột đang hiện. Giữ cột Sản phẩm đủ rộng; popup
+ * hẹp hơn sàn thì vùng cuộn ngang của DataTable xử lý thay vì bóp cột về 0.
+ */
+const tableStyle = computed(() => {
+  const w = compactWidths.value;
+  if (!w) return undefined;
+  let min = w.product + w.qty + w.price + w.action;
+  if (props.showUnit) min += w.unit;
+  if (props.showIndustry) min += w.industry;
+  if (props.showWarehouse) min += w.warehouse;
+  if (props.showVat) min += w.vat;
+  if (props.showDiscount) min += w.discount;
+  if (props.showAmount) min += w.amount;
+  return `table-layout: fixed; width: 100%; min-width: ${min}px`;
+});
+
 // Chế độ nhập liên tục (pre-input): mở form có sẵn 1 dòng trống, điền xong
 // dòng cuối (đã chọn sản phẩm) thì tự thêm dòng trống mới, không cần nút
 // "Thêm dòng". Bật qua `compact` (phiếu nhập) hoặc `preInput` (phiếu xuất).
@@ -455,15 +517,11 @@ watch(
     :resizable-columns="false"
     :sortable="false"
     :size="compact || preInput ? 'small' : 'large'"
-    :style="compact || preInput ? 'overflow-x: hidden' : undefined"
-    :table-style="compact || preInput ? 'table-layout: fixed; width: 100%' : undefined"
+    :table-style="tableStyle"
     @page="onPage"
     @search="keyword = $event"
   >
-    <Column
-      header="Sản phẩm"
-      :style="compact ? 'min-width: 230px' : preInput ? 'min-width: 260px' : undefined"
-    >
+    <Column header="Sản phẩm" :style="colStyle('product')">
       <template #body="{ data }">
         <div class="flex items-center gap-1">
           <ProductSelect
@@ -511,11 +569,7 @@ watch(
         </div>
       </template>
     </Column>
-    <Column
-      v-if="showUnit"
-      header="ĐVT"
-      :style="compact || preInput ? 'width: 88px' : 'width: 120px'"
-    >
+    <Column v-if="showUnit" header="ĐVT" :style="colStyle('unit') ?? 'width: 120px'">
       <template #body="{ data }">
         <span class="text-gray-600">{{
           catalog.productByCode(data.product_code)?.unit || "—"
@@ -524,15 +578,7 @@ watch(
     </Column>
     <Column
       header="SL"
-      :style="
-        compact
-          ? 'width: 72px'
-          : preInput
-            ? 'width: 80px'
-            : showIndustry
-              ? 'width: 100px'
-              : 'width: 110px'
-      "
+      :style="colStyle('qty') ?? (showIndustry ? 'width: 100px' : 'width: 110px')"
     >
       <template #body="{ data }">
         <div class="flex w-full flex-col gap-0.5">
@@ -557,15 +603,7 @@ watch(
     </Column>
     <Column
       header="Đơn giá"
-      :style="
-        compact
-          ? 'width: 110px'
-          : preInput
-            ? 'width: 140px'
-            : showIndustry
-              ? 'width: 140px'
-              : 'width: 150px'
-      "
+      :style="colStyle('price') ?? (showIndustry ? 'width: 140px' : 'width: 150px')"
     >
       <template #body="{ data }">
         <InputNumber
@@ -579,11 +617,7 @@ watch(
         />
       </template>
     </Column>
-    <Column
-      v-if="showIndustry"
-      header="Nhóm ngành"
-      :style="preInput ? 'width: 160px' : compact ? 'width: 140px' : undefined"
-    >
+    <Column v-if="showIndustry" header="Nhóm ngành" :style="colStyle('industry')">
       <template #body="{ data }">
         <Select
           v-model="data.industry_code"
@@ -596,11 +630,7 @@ watch(
         />
       </template>
     </Column>
-    <Column
-      v-if="showWarehouse"
-      header="Kho xuất"
-      :style="preInput ? 'width: 160px' : compact ? 'width: 150px' : undefined"
-    >
+    <Column v-if="showWarehouse" header="Kho xuất" :style="colStyle('warehouse')">
       <template #body="{ data }">
         <Select
           v-model="data.warehouse_code"
@@ -615,11 +645,7 @@ watch(
         />
       </template>
     </Column>
-    <Column
-      v-if="showVat"
-      header="VAT %"
-      :style="compact || preInput ? 'width: 96px' : 'width: 110px'"
-    >
+    <Column v-if="showVat" header="VAT %" :style="colStyle('vat') ?? 'width: 110px'">
       <template #body="{ data }">
         <!-- Thuế suất RIÊNG dòng; bỏ trống (placeholder "Chung") = mức chung
              đầu phiếu — hóa đơn trộn nhiều thuế suất mới cần điền từng dòng. -->
@@ -636,7 +662,12 @@ watch(
         />
       </template>
     </Column>
-    <Column v-if="showDiscount" header="Tiền CK" align="right" style="width: 120px">
+    <Column
+      v-if="showDiscount"
+      header="Tiền CK"
+      align="right"
+      :style="colStyle('discount') ?? 'width: 120px'"
+    >
       <template #body="{ data }">
         <InputNumber
           v-model="data.discount"
@@ -649,12 +680,7 @@ watch(
         />
       </template>
     </Column>
-    <Column
-      v-if="showAmount"
-      header="Thành tiền"
-      align="right"
-      :style="compact ? 'width: 130px' : undefined"
-    >
+    <Column v-if="showAmount" header="Thành tiền" align="right" :style="colStyle('amount')">
       <template #body="{ data }">
         <InputNumber
           v-if="amountInput"
@@ -670,7 +696,7 @@ watch(
         <span v-else class="font-medium">{{ fmtVnd(data.quantity * data.unit_price) }}</span>
       </template>
     </Column>
-    <Column header="" :style="compact || preInput ? 'width: 48px' : undefined">
+    <Column header="" :style="colStyle('action')">
       <template #body="{ data }">
         <Button
           v-if="canEdit"

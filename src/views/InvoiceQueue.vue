@@ -442,6 +442,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           class="text-sm"
           @row-select="(e: any) => (selectedId = e.data.invoice.id)"
           @row-unselect="() => (selectedId = null)"
+          @row-dblclick="(e: any) => openDraft(e.data.invoice)"
         >
           <Column selection-mode="single" header-style="width: 2.5rem" />
           <Column field="invoice.number" header="Số HĐ">

@@ -517,7 +517,7 @@ useKeepAliveRefresh(reload);
       :header="
         form.inbound_type === 'adjust' ? 'Tạo phiếu điều chỉnh hóa đơn mua' : 'Tạo phiếu nhập kho'
       "
-      width="max-w-3xl"
+      width="max-w-4xl"
       action-label="Lưu phiếu"
       :saving="saving"
       :show-action="auth.canStock"

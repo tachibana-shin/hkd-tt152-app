@@ -157,6 +157,22 @@ pub(crate) async fn invoice_draft_detail_json(
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("Không tìm thấy hóa đơn #{id}"))?;
 
+    // Địa chỉ người mua: bảng `invoice` không lưu địa chỉ nên tra từ danh mục
+    // khách — khớp MST trước, MST trống thì khớp tên (cùng quy ước với bản
+    // xuất Excel/XML ở `invoice_export::load_header_and_lines`). Thiếu cả hai
+    // thì để rỗng; template PDF tự bỏ dòng "Địa chỉ" thay vì in dòng trắng.
+    let customer_address: String = sqlx::query_scalar!(
+        r#"SELECT COALESCE(NULLIF((SELECT c.address FROM customer c
+                                   WHERE c.tax_code <> '' AND c.tax_code = ? LIMIT 1), ''),
+                          (SELECT c.address FROM customer c WHERE c.name = ? LIMIT 1), '')
+           as "addr!: String""#,
+        invoice.customer_tax_code,
+        invoice.customer,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
     // Bên bán: hồ sơ hộ kinh doanh (ký hiệu HĐĐT của hộ = ký hiệu hóa đơn).
     let (nb_name, nb_tax_code, nb_address, nb_phone, nb_symbol) = match sqlx::query!(
         "SELECT name, tax_code, address, phone, hddt_symbol FROM business WHERE id = 1"
@@ -226,6 +242,7 @@ pub(crate) async fn invoice_draft_detail_json(
         "nbsdthoai": nb_phone,
         "nmten": invoice.customer,
         "nmmst": invoice.customer_tax_code,
+        "nmdchi": customer_address,
         "tgtcthue": gross,
         "tgtthue": round2(invoice.vat_amount),
         "tgtphi": 0,
@@ -3168,6 +3185,14 @@ mod tests {
         .execute(&pool)
         .await
         .expect("hồ sơ hộ kinh doanh");
+        // Địa chỉ người mua nằm ở danh mục khách (invoice không lưu địa chỉ).
+        sqlx::query!(
+            "INSERT INTO customer (code, name, address, tax_code, phone)
+             VALUES ('KH-PDF', 'Khách X', 'Số 9 Đường B', 'MST-X', '')"
+        )
+        .execute(&pool)
+        .await
+        .expect("danh mục khách hàng");
 
         let id = seed_draft(&pool, "HDPDF").await;
         let raw = invoice_draft_detail_json(&pool, id)
@@ -3185,9 +3210,10 @@ mod tests {
             data["nky"], "2026-03-10",
             "ngày hóa đơn → dòng \"Ngày …\" in PDF"
         );
-        // Bên mua.
+        // Bên mua — địa chỉ tra theo MST từ danh mục khách.
         assert_eq!(data["nmten"], "Khách X");
         assert_eq!(data["nmmst"], "MST-X");
+        assert_eq!(data["nmdchi"], "Số 9 Đường B");
 
         // 1 dòng 1 × 1.000đ không chiết khấu → cộng tiền hàng = tổng thanh toán.
         assert_eq!(data["tgtcthue"], 1000.0);

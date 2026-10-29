@@ -220,7 +220,7 @@ async function save() {
   <AppDialog
     v-model:visible="visible"
     :header="`Sửa theo hóa đơn chính thức — ${invoice?.number ?? ''}`"
-    width="max-w-4xl"
+    width="max-w-6xl"
     cancel-label="Đóng"
     action-label="Lưu"
     :saving="saving"
