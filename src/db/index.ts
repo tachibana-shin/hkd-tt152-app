@@ -1312,6 +1312,10 @@ export const api = {
   getProductionLotComponents: async (voucherNo: string) =>
     parse<ProductionLotComponentRow[]>(
       await call<string>("get_production_lot_components", { voucherNo }),
+
+  fixProductionLotComponents: async (voucherNo: string) =>
+    parse<{ fixed: number }>(
+      await call<string>("fix_production_lot_components", { voucherNo }),
     ),
 
   // ─── ĐĂNG NHẬP / PHÂN QUYỀN ───

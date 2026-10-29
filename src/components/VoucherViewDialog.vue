@@ -59,6 +59,22 @@ const hasVatRows = computed(() => lines.value.some((r) => r.vat_rate > 0));
 // ─── Lô sản xuất: thành phần đã chụp lúc tạo (SL + đơn giá khai + vốn FIFO) ───
 const components = ref<ProductionLotComponentRow[]>([]);
 const componentsLoading = ref(false);
+const fixing = ref(false);
+async function fixComponents() {
+  fixing.value = true;
+  try {
+    const r = await api.fixProductionLotComponents(props.voucherNo);
+    toast.add({ severity: 'success', summary: 'Đã tạo snapshot', detail: `${r.fixed} dòng thành phần` });
+    // reload
+    componentsLoading.value = true;
+    components.value = await api.getProductionLotComponents(props.voucherNo);
+  } catch (e) {
+    toast.add({ severity: 'error', summary: 'Không tạo được snapshot', detail: String(e) });
+  } finally {
+    componentsLoading.value = false;
+    fixing.value = false;
+  }
+}
 const componentsError = ref("");
 const componentTotal = computed(() => components.value.reduce((s, r) => s + r.amount, 0));
 const componentCost = computed(() => components.value.reduce((s, r) => s + r.cost_amount, 0));
@@ -257,6 +273,11 @@ watch(
           <i class="pi pi-spin pi-spinner mr-1" />Đang nạp thành phần…
         </p>
         <p v-else-if="componentsError" class="text-xs text-red-600">{{ componentsError }}</p>
+        <div v-else-if="!components.length" class="flex items-center gap-2">
+          <span class="text-xs text-gray-500">Lô cũ chưa có snapshot thành phần.</span>
+          <Button size="small" label="Tạo snapshot" icon="pi pi-refresh"
+            @click="fixComponents" :loading="fixing" />
+        </div>
         <div v-else-if="components.length" class="overflow-x-auto rounded border border-gray-200">
           <table class="w-full text-sm" data-testid="lot-components-table">
             <thead class="bg-gray-50 text-xs text-gray-500">
