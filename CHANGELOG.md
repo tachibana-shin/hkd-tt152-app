@@ -1,5 +1,18 @@
 # Changelog
 
+# [0.29.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.28.1...v0.29.0) (2026-10-29)
+
+
+### Bug Fixes
+
+* PDF preview buyer address + popup width=0 layout + double-click edit invoice queue ([1083ada](https://github.com/tachibana-shin/hkd-tt152-app/commit/1083ada9dbbc81c232937524831c86002956f1a6))
+
+
+### Features
+
+* backfill snapshot thành phần cho lô sản xuất cũ (fix button) ([3fd5f6d](https://github.com/tachibana-shin/hkd-tt152-app/commit/3fd5f6df2526fd32f76a1a0203134b1b0895febe))
+* nút tạo snapshot thành phần cho lô cũ trong VoucherViewDialog ([486dbb2](https://github.com/tachibana-shin/hkd-tt152-app/commit/486dbb2e8b0cbea7c52c3c60fe19bcbc444ac8e7))
+
 ## [0.28.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.28.0...v0.28.1) (2026-10-27)
 
 
