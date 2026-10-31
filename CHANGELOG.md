@@ -1,5 +1,7 @@
 # Changelog
 
+## [0.30.1](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.30.0...v0.30.1) (2026-10-31)
+
 # [0.30.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.29.0...v0.30.0) (2026-10-31)
 
 
