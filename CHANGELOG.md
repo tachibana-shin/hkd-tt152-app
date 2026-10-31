@@ -1,5 +1,12 @@
 # Changelog
 
+# [0.30.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.29.0...v0.30.0) (2026-10-31)
+
+
+### Features
+
+* nhân bản hóa đơn & phiếu nhập; backfill giá vốn lô sản xuất ([beaa2ae](https://github.com/tachibana-shin/hkd-tt152-app/commit/beaa2ae35e519bab833a625c0fd3bc2638edd182))
+
 # [0.29.0](https://github.com/tachibana-shin/hkd-tt152-app/compare/v0.28.1...v0.29.0) (2026-10-29)
 
 
