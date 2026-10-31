@@ -63,6 +63,7 @@ import type {
   ProductionLotRow,
   ProductionLotComponentRow,
   StockVoucherRow,
+  InboundPrefill,
   LedgerRow,
   Invoice,
   InvoiceItem,
@@ -831,6 +832,15 @@ export const api = {
   /** Lập phiếu xuất cho hóa đơn chưa có phiếu (trừ tồn + ghi Nợ 131/Có 511). */
   createInvoiceOutbound: (invoiceId: number) =>
     call<string>("create_invoice_outbound", { invoiceId }),
+  /**
+   * Nhân bản hóa đơn (kể cả đã xuất kho / đã phát hành) thành hóa đơn NHÁP mới.
+   * Bản sao KHÔNG kèm phiếu xuất — tồn kho chỉ bị trừ khi người dùng chủ động
+   * bấm "Lập phiếu xuất" cho bản nháp đó.
+   */
+  cloneInvoice: async (invoiceId: number) =>
+    parse<{ id: number; number: string; source_number: string }>(
+      await call<string>("clone_invoice", { invoiceId }),
+    ),
   /** Số phiếu kế tiếp do backend sinh (không đoán từ danh sách đang lọc). */
   nextVoucherNo: (entryType: "PN" | "PX" | "PT" | "PC") =>
     call<string>("next_voucher_no", { entryType }),
@@ -1292,6 +1302,10 @@ export const api = {
   getVoucher: async (voucherNo: string) =>
     parse<VoucherRow[]>(await call<string>("get_voucher", { voucherNo })),
 
+  /** Dữ liệu điền sẵn khi nhân bản phiếu nhập (chưa ghi sổ, người dùng lưu mới tạo). */
+  getInboundPrefill: async (voucherNo: string) =>
+    parse<InboundPrefill>(await call<string>("get_inbound_prefill", { voucherNo })),
+
   /**
    * Danh sách lô sản xuất (phiếu nhập loại `production`) — 1 lô = 1 dòng kèm
    * tên thành phẩm + giá trị nhập kho, phân trang server-side.
@@ -1312,11 +1326,14 @@ export const api = {
   getProductionLotComponents: async (voucherNo: string) =>
     parse<ProductionLotComponentRow[]>(
       await call<string>("get_production_lot_components", { voucherNo }),
-
-  fixProductionLotComponents: async (voucherNo: string) =>
-    parse<{ fixed: number }>(
-      await call<string>("fix_production_lot_components", { voucherNo }),
     ),
+
+  /**
+   * Tạo snapshot thành phần cho lô cũ (tạo trước khi có bảng thành phần).
+   * Chỉ chạy khi lô chưa có snapshot; dựng lại từ định mức hiện hành.
+   */
+  fixProductionLotComponents: async (voucherNo: string) =>
+    parse<{ fixed: number }>(await call<string>("fix_production_lot_components", { voucherNo })),
 
   // ─── ĐĂNG NHẬP / PHÂN QUYỀN ───
   login: async (username: string, password: string): Promise<CurrentUser> =>

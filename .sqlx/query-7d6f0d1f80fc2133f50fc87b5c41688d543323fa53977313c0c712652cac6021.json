@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number, customer, customer_tax_code, total, vat_amount\n           FROM invoice WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "number",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "customer_tax_code",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "total",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "vat_amount",
+        "ordinal": 4,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7d6f0d1f80fc2133f50fc87b5c41688d543323fa53977313c0c712652cac6021"
+}

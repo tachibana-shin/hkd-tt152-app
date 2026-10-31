@@ -474,6 +474,9 @@ pub async fn api_invoke(
         "invoice_duplicate_numbers" => mx!(commands::invoice::invoice_duplicate_numbers, body),
         "invoice_shortage_map" => mx!(commands::invoice::invoice_shortage_map, body, ids: Vec<i64>),
         "next_voucher_no" => mx!(commands::stock::next_voucher_no, body, entry_type: String),
+        "get_inbound_prefill" => {
+            mx!(commands::stock::get_inbound_prefill, body, voucher_no: String)
+        }
         "get_journal_entries" => mx!(
             commands::stock::get_journal_entries,
             body,
@@ -595,6 +598,7 @@ pub async fn api_invoke(
             customer_tax_code: String,
             items: Vec<InvoiceItemInput>
         ),
+        "clone_invoice" => mx!(commands::invoice::clone_invoice, body, invoice_id: i64),
         "link_hddt" => mx!(
             commands::invoice::link_hddt,
             body,

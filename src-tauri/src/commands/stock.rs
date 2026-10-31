@@ -1297,6 +1297,141 @@ pub(crate) async fn next_voucher_no(
     next_voucher_no_core(&*state.pool.read().await, &entry_type).await
 }
 
+/// Dựng dữ liệu để NHÂN BẢN một phiếu nhập: đầu phiếu + các dòng hàng đã ghi
+/// sổ, quy ngược về đúng các ô nhập của màn "Tạo phiếu nhập".
+///
+/// Không chép ký hiệu / số / ngày hóa đơn gốc: bản sao là một lần nhập mới,
+/// dùng lại số hóa đơn đó sẽ đụng chốt chống nhập trùng. Phiếu điều chỉnh bị
+/// chặn vì hướng tăng/giảm không lưu ở đầu phiếu (dòng điều chỉnh giảm còn đảo
+/// Nợ/Có) nên dựng lại sẽ ra một phiếu khác nghĩa.
+pub(crate) async fn inbound_prefill_core(
+    pool: &SqlitePool,
+    voucher_no: &str,
+) -> Result<serde_json::Value, String> {
+    let voucher_no = voucher_no.trim();
+    let header = sqlx::query!(
+        r#"SELECT voucher_no, posting_date, description, supplier_code, warehouse_code,
+                  unit_code, inbound_type, reference_no, vat_rate
+             FROM inbound_voucher WHERE voucher_no = ?"#,
+        voucher_no
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("Không tìm thấy phiếu nhập {voucher_no}"))?;
+    if header.inbound_type == "adjust" {
+        return Err(
+            "Phiếu điều chỉnh không nhân bản được: hướng tăng/giảm không lưu ở đầu phiếu".into(),
+        );
+    }
+
+    let vat_deduct: String = sqlx::query_scalar!(
+        r#"SELECT COALESCE((SELECT value FROM app_setting WHERE key = 'vat_deduct'), '0') as "v!: String""#
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let deductible = vat_deduct == "1";
+
+    let rows = sqlx::query!(
+        r#"SELECT product_code, quantity, unit_price, amount, discount, vat_rate,
+                  debit_account, credit_account
+             FROM journal_entry
+            WHERE voucher_no = ? AND entry_type = 'PN' AND product_code <> ''
+            ORDER BY id"#,
+        voucher_no
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut items = Vec::with_capacity(rows.len());
+    let mut debit_account = String::new();
+    let mut credit_account = String::new();
+    for (i, row) in rows.iter().enumerate() {
+        if i == 0 {
+            debit_account = row.debit_account.clone();
+            credit_account = row.credit_account.clone();
+        }
+        let rate = row.vat_rate.clamp(0.0, 1.0);
+        // Sổ ghi đơn giá ĐÃ trừ chiết khấu (và gồm thuế nếu hộ không khấu trừ),
+        // nên quy ngược: giá trước CK = thành tiền đã gỡ thuế + tiền CK. Dùng
+        // công tắc khấu trừ HIỆN TẠI — bản sao sẽ được tính lại theo công tắc đó.
+        let net = if deductible {
+            row.amount
+        } else {
+            round2(row.amount / (1.0 + rate))
+        };
+        let unit_price = if row.quantity.abs() > 1e-9 {
+            round2((net + row.discount) / row.quantity)
+        } else {
+            row.unit_price
+        };
+        items.push(json!({
+            "product_code": row.product_code,
+            "quantity": row.quantity,
+            "unit_price": unit_price,
+            "discount": row.discount,
+            "vat_rate": rate,
+        }));
+    }
+    if items.is_empty() {
+        return Err(format!(
+            "Phiếu nhập {voucher_no} không có dòng hàng để nhân bản"
+        ));
+    }
+
+    // Ghi chú nằm ở bút toán, dạng "Theo chứng từ: {ref} · {note}"; gỡ phần
+    // chứng từ gốc ra để đầu phiếu mới không lặp "Theo chứng từ" lần nữa.
+    let raw_note: String = sqlx::query_scalar!(
+        r#"SELECT note FROM journal_entry
+            WHERE voucher_no = ? AND entry_type = 'PN'
+            ORDER BY id DESC LIMIT 1"#,
+        voucher_no
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let reference_no = header.reference_no.trim().to_string();
+    let note = if reference_no.is_empty() {
+        raw_note
+    } else {
+        let prefix = format!("Theo chứng từ: {reference_no}");
+        match raw_note.strip_prefix(&prefix) {
+            Some(rest) => rest.strip_prefix(" · ").unwrap_or(rest).to_string(),
+            None => raw_note,
+        }
+    };
+
+    Ok(json!({
+        "voucher_no": header.voucher_no,
+        "posting_date": header.posting_date,
+        "description": header.description,
+        "supplier_code": header.supplier_code,
+        "warehouse_code": header.warehouse_code,
+        "unit_code": header.unit_code,
+        "inbound_type": header.inbound_type,
+        "reference_no": reference_no,
+        "vat_rate": header.vat_rate,
+        "debit_account": debit_account,
+        "credit_account": credit_account,
+        "note": note,
+        "items": items,
+    }))
+}
+
+/// Lệnh giao diện: lấy dữ liệu nhân bản phiếu nhập (màn Tạo phiếu nhập tự mở
+/// sẵn, chưa ghi sổ — người dùng xem lại rồi mới lưu).
+#[tauri::command]
+pub(crate) async fn get_inbound_prefill(
+    state: State<'_, AppState>,
+    voucher_no: String,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
+    let pool = state.pool.read().await;
+    Ok(inbound_prefill_core(&pool, &voucher_no).await?.to_string())
+}
+
 /// Số phiếu chi (PC) tiếp theo: lấy số lớn nhất đang có + 1 (PC001, PC002…).
 /// Khớp với quy ước gợi ý số phiếu ở màn Phiếu thu/chi.
 async fn next_pc_no(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
@@ -2449,7 +2584,9 @@ pub(crate) async fn stock_vouchers_core(
                 SUM(quantity) AS total_qty,
                 SUM(discount) AS discount,
                 SUM(amount) AS amount,
-                MAX(note) AS note
+                MAX(note) AS note,
+                COALESCE((SELECT iv.inbound_type FROM inbound_voucher iv
+                           WHERE iv.voucher_no = v.voucher_no), '') AS inbound_type
            FROM (
              SELECT je.posting_date, je.voucher_no, je.entry_type, je.description,
                     je.product_code, je.quantity, je.discount, je.amount, je.note,
@@ -2682,56 +2819,110 @@ pub(crate) async fn production_lot_components_core(
     .map_err(|e| e.to_string())
 }
 
-/// Backfill snapshot thành phần cho các lô sản xuất cũ (tạo trước khi có
-/// snapshot) — chỉ chạy khi lô chưa có bản ghi `production_lot_component`.
-/// Dùng định mức hiện hành (best-effort) vì định mức cũ có thể đã thay đổi.
+/// Backfill snapshot thành phần cho lô sản xuất cũ (tạo trước khi có snapshot).
+///
+/// Chỉ chạy khi lô chưa có bản ghi `production_lot_component`. Thành phần +
+/// đơn giá khai dựng từ định mức HIỆN HÀNH (best-effort — định mức cũ có thể đã
+/// đổi); riêng tiền vốn FIFO đọc từ chính phiếu xuất NVL tự sinh của lô
+/// (`adjust_code = 'XuatNVL'`, ghi chú "Theo <số phiếu>") nên vẫn đúng giá vốn
+/// thực tế lúc sản xuất.
 pub(crate) async fn fix_production_lot_components_core(
     pool: &SqlitePool,
     voucher_no: &str,
 ) -> Result<usize, String> {
     let vn = voucher_no.trim();
-    if vn.is_empty() { return Err("Thiếu số phiếu lô".into()); }
-    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM inbound_voucher WHERE voucher_no = ?1 AND inbound_type = 'production'")
-        .bind(vn)
-        .fetch_optional(pool).await.map_err(|e| e.to_string())?;
-    let Some(inbound_id) = id else { return Err("Không tìm thấy lô sản xuất".into()); };
+    if vn.is_empty() {
+        return Err("Thiếu số phiếu lô".into());
+    }
+    let lot: Option<(i64, String)> = sqlx::query_as(
+        "SELECT id, warehouse_code FROM inbound_voucher
+          WHERE voucher_no = ?1 AND inbound_type = 'production'",
+    )
+    .bind(vn)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some((inbound_id, warehouse_code)) = lot else {
+        return Err("Không tìm thấy lô sản xuất".into());
+    };
 
-    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM production_lot_component WHERE inbound_voucher_id = ?1")
-        .bind(inbound_id)
-        .fetch_one(pool).await.map_err(|e| e.to_string())?;
-    if existing > 0 { return Ok(0); }
+    let existing: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM production_lot_component WHERE inbound_voucher_id = ?1",
+    )
+    .bind(inbound_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    if existing > 0 {
+        return Ok(0);
+    }
 
-    // Lấy danh sách thành phẩm của lô từ journal_entry (PN).
+    // Thành phẩm của lô đọc từ chính bút toán PN.
     let entries: Vec<(String, f64, f64)> = sqlx::query_as(
-        r#"SELECT product_code, SUM(quantity) as q, unit_price
+        r#"SELECT product_code, SUM(quantity), unit_price
              FROM journal_entry
-            WHERE inbound_voucher_id = ? AND entry_type = 'PN' AND product_code <> ''
+            WHERE inbound_voucher_id = ?1 AND entry_type = 'PN' AND product_code <> ''
             GROUP BY product_code, unit_price"#,
     )
     .bind(inbound_id)
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
-    if entries.is_empty() { return Err("Lô không có thành phẩm".into()); }
+    if entries.is_empty() {
+        return Err("Lô không có thành phẩm".into());
+    }
 
-    let items: Vec<InboundItemInput> = entries.into_iter().map(|(code, qty, price)| InboundItemInput {
-        product_code: code,
-        quantity: qty,
-        unit_price: price,
-        discount: 0.0,
-        vat_rate: None,
-        vat_amount: None,
-    }).collect();
-
-    // warehouse_code của lô
-    let wh: String = sqlx::query_scalar("SELECT warehouse_code FROM inbound_voucher WHERE id = ?1")
-        .bind(inbound_id)
-        .fetch_one(pool).await.map_err(|e| e.to_string())?;
+    let items: Vec<InboundItemInput> = entries
+        .into_iter()
+        .map(|(product_code, quantity, unit_price)| InboundItemInput {
+            product_code,
+            quantity,
+            unit_price,
+            discount: 0.0,
+            vat_rate: None,
+            vat_amount: None,
+        })
+        .collect();
 
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    let lines = load_production_bom_lines(&mut tx, &items, &wh).await?;
-    if lines.is_empty() { tx.rollback().await.ok(); return Err("Không có định mức cho thành phẩm".into()); }
+    let lines = load_production_bom_lines(&mut tx, &items, &warehouse_code).await?;
+    if lines.is_empty() {
+        tx.rollback().await.ok();
+        return Err("Không có định mức cho thành phẩm".into());
+    }
     snapshot_production_components(&mut tx, inbound_id, &lines).await?;
+
+    // Giá vốn FIFO thực tế lấy từ phiếu xuất NVL tự sinh của lô — cùng nguồn
+    // với lúc tạo lô, nên cột "Tiền vốn FIFO" không bị 0 với lô cũ.
+    let px_costs: Vec<(String, f64, f64)> = sqlx::query_as(
+        r#"SELECT product_code, SUM(quantity), SUM(amount)
+             FROM journal_entry
+            WHERE entry_type = 'PX' AND adjust_code = 'XuatNVL' AND note = ?1
+            GROUP BY product_code"#,
+    )
+    .bind(format!("Theo {vn}"))
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    for (code, qty, cost) in px_costs {
+        if qty <= 0.0 {
+            continue;
+        }
+        let unit_cost = cost / qty;
+        sqlx::query(
+            "UPDATE production_lot_component
+                SET unit_cost = ?, cost_amount = ROUND(quantity * ?, 2)
+              WHERE inbound_voucher_id = ? AND material_code = ? AND is_service = 0",
+        )
+        .bind(unit_cost)
+        .bind(unit_cost)
+        .bind(inbound_id)
+        .bind(&code)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(lines.len())
 }
@@ -2741,7 +2932,7 @@ pub(crate) async fn fix_production_lot_components(
     state: State<'_, AppState>,
     voucher_no: String,
 ) -> Result<String, String> {
-    require_role(&state, &["admin", "ketoan"]).await?;
+    require_role(&state, &["admin", "ketoan", "kho"]).await?;
     let pool = state.pool.read().await;
     let n = fix_production_lot_components_core(&pool, voucher_no.trim()).await?;
     Ok(json!({"fixed": n}).to_string())
@@ -5151,6 +5342,110 @@ mod tests {
         assert_eq!(nvl_again.amount, 120_000.0);
     }
 
+    /// Lô cũ (tạo trước khi có bảng thành phần): backfill dựng snapshot từ định
+    /// mức hiện hành, nhưng tiền vốn FIFO phải đọc từ phiếu xuất NVL tự sinh của
+    /// lô — không để cột "Tiền vốn FIFO" về 0.
+    #[tokio::test]
+    async fn backfill_snapshot_lo_cu_dung_dinh_muc_hien_hanh_va_gia_von_fifo() {
+        let pool = test_pool().await;
+        let (tp, _nvl) = seed_bom(&pool, 100.0).await;
+        sqlx::query!(
+            "UPDATE product_bom_item SET unit_price = 6000 WHERE product_id = ?",
+            tp
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        save_inbound_core(
+            &pool,
+            "2026-03-15",
+            "PNK-CU",
+            "Lô cũ",
+            "",
+            "W1",
+            "HKD",
+            &[inp("TP1", 10.0, 8_000.0)],
+            "",
+            "production",
+            "",
+            0.0,
+            "155",
+            "154",
+            false,
+            "",
+            true,
+        )
+        .await
+        .expect("nhập sản xuất");
+
+        // Mô phỏng lô tạo trước bản cập nhật: chưa có snapshot thành phần.
+        sqlx::query("DELETE FROM production_lot_component")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(production_lot_components_core(&pool, "PNK-CU")
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Định mức bị sửa sau khi sản xuất → backfill lấy định mức HIỆN HÀNH.
+        sqlx::query!(
+            "UPDATE product_bom_item SET quantity = 3.0, unit_price = 7000 WHERE product_id = ?",
+            tp
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let n = fix_production_lot_components_core(&pool, "PNK-CU")
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+
+        let comps = production_lot_components_core(&pool, "PNK-CU")
+            .await
+            .unwrap();
+        assert_eq!(comps.len(), 1);
+        let c = &comps[0];
+        assert_eq!(c.material_code, "NVL1");
+        assert_eq!(c.per_unit_qty, 3.0);
+        assert_eq!(c.quantity, 30.0);
+        assert_eq!(c.unit_price, 7_000.0);
+        assert_eq!(c.amount, 210_000.0);
+        // Vốn FIFO lấy từ PX tự sinh lúc lưu lô (20 × 5.000), không theo định mức.
+        assert_eq!(c.unit_cost, 5_000.0);
+        assert_eq!(c.cost_amount, 150_000.0);
+
+        // Đã có snapshot → chạy lại không ghi đè.
+        assert_eq!(
+            fix_production_lot_components_core(&pool, "PNK-CU")
+                .await
+                .unwrap(),
+            0
+        );
+        sqlx::query!(
+            "UPDATE product_bom_item SET quantity = 9.0 WHERE product_id = ?",
+            tp
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let again = production_lot_components_core(&pool, "PNK-CU")
+            .await
+            .unwrap();
+        assert_eq!(again[0].per_unit_qty, 3.0);
+    }
+
+    #[tokio::test]
+    async fn backfill_lo_san_xuat_bao_loi_khi_khong_ton_tai() {
+        let pool = test_pool().await;
+        let err = fix_production_lot_components_core(&pool, "PNK-KHONG-CO")
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Không tìm thấy lô sản xuất");
+    }
+
     #[tokio::test]
     async fn khong_bat_o_tu_xuat_nvl_thi_khong_sinh_phieu_xuat() {
         let pool = test_pool().await;
@@ -5249,5 +5544,125 @@ mod tests {
             scalar_f64(&pool, "SELECT COALESCE(SUM(quantity), 0) FROM stock_lot").await,
             10.0
         );
+    }
+
+    /// Nhân bản phiếu nhập: dựng lại đúng đầu phiếu + dòng hàng để mở sẵn màn
+    /// Tạo phiếu nhập (hộ KHÔNG khấu trừ → giá sổ đã gồm thuế, phải gỡ ra), và
+    /// chặn phiếu điều chỉnh vì hướng tăng/giảm không lưu ở đầu phiếu.
+    #[tokio::test]
+    async fn prefill_nhan_ban_phieu_nhap_dung_lai_duoc_o_nhap() {
+        let pool = test_pool().await;
+        seed_product(&pool, "SP-PN", "Hàng nhập", 0.08).await;
+        seed_warehouse(&pool, "W1", "Kho 1").await;
+        set_vat_deduct(&pool, false).await;
+
+        save_inbound_core(
+            &pool,
+            "2026-06-01",
+            "PN0001",
+            "Nhập hàng tháng 6",
+            "NCC1",
+            "W1",
+            "HKD",
+            &[InboundItemInput {
+                product_code: "SP-PN".into(),
+                quantity: 10.0,
+                unit_price: 100_000.0,
+                discount: 50_000.0,
+                vat_rate: Some(0.08),
+                ..Default::default()
+            }],
+            "ghi chú mua",
+            "purchase",
+            "HD-REF-1",
+            0.08,
+            "",
+            "",
+            false,
+            "",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let p = inbound_prefill_core(&pool, "PN0001").await.unwrap();
+        assert_eq!(p["inbound_type"], "purchase");
+        assert_eq!(p["description"], "Nhập hàng tháng 6");
+        assert_eq!(p["supplier_code"], "NCC1");
+        assert_eq!(p["warehouse_code"], "W1");
+        assert_eq!(p["reference_no"], "HD-REF-1");
+        assert_eq!(p["note"], "ghi chú mua");
+        assert_eq!(p["debit_account"], "152");
+        assert_eq!(p["credit_account"], "331");
+        assert!((p["vat_rate"].as_f64().unwrap() - 0.08).abs() < 1e-9);
+
+        let item = &p["items"].as_array().unwrap()[0];
+        assert_eq!(item["product_code"], "SP-PN");
+        assert_eq!(item["quantity"].as_f64().unwrap(), 10.0);
+        assert_eq!(item["discount"].as_f64().unwrap(), 50_000.0);
+        assert!((item["vat_rate"].as_f64().unwrap() - 0.08).abs() < 1e-9);
+        // Giá sổ = 102.600 (đã gồm 8% thuế) → quy ngược về đúng 100.000 đã nhập
+        // để bản sao không bị cộng thuế lần hai.
+        assert!(
+            (item["unit_price"].as_f64().unwrap() - 100_000.0).abs() < 0.01,
+            "{item}"
+        );
+
+        // Phiếu điều chỉnh: không lưu hướng tăng/giảm ở đầu phiếu → chặn.
+        sqlx::query(
+            "INSERT INTO inbound_voucher (voucher_no, inbound_type) VALUES ('PN-ADJ', 'adjust')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let err = inbound_prefill_core(&pool, "PN-ADJ").await.unwrap_err();
+        assert!(err.contains("điều chỉnh"), "{err}");
+    }
+
+    /// Khấu trừ GTGT: sổ ghi giá CHƯA thuế → vẫn quy ngược đúng giá đã nhập.
+    #[tokio::test]
+    async fn prefill_nhan_ban_phieu_nhap_khau_tru_thue() {
+        let pool = test_pool().await;
+        seed_product(&pool, "SP-PN2", "Hàng nhập 2", 0.08).await;
+        seed_warehouse(&pool, "W1", "Kho 1").await;
+        set_vat_deduct(&pool, true).await;
+
+        save_inbound_core(
+            &pool,
+            "2026-06-02",
+            "PN0002",
+            "Nhập khấu trừ",
+            "NCC2",
+            "W1",
+            "HKD",
+            &[InboundItemInput {
+                product_code: "SP-PN2".into(),
+                quantity: 10.0,
+                unit_price: 100_000.0,
+                discount: 50_000.0,
+                vat_rate: Some(0.08),
+                ..Default::default()
+            }],
+            "",
+            "purchase",
+            "",
+            0.08,
+            "",
+            "",
+            false,
+            "",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let p = inbound_prefill_core(&pool, "PN0002").await.unwrap();
+        let item = &p["items"].as_array().unwrap()[0];
+        assert!(
+            (item["unit_price"].as_f64().unwrap() - 100_000.0).abs() < 0.01,
+            "{item}"
+        );
+        assert!((item["vat_rate"].as_f64().unwrap() - 0.08).abs() < 1e-9);
+        assert_eq!(item["discount"].as_f64().unwrap(), 50_000.0);
     }
 }

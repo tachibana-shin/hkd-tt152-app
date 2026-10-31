@@ -74,7 +74,16 @@ function openLink(inv: Invoice) {
   linkTarget.value = inv;
   linkVisible.value = true;
 }
+/** Còn sửa dòng hàng được khi nháp, hoặc đã chép nhưng chưa phát hành/chưa xuất kho. */
+function canEditLines(inv: Invoice) {
+  return (
+    inv.status === "draft" ||
+    (inv.status === "exported" && !(inv.voucher_no ?? "").trim() && !inv.e_invoice_no)
+  );
+}
 function openDraft(inv: Invoice | null) {
+  // Nháy đúp dòng đã phát hành/xuất kho không được mở trình sửa dòng hàng.
+  if (inv && !canEditLines(inv)) return;
   draftTarget.value = inv;
   draftVisible.value = true;
 }
@@ -561,12 +570,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
                 <!-- Đã chép nhưng chưa phát hành/chưa xuất kho → vẫn sửa dòng hàng
                      được (gồm tạo nhanh lô sản xuất) — issue #9. -->
                 <Button
-                  v-if="
-                    data.invoice.status === 'draft' ||
-                    (data.invoice.status === 'exported' &&
-                      !(data.invoice.voucher_no ?? '').trim() &&
-                      !data.invoice.e_invoice_no)
-                  "
+                  v-if="canEditLines(data.invoice)"
                   icon="pi pi-file-edit"
                   text
                   rounded

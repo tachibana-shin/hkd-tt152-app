@@ -1646,7 +1646,7 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-17",
-      voucher_no: "PN9300",
+      voucher_no: uniqueVoucher("PN9300"),
       description: "Nhập tồn cho test hàng chờ xuất",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1689,17 +1689,21 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
     expect(res.ok(), `save_invoice ${number} failed: ${await res.text()}`).toBe(true);
     return number;
   };
-  await mk("HD9300", "0100000000"); // sẵn sàng chép
-  await mk("HD9301", "MST-SAI"); // lỗi MST → chặn
+  // Số HĐ riêng mỗi lần chạy: số trùng làm retry đỏ ngay từ bước lập hóa đơn.
+  const noOk = uniqueVoucher("HD9300");
+  const noBad = uniqueVoucher("HD9301");
+  const noIssued = uniqueVoucher("HD9302");
+  await mk(noOk, "0100000000"); // sẵn sàng chép
+  await mk(noBad, "MST-SAI"); // lỗi MST → chặn
 
   // Một hóa đơn đã phát hành (không nằm trong hàng chờ): lấy id theo số HĐ vì các
   // test trước đã tạo hóa đơn nên id không cố định.
-  const mkIssued = await mk("HD9302", "0100000000");
+  const mkIssued = await mk(noIssued, "0100000000");
   const list = (await (await request.post("/api/get_invoices", { data: {} })).json()) as Array<{
     id: number;
     number: string;
   }>;
-  const issuedId = list.find((i) => i.number === "HD9302")?.id;
+  const issuedId = list.find((i) => i.number === noIssued)?.id;
   expect(issuedId, `vừa lập ${mkIssued}`).toBeTruthy();
   const issued = await request.post("/api/link_hddt", {
     data: {
@@ -1720,12 +1724,13 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   await page.getByPlaceholder("Số hóa đơn, khách hàng, MST…").press("Enter");
 
   // Cả 2 hóa đơn chưa phát hành đều có mặt; hóa đơn đã phát hành thì không.
-  const rowOk = page.locator("tr", { has: page.getByText("HD9300", { exact: true }) }).first();
-  const rowBad = page.locator("tr", { has: page.getByText("HD9301", { exact: true }) }).first();
+  const rowOk = page.locator("tr", { has: page.getByText(noOk, { exact: true }) }).first();
+  const rowBad = page.locator("tr", { has: page.getByText(noBad, { exact: true }) }).first();
   await expect(rowOk.getByText("Sẵn sàng chép")).toBeVisible();
   await expect(rowBad.getByText("1 lỗi")).toBeVisible();
-  // Nền dòng: hàng chờ = còn chờ xuất (vàng) hoặc thiếu hàng (đỏ) — không để trắng.
-  await expect(rowOk).toHaveClass(/hkd-row-(draft|short)/);
+  // Nền dòng: hàng chờ = tím (đủ tồn, không lỗi) / vàng (chưa soi xong) / đỏ (thiếu
+  // hàng) — không để trắng. Đủ tồn hay chưa là do bước soi tồn nền, nên nhận cả 3.
+  await expect(rowOk).toHaveClass(/hkd-row-(draft|short|ready)/);
   await expect(rowBad).toHaveClass(/hkd-row-(draft|short)/);
   await expect(rowBad.getByText(/MST người mua/)).toBeVisible();
   // Nút chép bị khoá khi còn lỗi.
@@ -1741,12 +1746,12 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   // Màn tự chọn sẵn dòng chưa chép, không lỗi → F8 mở hộp thoại chép cho dòng đó.
   await page.keyboard.press("F8");
   const dlg = page.getByRole("dialog");
-  await expect(dlg.getByText("Chép hóa đơn HD9300 sang dịch vụ khác")).toBeVisible();
+  await expect(dlg.getByText(`Chép hóa đơn ${noOk} sang dịch vụ khác`)).toBeVisible();
   await dlg.getByRole("button", { name: "Đã chép sang bên kia" }).click();
   await expect(dlg).toBeHidden();
 
   // Đã chép → hàng hiện trạng thái chờ phát hành, F9 ghi số HĐĐT → biến khỏi danh sách.
-  const rowCopied = page.locator("tr", { has: page.getByText("HD9300", { exact: true }) }).first();
+  const rowCopied = page.locator("tr", { has: page.getByText(noOk, { exact: true }) }).first();
   await expect(rowCopied.getByText("Đã chép — chờ phát hành")).toBeVisible();
   // Dòng vừa chép không còn là dòng ưu tiên → chọn tay rồi F9.
   await rowCopied.getByRole("cell").nth(1).click();
@@ -1756,7 +1761,7 @@ test("Chờ xuất HĐĐT: chỉ hiện hóa đơn chưa phát hành, có checkl
   await linkDlg.getByLabel("Ký hiệu HĐĐT").fill("1C26TT152");
   await linkDlg.getByRole("button", { name: "Lưu" }).click();
   await expect(linkDlg).toBeHidden();
-  await expect(page.getByText("HD9300", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(noOk, { exact: true })).toHaveCount(0);
 
   // Ký hiệu vừa dùng được ghi vào hồ sơ hộ → hóa đơn sau mở hộp thoại phải tự điền
   // ký hiệu, không phải gõ lại.
@@ -1841,7 +1846,7 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
   const stockIn = await request.post("/api/save_inbound", {
     data: {
       posting_date: "2026-09-21",
-      voucher_no: "PN9350",
+      voucher_no: uniqueVoucher("PN9350"),
       description: "Nhập tồn cho test bấm nhiều lần",
       supplier_code: "",
       warehouse_code: "KHO-CHINH",
@@ -1899,9 +1904,10 @@ test("Hóa đơn nháp: bấm Lập hóa đơn nhiều lần chỉ tạo 1 hóa 
   const sameNo = all.filter((i) => i.number === number);
   expect(sameNo.length, `số ${number} bị lặp: ${sameNo.length} bản ghi`).toBe(1);
   await expect(page.locator("tr", { has: page.getByText(number, { exact: true }) })).toHaveCount(1);
-  // Dòng nháp phải có nền màu: vàng = nháp (đủ hàng), đỏ = thiếu hàng.
+  // Dòng nháp phải có nền màu, không trắng: tím = đủ hàng, vàng = chưa soi xong,
+  // đỏ = thiếu hàng (bước soi tồn chạy nền nên cả 3 đều hợp lệ).
   await expect(page.locator("tr", { has: page.getByText(number, { exact: true }) })).toHaveClass(
-    /hkd-row-(draft|short)/,
+    /hkd-row-(draft|short|ready)/,
   );
 });
 
@@ -2413,6 +2419,247 @@ test("Hóa đơn nháp: nút xoá dọn cả dòng hàng, hóa đơn đã xử l
     number: string;
   }>;
   expect(after.map((i) => i.number)).not.toContain("HD9100");
+});
+
+test("Hóa đơn: nhân bản tạo nháp mới không kèm phiếu xuất (cả hóa đơn đã xuất kho)", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  // Đủ tồn để lập được phiếu xuất cho hóa đơn nguồn.
+  const stockIn = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: "2026-10-01",
+      voucher_no: uniqueVoucher("PNCL"),
+      description: "Nhập tồn cho test nhân bản hóa đơn",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 3, unit_price: 10000, discount: 0 }],
+      note: "",
+      inbound_type: "purchase",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(stockIn.ok(), `save_inbound failed ${stockIn.status()}: ${await stockIn.text()}`).toBe(
+    true,
+  );
+
+  const number = uniqueVoucher("HDCL");
+  const customer = `Khách nhân bản ${number}`;
+  const created = await request.post("/api/save_invoice", {
+    data: {
+      number,
+      date: "2026-10-02",
+      customer,
+      customer_tax_code: "0100000000",
+      items: [
+        {
+          product_code: "SP001",
+          quantity: 1,
+          unit_price: 12000,
+          industry_code: "PPHH",
+          discount: 2000,
+          warehouse_code: "",
+        },
+      ],
+    },
+  });
+  expect(created.ok(), `save_invoice failed ${created.status()}: ${await created.text()}`).toBe(
+    true,
+  );
+
+  type Row = {
+    id: number;
+    number: string;
+    status: string;
+    customer: string;
+    voucher_no: string;
+    e_invoice_no: string;
+  };
+  const invoices = async () =>
+    (await (await request.post("/api/get_invoices", { data: {} })).json()) as Row[];
+  const src = (await invoices()).find((i) => i.number === number);
+  expect(src, "hóa đơn nguồn phải có trong danh sách").toBeTruthy();
+  const srcId = src!.id;
+
+  // Lập phiếu xuất → hóa đơn "đã xuất kho" (mang số PX) vẫn phải nhân bản được.
+  const outbound = await request.post("/api/create_invoice_outbound", {
+    data: { invoiceId: srcId },
+  });
+  expect(
+    outbound.ok(),
+    `create_invoice_outbound failed ${outbound.status()}: ${await outbound.text()}`,
+  ).toBe(true);
+
+  // Mở tab Hóa đơn SAU khi tạo dữ liệu (reload khi chưa vào tab sẽ về Tổng quan).
+  await sidebarButton(page, "Hóa đơn").click();
+  await expect(page.locator("header h2")).toHaveText("Hóa đơn");
+  const row = page.locator("tr", { has: page.getByText(number, { exact: true }) }).first();
+  await expect(row).toBeVisible();
+  await expect(row.getByText(/^PX\d+/)).toBeVisible();
+
+  await row.getByRole("button", { name: "Nhân bản hóa đơn" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã nhân bản hóa đơn");
+
+  await expect
+    .poll(
+      async () =>
+        (await invoices()).filter((i) => i.customer === customer && i.id !== srcId).length,
+    )
+    .toBe(1);
+  const clone = (await invoices()).find((i) => i.customer === customer && i.id !== srcId)!;
+  expect(clone.number).not.toBe(number);
+  // Bản sao là nháp KHÔNG kèm phiếu xuất / số HĐĐT — không trừ tồn lần hai.
+  expect(clone.status).toBe("draft");
+  expect(clone.voucher_no).toBe("");
+  expect(clone.e_invoice_no).toBe("");
+
+  const detail = (await (
+    await request.post("/api/get_invoice_detail", { data: { id: clone.id } })
+  ).json()) as {
+    items: Array<{
+      product_code: string;
+      quantity: number;
+      unit_price: number;
+      discount: number;
+    }>;
+  };
+  expect(detail.items).toHaveLength(1);
+  expect(detail.items[0]).toMatchObject({
+    product_code: "SP001",
+    quantity: 1,
+    unit_price: 12000,
+    discount: 2000,
+  });
+
+  // Hóa đơn nguồn giữ nguyên phiếu xuất.
+  const srcAfter = (await invoices()).find((i) => i.id === srcId);
+  expect(srcAfter!.voucher_no).not.toBe("");
+
+  // Bản nháp mới hiện ngay trên bảng với nhãn Nháp.
+  const cloneRow = page
+    .locator("tr", { has: page.getByText(clone.number, { exact: true }) })
+    .first();
+  await expect(cloneRow).toBeVisible();
+  await expect(cloneRow.getByText("Nháp", { exact: true })).toBeVisible();
+});
+
+test("Phiếu nhập: nhân bản mở sẵn phiếu mới, phiếu điều chỉnh thì ẩn nút", async ({
+  page,
+  request,
+}) => {
+  await ensureLoggedIn(page);
+
+  const pn = uniqueVoucher("PNCLONE");
+  const saved = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: new Date().toISOString().slice(0, 10),
+      voucher_no: pn,
+      description: "Phiếu nhập để nhân bản",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 3, unit_price: 15000, discount: 1000 }],
+      note: "ghi chú nhân bản",
+      inbound_type: "purchase",
+      reference_no: "HD-REF-CLONE",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(saved.ok(), `save_inbound failed ${saved.status()}: ${await saved.text()}`).toBe(true);
+
+  await sidebarButton(page, "Nhập kho").click();
+  await expect(page.locator("header h2")).toHaveText("Nhập kho");
+  const search = page.getByPlaceholder("Số phiếu, mã hàng, khách, diễn giải…");
+  await search.fill(pn);
+  const row = page.locator("tr", { has: page.getByText(pn, { exact: true }) }).first();
+  await expect(row).toBeVisible();
+
+  await row.getByRole("button", { name: `Nhân bản phiếu nhập ${pn}` }).click();
+  const dlg = page.getByRole("dialog", { name: `Nhân bản phiếu nhập từ ${pn}` });
+  await expect(dlg).toBeVisible();
+
+  // Số phiếu phải được cấp MỚI từ cơ sở dữ liệu, không phải số của bản gốc.
+  const expectedNo = await (
+    await request.post("/api/next_voucher_no", { data: { entryType: "PN" } })
+  ).text();
+  await expect(dlg.getByLabel("Số phiếu")).toHaveValue(expectedNo);
+  expect(expectedNo).not.toBe(pn);
+
+  await dlg.getByRole("button", { name: "Lưu phiếu" }).click();
+  await expect(page.locator(".p-toast-summary").last()).toContainText("Đã nhập kho");
+
+  // Dòng hàng được dựng lại đúng ô nhập: SL 3, tiền hàng sau CK = 44.000 (không
+  // bị cộng thuế hai lần hay mất chiết khấu), ghi chú + chứng từ gốc giữ nguyên.
+  type JournalLine = {
+    entry_type: string;
+    product_code: string;
+    quantity: number;
+    amount: number;
+    discount: number;
+    note: string;
+  };
+  const lines = (await (
+    await request.post("/api/get_voucher", { data: { voucherNo: expectedNo } })
+  ).json()) as JournalLine[];
+  const pnLines = lines.filter((l) => l.entry_type === "PN" && l.product_code === "SP001");
+  expect(pnLines).toHaveLength(1);
+  expect(pnLines[0].quantity).toBe(3);
+  expect(pnLines[0].amount).toBeCloseTo(44000, 2);
+  expect(pnLines[0].discount).toBeCloseTo(1000, 2);
+  expect(pnLines[0].note).toContain("ghi chú nhân bản");
+  expect(pnLines[0].note).toContain("HD-REF-CLONE");
+
+  // Bản gốc vẫn còn nguyên 1 dòng hàng.
+  const srcLines = (await (
+    await request.post("/api/get_voucher", { data: { voucherNo: pn } })
+  ).json()) as JournalLine[];
+  expect(srcLines.filter((l) => l.entry_type === "PN" && l.product_code === "SP001")).toHaveLength(
+    1,
+  );
+
+  // Phiếu điều chỉnh: ẩn nút nhân bản (hướng tăng/giảm không lưu ở đầu phiếu).
+  const adjustNo = uniqueVoucher("PNADJ");
+  const adjust = await request.post("/api/save_inbound", {
+    data: {
+      posting_date: new Date().toISOString().slice(0, 10),
+      voucher_no: adjustNo,
+      description: "Điều chỉnh tăng để kiểm tra ẩn nút",
+      supplier_code: "",
+      warehouse_code: "KHO-CHINH",
+      unit_code: "HKD",
+      items: [{ product_code: "SP001", quantity: 1, unit_price: 15000, discount: 0 }],
+      note: "",
+      inbound_type: "adjust",
+      reference_no: "",
+      vat_rate: 0,
+      debit_account: "152",
+      credit_account: "331",
+      pay_now: false,
+      adjust_dir: "up",
+      autoBom: false,
+    },
+  });
+  expect(adjust.ok(), `save_inbound adjust failed ${adjust.status()}: ${await adjust.text()}`).toBe(
+    true,
+  );
+  await search.fill(adjustNo);
+  const adjustRow = page.locator("tr", { has: page.getByText(adjustNo, { exact: true }) }).first();
+  await expect(adjustRow).toBeVisible();
+  await expect(adjustRow.getByRole("button", { name: /Nhân bản phiếu nhập/ })).toHaveCount(0);
 });
 
 test("Xuất hóa đơn sang dịch vụ khác: chép dữ liệu + lưu bản chốt + thay thế hóa đơn", async ({
@@ -5472,11 +5719,29 @@ test("Định mức vật tư: khai nhiều thành phẩm trong 1 màn, lưu và
 
   /** Mở 1 bộ chọn (đã scope vào bảng / dòng) rồi gõ + bấm option đúng tên. */
   async function choose(scope: Locator, text: string) {
-    await scope.click();
-    const box = page.locator('.p-select-overlay [role="searchbox"]').last();
+    // Màn có NHIỀU Select: dropdown của ô vừa chọn đôi khi còn trong DOM khi mở
+    // ô kế → chọn ".p-select-overlay" cuối cùng có thể trúng overlay CŨ, gõ lọc
+    // vào đó thì danh sách của ô mới không lọc gì (option cần tìm không render).
+    // Đóng hẳn overlay thừa, rồi khoanh overlay bằng listbox id trên
+    // aria-controls của chính combobox (luôn có, kể cả khi đang đóng).
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".p-select-overlay")).toHaveCount(0);
+    const inside = scope.getByRole("combobox");
+    const combo = (await inside.count()) > 0 ? inside.first() : scope;
+    const listId = await combo.getAttribute("aria-controls");
+    expect(listId, "combobox phải có aria-controls trỏ danh sách option").toBeTruthy();
+    await combo.click();
+    const overlay = page.locator(".p-select-overlay").filter({
+      has: page.locator(`[id="${listId}"]`),
+    });
+    const box = overlay.getByRole("searchbox");
     await expect(box).toBeVisible();
-    await box.fill(text);
-    await page.getByRole("option", { name: text }).first().click();
+    // Gõ lọc phải THỰC SỰ giữ nguyên chữ (đôi khi ô lọc bị reset ngay sau fill).
+    await expect(async () => {
+      await box.fill(text);
+      await expect(box).toHaveValue(text);
+    }).toPass({ timeout: 10_000 });
+    await overlay.getByRole("option", { name: text }).first().click();
   }
 
   await sidebarButton(page, "Sản phẩm").click();

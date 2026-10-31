@@ -224,6 +224,33 @@ export interface StockVoucherRow {
   invoice_e_invoice_no?: string;
   /** Trạng thái hóa đơn đại diện (`draft` / `official` / …). */
   invoice_status?: string;
+  /** Loại nhập của đầu phiếu (`purchase` / `production` / `other` / `adjust`); rỗng với phiếu xuất. */
+  inbound_type?: string;
+}
+
+/** Dữ liệu nhân bản phiếu nhập — màn Tạo phiếu nhập mở sẵn với các ô này. */
+export interface InboundPrefill {
+  voucher_no: string;
+  posting_date: string;
+  description: string;
+  supplier_code: string;
+  warehouse_code: string;
+  unit_code: string;
+  inbound_type: string;
+  reference_no: string;
+  /** Tỷ lệ thuế GTGT đầu phiếu (0.08 = 8%). */
+  vat_rate: number;
+  debit_account: string;
+  credit_account: string;
+  note: string;
+  items: {
+    product_code: string;
+    quantity: number;
+    unit_price: number;
+    discount: number;
+    /** Tỷ lệ thuế của dòng (0.08 = 8%). */
+    vat_rate: number;
+  }[];
 }
 
 /** Một hóa đơn có thể chọn để liên kết lại với phiếu xuất. */

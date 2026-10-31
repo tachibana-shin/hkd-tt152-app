@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,\n                                   industry_code, vat_rate, pit_rate, discount, warehouse_code,\n                                   line_name)\n         SELECT ?, product_id, quantity, unit_price, subtotal, industry_code, vat_rate,\n                pit_rate, discount, warehouse_code, line_name\n           FROM invoice_item WHERE invoice_id = ?\n          ORDER BY id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "987861bcdc3ad647fb9d2f8480bb2c12e615af1353cb8da61ae6c40649ee4373"
+}

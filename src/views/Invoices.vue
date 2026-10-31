@@ -277,6 +277,31 @@ function makeOutbound(inv: Invoice) {
   });
 }
 
+/**
+ * Nhân bản hóa đơn thành NHÁP mới — cả hóa đơn nháp lẫn đã xuất kho/đã phát
+ * hành đều được. Bản sao KHÔNG kèm phiếu xuất (không trừ tồn lần hai) và
+ * không mang số HĐĐT; muốn xuất kho cho bản nháp thì bấm "Lập phiếu xuất".
+ */
+async function cloneInvoiceRow(inv: Invoice) {
+  try {
+    const res = await api.cloneInvoice(inv.id);
+    await reload();
+    toast.add({
+      severity: "success",
+      summary: "Đã nhân bản hóa đơn",
+      detail: `${res.source_number} → hóa đơn nháp ${res.number} (chưa có phiếu xuất)`,
+      life: 5000,
+    });
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không nhân bản được hóa đơn",
+      detail: String(e),
+      life: 8000,
+    });
+  }
+}
+
 async function afterStatusChange() {
   await reload();
   if (statusTarget.value) {
@@ -572,6 +597,15 @@ useKeepAliveRefresh(reload);
               />
               <!-- Đã bị thay thế thì không chép/liên kết được nữa -->
               <template v-if="data.status !== 'cancelled' && data.status !== 'replaced'">
+                <Button
+                  icon="pi pi-clone"
+                  text
+                  rounded
+                  size="small"
+                  aria-label="Nhân bản hóa đơn"
+                  v-tooltip="'Nhân bản thành hóa đơn nháp mới (không kèm phiếu xuất)'"
+                  @click="cloneInvoiceRow(data)"
+                />
                 <Button
                   icon="pi pi-copy"
                   text

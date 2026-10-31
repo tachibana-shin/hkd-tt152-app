@@ -306,6 +306,10 @@ pub(crate) struct StockVoucherRow {
     /// Trạng thái hóa đơn đại diện (`draft` / `official` / …) — để UI gắn nhãn.
     #[sqlx(default)]
     pub(crate) invoice_status: String,
+    /// Loại nhập của đầu phiếu (`purchase` / `production` / `other` / `adjust`);
+    /// rỗng với phiếu xuất. UI ẩn "Nhân bản" với phiếu điều chỉnh.
+    #[sqlx(default)]
+    pub(crate) inbound_type: String,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]

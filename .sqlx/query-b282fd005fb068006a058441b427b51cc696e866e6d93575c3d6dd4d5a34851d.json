@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT voucher_no, posting_date, description, supplier_code, warehouse_code,\n                  unit_code, inbound_type, reference_no, vat_rate\n             FROM inbound_voucher WHERE voucher_no = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "voucher_no",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "posting_date",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "supplier_code",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "warehouse_code",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "unit_code",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "inbound_type",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "reference_no",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "vat_rate",
+        "ordinal": 8,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b282fd005fb068006a058441b427b51cc696e866e6d93575c3d6dd4d5a34851d"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE product_bom_item SET quantity = 9.0 WHERE product_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "eaeb79182dacda67ad5625acec04f14ed3685cb2c6dc2428ec31e251cf87998f"
+}

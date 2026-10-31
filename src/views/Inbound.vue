@@ -141,6 +141,7 @@ async function adjustFromVoucher(row: { voucher_no: string }) {
       pay_now: false,
       auto_bom: false,
     });
+    cloneSource.value = "";
     nextVoucherNo();
     dialog.value = true;
   } catch (e) {
@@ -148,8 +149,54 @@ async function adjustFromVoucher(row: { voucher_no: string }) {
   }
 }
 
+/**
+ * Nhân bản phiếu nhập: mở sẵn hộp thoại "Tạo phiếu nhập" với đầu phiếu + dòng
+ * hàng của phiếu gốc, CHƯA ghi sổ. Bản sao không mang ký hiệu/số hóa đơn gốc
+ * (tránh chốt chống nhập trùng) và mặc định KHÔNG trả tiền ngay.
+ */
+async function cloneFromVoucher(row: { voucher_no: string }) {
+  try {
+    const p = await api.getInboundPrefill(row.voucher_no);
+    Object.assign(form, {
+      posting_date: new Date(),
+      description: p.description,
+      supplier_code: p.supplier_code,
+      warehouse_code: p.warehouse_code,
+      note: p.note,
+      items: p.items.map((it) => ({
+        product_code: it.product_code,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        discount: it.discount,
+        vat_pct: Math.round(it.vat_rate * 100),
+      })),
+      inbound_type: p.inbound_type as "purchase" | "production" | "other",
+      reference_no: p.reference_no,
+      vat_rate: Math.round(p.vat_rate * 100),
+      invoice_serial: "",
+      invoice_no: "",
+      debit_account: p.debit_account,
+      credit_account: p.credit_account,
+      adjust_dir: "up",
+      pay_now: false,
+      auto_bom: p.inbound_type === "production",
+    });
+    cloneSource.value = row.voucher_no;
+    dialog.value = true;
+    void nextVoucherNo();
+  } catch (e) {
+    toast.add({
+      severity: "error",
+      summary: "Không nhân bản được phiếu nhập",
+      detail: String(e),
+    });
+  }
+}
+
 const dialog = ref(false);
 const saving = ref(false);
+/** Số phiếu gốc khi hộp thoại đang NHÂN BẢN (rỗng = tạo mới / điều chỉnh). */
+const cloneSource = ref("");
 /** Popup "Nhập hàng từ Excel" — mở từ nút trong popup tạo phiếu nhập. */
 const excelVisible = ref(false);
 
@@ -230,6 +277,7 @@ async function nextVoucherNo() {
 }
 
 function openCreate() {
+  cloneSource.value = "";
   Object.assign(form, {
     posting_date: new Date(),
     description: "Phiếu nhập kho",
@@ -439,7 +487,7 @@ useKeepAliveRefresh(reload);
           :global-filter-fields="['voucher_no', 'description', 'supplier_name']"
           stripedRows
           actions-header="Thao tác"
-          actions-width="132"
+          actions-width="180"
           @page="page.onPage"
           @sort="page.onSort"
         >
@@ -503,6 +551,18 @@ useKeepAliveRefresh(reload);
                 v-tooltip="'Lập phiếu điều chỉnh (trả lại NCC) theo phiếu này'"
                 @click="adjustFromVoucher(data)"
               />
+              <!-- Phiếu điều chỉnh không nhân bản được: hướng tăng/giảm không
+                   lưu ở đầu phiếu nên bản sao sẽ mang nghĩa khác. -->
+              <Button
+                v-if="auth.canStock && data.inbound_type !== 'adjust'"
+                icon="pi pi-clone"
+                text
+                rounded
+                size="small"
+                :aria-label="`Nhân bản phiếu nhập ${data.voucher_no}`"
+                v-tooltip="'Nhân bản phiếu nhập (mở sẵn, chưa ghi sổ)'"
+                @click="cloneFromVoucher(data)"
+              />
             </div>
           </template>
           <template #empty>
@@ -515,7 +575,11 @@ useKeepAliveRefresh(reload);
     <AppDialog
       v-model:visible="dialog"
       :header="
-        form.inbound_type === 'adjust' ? 'Tạo phiếu điều chỉnh hóa đơn mua' : 'Tạo phiếu nhập kho'
+        cloneSource
+          ? `Nhân bản phiếu nhập từ ${cloneSource}`
+          : form.inbound_type === 'adjust'
+            ? 'Tạo phiếu điều chỉnh hóa đơn mua'
+            : 'Tạo phiếu nhập kho'
       "
       width="max-w-4xl"
       action-label="Lưu phiếu"

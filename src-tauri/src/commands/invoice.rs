@@ -634,6 +634,100 @@ async fn save_invoice_core(
     }))
 }
 
+/// Số hóa đơn nội bộ kế tiếp theo dãy `HD0001` — lấy số lớn nhất trong TOÀN BỘ
+/// bảng (không đoán từ trang danh sách đang xem) rồi nhảy qua số đã dùng.
+async fn next_invoice_number(tx: &mut SqliteTransaction<'_>) -> Result<String, String> {
+    let numbers: Vec<String> = sqlx::query_scalar("SELECT number FROM invoice")
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut next = numbers
+        .iter()
+        .filter_map(|n| n.strip_prefix("HD")?.parse::<i64>().ok())
+        .max()
+        .unwrap_or(0)
+        + 1;
+    loop {
+        let candidate = format!("HD{next:04}");
+        if !numbers.iter().any(|n| n == &candidate) {
+            return Ok(candidate);
+        }
+        next += 1;
+    }
+}
+
+/// Nhân bản một hóa đơn thành hóa đơn NHÁP mới: chép thông tin chung + toàn bộ
+/// dòng hàng (nhóm ngành, thuế, chiết khấu, kho, tên khác), cấp số nội bộ mới,
+/// ngày = hôm nay.
+///
+/// KHÔNG chép phiếu xuất / số HĐĐT / lịch sử chép: hóa đơn nguồn đã xuất kho
+/// rồi thì bản sao cũng không được trừ tồn lần hai — muốn xuất kho cho bản
+/// nháp mới thì bấm "Lập phiếu xuất" như hóa đơn nháp thường.
+async fn clone_invoice_core(pool: &SqlitePool, id: i64) -> Result<serde_json::Value, String> {
+    let src = sqlx::query!(
+        "SELECT number, customer, customer_tax_code, total, vat_amount
+           FROM invoice WHERE id = ?",
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "Không tìm thấy hóa đơn".to_string())?;
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let number = next_invoice_number(&mut tx).await?;
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let res = sqlx::query!(
+        "INSERT INTO invoice (number, date, customer, customer_tax_code, total, vat_amount, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'draft')",
+        number,
+        date,
+        src.customer,
+        src.customer_tax_code,
+        src.total,
+        src.vat_amount
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let new_id = res.last_insert_rowid();
+    sqlx::query!(
+        "INSERT INTO invoice_item (invoice_id, product_id, quantity, unit_price, subtotal,
+                                   industry_code, vat_rate, pit_rate, discount, warehouse_code,
+                                   line_name)
+         SELECT ?, product_id, quantity, unit_price, subtotal, industry_code, vat_rate,
+                pit_rate, discount, warehouse_code, line_name
+           FROM invoice_item WHERE invoice_id = ?
+          ORDER BY id",
+        new_id,
+        id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "id": new_id,
+        "number": number,
+        "source_number": src.number,
+    }))
+}
+
+/// Lệnh giao diện: nhân bản hóa đơn đang nháp / đã xuất kho / đã phát hành
+/// thành nháp mới không kèm phiếu xuất.
+#[tauri::command]
+pub(crate) async fn clone_invoice(
+    state: State<'_, AppState>,
+    invoice_id: i64,
+) -> Result<String, String> {
+    require_role(&state, &["admin", "ketoan"]).await?;
+    let pool = state.pool.read().await;
+    let res = clone_invoice_core(&pool, invoice_id).await?;
+    audit(&state, "clone", "invoice", &res.to_string()).await;
+    Ok(res.to_string())
+}
+
 /// Sửa hóa đơn NHÁP hoặc đã chép sang bên kia nhưng CHƯA phát hành/chưa xuất
 /// kho: thay toàn bộ dòng hàng và cập nhật thông tin chung.
 ///
@@ -5335,5 +5429,130 @@ mod tests {
             .unwrap();
         assert_eq!(by_customer.len(), 1);
         assert_eq!(by_customer[0].number, "HD-FREE");
+    }
+
+    /// Nhân bản hóa đơn ĐÃ XUẤT KHO + ĐÃ PHÁT HÀNH: bản sao là nháp mới, không
+    /// mang số HĐĐT / phiếu xuất, nhưng chép đủ dòng hàng (tên dòng, CK, kho).
+    #[tokio::test]
+    async fn clone_hoa_don_tao_nhap_moi_khong_kem_phieu_xuat() {
+        let pool = test_pool().await;
+        let pid = seed_product(&pool, "SP-CLONE", "Hàng nhân bản", 0.08).await;
+        sqlx::query(
+            "INSERT INTO invoice
+                (number, date, customer, customer_tax_code, total, vat_amount,
+                 status, e_invoice_no, voucher_no)
+             VALUES ('HD0007', '2026-05-01', 'Khách nhân bản', 'MST-CLONE',
+                     1080000, 80000, 'official', '00001234', 'PX007')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let src_id = scalar_i64(&pool, "SELECT id FROM invoice WHERE number = 'HD0007'").await;
+        sqlx::query(
+            "INSERT INTO invoice_item
+                (invoice_id, product_id, quantity, unit_price, subtotal, industry_code,
+                 vat_rate, pit_rate, discount, warehouse_code, line_name)
+             VALUES (?, ?, 10, 100000, 1000000, 'PPHH', 0.08, 0.005, 50000, 'KHO1', 'Tên khác')",
+        )
+        .bind(src_id)
+        .bind(pid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let clone = clone_invoice_core(&pool, src_id).await.unwrap();
+        let new_id = clone["id"].as_i64().unwrap();
+        let new_number = clone["number"].as_str().unwrap().to_string();
+        assert_ne!(new_id, src_id);
+        assert_eq!(clone["source_number"], "HD0007");
+        assert!(new_number.starts_with("HD") && new_number != "HD0007");
+
+        let (status, e_no, voucher_no, customer, tax_code, total, date): (
+            String,
+            String,
+            String,
+            String,
+            String,
+            f64,
+            String,
+        ) = sqlx::query_as(
+            "SELECT status, e_invoice_no, voucher_no, customer, customer_tax_code, total, date
+               FROM invoice WHERE id = ?",
+        )
+        .bind(new_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "draft");
+        assert_eq!(e_no, "");
+        assert_eq!(voucher_no, "");
+        assert_eq!(customer, "Khách nhân bản");
+        assert_eq!(tax_code, "MST-CLONE");
+        assert_eq!(total, 1_080_000.0);
+        assert_eq!(date, chrono::Local::now().format("%Y-%m-%d").to_string());
+
+        let (qty, price, subtotal, industry, vat, pit, discount, wh, line_name): (
+            f64,
+            f64,
+            f64,
+            String,
+            f64,
+            f64,
+            f64,
+            String,
+            String,
+        ) = sqlx::query_as(
+            "SELECT quantity, unit_price, subtotal, industry_code, vat_rate, pit_rate,
+                    discount, warehouse_code, line_name
+               FROM invoice_item WHERE invoice_id = ?",
+        )
+        .bind(new_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((qty, price, subtotal), (10.0, 100_000.0, 1_000_000.0));
+        assert_eq!(industry, "PPHH");
+        assert_eq!((vat, pit, discount), (0.08, 0.005, 50_000.0));
+        assert_eq!(wh, "KHO1");
+        assert_eq!(line_name, "Tên khác");
+
+        // Hóa đơn gốc không bị đụng.
+        let (src_status, src_e_no, src_voucher): (String, String, String) =
+            sqlx::query_as("SELECT status, e_invoice_no, voucher_no FROM invoice WHERE id = ?")
+                .bind(src_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(src_status, "official");
+        assert_eq!(src_e_no, "00001234");
+        assert_eq!(src_voucher, "PX007");
+
+        // Nhân bản lần 2 phải ra số khác — không đụng số đã cấp.
+        let again = clone_invoice_core(&pool, src_id).await.unwrap();
+        assert_ne!(again["number"].as_str().unwrap(), new_number);
+    }
+
+    /// Hóa đơn đang NHÁP cũng nhân bản được — bản sao vẫn là nháp, ngày hôm nay.
+    #[tokio::test]
+    async fn clone_hoa_don_nhap_cung_duoc() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO invoice (number, date, customer, total, status)
+             VALUES ('HD0010', '2025-12-31', 'Khách nháp', 250000, 'draft')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let src_id = scalar_i64(&pool, "SELECT id FROM invoice WHERE number = 'HD0010'").await;
+        let clone = clone_invoice_core(&pool, src_id).await.unwrap();
+        assert_eq!(clone["source_number"], "HD0010");
+        let (status, date): (String, String) =
+            sqlx::query_as("SELECT status, date FROM invoice WHERE id = ?")
+                .bind(clone["id"].as_i64().unwrap())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "draft");
+        assert_eq!(date, chrono::Local::now().format("%Y-%m-%d").to_string());
     }
 }

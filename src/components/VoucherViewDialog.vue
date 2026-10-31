@@ -11,6 +11,7 @@
  * thêm hộp thoại khác.
  */
 import { api } from "@/db";
+import { useAuthStore } from "@/stores/auth";
 import type { ProductionLotComponentRow, VoucherRow } from "@/types";
 import { fmtDec, fmtInt as fmt, fmtVnd as money } from "@/utils/format";
 
@@ -18,6 +19,7 @@ const visible = defineModel<boolean>("visible", { default: false });
 const props = defineProps<{ voucherNo: string; withComponents?: boolean }>();
 
 const toast = useToast();
+const auth = useAuthStore();
 const router = useRouter();
 const rows = ref<VoucherRow[]>([]);
 const loading = ref(false);
@@ -64,12 +66,16 @@ async function fixComponents() {
   fixing.value = true;
   try {
     const r = await api.fixProductionLotComponents(props.voucherNo);
-    toast.add({ severity: 'success', summary: 'Đã tạo snapshot', detail: `${r.fixed} dòng thành phần` });
-    // reload
     componentsLoading.value = true;
     components.value = await api.getProductionLotComponents(props.voucherNo);
+    componentsError.value = "";
+    toast.add({
+      severity: "success",
+      summary: "Đã tạo snapshot thành phần",
+      detail: r.fixed ? `${r.fixed} dòng` : "Lô đã có snapshot",
+    });
   } catch (e) {
-    toast.add({ severity: 'error', summary: 'Không tạo được snapshot', detail: String(e) });
+    toast.add({ severity: "error", summary: "Không tạo được snapshot", detail: String(e) });
   } finally {
     componentsLoading.value = false;
     fixing.value = false;
@@ -275,8 +281,14 @@ watch(
         <p v-else-if="componentsError" class="text-xs text-red-600">{{ componentsError }}</p>
         <div v-else-if="!components.length" class="flex items-center gap-2">
           <span class="text-xs text-gray-500">Lô cũ chưa có snapshot thành phần.</span>
-          <Button size="small" label="Tạo snapshot" icon="pi pi-refresh"
-            @click="fixComponents" :loading="fixing" />
+          <Button
+            v-if="auth.canStock"
+            size="small"
+            label="Tạo snapshot"
+            icon="pi pi-refresh"
+            :loading="fixing"
+            @click="fixComponents"
+          />
         </div>
         <div v-else-if="components.length" class="overflow-x-auto rounded border border-gray-200">
           <table class="w-full text-sm" data-testid="lot-components-table">

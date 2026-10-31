@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO customer (code, name, address, tax_code, phone)\n             VALUES ('KH-PDF', 'Khách X', 'Số 9 Đường B', 'MST-X', '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4bab2baef22377048ef8942c018d4d6e16dc5617a48bb4b2a710401df69f4ed6"
+}
